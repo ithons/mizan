@@ -1,0 +1,9 @@
+node_modules/
+dist/
+.env*
+mizan.db
+credentials.json
+logs/
+*.pem
+*.key
+.DS_Store
