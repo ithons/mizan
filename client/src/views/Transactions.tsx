@@ -11,7 +11,7 @@ import {
   Trash2,
 } from 'lucide-react';
 import { format, subMonths } from 'date-fns';
-import { transactionsApi, accountsApi, categoriesApi, settingsApi } from '../lib/api';
+import { transactionsApi, accountsApi, categoriesApi, settingsApi, flattenCategories } from '../lib/api';
 import { formatDate, formatCurrency } from '../lib/formatters';
 import { useAppStore } from '../store';
 import { Modal } from '../components/Modal';
@@ -220,10 +220,11 @@ export function Transactions() {
     queryFn: accountsApi.list,
   });
 
-  const { data: categories = [] } = useQuery({
+  const { data: categoriesTree = [] } = useQuery({
     queryKey: ['categories'],
     queryFn: categoriesApi.list,
   });
+  const categories = flattenCategories(categoriesTree);
 
   const updateCatMutation = useMutation({
     mutationFn: ({ id, categoryId }: { id: string; categoryId: string }) =>

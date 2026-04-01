@@ -65,14 +65,28 @@ function mapAccountType(
 
 export async function createLinkToken(): Promise<string> {
   const plaid = getPlaidClient();
+  const creds = getCredentials();
 
-  const response = await plaid.linkTokenCreate({
+  const requestPayload = {
     user: { client_user_id: 'local-user' },
-    client_name: 'Mizan',
+    client_name: 'Mizān',
     products: [Products.Transactions, Products.Investments],
     country_codes: [CountryCode.Us],
     language: 'en',
-  });
+    redirect_uri: 'http://localhost:3000',
+  };
+
+  console.log(
+    '[plaid] createLinkToken environment=%s basePath=%s',
+    creds.plaid?.environment,
+    PlaidEnvironments[creds.plaid?.environment ?? 'sandbox']
+  );
+  console.log('[plaid] createLinkToken request:', JSON.stringify(requestPayload));
+
+  const response = await plaid.linkTokenCreate(requestPayload);
+
+  console.log('[plaid] link_token (first 20 chars):', response.data.link_token.substring(0, 20));
+  console.log('[plaid] response request_id:', response.data.request_id);
 
   return response.data.link_token;
 }
@@ -524,10 +538,11 @@ export async function createUpdateToken(dbItemId: string): Promise<string> {
 
   const response = await plaid.linkTokenCreate({
     user: { client_user_id: 'local-user' },
-    client_name: 'Mizan',
+    client_name: 'Mizān',
     access_token: accessToken,
     country_codes: [CountryCode.Us],
     language: 'en',
+    redirect_uri: 'http://localhost:3000',
   });
 
   return response.data.link_token;

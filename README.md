@@ -49,6 +49,25 @@ Credentials are encrypted at rest using a key derived from your machine's unique
 5. Click **Connect Bank or Card** to link an account via Plaid Link
 6. In sandbox, use `user_good` / `pass_good` to test
 
+### OAuth institutions (Chase, Wells Fargo, Bank of America, etc.)
+
+Some banks use OAuth — instead of entering credentials inside Plaid Link, the browser
+navigates to the bank's website and back. **This will not work until you register the
+redirect URI in your Plaid dashboard.** Symptoms of a missing registration: you land on
+the bank login page but never return to the app; or you see `plaid-link-oauth://handoff`
+in the URL state.
+
+**Required one-time setup:**
+
+1. Go to [dashboard.plaid.com](https://dashboard.plaid.com) → **Team Settings → API → Allowed redirect URIs**
+2. Click **Add URI** and enter exactly: `http://localhost:3000`
+3. Save
+
+Without step 2, Plaid embeds `plaid-link-oauth://handoff` (a mobile deep-link scheme) in
+the OAuth state instead of your localhost URL, and the browser cannot handle it.
+
+In production, replace `http://localhost:3000` with your actual domain.
+
 ## Coinbase Setup
 
 1. Go to [portal.cdp.coinbase.com/projects/api-keys](https://portal.cdp.coinbase.com/projects/api-keys)

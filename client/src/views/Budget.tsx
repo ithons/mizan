@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query';
 import { ChevronLeft, ChevronRight, Plus, Check, X, Trash2 } from 'lucide-react';
 import { format, subMonths, addMonths } from 'date-fns';
-import { budgetsApi, recurringApi, categoriesApi } from '../lib/api';
+import { budgetsApi, recurringApi, categoriesApi, flattenCategories } from '../lib/api';
 import { formatCurrency, formatDate, formatMonth, formatPercent } from '../lib/formatters';
 import { FREQUENCY_LABELS } from '../lib/constants';
 import { useAppStore } from '../store';
@@ -18,7 +18,7 @@ function BudgetRow({
   onDelete,
 }: {
   budget: any;
-  onEdit: (id: string, amount: number) => void;
+  onEdit: (categoryId: string, amount: number) => void;
   onDelete: (id: string) => void;
 }) {
   const spent = budget.spent ?? 0;
@@ -56,11 +56,11 @@ function BudgetRow({
                 value={editVal}
                 onChange={(e) => setEditVal(e.target.value)}
                 onKeyDown={(e) => {
-                  if (e.key === 'Enter') { onEdit(budget.id, parseFloat(editVal) || 0); setEditing(false); }
+                  if (e.key === 'Enter') { onEdit(budget.category_id, parseFloat(editVal) || 0); setEditing(false); }
                   if (e.key === 'Escape') setEditing(false);
                 }}
               />
-              <button onClick={() => { onEdit(budget.id, parseFloat(editVal) || 0); setEditing(false); }}>
+              <button onClick={() => { onEdit(budget.category_id, parseFloat(editVal) || 0); setEditing(false); }}>
                 <Check size={12} className="text-[#4ecba3]" />
               </button>
               <button onClick={() => setEditing(false)}>
@@ -126,9 +126,10 @@ function AddBudgetModal({
 
   const mutation = useMutation({
     mutationFn: () =>
-      budgetsApi.upsert({
-        ...form,
+      budgetsApi.upsert(form.category_id, {
         amount: parseFloat(form.amount) || 0,
+        period: form.period,
+        rollover: form.rollover,
       }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['budgets'] });
@@ -209,10 +210,11 @@ function RecurringTab() {
     queryFn: () => recurringApi.upcoming(30),
   });
 
-  const { data: categories = [] } = useQuery({
+  const { data: categoriesTree = [] } = useQuery({
     queryKey: ['categories'],
     queryFn: categoriesApi.list,
   });
+  const categories = flattenCategories(categoriesTree);
 
   const confirmMutation = useMutation({
     mutationFn: recurringApi.confirm,
@@ -362,16 +364,17 @@ export function Budget() {
     queryFn: () => budgetsApi.getMonth(currentMonth),
   });
 
-  const { data: categories = [] } = useQuery({
+  const { data: categoriesTree = [] } = useQuery({
     queryKey: ['categories'],
     queryFn: categoriesApi.list,
   });
+  const categories = flattenCategories(categoriesTree);
 
   const monthDate = new Date(`${currentMonth}-01`);
 
   const editMutation = useMutation({
-    mutationFn: ({ id, amount }: { id: string; amount: number }) =>
-      budgetsApi.upsert({ id, amount }),
+    mutationFn: ({ categoryId, amount }: { categoryId: string; amount: number }) =>
+      budgetsApi.upsert(categoryId, { amount }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['budgets'] }),
     onError: (err: Error) => addToast({ type: 'error', message: err.message }),
   });
@@ -472,7 +475,7 @@ export function Budget() {
                 <BudgetRow
                   key={budget.id}
                   budget={budget}
-                  onEdit={(id, amount) => editMutation.mutate({ id, amount })}
+                  onEdit={(categoryId, amount) => editMutation.mutate({ categoryId, amount })}
                   onDelete={(id) => deleteMutation.mutate(id)}
                 />
               ))

@@ -86,7 +86,7 @@ export function Dashboard() {
 
   const { data: spending } = useQuery({
     queryKey: ['spending', currentMonth],
-    queryFn: () => reportsApi.spending({ month: currentMonth }),
+    queryFn: () => reportsApi.spending({ startDate, endDate }),
   });
 
   const { data: upcoming } = useQuery({
@@ -95,7 +95,7 @@ export function Dashboard() {
   });
 
   const { data: budgets } = useQuery({
-    queryKey: ['budgets', currentMonth],
+    queryKey: ['budgets', 'month', currentMonth],
     queryFn: () => budgetsApi.getMonth(currentMonth),
   });
 

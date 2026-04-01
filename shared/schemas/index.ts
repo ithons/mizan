@@ -3,7 +3,7 @@ import { z } from 'zod';
 export const CreateManualAccountSchema = z.object({
   account_name: z.string().min(1),
   type: z.enum(['checking', 'savings', 'credit', 'brokerage', 'ira_traditional', 'ira_roth', 'crypto_wallet', 'cash', 'other']),
-  institution_name: z.string().min(1),
+  institution_name: z.string().optional(),
   current_balance: z.number().default(0),
   currency: z.string().default('USD'),
   is_liability: z.boolean().default(false),

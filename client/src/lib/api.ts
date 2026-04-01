@@ -129,6 +129,18 @@ export const investmentsApi = {
 
 // ─── Categories ──────────────────────────────────────────────────────────────
 
+/** Flatten a nested category tree into a single sorted array (parents before children). */
+export function flattenCategories(cats: import('@shared/types').Category[]): import('@shared/types').Category[] {
+  const result: import('@shared/types').Category[] = [];
+  for (const cat of cats) {
+    result.push(cat);
+    if (cat.children?.length) {
+      result.push(...cat.children);
+    }
+  }
+  return result;
+}
+
 export const categoriesApi = {
   list: () => apiFetch<Category[]>('/api/categories'),
   create: (body: Partial<Category>) =>
@@ -154,11 +166,14 @@ export const categoriesApi = {
 
 export const budgetsApi = {
   list: () => apiFetch<Budget[]>('/api/budgets'),
-  getMonth: (month: string) => apiFetch<Budget[]>(`/api/budgets?month=${month}`),
-  upsert: (body: Partial<Budget>) =>
-    apiFetch<Budget>('/api/budgets', {
-      method: 'POST',
-      body: JSON.stringify(body),
+  getMonth: (month: string) => {
+    const [year, m] = month.split('-');
+    return apiFetch<Budget[]>(`/api/budgets/month/${year}/${parseInt(m, 10)}`);
+  },
+  upsert: (categoryId: string, body: { amount: number; period?: string; rollover?: boolean }) =>
+    apiFetch<Budget>(`/api/budgets/${categoryId}`, {
+      method: 'PUT',
+      body: JSON.stringify({ amount: body.amount, period: body.period ?? 'monthly', rollover: body.rollover ?? false }),
     }),
   delete: (id: string) =>
     apiFetch<void>(`/api/budgets/${id}`, { method: 'DELETE' }),
@@ -214,7 +229,7 @@ export const reportsApi = {
     const q = new URLSearchParams();
     if (params?.startDate) q.set('startDate', params.startDate);
     if (params?.endDate) q.set('endDate', params.endDate);
-    params?.categoryIds?.forEach((id) => q.append('categoryId', id));
+    if (params?.categoryIds?.length) q.set('categoryIds', params.categoryIds.join(','));
     return apiFetch<{ months: string[]; series: Array<{ category_id: string; category_name: string; color?: string | null; values: number[] }> }>(`/api/reports/trends?${q.toString()}`);
   },
   networth: (params?: { months?: number }) =>
@@ -301,5 +316,13 @@ export const settingsApi = {
 // ─── Health ──────────────────────────────────────────────────────────────────
 
 export const healthApi = {
-  get: () => apiFetch<{ status: string; version: string }>('/api/health'),
+  get: () =>
+    apiFetch<{
+      status: string;
+      version: string;
+      plaidEnvironment: 'sandbox' | 'production' | null;
+      plaidItemCount: number;
+      coinbaseConnected: boolean;
+      error: string | null;
+    }>('/api/health'),
 };

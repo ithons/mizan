@@ -6,6 +6,7 @@ import {
   CreateManualAccountSchema,
   UpdateAccountSchema,
 } from '../../../shared/schemas';
+import { takeSnapshot } from '../services/snapshot';
 
 const router = Router();
 
@@ -38,7 +39,7 @@ router.post(
       const body = req.body as {
         account_name: string;
         type: string;
-        institution_name: string;
+        institution_name?: string;
         current_balance: number;
         currency: string;
         is_liability: boolean;
@@ -47,6 +48,9 @@ router.post(
 
       const id = uuidv4();
       const now = new Date().toISOString();
+
+      // Auto-derive liability from type if not explicitly provided
+      const isLiability = body.is_liability ?? (body.type === 'credit');
 
       // Get next sort_order
       const maxOrder = db.prepare(
@@ -67,7 +71,7 @@ router.post(
         body.type,
         body.current_balance,
         body.currency,
-        body.is_liability ? 1 : 0,
+        isLiability ? 1 : 0,
         body.color || null,
         sortOrder,
         now,
@@ -75,6 +79,10 @@ router.post(
       );
 
       const account = db.prepare('SELECT * FROM accounts WHERE id = ?').get(id);
+
+      // Take a fresh snapshot so net worth reflects the new account immediately
+      takeSnapshot();
+
       res.status(201).json({ data: account });
     } catch (err) {
       next(err);
@@ -139,6 +147,11 @@ router.patch(
 
       db.prepare(`UPDATE accounts SET ${updates.join(', ')} WHERE id = ?`).run(...values);
 
+      // If balance changed, refresh snapshot
+      if (body.current_balance !== undefined) {
+        takeSnapshot();
+      }
+
       const updated = db.prepare('SELECT * FROM accounts WHERE id = ?').get(id);
       res.json({ data: updated });
     } catch (err) {
@@ -163,12 +176,17 @@ router.delete('/:id', (req: Request, res: Response, next: NextFunction): void =>
     }
 
     if (account.is_manual) {
+      // Clean up associated transactions before deleting the account
+      db.prepare('DELETE FROM transactions WHERE account_id = ?').run(id);
       db.prepare('DELETE FROM accounts WHERE id = ?').run(id);
     } else {
       db.prepare(
         'UPDATE accounts SET is_hidden = 1, updated_at = ? WHERE id = ?'
       ).run(new Date().toISOString(), id);
     }
+
+    // Refresh net worth snapshot after account removal
+    takeSnapshot();
 
     res.json({ data: { success: true } });
   } catch (err) {

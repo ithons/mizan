@@ -31,6 +31,11 @@ function PlaidSection() {
   const [showSecret, setShowSecret] = useState(false);
   const [form, setForm] = useState({ clientId: '', secret: '', environment: 'sandbox' });
 
+  const { data: credStatus } = useQuery({
+    queryKey: ['credential-status'],
+    queryFn: settingsApi.getCredentials,
+  });
+
   const { data: items = [], isLoading: itemsLoading } = useQuery({
     queryKey: ['plaid-items'],
     queryFn: plaidApi.listItems,
@@ -38,7 +43,10 @@ function PlaidSection() {
 
   const saveMutation = useMutation({
     mutationFn: () => settingsApi.savePlaidCredentials(form),
-    onSuccess: () => addToast({ type: 'success', message: 'Plaid credentials saved' }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['credential-status'] });
+      addToast({ type: 'success', message: 'Plaid credentials saved' });
+    },
     onError: (err: Error) => addToast({ type: 'error', message: err.message }),
   });
 
@@ -70,7 +78,20 @@ function PlaidSection() {
   return (
     <div className="space-y-6">
       <div>
-        <h3 className="text-sm font-medium text-text mb-4">Plaid Credentials</h3>
+        <div className="flex items-center gap-3 mb-4">
+          <h3 className="text-sm font-medium text-text">Plaid Credentials</h3>
+          {credStatus?.plaidEnvironment && (
+            <span
+              className={`text-xs px-2 py-0.5 rounded border font-mono ${
+                credStatus.plaidEnvironment === 'sandbox'
+                  ? 'text-[#f0c040] border-[#f0c040]/40 bg-[#f0c040]/10'
+                  : 'text-[#e07070] border-[#e07070]/40 bg-[#e07070]/10'
+              }`}
+            >
+              {credStatus.plaidEnvironment}
+            </span>
+          )}
+        </div>
         <div className="space-y-3 max-w-md">
           <div>
             <label className="block text-xs text-muted mb-1">Client ID</label>
@@ -118,6 +139,25 @@ function PlaidSection() {
               ))}
             </div>
           </div>
+          {/* OAuth redirect URI requirement */}
+          <div className="flex items-start gap-2 p-3 bg-[#f0c040]/8 border border-[#f0c040]/30 rounded">
+            <AlertTriangle size={13} className="text-[#f0c040] mt-0.5 flex-shrink-0" />
+            <div className="text-xs text-muted space-y-1">
+              <p className="text-[#f0c040]/90 font-medium">Required for OAuth banks (Chase, Wells Fargo, etc.)</p>
+              <p>
+                In your Plaid Dashboard go to{' '}
+                <span className="font-mono text-text">Settings → API → Allowed redirect URIs</span>{' '}
+                and add:
+              </p>
+              <p className="font-mono text-text bg-background px-2 py-0.5 rounded inline-block">
+                http://localhost:3000
+              </p>
+              <p className="text-muted/70">
+                Without this, OAuth institutions will redirect to a deep link that browsers cannot handle.
+              </p>
+            </div>
+          </div>
+
           <div className="flex gap-2 pt-1">
             <button
               className="px-4 py-2 text-sm bg-[#4ecba3] text-[#0f0f11] font-medium rounded hover:opacity-90"
@@ -193,8 +233,11 @@ function CoinbaseSection() {
 
   const connectMutation = useMutation({
     mutationFn: () => coinbaseApi.connect(form),
-    onSuccess: () => {
-      addToast({ type: 'success', message: 'Coinbase connected' });
+    onSuccess: (data) => {
+      const detail = data && typeof data === 'object' && 'accountCount' in data
+        ? ` — ${(data as unknown as { accountCount: number; displayName: string }).accountCount} account(s) found`
+        : '';
+      addToast({ type: 'success', message: `Coinbase connected${detail}` });
       setConnected(true);
       qc.invalidateQueries({ queryKey: ['accounts'] });
     },

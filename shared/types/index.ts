@@ -253,5 +253,6 @@ export interface NetWorthHistory {
 
 export interface CredentialStatus {
   plaid: boolean;
+  plaidEnvironment: 'sandbox' | 'production' | null;
   coinbase: boolean;
 }

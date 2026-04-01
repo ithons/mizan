@@ -4,6 +4,20 @@ import { takeSnapshot } from '../services/snapshot';
 
 const router = Router();
 
+// GET /snapshot — return the latest net worth snapshot
+router.get('/snapshot', (_req: Request, res: Response, next: NextFunction): void => {
+  try {
+    const db = getDb();
+    const snapshot = db.prepare(
+      'SELECT * FROM net_worth_snapshots ORDER BY date DESC LIMIT 1'
+    ).get();
+
+    res.json({ data: snapshot ?? null });
+  } catch (err) {
+    next(err);
+  }
+});
+
 // POST /snapshot — take net worth snapshot
 router.post('/snapshot', (_req: Request, res: Response, next: NextFunction): void => {
   try {
@@ -21,22 +35,29 @@ router.post('/snapshot', (_req: Request, res: Response, next: NextFunction): voi
   }
 });
 
-// GET /history?startDate&endDate
+// GET /history?startDate&endDate&months
 router.get('/history', (req: Request, res: Response, next: NextFunction): void => {
   try {
     const db = getDb();
-    const { startDate, endDate } = req.query as Record<string, string>;
+    const { startDate, endDate, months } = req.query as Record<string, string>;
 
     const conditions: string[] = [];
     const params: unknown[] = [];
 
-    if (startDate) {
+    if (months) {
+      const cutoff = new Date();
+      cutoff.setMonth(cutoff.getMonth() - parseInt(months, 10));
       conditions.push('date >= ?');
-      params.push(startDate);
-    }
-    if (endDate) {
-      conditions.push('date <= ?');
-      params.push(endDate);
+      params.push(cutoff.toISOString().split('T')[0]);
+    } else {
+      if (startDate) {
+        conditions.push('date >= ?');
+        params.push(startDate);
+      }
+      if (endDate) {
+        conditions.push('date <= ?');
+        params.push(endDate);
+      }
     }
 
     const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
@@ -47,7 +68,7 @@ router.get('/history', (req: Request, res: Response, next: NextFunction): void =
       ORDER BY date ASC
     `).all(...params);
 
-    res.json({ data: { snapshots } });
+    res.json({ data: snapshots });
   } catch (err) {
     next(err);
   }

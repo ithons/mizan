@@ -6,7 +6,6 @@ import { validate } from '../middleware/validate';
 import {
   PlaidCredentialsSchema,
   CoinbaseCredentialsSchema,
-  DeleteDataSchema,
   CsvImportMappingSchema,
 } from '../../../shared/schemas';
 import {
@@ -15,6 +14,7 @@ import {
   updateCoinbaseCredentials,
 } from '../services/credentials';
 import type { PlaidCredentials } from '../services/credentials';
+import { resetPlaidClient } from '../services/plaid';
 import type { z } from 'zod';
 
 const router = Router();
@@ -26,6 +26,7 @@ router.get('/credentials', (_req: Request, res: Response, next: NextFunction): v
     res.json({
       data: {
         plaid: !!creds.plaid,
+        plaidEnvironment: creds.plaid?.environment ?? null,
         coinbase: !!creds.coinbase,
       },
     });
@@ -41,6 +42,8 @@ router.post(
   (req: Request, res: Response, next: NextFunction): void => {
     try {
       updatePlaidCredentials(req.body as PlaidCredentials);
+      resetPlaidClient();
+      console.log('[plaid] credentials updated, environment=%s', (req.body as PlaidCredentials).environment);
       res.json({ data: { success: true } });
     } catch (err) {
       next(err);
@@ -62,11 +65,14 @@ router.post(
   }
 );
 
-// POST /export/csv
-router.post('/export/csv', (req: Request, res: Response, next: NextFunction): void => {
+// GET /export-csv
+router.get('/export-csv', (req: Request, res: Response, next: NextFunction): void => {
   try {
     const db = getDb();
-    const body = req.body as { startDate?: string; endDate?: string; accountIds?: string[] };
+    const body = req.query as { startDate?: string; endDate?: string; accountIds?: string | string[] };
+    const accountIds = body.accountIds
+      ? Array.isArray(body.accountIds) ? body.accountIds : [body.accountIds]
+      : undefined;
 
     const conditions: string[] = [];
     const params: unknown[] = [];
@@ -79,9 +85,9 @@ router.post('/export/csv', (req: Request, res: Response, next: NextFunction): vo
       conditions.push('t.date <= ?');
       params.push(body.endDate);
     }
-    if (body.accountIds && body.accountIds.length > 0) {
-      conditions.push(`t.account_id IN (${body.accountIds.map(() => '?').join(',')})`);
-      params.push(...body.accountIds);
+    if (accountIds && accountIds.length > 0) {
+      conditions.push(`t.account_id IN (${accountIds.map(() => '?').join(',')})`);
+      params.push(...accountIds);
     }
 
     const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
@@ -132,8 +138,8 @@ router.post('/export/csv', (req: Request, res: Response, next: NextFunction): vo
   }
 });
 
-// POST /import/csv
-router.post('/import/csv', (req: Request, res: Response, next: NextFunction): void => {
+// POST /import-csv
+router.post('/import-csv', (req: Request, res: Response, next: NextFunction): void => {
   try {
     const db = getDb();
     const body = req.body as {
@@ -252,8 +258,7 @@ router.post('/import/csv', (req: Request, res: Response, next: NextFunction): vo
 // DELETE /data — wipe all user data
 router.delete(
   '/data',
-  validate(DeleteDataSchema),
-  (req: Request, res: Response, next: NextFunction): void => {
+  (_req: Request, res: Response, next: NextFunction): void => {
     try {
       const db = getDb();
 

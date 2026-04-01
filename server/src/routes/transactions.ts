@@ -105,7 +105,7 @@ router.get('/', (req: Request, res: Response, next: NextFunction): void => {
       LIMIT ? OFFSET ?
     `).all(...params, limit, offset);
 
-    res.json({ data, total: countRow.total, page, limit });
+    res.json({ data: { data, total: countRow.total, page, limit } });
   } catch (err) {
     next(err);
   }
@@ -299,9 +299,9 @@ router.delete('/:id', (req: Request, res: Response, next: NextFunction): void =>
   }
 });
 
-// POST /bulk/category — bulk update categories
+// POST /bulk-category — bulk update categories
 router.post(
-  '/bulk/category',
+  '/bulk-category',
   validate(BulkCategorySchema),
   (req: Request, res: Response, next: NextFunction): void => {
     try {

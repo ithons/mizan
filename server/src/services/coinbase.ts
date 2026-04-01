@@ -12,8 +12,26 @@ function buildJwt(method: string, path: string): string {
     throw new Error('Coinbase credentials not configured');
   }
 
-  const { keyName, privateKey } = creds.coinbase;
+  const { keyName } = creds.coinbase;
+
+  // Normalize private key: trim whitespace and convert escaped newlines
+  const privateKey = creds.coinbase.privateKey.trim().replace(/\\n/g, '\n');
+
+  // Validate PEM format before attempting to sign
+  if (!privateKey.includes('-----BEGIN EC PRIVATE KEY-----')) {
+    const header = privateKey.substring(0, 50);
+    console.error('[coinbase] Invalid private key format — expected EC PRIVATE KEY, got:', header);
+    throw new Error(
+      'Invalid private key format: expected -----BEGIN EC PRIVATE KEY-----. ' +
+      'Make sure you are pasting the full PEM key from the Coinbase portal.'
+    );
+  }
+
   const now = Math.floor(Date.now() / 1000);
+  console.log('[coinbase] Building JWT: method=%s path=%s keyName=%s clock=%d', method, path, keyName, now);
+
+  // Strip query string from the URI claim — Coinbase validates against path only
+  const pathWithoutQuery = path.split('?')[0];
 
   const payload = {
     sub: keyName,
@@ -21,7 +39,7 @@ function buildJwt(method: string, path: string): string {
     nbf: now,
     exp: now + 120,
     aud: ['retail_rest_api_proxy'],
-    uri: `${method.toUpperCase()} api.coinbase.com${path}`,
+    uri: `${method.toUpperCase()} api.coinbase.com${pathWithoutQuery}`,
   };
 
   return jwt.sign(payload, privateKey, {
@@ -37,17 +55,32 @@ async function signedRequest<T>(
 ): Promise<T> {
   const token = buildJwt(method, path);
 
-  const response = await axios({
-    method,
-    url: `https://api.coinbase.com${path}`,
-    data: body,
-    headers: {
-      Authorization: `Bearer ${token}`,
-      'Content-Type': 'application/json',
-    },
-  });
-
-  return response.data as T;
+  try {
+    const response = await axios({
+      method,
+      url: `https://api.coinbase.com${path}`,
+      data: body,
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json',
+      },
+    });
+    return response.data as T;
+  } catch (err: unknown) {
+    const axiosErr = err as { response?: { status?: number; data?: unknown } };
+    if (axiosErr.response) {
+      console.error('[coinbase] API error %d:', axiosErr.response.status, JSON.stringify(axiosErr.response.data));
+      const errBody = axiosErr.response.data as { message?: string; error?: string; error_details?: string; preview?: { error_details?: string } } | undefined;
+      const detail =
+        errBody?.error_details ||
+        errBody?.preview?.error_details ||
+        errBody?.message ||
+        errBody?.error ||
+        `HTTP ${axiosErr.response.status}`;
+      throw new Error(`Coinbase API error (${axiosErr.response.status}): ${detail}`);
+    }
+    throw err;
+  }
 }
 
 export async function testConnection(): Promise<{ userId: string; displayName: string }> {

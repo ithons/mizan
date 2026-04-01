@@ -23,11 +23,6 @@ import { CategoryBadge } from '../components/CategoryBadge';
 import { PageLoader } from '../components/LoadingSpinner';
 import type { Account } from '@shared/types';
 
-declare global {
-  interface Window {
-    Plaid: any;
-  }
-}
 
 function AccountTypeBadge({ type }: { type: string }) {
   return (
@@ -371,6 +366,7 @@ function AddManualAccountModal({ open, onClose }: { open: boolean; onClose: () =
       }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['accounts'] });
+      qc.invalidateQueries({ queryKey: ['networth'] });
       addToast({ type: 'success', message: 'Account created' });
       onClose();
     },
@@ -466,6 +462,7 @@ export function Accounts() {
     mutationFn: accountsApi.delete,
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['accounts'] });
+      qc.invalidateQueries({ queryKey: ['networth'] });
       setSelectedId(null);
     },
     onError: (err: Error) => addToast({ type: 'error', message: err.message }),
