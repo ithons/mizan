@@ -90,8 +90,6 @@ function AddTransactionModal({
       transactionsApi.createManual({
         ...form,
         amount: parseFloat(form.amount) || 0,
-        is_manual: true,
-        pending: false,
         original_name: form.merchant_name,
       }),
     onSuccess: () => {

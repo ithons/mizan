@@ -117,7 +117,7 @@ export const transactionsApi = {
 export const investmentsApi = {
   holdings: () => apiFetch<Holding[]>('/api/investments/holdings'),
   holdingsByAccount: (accountId: string) =>
-    apiFetch<Holding[]>(`/api/investments/holdings?accountId=${accountId}`),
+    apiFetch<Holding[]>(`/api/investments/holdings/${accountId}`),
   transactions: (params?: { accountId?: string; startDate?: string; endDate?: string }) => {
     const q = new URLSearchParams();
     if (params?.accountId) q.set('accountId', params.accountId);
@@ -238,7 +238,7 @@ export const reportsApi = {
     const q = new URLSearchParams();
     if (params?.startDate) q.set('startDate', params.startDate);
     if (params?.endDate) q.set('endDate', params.endDate);
-    return apiFetch<{ total_value: number; history: Array<{ date: string; value: number }> }>(`/api/reports/investments?${q.toString()}`);
+    return apiFetch<{ total_value: number; history: Array<{ date: string; value: number }>; allocation: Array<{ security_type: string; total_value: number }>; holdings: unknown[] }>(`/api/reports/investments?${q.toString()}`);
   },
 };
 
@@ -280,7 +280,7 @@ export const plaidApi = {
 
 export const coinbaseApi = {
   connect: (body: { keyName: string; privateKey: string }) =>
-    apiFetch<{ success: boolean }>('/api/coinbase/connect', {
+    apiFetch<{ accountCount: number; displayName: string }>('/api/coinbase/connect', {
       method: 'POST',
       body: JSON.stringify(body),
     }),

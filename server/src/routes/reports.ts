@@ -221,6 +221,14 @@ router.get('/trends', (req: Request, res: Response, next: NextFunction): void =>
 
     const where = `WHERE ${conditions.join(' AND ')}`;
 
+    interface TrendRow {
+      month: string;
+      category_id: string | null;
+      category_name: string | null;
+      color: string | null;
+      amount: number;
+    }
+
     const rows = db.prepare(`
       SELECT
         strftime('%Y-%m', t.date) AS month,
@@ -233,9 +241,36 @@ router.get('/trends', (req: Request, res: Response, next: NextFunction): void =>
       ${where}
       GROUP BY month, t.category_id
       ORDER BY month ASC, amount DESC
-    `).all(...params);
+    `).all(...params) as TrendRow[];
 
-    res.json({ data: rows });
+    // Build sorted month list
+    const monthSet = new Set<string>();
+    for (const r of rows) monthSet.add(r.month);
+    const months = Array.from(monthSet).sort();
+
+    // Build series keyed by category
+    const seriesMap = new Map<string, { category_id: string; category_name: string; color: string | null; valuesByMonth: Map<string, number> }>();
+    for (const r of rows) {
+      const key = r.category_id ?? 'uncategorized';
+      if (!seriesMap.has(key)) {
+        seriesMap.set(key, {
+          category_id: key,
+          category_name: r.category_name ?? 'Uncategorized',
+          color: r.color,
+          valuesByMonth: new Map(),
+        });
+      }
+      seriesMap.get(key)!.valuesByMonth.set(r.month, r.amount || 0);
+    }
+
+    const series = Array.from(seriesMap.values()).map((s) => ({
+      category_id: s.category_id,
+      category_name: s.category_name,
+      color: s.color,
+      values: months.map((m) => s.valuesByMonth.get(m) ?? 0),
+    }));
+
+    res.json({ data: { months, series } });
   } catch (err) {
     next(err);
   }
@@ -333,12 +368,17 @@ router.get('/investments', (req: Request, res: Response, next: NextFunction): vo
       'SELECT SUM(institution_value) AS total FROM holdings'
     ).get() as { total: number | null };
 
+    const history = (transactions as Array<{ month: string; total_volume: number }>).map((t) => ({
+      date: t.month,
+      value: t.total_volume,
+    }));
+
     res.json({
       data: {
         total_value: totalValue.total || 0,
         allocation,
         holdings,
-        monthly_volume: transactions,
+        history,
       },
     });
   } catch (err) {

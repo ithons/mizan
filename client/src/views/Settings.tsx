@@ -234,8 +234,8 @@ function CoinbaseSection() {
   const connectMutation = useMutation({
     mutationFn: () => coinbaseApi.connect(form),
     onSuccess: (data) => {
-      const detail = data && typeof data === 'object' && 'accountCount' in data
-        ? ` — ${(data as unknown as { accountCount: number; displayName: string }).accountCount} account(s) found`
+      const detail = data?.accountCount != null
+        ? ` — ${data.accountCount} account(s) found`
         : '';
       addToast({ type: 'success', message: `Coinbase connected${detail}` });
       setConnected(true);
