@@ -63,7 +63,7 @@ function mapAccountType(
   return 'other';
 }
 
-export async function createLinkToken(): Promise<string> {
+export async function createLinkToken(redirectUri: string = 'http://localhost:3000'): Promise<string> {
   const plaid = getPlaidClient();
   const creds = getCredentials();
 
@@ -73,7 +73,7 @@ export async function createLinkToken(): Promise<string> {
     products: [Products.Transactions, Products.Investments],
     country_codes: [CountryCode.Us],
     language: 'en',
-    redirect_uri: 'http://localhost:3000',
+    redirect_uri: redirectUri,
   };
 
   console.log(
@@ -522,7 +522,7 @@ export async function syncAllItems(): Promise<void> {
   }
 }
 
-export async function createUpdateToken(dbItemId: string): Promise<string> {
+export async function createUpdateToken(dbItemId: string, redirectUri: string = 'http://localhost:3000'): Promise<string> {
   const db = getDb();
   const plaid = getPlaidClient();
   const creds = getCredentials();
@@ -542,7 +542,7 @@ export async function createUpdateToken(dbItemId: string): Promise<string> {
     access_token: accessToken,
     country_codes: [CountryCode.Us],
     language: 'en',
-    redirect_uri: 'http://localhost:3000',
+    redirect_uri: redirectUri,
   });
 
   return response.data.link_token;

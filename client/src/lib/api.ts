@@ -254,20 +254,26 @@ export const networthApi = {
 
 export const plaidApi = {
   createLinkToken: () =>
-    apiFetch<{ link_token: string }>('/api/plaid/link-token', { method: 'POST' }),
+    apiFetch<{ link_token: string; redirect_uri: string }>('/api/plaid/link-token', {
+      method: 'POST',
+      body: JSON.stringify({ redirectUri: window.location.origin }),
+    }),
   exchangeToken: (publicToken: string, metadata: unknown) =>
     apiFetch<{ success: boolean }>('/api/plaid/exchange-token', {
       method: 'POST',
-      body: JSON.stringify({ public_token: publicToken, metadata }),
+      body: JSON.stringify({ publicToken, metadata }),
     }),
   syncItem: (itemId: string) =>
-    apiFetch<void>(`/api/plaid/items/${itemId}/sync`, { method: 'POST' }),
-  syncAll: () => apiFetch<void>('/api/plaid/sync-all', { method: 'POST' }),
+    apiFetch<void>(`/api/plaid/sync/${itemId}`, { method: 'POST' }),
+  syncAll: () => apiFetch<void>('/api/plaid/sync/all', { method: 'POST' }),
   listItems: () => apiFetch<PlaidItem[]>('/api/plaid/items'),
   deleteItem: (itemId: string) =>
     apiFetch<void>(`/api/plaid/items/${itemId}`, { method: 'DELETE' }),
   createUpdateToken: (itemId: string) =>
-    apiFetch<{ link_token: string }>(`/api/plaid/items/${itemId}/update-token`, { method: 'POST' }),
+    apiFetch<{ link_token: string; redirect_uri: string }>(`/api/plaid/update-token/${itemId}`, {
+      method: 'POST',
+      body: JSON.stringify({ redirectUri: window.location.origin }),
+    }),
 };
 
 // ─── Coinbase ────────────────────────────────────────────────────────────────

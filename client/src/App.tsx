@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import { useEffect } from 'react';
 import { Routes, Route } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import { Layout } from './components/Layout';
@@ -27,8 +27,8 @@ function AppRoutes() {
 
   // Handle Plaid OAuth return (Chase, Wells Fargo, etc.)
   // After the user authenticates with their bank, Plaid redirects back to
-  // http://localhost:3000?oauth_state_id=<id>. We must resume the Link
-  // session by passing receivedRedirectUri to Plaid.create().
+  // the registered redirect URI with ?oauth_state_id=<id>. We must resume
+  // the Link session by passing receivedRedirectUri to Plaid.create().
   useEffect(() => {
     if (!window.location.href.includes('oauth_state_id')) return;
 
@@ -36,7 +36,14 @@ function AppRoutes() {
 
     (async () => {
       try {
-        const { link_token } = await plaidApi.createLinkToken();
+        if (!window.Plaid) {
+          addToast({ type: 'error', message: 'Plaid SDK failed to load. Check your network connection.' });
+          window.history.replaceState({}, '', window.location.pathname);
+          return;
+        }
+        const storedToken = sessionStorage.getItem('plaid_link_token');
+        const link_token = storedToken ?? (await plaidApi.createLinkToken()).link_token;
+        sessionStorage.removeItem('plaid_link_token');
         const handler = window.Plaid.create({
           token: link_token,
           receivedRedirectUri,

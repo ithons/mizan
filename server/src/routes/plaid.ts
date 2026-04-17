@@ -16,10 +16,11 @@ import { removePlaidItemToken } from '../services/credentials';
 const router = Router();
 
 // POST /link-token
-router.post('/link-token', async (_req: Request, res: Response, next: NextFunction): Promise<void> => {
+router.post('/link-token', async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
-    const linkToken = await createLinkToken();
-    res.json({ data: { link_token: linkToken } });
+    const redirectUri: string = (req.body as { redirectUri?: string }).redirectUri || 'http://localhost:3000';
+    const linkToken = await createLinkToken(redirectUri);
+    res.json({ data: { link_token: linkToken, redirect_uri: redirectUri } });
   } catch (err) {
     next(err);
   }
@@ -44,20 +45,20 @@ router.post(
   }
 );
 
-// POST /sync/:itemId
-router.post('/sync/:itemId', async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+// POST /sync/all — must be registered before /sync/:itemId to avoid "all" matching as itemId
+router.post('/sync/all', async (_req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
-    await syncItem(req.params['itemId'] as string);
+    await syncAllItems();
     res.json({ data: { success: true } });
   } catch (err) {
     next(err);
   }
 });
 
-// POST /sync/all
-router.post('/sync/all', async (_req: Request, res: Response, next: NextFunction): Promise<void> => {
+// POST /sync/:itemId
+router.post('/sync/:itemId', async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
-    await syncAllItems();
+    await syncItem(req.params['itemId'] as string);
     res.json({ data: { success: true } });
   } catch (err) {
     next(err);
@@ -117,8 +118,9 @@ router.delete('/items/:id', async (req: Request, res: Response, next: NextFuncti
 // POST /update-token/:id — get update mode link token
 router.post('/update-token/:id', async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
-    const linkToken = await createUpdateToken(req.params['id'] as string);
-    res.json({ data: { link_token: linkToken } });
+    const redirectUri: string = (req.body as { redirectUri?: string }).redirectUri || 'http://localhost:3000';
+    const linkToken = await createUpdateToken(req.params['id'] as string, redirectUri);
+    res.json({ data: { link_token: linkToken, redirect_uri: redirectUri } });
   } catch (err) {
     next(err);
   }

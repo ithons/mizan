@@ -39,6 +39,8 @@ function AccountRow({
   onHide,
   onDelete,
   onSync,
+  needsReauth,
+  onReauth,
 }: {
   account: Account;
   selected: boolean;
@@ -46,6 +48,8 @@ function AccountRow({
   onHide: () => void;
   onDelete: () => void;
   onSync: () => void;
+  needsReauth?: boolean;
+  onReauth?: () => void;
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
 
@@ -72,6 +76,18 @@ function AccountRow({
       >
         {formatCurrency(account.current_balance)}
       </span>
+
+      {/* Reauth warning */}
+      {needsReauth && (
+        <button
+          className="flex items-center gap-1 text-xs text-[#e07070] hover:opacity-80 flex-shrink-0"
+          onClick={(e) => { e.stopPropagation(); onReauth?.(); }}
+          title="Login expired — click to reconnect"
+        >
+          <Unlink size={12} />
+          Reconnect
+        </button>
+      )}
 
       {/* Kebab menu */}
       <div className="relative" onClick={(e) => e.stopPropagation()}>
@@ -123,6 +139,8 @@ function AccountGroup({
   onHide,
   onDelete,
   onSync,
+  reauthIds,
+  onReauth,
 }: {
   label: string;
   accounts: Account[];
@@ -131,6 +149,8 @@ function AccountGroup({
   onHide: (id: string) => void;
   onDelete: (id: string) => void;
   onSync: (id: string) => void;
+  reauthIds?: Set<string>;
+  onReauth?: (id: string) => void;
 }) {
   const [collapsed, setCollapsed] = useState(false);
   const total = accounts.reduce((sum, a) => sum + (a.is_liability ? -a.current_balance : a.current_balance), 0);
@@ -160,6 +180,8 @@ function AccountGroup({
           onHide={() => onHide(acc.id)}
           onDelete={() => onDelete(acc.id)}
           onSync={() => onSync(acc.id)}
+          needsReauth={reauthIds?.has(acc.connection_id ?? '')}
+          onReauth={() => onReauth?.(acc.connection_id ?? '')}
         />
       ))}
     </div>
@@ -450,6 +472,15 @@ export function Accounts() {
     queryFn: accountsApi.list,
   });
 
+  const { data: plaidItems = [] } = useQuery({
+    queryKey: ['plaid-items'],
+    queryFn: plaidApi.listItems,
+  });
+
+  const reauthIds = new Set(
+    plaidItems.filter((item) => item.status === 'reauth_required').map((item) => item.id)
+  );
+
   const hideMutation = useMutation({
     mutationFn: (id: string) => {
       const acc = accounts.find((a) => a.id === id);
@@ -480,18 +511,49 @@ export function Accounts() {
     onError: (err: Error) => addToast({ type: 'error', message: err.message }),
   });
 
+  const handleReauth = async (itemId: string) => {
+    try {
+      if (!window.Plaid) {
+        addToast({ type: 'error', message: 'Plaid SDK failed to load. Check your network connection.' });
+        return;
+      }
+      const { link_token } = await plaidApi.createUpdateToken(itemId);
+      sessionStorage.setItem('plaid_link_token', link_token);
+      const handler = window.Plaid.create({
+        token: link_token,
+        onSuccess: async () => {
+          sessionStorage.removeItem('plaid_link_token');
+          await plaidApi.syncItem(itemId);
+          qc.invalidateQueries({ queryKey: ['accounts'] });
+          qc.invalidateQueries({ queryKey: ['plaid-items'] });
+          addToast({ type: 'success', message: 'Bank reconnected' });
+        },
+        onExit: () => { sessionStorage.removeItem('plaid_link_token'); },
+      });
+      handler.open();
+    } catch (err: any) {
+      addToast({ type: 'error', message: err.message || 'Failed to reconnect' });
+    }
+  };
+
   const connectPlaid = async () => {
     setAddMenuOpen(false);
     try {
+      if (!window.Plaid) {
+        addToast({ type: 'error', message: 'Plaid SDK failed to load. Check your network connection.' });
+        return;
+      }
       const { link_token } = await plaidApi.createLinkToken();
+      sessionStorage.setItem('plaid_link_token', link_token);
       const handler = window.Plaid.create({
         token: link_token,
         onSuccess: async (publicToken: string, metadata: unknown) => {
+          sessionStorage.removeItem('plaid_link_token');
           await plaidApi.exchangeToken(publicToken, metadata);
           qc.invalidateQueries({ queryKey: ['accounts'] });
           addToast({ type: 'success', message: 'Bank connected successfully' });
         },
-        onExit: () => {},
+        onExit: () => { sessionStorage.removeItem('plaid_link_token'); },
       });
       handler.open();
     } catch (err: any) {
@@ -570,6 +632,8 @@ export function Accounts() {
               onHide={(id) => hideMutation.mutate(id)}
               onDelete={(id) => deleteMutation.mutate(id)}
               onSync={(id) => syncMutation.mutate(id)}
+              reauthIds={reauthIds}
+              onReauth={handleReauth}
             />
           ))}
           {accounts.length === 0 && (

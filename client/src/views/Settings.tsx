@@ -150,7 +150,7 @@ function PlaidSection() {
                 and add:
               </p>
               <p className="font-mono text-text bg-background px-2 py-0.5 rounded inline-block">
-                http://localhost:3000
+                {window.location.origin}
               </p>
               <p className="text-muted/70">
                 Without this, OAuth institutions will redirect to a deep link that browsers cannot handle.
@@ -634,7 +634,7 @@ function DataSection() {
             onClick={async () => {
               try {
                 const items = await plaidApi.listItems();
-                await Promise.all(items.map((i) => plaidApi.deleteItem(i.item_id)));
+                await Promise.all(items.map((i) => plaidApi.deleteItem(i.id)));
                 qc.invalidateQueries({ queryKey: ['accounts'] });
                 addToast({ type: 'success', message: 'All Plaid items disconnected' });
               } catch (err: any) {
