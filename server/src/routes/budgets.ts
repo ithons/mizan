@@ -6,6 +6,13 @@ import { UpsertBudgetSchema } from '../../../shared/schemas';
 
 const router = Router();
 
+function parsePositiveInteger(value: unknown): number | null {
+  if (typeof value !== 'string' || !/^\d+$/.test(value)) return null;
+
+  const parsed = Number(value);
+  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : null;
+}
+
 // GET / - all budgets JOIN categories
 router.get('/', (_req: Request, res: Response, next: NextFunction): void => {
   try {
@@ -31,10 +38,10 @@ router.get('/', (_req: Request, res: Response, next: NextFunction): void => {
 router.get('/month/:year/:month', (req: Request, res: Response, next: NextFunction): void => {
   try {
     const db = getDb();
-    const year = parseInt(req.params['year'] as string);
-    const month = parseInt(req.params['month'] as string);
+    const year = parsePositiveInteger(req.params['year']);
+    const month = parsePositiveInteger(req.params['month']);
 
-    if (isNaN(year) || isNaN(month) || month < 1 || month > 12) {
+    if (year === null || month === null || month > 12) {
       res.status(400).json({ error: 'Invalid year or month' });
       return;
     }

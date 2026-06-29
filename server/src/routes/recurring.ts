@@ -6,6 +6,16 @@ import { format, addDays } from 'date-fns';
 
 const router = Router();
 
+function parseDays(value: unknown): number | null {
+  if (value === undefined) return 30;
+  if (typeof value !== 'string' || !/^\d+$/.test(value)) return null;
+
+  const parsed = Number(value);
+  if (!Number.isSafeInteger(parsed)) return null;
+
+  return Math.min(Math.max(parsed, 1), 365);
+}
+
 // GET / - all active recurring_patterns JOIN categories
 router.get('/', (_req: Request, res: Response, next: NextFunction): void => {
   try {
@@ -31,8 +41,12 @@ router.get('/', (_req: Request, res: Response, next: NextFunction): void => {
 router.get('/upcoming', (req: Request, res: Response, next: NextFunction): void => {
   try {
     const db = getDb();
-    const rawDays = parseInt(String(req.query.days ?? '30'), 10);
-    const days = Number.isFinite(rawDays) ? Math.min(Math.max(rawDays, 1), 365) : 30;
+    const days = parseDays(req.query.days);
+    if (days === null) {
+      res.status(400).json({ error: 'Invalid days filter' });
+      return;
+    }
+
     const endDate = format(addDays(new Date(), days), 'yyyy-MM-dd');
 
     const patterns = db.prepare(`
