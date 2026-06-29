@@ -26,6 +26,13 @@ interface PlaidSyncIssue {
   message: string;
 }
 
+interface PlaidExchangeResult {
+  itemId: string;
+  accounts: Account[];
+  initialSyncStatus: PlaidSyncStatus | 'failed';
+  initialSyncError?: string;
+}
+
 async function apiFetch<T>(url: string, options?: RequestInit): Promise<T> {
   const res = await fetch(url, {
     ...options,
@@ -279,7 +286,7 @@ export const plaidApi = {
       body: JSON.stringify({ redirectUri: window.location.origin }),
     }),
   exchangeToken: (publicToken: string, metadata: unknown) =>
-    apiFetch<{ success: boolean }>('/api/plaid/exchange-token', {
+    apiFetch<PlaidExchangeResult>('/api/plaid/exchange-token', {
       method: 'POST',
       body: JSON.stringify({ publicToken, metadata }),
     }),

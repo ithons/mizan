@@ -30,6 +30,13 @@ export interface PlaidSyncSummary {
   failed: PlaidSyncIssue[];
 }
 
+export interface PlaidExchangeResult {
+  itemId: string;
+  accounts: Account[];
+  initialSyncStatus: PlaidSyncItemStatus | 'failed';
+  initialSyncError?: string;
+}
+
 function getPlaidClient(): PlaidApi {
   if (_client) return _client;
   const creds = getCredentials();
@@ -116,7 +123,7 @@ export async function createLinkToken(redirectUri: string = 'http://localhost:30
 export async function exchangeToken(
   publicToken: string,
   metadata: Record<string, unknown>
-): Promise<{ itemId: string; accounts: Account[] }> {
+): Promise<PlaidExchangeResult> {
   const plaid = getPlaidClient();
   const db = getDb();
 
@@ -197,14 +204,24 @@ export async function exchangeToken(
     }
   }
 
-  // Queue immediate sync
+  let initialSyncStatus: PlaidExchangeResult['initialSyncStatus'] = 'synced';
+  let initialSyncError: string | undefined;
+
   try {
-    await syncItem(dbItemId);
+    initialSyncStatus = await syncItem(dbItemId);
   } catch (err) {
-    console.error('[plaid] Initial sync failed:', (err as Error).message);
+    initialSyncStatus = 'failed';
+    initialSyncError = (err as Error).message || 'Initial sync failed';
+    db.prepare("UPDATE plaid_items SET status = 'sync_error' WHERE id = ?").run(dbItemId);
+    console.error('[plaid] Initial sync failed:', initialSyncError);
   }
 
-  return { itemId: dbItemId, accounts: [] };
+  return {
+    itemId: dbItemId,
+    accounts: [],
+    initialSyncStatus,
+    ...(initialSyncError ? { initialSyncError } : {}),
+  };
 }
 
 export async function syncItem(dbItemId: string): Promise<PlaidSyncItemStatus> {

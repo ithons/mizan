@@ -1024,9 +1024,18 @@ export function Accounts() {
         token: link_token,
         onSuccess: async (publicToken: string, metadata: unknown) => {
           sessionStorage.removeItem('plaid_link_token');
-          await plaidApi.exchangeToken(publicToken, metadata);
+          const result = await plaidApi.exchangeToken(publicToken, metadata);
           invalidateFinancialData(qc);
-          addToast({ type: 'success', message: 'Bank connected successfully' });
+          if (result.initialSyncStatus === 'synced') {
+            addToast({ type: 'success', message: 'Bank connected successfully' });
+          } else {
+            addToast({
+              type: 'error',
+              message: result.initialSyncError
+                ? `Bank connected, but initial sync failed: ${result.initialSyncError}`
+                : 'Bank connected, but initial sync did not finish',
+            });
+          }
         },
         onExit: () => sessionStorage.removeItem('plaid_link_token'),
       });
