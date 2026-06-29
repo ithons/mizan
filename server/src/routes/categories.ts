@@ -201,23 +201,27 @@ router.post(
 
       const now = new Date().toISOString();
 
-      // Move all transactions to target
-      db.prepare(
-        'UPDATE transactions SET category_id = ?, updated_at = ? WHERE category_id = ?'
-      ).run(targetId, now, id);
+      const mergeCategory = db.transaction(() => {
+        db.prepare(
+          'UPDATE transactions SET category_id = ?, updated_at = ? WHERE category_id = ?'
+        ).run(targetId, now, id);
 
-      // Move all budgets to target
-      db.prepare(
-        'UPDATE budgets SET category_id = ? WHERE category_id = ?'
-      ).run(targetId, id);
+        db.prepare(
+          'UPDATE budgets SET category_id = ? WHERE category_id = ?'
+        ).run(targetId, id);
 
-      // Re-assign child categories to target
-      db.prepare(
-        'UPDATE categories SET parent_id = ? WHERE parent_id = ?'
-      ).run(targetId, id);
+        db.prepare(
+          'UPDATE merchant_rules SET category_id = ? WHERE category_id = ?'
+        ).run(targetId, id);
 
-      // Delete source
-      db.prepare('DELETE FROM categories WHERE id = ?').run(id);
+        db.prepare(
+          'UPDATE categories SET parent_id = ? WHERE parent_id = ?'
+        ).run(targetId, id);
+
+        db.prepare('DELETE FROM categories WHERE id = ?').run(id);
+      });
+
+      mergeCategory();
 
       res.json({ data: { success: true } });
     } catch (err) {
