@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   ArrowDownCircle,
   ArrowUpCircle,
@@ -8,12 +8,15 @@ import {
   Clock3,
   RefreshCw,
   Wallet,
+  XCircle,
 } from 'lucide-react';
 import type { Account, RecurringForecastOccurrence } from '@shared/types';
 import { accountsApi, recurringApi } from '../lib/api';
 import { formatCurrency, formatDate } from '../lib/formatters';
 import { PageLoader } from '../components/LoadingSpinner';
 import { EmptyState } from '../components/EmptyState';
+import { invalidateFinancialData } from '../lib/queryInvalidation';
+import { useAppStore } from '../store';
 
 const FREQUENCY_LABELS: Record<RecurringForecastOccurrence['frequency'], string> = {
   weekly: 'Weekly',
@@ -78,7 +81,17 @@ function Stat({
   );
 }
 
-function ScheduleRow({ occurrence }: { occurrence: RecurringForecastOccurrence }) {
+function ScheduleRow({
+  occurrence,
+  isMutating,
+  onConfirm,
+  onDismiss,
+}: {
+  occurrence: RecurringForecastOccurrence;
+  isMutating: boolean;
+  onConfirm: (patternId: string) => void;
+  onDismiss: (patternId: string) => void;
+}) {
   const Icon = occurrence.is_income ? ArrowUpCircle : ArrowDownCircle;
   const color = occurrence.is_income ? '#4ecba3' : '#e07070';
 
@@ -109,14 +122,38 @@ function ScheduleRow({ occurrence }: { occurrence: RecurringForecastOccurrence }
           </div>
         </div>
       </div>
-      <p className="font-mono text-sm text-right" style={{ color }}>
-        {formatCurrency(occurrence.amount)}
-      </p>
+      <div className="flex items-center justify-end gap-2">
+        <p className="font-mono text-sm text-right" style={{ color }}>
+          {formatCurrency(occurrence.amount)}
+        </p>
+        {!occurrence.is_confirmed && (
+          <div className="flex items-center gap-1">
+            <button
+              className="p-1 text-muted hover:text-[#4ecba3] disabled:opacity-30"
+              onClick={() => onConfirm(occurrence.pattern_id)}
+              disabled={isMutating}
+              title="Confirm recurring pattern"
+            >
+              <CheckCircle2 size={13} />
+            </button>
+            <button
+              className="p-1 text-muted hover:text-[#e07070] disabled:opacity-30"
+              onClick={() => onDismiss(occurrence.pattern_id)}
+              disabled={isMutating}
+              title="Dismiss recurring pattern"
+            >
+              <XCircle size={13} />
+            </button>
+          </div>
+        )}
+      </div>
     </div>
   );
 }
 
 export function Bills() {
+  const qc = useQueryClient();
+  const { addToast } = useAppStore();
   const [days, setDays] = useState(60);
 
   const { data: forecast, isLoading } = useQuery({
@@ -127,6 +164,24 @@ export function Bills() {
   const { data: accounts = [] } = useQuery({
     queryKey: ['accounts'],
     queryFn: accountsApi.list,
+  });
+
+  const confirmMutation = useMutation({
+    mutationFn: (patternId: string) => recurringApi.confirm(patternId),
+    onSuccess: () => {
+      invalidateFinancialData(qc);
+      addToast({ type: 'success', message: 'Recurring pattern confirmed' });
+    },
+    onError: (err: Error) => addToast({ type: 'error', message: err.message }),
+  });
+
+  const dismissMutation = useMutation({
+    mutationFn: (patternId: string) => recurringApi.dismiss(patternId),
+    onSuccess: () => {
+      invalidateFinancialData(qc);
+      addToast({ type: 'success', message: 'Recurring pattern dismissed' });
+    },
+    onError: (err: Error) => addToast({ type: 'error', message: err.message }),
   });
 
   const occurrences = forecast?.occurrences ?? [];
@@ -280,7 +335,13 @@ export function Bills() {
             {grouped.map(([date, items]) => (
               <div key={date}>
                 {items.map((occurrence) => (
-                  <ScheduleRow key={occurrence.id} occurrence={occurrence} />
+                  <ScheduleRow
+                    key={occurrence.id}
+                    occurrence={occurrence}
+                    isMutating={confirmMutation.isPending || dismissMutation.isPending}
+                    onConfirm={(patternId) => confirmMutation.mutate(patternId)}
+                    onDismiss={(patternId) => dismissMutation.mutate(patternId)}
+                  />
                 ))}
               </div>
             ))}
