@@ -29,6 +29,7 @@ import { AmountBadge } from '../components/AmountBadge';
 import { CategoryBadge } from '../components/CategoryBadge';
 import { SkeletonList } from '../components/SkeletonLoader';
 import { ConfirmRemoveModal } from '../components/ConfirmRemoveModal';
+import { loadPlaidLink } from '../lib/plaidLink';
 import type { Account, PlaidItem, Holding } from '@shared/types';
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -983,13 +984,10 @@ export function Accounts() {
 
   const handleReauth = async (itemId: string) => {
     try {
-      if (!window.Plaid) {
-        addToast({ type: 'error', message: 'Plaid SDK failed to load.' });
-        return;
-      }
+      const plaid = await loadPlaidLink();
       const { link_token } = await plaidApi.createUpdateToken(itemId);
       sessionStorage.setItem('plaid_link_token', link_token);
-      const handler = window.Plaid.create({
+      const handler = plaid.create({
         token: link_token,
         onSuccess: async () => {
           sessionStorage.removeItem('plaid_link_token');
@@ -1013,13 +1011,10 @@ export function Accounts() {
   const connectPlaid = async () => {
     setAddMenuOpen(false);
     try {
-      if (!window.Plaid) {
-        addToast({ type: 'error', message: 'Plaid SDK failed to load.' });
-        return;
-      }
+      const plaid = await loadPlaidLink();
       const { link_token } = await plaidApi.createLinkToken();
       sessionStorage.setItem('plaid_link_token', link_token);
-      const handler = window.Plaid.create({
+      const handler = plaid.create({
         token: link_token,
         onSuccess: async (publicToken: string, metadata: unknown) => {
           sessionStorage.removeItem('plaid_link_token');

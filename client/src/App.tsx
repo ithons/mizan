@@ -6,6 +6,7 @@ import { ToastContainer } from './components/Toast';
 import { useSyncStatus } from './hooks/useSyncStatus';
 import { useAppStore } from './store';
 import { plaidApi } from './lib/api';
+import { loadPlaidLink } from './lib/plaidLink';
 
 const Dashboard = lazy(() => import('./views/Dashboard').then((module) => ({ default: module.Dashboard })));
 const Accounts = lazy(() => import('./views/Accounts').then((module) => ({ default: module.Accounts })));
@@ -16,25 +17,6 @@ const Investments = lazy(() => import('./views/Investments').then((module) => ({
 const Reports = lazy(() => import('./views/Reports').then((module) => ({ default: module.Reports })));
 const Settings = lazy(() => import('./views/Settings').then((module) => ({ default: module.Settings })));
 const Advisor = lazy(() => import('./views/Advisor').then((module) => ({ default: module.Advisor })));
-
-interface PlaidHandler {
-  open: () => void;
-}
-
-interface PlaidCreateOptions {
-  token: string;
-  receivedRedirectUri?: string;
-  onSuccess: (publicToken: string, metadata: unknown) => void | Promise<void>;
-  onExit?: () => void;
-}
-
-declare global {
-  interface Window {
-    Plaid?: {
-      create: (options: PlaidCreateOptions) => PlaidHandler;
-    };
-  }
-}
 
 function errorMessage(err: unknown, fallback: string) {
   return err instanceof Error && err.message ? err.message : fallback;
@@ -74,15 +56,11 @@ function AppRoutes() {
 
     (async () => {
       try {
-        if (!window.Plaid) {
-          addToast({ type: 'error', message: 'Plaid SDK failed to load. Check your network connection.' });
-          window.history.replaceState({}, '', window.location.pathname);
-          return;
-        }
+        const plaid = await loadPlaidLink();
         const storedToken = sessionStorage.getItem('plaid_link_token');
         const link_token = storedToken ?? (await plaidApi.createLinkToken()).link_token;
         sessionStorage.removeItem('plaid_link_token');
-        const handler = window.Plaid.create({
+        const handler = plaid.create({
           token: link_token,
           receivedRedirectUri,
           onSuccess: async (publicToken: string, metadata: unknown) => {
