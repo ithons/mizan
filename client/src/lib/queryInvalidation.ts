@@ -15,6 +15,7 @@ const FINANCIAL_QUERY_KEYS = [
   'spending',
   'income',
   'trends',
+  'insights',
   'inv-report',
   'reports-investments',
   'investment-transactions',

@@ -12,9 +12,10 @@ import {
   Trash2,
   SlidersHorizontal,
   AlertCircle,
+  Sparkles,
 } from 'lucide-react';
 import { format, subMonths } from 'date-fns';
-import { transactionsApi, accountsApi, categoriesApi, settingsApi, flattenCategories } from '../lib/api';
+import { transactionsApi, accountsApi, categoriesApi, settingsApi, flattenCategories, rulesApi } from '../lib/api';
 import { formatDate, formatCurrency } from '../lib/formatters';
 import { useAppStore } from '../store';
 import { Modal } from '../components/Modal';
@@ -382,6 +383,31 @@ export function Transactions() {
     },
   });
 
+  const createRuleMutation = useMutation({
+    mutationFn: ({ pattern, categoryId }: { pattern: string; categoryId: string }) =>
+      rulesApi.create({
+        pattern,
+        category_id: categoryId,
+        apply_existing: true,
+      }),
+    onSuccess: (result) => {
+      invalidateFinancialData(qc);
+      addToast({
+        type: 'success',
+        message: result.applied > 0
+          ? `Rule saved and applied to ${result.applied} transactions`
+          : 'Rule saved',
+      });
+    },
+    onError: (err: Error) => addToast({ type: 'error', message: err.message }),
+  });
+
+  const createRuleFromTransaction = (merchantName: string | null | undefined, categoryId: string | null | undefined) => {
+    const pattern = merchantName?.trim();
+    if (!pattern || !categoryId) return;
+    createRuleMutation.mutate({ pattern, categoryId });
+  };
+
   const rawTxs = txData?.data ?? [];
   const total = txData?.total ?? 0;
   const totalPages = Math.ceil(total / PAGE_SIZE);
@@ -699,11 +725,23 @@ export function Transactions() {
                       </div>
                     </td>
                     <td className="px-3 py-2.5">
-                      <CategoryDropdown
-                        value={tx.category_id}
-                        categories={categories}
-                        onChange={(catId) => updateCatMutation.mutate({ id: tx.id, categoryId: catId })}
-                      />
+                      <div className="flex items-center gap-2">
+                        <CategoryDropdown
+                          value={tx.category_id}
+                          categories={categories}
+                          onChange={(catId) => updateCatMutation.mutate({ id: tx.id, categoryId: catId })}
+                        />
+                        {tx.category_id && (tx.merchant_name || tx.original_name) && (
+                          <button
+                            className="text-muted hover:text-[#d4a44c] opacity-0 group-hover:opacity-100 transition-colors disabled:opacity-30"
+                            onClick={() => createRuleFromTransaction(tx.merchant_name || tx.original_name, tx.category_id)}
+                            disabled={createRuleMutation.isPending}
+                            title="Create merchant rule"
+                          >
+                            <Sparkles size={12} />
+                          </button>
+                        )}
+                      </div>
                     </td>
                     <td className="px-3 py-2.5">
                       <AmountBadge amount={tx.amount} />
@@ -742,7 +780,7 @@ export function Transactions() {
         {/* Pagination */}
         <div className="flex items-center justify-between px-4 py-2.5 border-t border-border">
           <span className="text-xs text-muted font-mono">
-            {total > 0 ? `${(page - 1) * PAGE_SIZE + 1}–${Math.min(page * PAGE_SIZE, total)} of ${total}` : '0 results'}
+            {total > 0 ? `${(page - 1) * PAGE_SIZE + 1}-${Math.min(page * PAGE_SIZE, total)} of ${total}` : '0 results'}
           </span>
           <div className="flex items-center gap-1">
             <button
