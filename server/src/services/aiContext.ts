@@ -1,4 +1,4 @@
-import { addDays, addMonths, format, parseISO, startOfMonth, subMonths } from 'date-fns';
+import { addDays, addMonths, differenceInCalendarDays, format, parseISO, startOfMonth, subMonths } from 'date-fns';
 import type Database from 'better-sqlite3';
 import { getDb } from '../db/index';
 
@@ -64,6 +64,23 @@ interface RecurringForecastContext {
   bills: number;
   net: number;
   occurrences: ForecastOccurrence[];
+}
+
+interface ConnectionContextRow {
+  provider: 'plaid' | 'coinbase';
+  institution_name: string | null;
+  status: string;
+  last_synced_at: string | null;
+  account_count: number;
+}
+
+function ageInDays(iso: string | null): number | null {
+  if (!iso) return null;
+
+  const parsed = parseISO(iso);
+  if (Number.isNaN(parsed.getTime())) return null;
+
+  return differenceInCalendarDays(new Date(), parsed);
 }
 
 function nextOccurrenceDate(date: Date, frequency: Frequency): Date {
@@ -187,6 +204,68 @@ export function buildFinancialContext(): string {
   const sixMonthsAgo = format(startOfMonth(subMonths(today, 6)), 'yyyy-MM-dd');
 
   const lines: string[] = [`## Financial Snapshot - ${format(today, 'MMMM d, yyyy')}`];
+
+  const plaidConnections = db.prepare(`
+    SELECT
+      'plaid' AS provider,
+      institution_name,
+      status,
+      last_synced_at,
+      (
+        SELECT COUNT(*)
+        FROM accounts a
+        WHERE a.connection_id = pi.id
+          AND a.connection_type = 'plaid'
+          AND a.is_hidden = 0
+      ) AS account_count
+    FROM plaid_items pi
+    WHERE status != 'removed'
+  `).all() as ConnectionContextRow[];
+
+  const coinbaseConnections = db.prepare(`
+    SELECT
+      'coinbase' AS provider,
+      display_name AS institution_name,
+      status,
+      last_synced_at,
+      (
+        SELECT COUNT(*)
+        FROM accounts a
+        WHERE a.connection_id = cc.id
+          AND a.connection_type = 'coinbase'
+          AND a.is_hidden = 0
+      ) AS account_count
+    FROM coinbase_connections cc
+    WHERE status != 'disconnected'
+  `).all() as ConnectionContextRow[];
+
+  const connections = [...plaidConnections, ...coinbaseConnections];
+  const staleConnections = connections.filter((connection) => {
+    if (connection.status !== 'active') return false;
+    return (ageInDays(connection.last_synced_at) ?? 999) >= 3;
+  });
+  const attentionConnections = connections.filter((connection) => connection.status !== 'active');
+  const syncedDates = connections
+    .map((connection) => connection.last_synced_at)
+    .filter((date): date is string => Boolean(date))
+    .sort();
+
+  lines.push('');
+  lines.push('### Data Freshness');
+  if (connections.length === 0) {
+    lines.push('  No live institution connections. Balances and transactions may be manual or empty.');
+  } else {
+    lines.push(`  Connections: ${connections.length}`);
+    lines.push(`  Last successful sync: ${syncedDates.at(-1) ?? 'Never'}`);
+    lines.push(`  Stale connections: ${staleConnections.length}`);
+    lines.push(`  Connections needing attention: ${attentionConnections.length}`);
+    for (const connection of connections.slice(0, 6)) {
+      const age = ageInDays(connection.last_synced_at);
+      const name = connection.institution_name || (connection.provider === 'plaid' ? 'Bank connection' : 'Coinbase');
+      const ageLabel = age === null ? 'never synced' : `${age}d ago`;
+      lines.push(`  ${name}: ${connection.status}, ${ageLabel}, ${connection.account_count} accounts`);
+    }
+  }
 
   // ── Accounts & Net Worth ─────────────────────────────────────────────────
   const accounts = db.prepare(`
