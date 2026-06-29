@@ -673,7 +673,7 @@ function EditManualAccountModal({
         color: form.color,
       }),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['accounts'] });
+      invalidateFinancialData(qc);
       addToast({ type: 'success', message: 'Account updated' });
       onClose();
     },
@@ -782,8 +782,7 @@ function AddManualAccountModal({ open, onClose }: { open: boolean; onClose: () =
         current_balance: parseFloat(form.current_balance) || 0,
       }),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['accounts'] });
-      qc.invalidateQueries({ queryKey: ['networth'] });
+      invalidateFinancialData(qc);
       addToast({ type: 'success', message: 'Account created' });
       onClose();
     },
@@ -932,14 +931,13 @@ export function Accounts() {
       const acc = accounts.find((a) => a.id === id);
       return accountsApi.update(id, { is_hidden: !acc?.is_hidden });
     },
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['accounts'] }),
+    onSuccess: () => invalidateFinancialData(qc),
   });
 
   const deleteMutation = useMutation({
     mutationFn: accountsApi.delete,
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['accounts'] });
-      qc.invalidateQueries({ queryKey: ['networth'] });
+      invalidateFinancialData(qc);
       setSelectedId(null);
       setConfirmDeleteAccount(null);
       addToast({ type: 'success', message: 'Account deleted' });
@@ -950,8 +948,7 @@ export function Accounts() {
   const removeItemMutation = useMutation({
     mutationFn: (itemId: string) => plaidApi.deleteItem(itemId),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['accounts'] });
-      qc.invalidateQueries({ queryKey: ['plaid-items'] });
+      invalidateFinancialData(qc);
       setConfirmRemoveItem(null);
       addToast({ type: 'success', message: 'Institution removed' });
     },
@@ -974,7 +971,7 @@ export function Accounts() {
   const disconnectCoinbaseMutation = useMutation({
     mutationFn: coinbaseApi.disconnect,
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['accounts'] });
+      invalidateFinancialData(qc);
       setConfirmDisconnectCoinbase(false);
       addToast({ type: 'info', message: 'Coinbase disconnected' });
     },
