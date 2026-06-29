@@ -23,6 +23,21 @@ import type { z } from 'zod';
 
 const router = Router();
 
+function parseCsvAmount(rawAmount: string | undefined): number | null {
+  const trimmed = rawAmount?.trim();
+  if (!trimmed) return null;
+
+  const isParenthesized = trimmed.startsWith('(') && trimmed.endsWith(')');
+  const normalized = trimmed
+    .replace(/^\((.*)\)$/, '-$1')
+    .replace(/[$,\s]/g, '');
+
+  const parsed = Number(normalized);
+  if (!Number.isFinite(parsed)) return null;
+
+  return isParenthesized ? -Math.abs(parsed) : parsed;
+}
+
 // GET /credentials
 router.get('/credentials', (_req: Request, res: Response, next: NextFunction): void => {
   try {
@@ -172,7 +187,7 @@ router.post('/import-csv', (req: Request, res: Response, next: NextFunction): vo
 
       try {
         // Parse date
-        let dateStr = row[mapping.date] || '';
+        let dateStr = (row[mapping.date] || '').trim();
         const dateFormat = mapping.dateFormat || 'yyyy-MM-dd';
         let parsedDate: Date;
 
@@ -186,8 +201,8 @@ router.post('/import-csv', (req: Request, res: Response, next: NextFunction): vo
         dateStr = format(parsedDate, 'yyyy-MM-dd');
 
         // Parse amount
-        let amount = parseFloat(row[mapping.amount] || '0');
-        if (isNaN(amount)) {
+        let amount = parseCsvAmount(row[mapping.amount]);
+        if (amount === null) {
           errors.push(`Row ${i + 1}: Invalid amount "${row[mapping.amount]}"`);
           continue;
         }
