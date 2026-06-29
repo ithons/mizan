@@ -95,9 +95,9 @@ export function Dashboard() {
     queryFn: () => reportsApi.spending({ startDate, endDate }),
   });
 
-  const { data: upcoming } = useQuery({
-    queryKey: ['recurring', 'upcoming', 7],
-    queryFn: () => recurringApi.upcoming(7),
+  const { data: forecast } = useQuery({
+    queryKey: ['recurring', 'forecast', 'dashboard', 30],
+    queryFn: () => recurringApi.forecast(30),
   });
 
   const { data: budgets } = useQuery({
@@ -315,24 +315,50 @@ export function Dashboard() {
 
         {/* Upcoming Bills */}
         <div className="col-span-2 bg-surface border border-border rounded p-4">
-          <h2 className="text-sm font-medium text-text mb-4">Upcoming Bills (7 days)</h2>
-          {upcoming && upcoming.length > 0 ? (
-            <div className="space-y-2">
-              {upcoming.map((bill) => (
-                <div key={bill.id} className="flex items-center justify-between py-1.5 border-b border-border last:border-0">
-                  <div className="min-w-0">
-                    <p className="text-sm text-text truncate">{bill.merchant_name}</p>
-                    <p className="text-xs text-muted font-mono">{formatDateShort(bill.next_expected)}</p>
-                  </div>
-                  <span className="font-mono text-sm text-[#e07070] ml-2">
-                    {formatCurrency(bill.average_amount)}
-                  </span>
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-sm font-medium text-text">Next 30 Days</h2>
+            <button onClick={() => navigate('/bills')} className="text-xs text-muted hover:text-[#4ecba3] flex items-center gap-1">
+              View all <ArrowRight size={11} />
+            </button>
+          </div>
+          {forecast && forecast.occurrences.length > 0 ? (
+            <div className="space-y-3">
+              <div className="grid grid-cols-3 gap-2 text-xs">
+                <div>
+                  <p className="text-muted mb-0.5">Income</p>
+                  <p className="font-mono text-[#4ecba3]">{formatCurrency(forecast.income)}</p>
                 </div>
-              ))}
+                <div>
+                  <p className="text-muted mb-0.5">Bills</p>
+                  <p className="font-mono text-[#e07070]">{formatCurrency(-forecast.bills)}</p>
+                </div>
+                <div>
+                  <p className="text-muted mb-0.5">Net</p>
+                  <p className="font-mono" style={{ color: forecast.net >= 0 ? '#4ecba3' : '#e07070' }}>
+                    {formatCurrency(forecast.net)}
+                  </p>
+                </div>
+              </div>
+              <div className="space-y-2">
+                {forecast.occurrences.slice(0, 5).map((item) => (
+                  <div key={item.id} className="flex items-center justify-between py-1.5 border-b border-border last:border-0">
+                    <div className="min-w-0">
+                      <p className="text-sm text-text truncate">{item.merchant_name}</p>
+                      <p className="text-xs text-muted font-mono">{formatDateShort(item.expected_date)}</p>
+                    </div>
+                    <span
+                      className="font-mono text-sm ml-2"
+                      style={{ color: item.amount >= 0 ? '#4ecba3' : '#e07070' }}
+                    >
+                      {formatCurrency(item.amount)}
+                    </span>
+                  </div>
+                ))}
+              </div>
             </div>
           ) : (
             <div className="h-32 flex items-center justify-center text-muted text-sm">
-              No upcoming bills
+              No recurring activity scheduled
             </div>
           )}
         </div>
