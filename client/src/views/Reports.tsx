@@ -22,6 +22,7 @@ import { reportsApi, networthApi, investmentsApi, categoriesApi } from '../lib/a
 import { formatCurrency, formatMonth, formatDate, formatPercent } from '../lib/formatters';
 import { PageLoader } from '../components/LoadingSpinner';
 import { EmptyState } from '../components/EmptyState';
+import type { Category } from '@shared/types';
 const COLORS = [
   '#4ecba3', '#5b8dee', '#d4a44c', '#e07070', '#a78bfa',
   '#f472b6', '#34d399', '#fb923c', '#60a5fa', '#f87171',
@@ -61,6 +62,14 @@ interface DrillCategory {
 interface SpendingTreemapContentProps extends TreemapContentProps {
   categories?: DrillCategory[];
   onDrill?: (categoryId: string, categoryName: string) => void;
+}
+
+interface CategoryOption {
+  id: string;
+  label: string;
+  color?: string | null;
+  is_income: boolean;
+  is_investment: boolean;
 }
 
 function getDateRange(preset: DatePreset, customStart?: string, customEnd?: string) {
@@ -161,6 +170,22 @@ function BasicTreemapContent(rawProps: TreemapContentProps) {
       )}
     </g>
   );
+}
+
+function flattenCategoryOptions(categories: Category[], parentLabel?: string): CategoryOption[] {
+  return categories.flatMap((category) => {
+    const label = parentLabel ? `${parentLabel} / ${category.name}` : category.name;
+    return [
+      {
+        id: category.id,
+        label,
+        color: category.color,
+        is_income: category.is_income,
+        is_investment: category.is_investment,
+      },
+      ...flattenCategoryOptions(category.children ?? [], label),
+    ];
+  });
 }
 
 // ─── Spending Tab ─────────────────────────────────────────────────────────────
@@ -368,7 +393,9 @@ function TrendsTab({ startDate, endDate }: { startDate: string; endDate: string 
       }))
     : [];
 
-  const expenseCategories = categories.filter((c) => !c.is_income && !c.is_investment);
+  const expenseCategories = flattenCategoryOptions(categories)
+    .filter((c) => !c.is_income && !c.is_investment);
+  const categoryLabels = new Map(expenseCategories.map((category) => [category.id, category.label]));
 
   return (
     <div className="space-y-6">
@@ -389,7 +416,7 @@ function TrendsTab({ startDate, endDate }: { startDate: string; endDate: string 
               }}
             >
               <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: color }} />
-              {cat.name}
+              {cat.label}
             </button>
           );
         })}
@@ -414,7 +441,7 @@ function TrendsTab({ startDate, endDate }: { startDate: string; endDate: string 
                 <Line
                   key={s.category_id}
                   dataKey={s.category_id}
-                  name={s.category_name}
+                  name={categoryLabels.get(s.category_id) ?? s.category_name}
                   stroke={s.color || COLORS[i % COLORS.length]}
                   strokeWidth={2}
                   dot={false}
