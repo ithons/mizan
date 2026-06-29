@@ -30,6 +30,7 @@ import { CategoryBadge } from '../components/CategoryBadge';
 import { SkeletonList } from '../components/SkeletonLoader';
 import { ConfirmRemoveModal } from '../components/ConfirmRemoveModal';
 import { loadPlaidLink } from '../lib/plaidLink';
+import { invalidateFinancialData } from '../lib/queryInvalidation';
 import type { Account, PlaidItem, Holding } from '@shared/types';
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -959,9 +960,13 @@ export function Accounts() {
 
   const syncItemMutation = useMutation({
     mutationFn: (itemId: string) => plaidApi.syncItem(itemId),
-    onSuccess: () => {
-      addToast({ type: 'info', message: 'Sync started' });
-      qc.invalidateQueries({ queryKey: ['accounts'] });
+    onSuccess: (result) => {
+      invalidateFinancialData(qc);
+      if (!result.success) {
+        addToast({ type: 'error', message: 'Bank needs reconnecting' });
+        return;
+      }
+      addToast({ type: 'success', message: 'Bank sync complete' });
     },
     onError: (err: Error) => addToast({ type: 'error', message: err.message }),
   });
@@ -978,7 +983,12 @@ export function Accounts() {
 
   const syncCoinbaseMutation = useMutation({
     mutationFn: coinbaseApi.sync,
-    onSuccess: () => addToast({ type: 'info', message: 'Coinbase sync started' }),
+    onSuccess: (result) => {
+      invalidateFinancialData(qc);
+      const changes = result.transactionCount + result.staleAccountCount;
+      const detail = changes > 0 ? `, ${changes} update(s)` : '';
+      addToast({ type: 'success', message: `Coinbase sync complete${detail}` });
+    },
     onError: (err: Error) => addToast({ type: 'error', message: err.message }),
   });
 
@@ -991,13 +1001,12 @@ export function Accounts() {
         token: link_token,
         onSuccess: async () => {
           sessionStorage.removeItem('plaid_link_token');
-          await plaidApi.syncItem(itemId);
-          qc.invalidateQueries({ queryKey: ['accounts'] });
-          qc.invalidateQueries({ queryKey: ['plaid-items'] });
-          qc.invalidateQueries({ queryKey: ['transactions'] });
-          qc.invalidateQueries({ queryKey: ['networth'] });
-          qc.invalidateQueries({ queryKey: ['cashflow'] });
-          qc.invalidateQueries({ queryKey: ['reports'] });
+          const result = await plaidApi.syncItem(itemId);
+          invalidateFinancialData(qc);
+          if (!result.success) {
+            addToast({ type: 'error', message: 'Bank still needs reconnecting' });
+            return;
+          }
           addToast({ type: 'success', message: 'Bank reconnected' });
         },
         onExit: () => sessionStorage.removeItem('plaid_link_token'),
@@ -1019,10 +1028,7 @@ export function Accounts() {
         onSuccess: async (publicToken: string, metadata: unknown) => {
           sessionStorage.removeItem('plaid_link_token');
           await plaidApi.exchangeToken(publicToken, metadata);
-          qc.invalidateQueries({ queryKey: ['accounts'] });
-          qc.invalidateQueries({ queryKey: ['plaid-items'] });
-          qc.invalidateQueries({ queryKey: ['transactions'] });
-          qc.invalidateQueries({ queryKey: ['networth'] });
+          invalidateFinancialData(qc);
           addToast({ type: 'success', message: 'Bank connected successfully' });
         },
         onExit: () => sessionStorage.removeItem('plaid_link_token'),

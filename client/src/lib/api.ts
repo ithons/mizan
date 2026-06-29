@@ -18,6 +18,14 @@ import type {
   AiStreamEvent,
 } from '@shared/types';
 
+type PlaidSyncStatus = 'synced' | 'reauth_required';
+
+interface PlaidSyncIssue {
+  itemId: string;
+  institutionName: string;
+  message: string;
+}
+
 async function apiFetch<T>(url: string, options?: RequestInit): Promise<T> {
   const res = await fetch(url, {
     ...options,
@@ -276,8 +284,13 @@ export const plaidApi = {
       body: JSON.stringify({ publicToken, metadata }),
     }),
   syncItem: (itemId: string) =>
-    apiFetch<void>(`/api/plaid/sync/${itemId}`, { method: 'POST' }),
-  syncAll: () => apiFetch<void>('/api/plaid/sync/all', { method: 'POST' }),
+    apiFetch<{ success: boolean; status: PlaidSyncStatus }>(`/api/plaid/sync/${itemId}`, { method: 'POST' }),
+  syncAll: () => apiFetch<{
+    success: boolean;
+    synced: number;
+    reauthRequired: PlaidSyncIssue[];
+    failed: PlaidSyncIssue[];
+  }>('/api/plaid/sync/all', { method: 'POST' }),
   listItems: () => apiFetch<PlaidItem[]>('/api/plaid/items'),
   deleteItem: (itemId: string) =>
     apiFetch<void>(`/api/plaid/items/${itemId}`, { method: 'DELETE' }),

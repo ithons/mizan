@@ -11,8 +11,21 @@ import {
   testConnection,
   syncCoinbase,
 } from '../services/coinbase';
+import { takeSnapshot } from '../services/snapshot';
 
 const router = Router();
+
+function syncChangedFinancialData(syncResult: {
+  accountCount: number;
+  transactionCount: number;
+  staleAccountCount: number;
+}): boolean {
+  return (
+    syncResult.accountCount > 0 ||
+    syncResult.transactionCount > 0 ||
+    syncResult.staleAccountCount > 0
+  );
+}
 
 // POST /connect
 router.post(
@@ -61,6 +74,7 @@ router.post(
 
       // Sync accounts
       const syncResult = await syncCoinbase();
+      if (syncChangedFinancialData(syncResult)) takeSnapshot();
 
       res.json({
         data: {
@@ -78,6 +92,7 @@ router.post(
 router.post('/sync', async (_req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
     const syncResult = await syncCoinbase();
+    if (syncChangedFinancialData(syncResult)) takeSnapshot();
     res.json({ data: syncResult });
   } catch (err) {
     next(err);

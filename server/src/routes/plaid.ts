@@ -12,6 +12,7 @@ import {
   createUpdateToken,
 } from '../services/plaid';
 import { removePlaidItemToken } from '../services/credentials';
+import { takeSnapshot } from '../services/snapshot';
 
 const router = Router();
 
@@ -42,6 +43,7 @@ router.post(
       };
 
       const result = await exchangeToken(publicToken, metadata);
+      takeSnapshot();
       res.json({ data: result });
     } catch (err) {
       next(err);
@@ -53,6 +55,7 @@ router.post(
 router.post('/sync/all', async (_req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
     const summary = await syncAllItems();
+    if (summary.synced > 0) takeSnapshot();
     res.json({
       data: {
         success: summary.failed.length === 0 && summary.reauthRequired.length === 0,
@@ -68,6 +71,7 @@ router.post('/sync/all', async (_req: Request, res: Response, next: NextFunction
 router.post('/sync/:itemId', async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
     const status = await syncItem(req.params['itemId'] as string);
+    if (status === 'synced') takeSnapshot();
     res.json({ data: { success: status === 'synced', status } });
   } catch (err) {
     next(err);

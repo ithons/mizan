@@ -23,6 +23,7 @@ import {
 import { settingsApi, plaidApi, coinbaseApi, categoriesApi } from '../lib/api';
 import { formatRelativeTime } from '../lib/formatters';
 import { useAppStore } from '../store';
+import { invalidateFinancialData } from '../lib/queryInvalidation';
 import { Modal } from '../components/Modal';
 import { ConfirmRemoveModal } from '../components/ConfirmRemoveModal';
 import { PageLoader } from '../components/LoadingSpinner';
@@ -75,7 +76,14 @@ function PlaidSection() {
 
   const syncMutation = useMutation({
     mutationFn: (itemId: string) => plaidApi.syncItem(itemId),
-    onSuccess: () => addToast({ type: 'info', message: 'Sync started' }),
+    onSuccess: (result) => {
+      invalidateFinancialData(qc);
+      if (!result.success) {
+        addToast({ type: 'error', message: 'Institution needs reconnecting' });
+        return;
+      }
+      addToast({ type: 'success', message: 'Institution sync complete' });
+    },
     onError: (err: Error) => addToast({ type: 'error', message: err.message }),
   });
 
@@ -273,14 +281,19 @@ function CoinbaseSection() {
         : '';
       addToast({ type: 'success', message: `Coinbase connected${detail}` });
       qc.invalidateQueries({ queryKey: ['credential-status'] });
-      qc.invalidateQueries({ queryKey: ['accounts'] });
+      invalidateFinancialData(qc);
     },
     onError: (err: Error) => addToast({ type: 'error', message: err.message }),
   });
 
   const syncMutation = useMutation({
     mutationFn: coinbaseApi.sync,
-    onSuccess: () => addToast({ type: 'success', message: 'Coinbase sync started' }),
+    onSuccess: (result) => {
+      invalidateFinancialData(qc);
+      const changes = result.transactionCount + result.staleAccountCount;
+      const detail = changes > 0 ? `, ${changes} update(s)` : '';
+      addToast({ type: 'success', message: `Coinbase sync complete${detail}` });
+    },
     onError: (err: Error) => addToast({ type: 'error', message: err.message }),
   });
 

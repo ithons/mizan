@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { useAppStore } from '../store';
+import { invalidateFinancialData } from '../lib/queryInvalidation';
 import type { SyncEvent } from '@shared/types';
 
 export function useSyncStatus() {
@@ -35,15 +36,7 @@ export function useSyncStatus() {
             case 'sync_complete':
               setSyncStatus('idle');
               setLastSynced(data.completedAt ?? new Date().toISOString());
-              queryClient.invalidateQueries({ queryKey: ['accounts'] });
-              queryClient.invalidateQueries({ queryKey: ['plaid-items'] });
-              queryClient.invalidateQueries({ queryKey: ['transactions'] });
-              queryClient.invalidateQueries({ queryKey: ['networth'] });
-              queryClient.invalidateQueries({ queryKey: ['budgets'] });
-              queryClient.invalidateQueries({ queryKey: ['recurring'] });
-              queryClient.invalidateQueries({ queryKey: ['holdings'] });
-              queryClient.invalidateQueries({ queryKey: ['cashflow'] });
-              queryClient.invalidateQueries({ queryKey: ['reports'] });
+              invalidateFinancialData(queryClient);
               addToast({ type: 'success', message: 'Sync complete' });
               break;
             case 'sync_error':
