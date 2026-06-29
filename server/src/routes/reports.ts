@@ -270,9 +270,38 @@ router.get('/trends', (req: Request, res: Response, next: NextFunction): void =>
       ? categoryIds.split(',').map(id => id.trim()).filter(Boolean)
       : [];
 
+    const categoryRows = db.prepare(`
+      SELECT id, name, color, parent_id
+      FROM categories
+    `).all() as Array<{
+      id: string;
+      name: string;
+      color: string | null;
+      parent_id: string | null;
+    }>;
+    const categoriesById = new Map(categoryRows.map((category) => [category.id, category]));
+    const childrenByParent = new Map<string, string[]>();
+    for (const category of categoryRows) {
+      if (!category.parent_id) continue;
+      const existing = childrenByParent.get(category.parent_id) ?? [];
+      existing.push(category.id);
+      childrenByParent.set(category.parent_id, existing);
+    }
+
+    const collectDescendants = (categoryId: string): string[] => {
+      const children = childrenByParent.get(categoryId) ?? [];
+      return children.flatMap((childId) => [childId, ...collectDescendants(childId)]);
+    };
+
+    const selectedCategoryIds = new Set(parsedCategoryIds);
+    const expandedCategoryIds = new Set(
+      parsedCategoryIds.flatMap((categoryId) => [categoryId, ...collectDescendants(categoryId)])
+    );
+
     if (parsedCategoryIds.length > 0) {
-      conditions.push(`t.category_id IN (${parsedCategoryIds.map(() => '?').join(',')})`);
-      params.push(...parsedCategoryIds);
+      const expandedIds = Array.from(expandedCategoryIds);
+      conditions.push(`t.category_id IN (${expandedIds.map(() => '?').join(',')})`);
+      params.push(...expandedIds);
     }
 
     const where = `WHERE ${conditions.join(' AND ')}`;
@@ -299,6 +328,18 @@ router.get('/trends', (req: Request, res: Response, next: NextFunction): void =>
       ORDER BY month ASC, amount DESC
     `).all(...params) as TrendRow[];
 
+    const getSelectedSeriesCategoryId = (categoryId: string | null): string | null => {
+      if (!categoryId || selectedCategoryIds.size === 0) return categoryId;
+
+      let currentId: string | null = categoryId;
+      while (currentId) {
+        if (selectedCategoryIds.has(currentId)) return currentId;
+        currentId = categoriesById.get(currentId)?.parent_id ?? null;
+      }
+
+      return null;
+    };
+
     // Build sorted month list
     const monthSet = new Set<string>();
     for (const r of rows) monthSet.add(r.month);
@@ -307,16 +348,21 @@ router.get('/trends', (req: Request, res: Response, next: NextFunction): void =>
     // Build series keyed by category
     const seriesMap = new Map<string, { category_id: string; category_name: string; color: string | null; valuesByMonth: Map<string, number> }>();
     for (const r of rows) {
-      const key = r.category_id ?? 'uncategorized';
+      const seriesCategoryId = getSelectedSeriesCategoryId(r.category_id);
+      if (parsedCategoryIds.length > 0 && !seriesCategoryId) continue;
+
+      const key = seriesCategoryId ?? 'uncategorized';
+      const category = categoriesById.get(key);
       if (!seriesMap.has(key)) {
         seriesMap.set(key, {
           category_id: key,
-          category_name: r.category_name ?? 'Uncategorized',
-          color: r.color,
+          category_name: category?.name ?? r.category_name ?? 'Uncategorized',
+          color: category?.color ?? r.color,
           valuesByMonth: new Map(),
         });
       }
-      seriesMap.get(key)!.valuesByMonth.set(r.month, r.amount || 0);
+      const valuesByMonth = seriesMap.get(key)!.valuesByMonth;
+      valuesByMonth.set(r.month, (valuesByMonth.get(r.month) ?? 0) + (r.amount || 0));
     }
 
     const series = Array.from(seriesMap.values()).map((s) => ({
