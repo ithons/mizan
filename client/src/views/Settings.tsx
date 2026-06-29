@@ -71,8 +71,7 @@ function PlaidSection() {
   const deleteMutation = useMutation({
     mutationFn: (itemId: string) => plaidApi.deleteItem(itemId),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['plaid-items'] });
-      qc.invalidateQueries({ queryKey: ['accounts'] });
+      invalidateFinancialData(qc);
       setUnlinkTarget(null);
       addToast({ type: 'success', message: 'Institution removed' });
     },
@@ -307,7 +306,7 @@ function CoinbaseSection() {
     onSuccess: () => {
       addToast({ type: 'info', message: 'Coinbase disconnected' });
       qc.invalidateQueries({ queryKey: ['credential-status'] });
-      qc.invalidateQueries({ queryKey: ['accounts'] });
+      invalidateFinancialData(qc);
       setShowDisconnectConfirm(false);
     },
     onError: (err: Error) => addToast({ type: 'error', message: err.message }),
@@ -760,7 +759,7 @@ function DataSection() {
               try {
                 const items = await plaidApi.listItems();
                 await Promise.all(items.map((i) => plaidApi.deleteItem(i.id)));
-                qc.invalidateQueries({ queryKey: ['accounts'] });
+                invalidateFinancialData(qc);
                 addToast({ type: 'success', message: 'All Plaid items disconnected' });
               } catch (err: unknown) {
                 addToast({ type: 'error', message: err instanceof Error ? err.message : 'Disconnect failed' });
