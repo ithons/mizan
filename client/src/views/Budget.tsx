@@ -7,6 +7,7 @@ import { formatCurrency, formatDate, formatMonth, formatPercent } from '../lib/f
 import { FREQUENCY_LABELS } from '../lib/constants';
 import { useAppStore } from '../store';
 import { invalidateFinancialData } from '../lib/queryInvalidation';
+import { parseDecimalInput } from '../lib/numberInput';
 import { Modal } from '../components/Modal';
 import { CategoryBadge } from '../components/CategoryBadge';
 import { PageLoader } from '../components/LoadingSpinner';
@@ -30,6 +31,12 @@ function BudgetRow({
 
   const [editing, setEditing] = useState(false);
   const [editVal, setEditVal] = useState(String(budget.amount));
+  const commitEdit = () => {
+    const amount = parseDecimalInput(editVal);
+    if (amount === null || amount <= 0) return;
+    onEdit(budget.category_id, amount);
+    setEditing(false);
+  };
 
   return (
     <div className="py-3 border-b border-border last:border-0">
@@ -58,11 +65,11 @@ function BudgetRow({
                 value={editVal}
                 onChange={(e) => setEditVal(e.target.value)}
                 onKeyDown={(e) => {
-                  if (e.key === 'Enter') { onEdit(budget.category_id, parseFloat(editVal) || 0); setEditing(false); }
+                  if (e.key === 'Enter') commitEdit();
                   if (e.key === 'Escape') setEditing(false);
                 }}
               />
-              <button onClick={() => { onEdit(budget.category_id, parseFloat(editVal) || 0); setEditing(false); }}>
+              <button onClick={commitEdit}>
                 <Check size={12} className="text-[#4ecba3]" />
               </button>
               <button onClick={() => setEditing(false)}>
@@ -134,11 +141,17 @@ function AddBudgetModal({
   }, [categories, open]);
 
   const mutation = useMutation({
-    mutationFn: () =>
-      budgetsApi.upsert(form.category_id, {
-        amount: parseFloat(form.amount) || 0,
+    mutationFn: () => {
+      const amount = parseDecimalInput(form.amount);
+      if (amount === null || amount <= 0) {
+        throw new Error('Enter a valid budget amount');
+      }
+
+      return budgetsApi.upsert(form.category_id, {
+        amount,
         rollover: form.rollover,
-      }),
+      });
+    },
     onSuccess: () => {
       invalidateFinancialData(qc);
       addToast({ type: 'success', message: 'Budget saved' });

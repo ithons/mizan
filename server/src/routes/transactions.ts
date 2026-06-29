@@ -38,6 +38,13 @@ function upsertMerchantRule(
   ).run(uuidv4(), pattern, categoryId, createdAt);
 }
 
+function parseQueryNumber(value: string | string[] | undefined): number | null {
+  if (value === undefined) return null;
+  const raw = Array.isArray(value) ? value[0] : value;
+  const parsed = Number(raw);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
 // GET / - list transactions with filters
 router.get('/', (req: Request, res: Response, next: NextFunction): void => {
   try {
@@ -86,13 +93,23 @@ router.get('/', (req: Request, res: Response, next: NextFunction): void => {
       const like = `%${query.search}%`;
       params.push(like, like, like);
     }
-    if (query.minAmount) {
+    if (query.minAmount !== undefined) {
+      const minAmount = parseQueryNumber(query.minAmount);
+      if (minAmount === null) {
+        res.status(400).json({ error: 'Invalid minAmount filter' });
+        return;
+      }
       conditions.push('t.amount >= ?');
-      params.push(parseFloat(query.minAmount as string));
+      params.push(minAmount);
     }
-    if (query.maxAmount) {
+    if (query.maxAmount !== undefined) {
+      const maxAmount = parseQueryNumber(query.maxAmount);
+      if (maxAmount === null) {
+        res.status(400).json({ error: 'Invalid maxAmount filter' });
+        return;
+      }
       conditions.push('t.amount <= ?');
-      params.push(parseFloat(query.maxAmount as string));
+      params.push(maxAmount);
     }
     if (query.pending !== undefined) {
       conditions.push('t.pending = ?');

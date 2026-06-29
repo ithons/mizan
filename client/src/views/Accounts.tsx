@@ -31,6 +31,7 @@ import { SkeletonList } from '../components/SkeletonLoader';
 import { ConfirmRemoveModal } from '../components/ConfirmRemoveModal';
 import { loadPlaidLink } from '../lib/plaidLink';
 import { invalidateFinancialData } from '../lib/queryInvalidation';
+import { parseDecimalInput } from '../lib/numberInput';
 import type { Account, PlaidItem, Holding } from '@shared/types';
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -664,14 +665,20 @@ function EditManualAccountModal({
   }, [account]);
 
   const mutation = useMutation({
-    mutationFn: () =>
-      accountsApi.update(account!.id, {
+    mutationFn: () => {
+      const currentBalance = parseDecimalInput(form.current_balance);
+      if (currentBalance === null) {
+        throw new Error('Enter a valid current balance');
+      }
+
+      return accountsApi.update(account!.id, {
         account_name: form.account_name,
         institution_name: form.institution_name,
         type: form.type as import('@shared/types').AccountType,
-        current_balance: parseFloat(form.current_balance) || 0,
+        current_balance: currentBalance,
         color: form.color,
-      }),
+      });
+    },
     onSuccess: () => {
       invalidateFinancialData(qc);
       addToast({ type: 'success', message: 'Account updated' });
@@ -776,11 +783,17 @@ function AddManualAccountModal({ open, onClose }: { open: boolean; onClose: () =
   });
 
   const mutation = useMutation({
-    mutationFn: () =>
-      accountsApi.createManual({
+    mutationFn: () => {
+      const currentBalance = parseDecimalInput(form.current_balance);
+      if (currentBalance === null) {
+        throw new Error('Enter a valid current balance');
+      }
+
+      return accountsApi.createManual({
         ...form,
-        current_balance: parseFloat(form.current_balance) || 0,
-      }),
+        current_balance: currentBalance,
+      });
+    },
     onSuccess: () => {
       invalidateFinancialData(qc);
       addToast({ type: 'success', message: 'Account created' });

@@ -22,6 +22,7 @@ import { CategoryBadge } from '../components/CategoryBadge';
 import { InlineEdit } from '../components/InlineEdit';
 import { SkeletonList } from '../components/SkeletonLoader';
 import { invalidateFinancialData } from '../lib/queryInvalidation';
+import { parseDecimalInput } from '../lib/numberInput';
 import type { TransactionFilters, Category } from '@shared/types';
 
 const PAGE_SIZE = 50;
@@ -166,12 +167,18 @@ function AddTransactionModal({
   });
 
   const mutation = useMutation({
-    mutationFn: () =>
-      transactionsApi.createManual({
+    mutationFn: () => {
+      const amount = parseDecimalInput(form.amount);
+      if (amount === null) {
+        throw new Error('Enter a valid amount');
+      }
+
+      return transactionsApi.createManual({
         ...form,
-        amount: parseFloat(form.amount) || 0,
+        amount,
         original_name: form.merchant_name,
-      }),
+      });
+    },
     onSuccess: () => {
       invalidateFinancialData(qc);
       addToast({ type: 'success', message: 'Transaction added' });

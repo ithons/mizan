@@ -140,12 +140,14 @@ export function detectRecurring(): void {
 
     // Upsert recurring_pattern matching on merchant_name
     const existing = db.prepare(
-      'SELECT id, is_confirmed FROM recurring_patterns WHERE merchant_name = ?'
-    ).get(normalizedName) as { id: string; is_confirmed: number } | undefined;
+      'SELECT id, is_active, is_confirmed FROM recurring_patterns WHERE merchant_name = ?'
+    ).get(normalizedName) as { id: string; is_active: number; is_confirmed: number } | undefined;
 
     let patternId: string;
 
     if (existing) {
+      if (!existing.is_active && !existing.is_confirmed) continue;
+
       patternId = existing.id;
       db.prepare(`
         UPDATE recurring_patterns

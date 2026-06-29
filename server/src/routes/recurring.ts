@@ -92,7 +92,7 @@ router.post('/:id/dismiss', (req: Request, res: Response, next: NextFunction): v
     const now = new Date().toISOString();
     const dismissPattern = db.transaction(() => {
       db.prepare(
-        'UPDATE recurring_patterns SET is_active = 0, updated_at = ? WHERE id = ?'
+        'UPDATE recurring_patterns SET is_active = 0, is_confirmed = 0, updated_at = ? WHERE id = ?'
       ).run(now, id);
 
       db.prepare(
