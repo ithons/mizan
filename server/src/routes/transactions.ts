@@ -6,6 +6,7 @@ import { validate } from '../middleware/validate';
 import { adjustManualAccountBalance } from '../services/manualAccountBalance';
 import { takeSnapshot } from '../services/snapshot';
 import { detectRecurring } from '../services/recurring';
+import { upsertMerchantRule } from '../services/rules';
 import {
   CreateManualTransactionSchema,
   UpdateTransactionSchema,
@@ -13,30 +14,6 @@ import {
 } from '../../../shared/schemas';
 
 const router = Router();
-
-function upsertMerchantRule(
-  db: Database.Database,
-  pattern: string | null | undefined,
-  categoryId: string,
-  createdAt: string
-): void {
-  if (!pattern) return;
-
-  const existingRule = db.prepare(
-    'SELECT id FROM merchant_rules WHERE pattern = ?'
-  ).get(pattern) as { id: string } | undefined;
-
-  if (existingRule) {
-    db.prepare(
-      'UPDATE merchant_rules SET category_id = ? WHERE id = ?'
-    ).run(categoryId, existingRule.id);
-    return;
-  }
-
-  db.prepare(
-    'INSERT INTO merchant_rules (id, pattern, category_id, created_at) VALUES (?, ?, ?, ?)'
-  ).run(uuidv4(), pattern, categoryId, createdAt);
-}
 
 function accountExists(db: Database.Database, accountId: string): boolean {
   return Boolean(db.prepare('SELECT id FROM accounts WHERE id = ?').get(accountId));

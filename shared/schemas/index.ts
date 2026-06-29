@@ -91,6 +91,21 @@ export const UpdateGoalSchema = CreateGoalSchema.partial().extend({
   is_archived: z.boolean().optional(),
 });
 
+export const CreateMerchantRuleSchema = z.object({
+  pattern: z.string().min(1),
+  category_id: z.string().min(1),
+  apply_existing: z.boolean().default(true),
+});
+
+export const UpdateMerchantRuleSchema = z.object({
+  pattern: z.string().min(1).optional(),
+  category_id: z.string().min(1).optional(),
+});
+
+export const ApplyMerchantRulesSchema = z.object({
+  only_uncategorized: z.boolean().default(true),
+});
+
 export const PlaidCredentialsSchema = z.object({
   clientId: z.string().min(1),
   secret: z.string().min(1),

@@ -12,6 +12,7 @@ import {
   savePlaidItemToken,
   removePlaidItemToken,
 } from './credentials';
+import { applyMerchantRulesToTransaction } from './rules';
 import type { Account, AccountType } from '../../../shared/types';
 
 let _client: PlaidApi | null = null;
@@ -308,7 +309,7 @@ export async function syncItem(dbItemId: string): Promise<PlaidSyncItemStatus> {
           now,
           now
         );
-        autoCategorize(txnId, txn.merchant_name || txn.name);
+        applyMerchantRulesToTransaction(db, txnId, txn.merchant_name || txn.name);
       }
     }
 
@@ -617,23 +618,4 @@ export async function createUpdateToken(dbItemId: string, redirectUri: string = 
   });
 
   return response.data.link_token;
-}
-
-export function autoCategorize(transactionId: string, merchantName: string): void {
-  const db = getDb();
-
-  const rules = db.prepare(
-    'SELECT pattern, category_id FROM merchant_rules ORDER BY created_at DESC'
-  ).all() as Array<{ pattern: string; category_id: string }>;
-
-  const lowerMerchant = merchantName.toLowerCase();
-
-  for (const rule of rules) {
-    if (lowerMerchant.includes(rule.pattern.toLowerCase())) {
-      db.prepare(
-        'UPDATE transactions SET category_id = ? WHERE id = ?'
-      ).run(rule.category_id, transactionId);
-      return;
-    }
-  }
 }

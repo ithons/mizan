@@ -156,6 +156,10 @@ export interface MerchantRule {
   pattern: string;
   category_id: string;
   created_at: string;
+  category_name?: string | null;
+  category_color?: string | null;
+  category_icon?: string | null;
+  match_count?: number;
 }
 
 export type GoalType = 'savings' | 'debt';

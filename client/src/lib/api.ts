@@ -4,6 +4,7 @@ import type {
   TransactionFilters,
   Category,
   Goal,
+  MerchantRule,
   Budget,
   RecurringPattern,
   NetWorthSnapshot,
@@ -191,6 +192,34 @@ export const categoriesApi = {
       method: 'POST',
       body: JSON.stringify({ targetId }),
     }),
+};
+
+// ─── Rules ──────────────────────────────────────────────────────────────────
+
+export const rulesApi = {
+  list: () => apiFetch<MerchantRule[]>('/api/rules'),
+  create: (body: { pattern: string; category_id: string; apply_existing?: boolean }) =>
+    apiFetch<{ rule: MerchantRule | null; applied: number }>('/api/rules', {
+      method: 'POST',
+      body: JSON.stringify({
+        ...body,
+        apply_existing: body.apply_existing ?? true,
+      }),
+    }),
+  update: (id: string, body: Partial<MerchantRule>) =>
+    apiFetch<MerchantRule>(`/api/rules/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(body),
+    }),
+  apply: (body: { only_uncategorized?: boolean } = {}) =>
+    apiFetch<{ updated: number }>('/api/rules/apply', {
+      method: 'POST',
+      body: JSON.stringify({
+        only_uncategorized: body.only_uncategorized ?? true,
+      }),
+    }),
+  delete: (id: string) =>
+    apiFetch<void>(`/api/rules/${id}`, { method: 'DELETE' }),
 };
 
 // ─── Budgets ─────────────────────────────────────────────────────────────────

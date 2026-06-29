@@ -8,6 +8,7 @@ const FINANCIAL_QUERY_KEYS = [
   'budgets',
   'recurring',
   'goals',
+  'rules',
   'holdings',
   'cashflow',
   'reports',
