@@ -1,11 +1,14 @@
-import { format, subMonths, startOfMonth } from 'date-fns';
+import { addDays, addMonths, format, parseISO, startOfMonth, subMonths } from 'date-fns';
+import type Database from 'better-sqlite3';
 import { getDb } from '../db/index';
 
-export const ADVISOR_SYSTEM_PROMPT = `You are a sharp, honest personal financial advisor with access to the user's complete financial picture. Their real balances, transactions, and portfolio are provided below.
+export const ADVISOR_SYSTEM_PROMPT = `You are a sharp, honest personal financial advisor with access to the user's complete financial picture. Their real balances, transactions, portfolio, goals, recurring bills, and cash-flow forecast are provided below.
 
 Give specific, actionable advice using their actual numbers. Be direct - if something looks concerning (overspending, under-diversification, thin emergency fund, too much in a single position), say so clearly. If something looks healthy, say that too.
 
 For investments: discuss asset allocation, concentration risk, tax-advantaged account usage, and whether holdings match a reasonable time horizon. Ask if you need to know their tax bracket or risk tolerance before giving tax/risk advice.
+
+For cash flow: use the recurring forecast and goal progress when available. If data is stale, missing, or only estimated from detected patterns, say that plainly.
 
 Keep responses concise unless depth is clearly warranted. Use dollar amounts and percentages from their data. Never fabricate numbers.`;
 
@@ -21,6 +24,159 @@ function fmt(n: number | null | undefined, prefix = '$'): string {
 function pct(n: number | null | undefined): string {
   if (n == null) return 'N/A';
   return `${n >= 0 ? '+' : ''}${n.toFixed(1)}%`;
+}
+
+type Frequency = 'weekly' | 'biweekly' | 'monthly' | 'quarterly' | 'annual';
+
+interface GoalContextRow {
+  name: string;
+  type: 'savings' | 'debt';
+  target_amount: number;
+  current_amount: number;
+  starting_amount: number | null;
+  target_date: string | null;
+  account_name: string | null;
+  institution_name: string | null;
+  account_balance: number | null;
+}
+
+interface RecurringContextRow {
+  id: string;
+  merchant_name: string;
+  category_name: string | null;
+  frequency: Frequency;
+  next_expected: string;
+  is_confirmed: number;
+  average_signed_amount: number;
+}
+
+interface ForecastOccurrence {
+  merchant_name: string;
+  category_name: string | null;
+  frequency: Frequency;
+  expected_date: string;
+  amount: number;
+  is_confirmed: boolean;
+}
+
+interface RecurringForecastContext {
+  income: number;
+  bills: number;
+  net: number;
+  occurrences: ForecastOccurrence[];
+}
+
+function nextOccurrenceDate(date: Date, frequency: Frequency): Date {
+  switch (frequency) {
+    case 'weekly':
+      return addDays(date, 7);
+    case 'biweekly':
+      return addDays(date, 14);
+    case 'monthly':
+      return addMonths(date, 1);
+    case 'quarterly':
+      return addMonths(date, 3);
+    case 'annual':
+      return addMonths(date, 12);
+  }
+}
+
+function buildRecurringForecastContext(
+  db: Database.Database,
+  days: number
+): RecurringForecastContext {
+  const today = format(new Date(), 'yyyy-MM-dd');
+  const endDate = format(addDays(new Date(), days), 'yyyy-MM-dd');
+  const patterns = db.prepare(`
+    SELECT
+      rp.id,
+      rp.merchant_name,
+      rp.frequency,
+      rp.next_expected,
+      rp.is_confirmed,
+      c.name AS category_name,
+      COALESCE(
+        (
+          SELECT AVG(t.amount)
+          FROM transactions t
+          WHERE t.recurring_id = rp.id
+        ),
+        CASE WHEN COALESCE(c.is_income, 0) = 1 THEN rp.average_amount ELSE -rp.average_amount END
+      ) AS average_signed_amount
+    FROM recurring_patterns rp
+    LEFT JOIN categories c ON c.id = rp.category_id
+    WHERE rp.is_active = 1
+      AND rp.next_expected <= ?
+      AND (rp.is_confirmed = 1 OR rp.transaction_count >= 3)
+    ORDER BY rp.next_expected ASC
+  `).all(endDate) as RecurringContextRow[];
+
+  const occurrences: ForecastOccurrence[] = [];
+
+  for (const pattern of patterns) {
+    let expected = parseISO(pattern.next_expected);
+    let guard = 0;
+
+    while (format(expected, 'yyyy-MM-dd') < today && guard < 500) {
+      expected = nextOccurrenceDate(expected, pattern.frequency);
+      guard++;
+    }
+
+    while (format(expected, 'yyyy-MM-dd') <= endDate && guard < 500) {
+      const expectedDate = format(expected, 'yyyy-MM-dd');
+      occurrences.push({
+        merchant_name: pattern.merchant_name,
+        category_name: pattern.category_name,
+        frequency: pattern.frequency,
+        expected_date: expectedDate,
+        amount: pattern.average_signed_amount,
+        is_confirmed: Boolean(pattern.is_confirmed),
+      });
+
+      expected = nextOccurrenceDate(expected, pattern.frequency);
+      guard++;
+    }
+  }
+
+  occurrences.sort((a, b) => a.expected_date.localeCompare(b.expected_date));
+
+  const income = occurrences.reduce((sum, occurrence) =>
+    occurrence.amount > 0 ? sum + occurrence.amount : sum, 0);
+  const bills = occurrences.reduce((sum, occurrence) =>
+    occurrence.amount < 0 ? sum + Math.abs(occurrence.amount) : sum, 0);
+
+  return {
+    income,
+    bills,
+    net: income - bills,
+    occurrences,
+  };
+}
+
+function goalProgress(row: GoalContextRow): {
+  progress: number;
+  remaining: number;
+  percent: number;
+} {
+  let progress = row.current_amount;
+
+  if (row.account_balance !== null) {
+    if (row.type === 'savings') {
+      progress = Math.max(row.account_balance, 0);
+    } else {
+      const startingAmount = row.starting_amount ?? row.target_amount;
+      progress = Math.max(startingAmount - row.account_balance, 0);
+    }
+  }
+
+  const cappedProgress = Math.min(progress, row.target_amount);
+  return {
+    progress: cappedProgress,
+    remaining: Math.max(row.target_amount - cappedProgress, 0),
+    percent: row.target_amount > 0
+      ? Math.min((cappedProgress / row.target_amount) * 100, 100)
+      : 0,
+  };
 }
 
 export function buildFinancialContext(): string {
@@ -112,6 +268,26 @@ export function buildFinancialContext(): string {
   lines.push(`  Expenses: ${fmt(avgExpenses)}/mo`);
   lines.push(`  Net:      ${fmt(avgNet)}/mo`);
 
+  const forecastDays = 60;
+  const forecast = buildRecurringForecastContext(db, forecastDays);
+  if (forecast.occurrences.length > 0) {
+    lines.push('');
+    lines.push(`### Forward Cash Flow - next ${forecastDays} days`);
+    lines.push(`  Scheduled income: ${fmt(forecast.income)}`);
+    lines.push(`  Scheduled bills:  ${fmt(forecast.bills)}`);
+    lines.push(`  Scheduled net:    ${fmt(forecast.net)}`);
+    lines.push(`  Liquid after scheduled net: ${fmt(liquid + forecast.net)}`);
+    lines.push('  Next scheduled items:');
+    for (const occurrence of forecast.occurrences.slice(0, 10)) {
+      const sign = occurrence.amount >= 0 ? '+' : '-';
+      const status = occurrence.is_confirmed ? 'confirmed' : 'detected';
+      const category = occurrence.category_name ?? 'Uncategorized';
+      lines.push(
+        `    ${occurrence.expected_date}: ${occurrence.merchant_name} ${sign}${fmt(Math.abs(occurrence.amount))} (${category}, ${occurrence.frequency}, ${status})`
+      );
+    }
+  }
+
   // ── Top Spending Categories (this month) ────────────────────────────────
   const thisMonthSpending = db.prepare(`
     SELECT
@@ -149,6 +325,76 @@ export function buildFinancialContext(): string {
       const budgetStr = budget ? ` | budget: ${fmt(row.total)}/${fmt(budget)} (${Math.round((row.total / budget) * 100)}%)` : '';
       lines.push(`  ${row.category}: ${fmt(row.total)}${budgetStr}`);
     }
+  }
+
+  // Goals
+  const goals = db.prepare(`
+    SELECT
+      g.name,
+      g.type,
+      g.target_amount,
+      g.current_amount,
+      g.starting_amount,
+      g.target_date,
+      a.account_name,
+      a.institution_name,
+      a.current_balance AS account_balance
+    FROM goals g
+    LEFT JOIN accounts a ON a.id = g.account_id
+    WHERE g.is_archived = 0
+    ORDER BY g.target_date IS NULL ASC, g.target_date ASC, g.created_at ASC
+    LIMIT 8
+  `).all() as GoalContextRow[];
+
+  if (goals.length > 0) {
+    lines.push('');
+    lines.push('### Goals');
+    for (const goal of goals) {
+      const progress = goalProgress(goal);
+      const verb = goal.type === 'debt' ? 'paid down' : 'saved';
+      const linked = goal.account_name
+        ? ` | linked to ${goal.account_name}${goal.institution_name ? ` at ${goal.institution_name}` : ''}`
+        : '';
+      const targetDate = goal.target_date ? ` | target: ${goal.target_date}` : '';
+      lines.push(
+        `  ${goal.name}: ${fmt(progress.progress)} ${verb} of ${fmt(goal.target_amount)} (${Math.round(progress.percent)}%), ${fmt(progress.remaining)} remaining${targetDate}${linked}`
+      );
+    }
+  }
+
+  const reviewQueue = db.prepare(`
+    SELECT
+      (SELECT COUNT(*) FROM transactions WHERE pending = 0) AS posted_transactions,
+      (SELECT COUNT(*) FROM transactions WHERE pending = 0 AND category_id IS NULL) AS uncategorized_transactions,
+      (SELECT COUNT(*) FROM merchant_rules) AS merchant_rules,
+      (
+        SELECT COUNT(*)
+        FROM recurring_patterns
+        WHERE is_active = 1 AND is_confirmed = 0 AND transaction_count >= 3
+      ) AS detected_recurring
+  `).get() as {
+    posted_transactions: number;
+    uncategorized_transactions: number;
+    merchant_rules: number;
+    detected_recurring: number;
+  };
+
+  if (
+    reviewQueue.posted_transactions > 0 ||
+    reviewQueue.merchant_rules > 0 ||
+    reviewQueue.detected_recurring > 0
+  ) {
+    const uncategorizedPct = reviewQueue.posted_transactions > 0
+      ? (reviewQueue.uncategorized_transactions / reviewQueue.posted_transactions) * 100
+      : 0;
+    lines.push('');
+    lines.push('### Review Queue');
+    lines.push(`  Posted transactions: ${reviewQueue.posted_transactions}`);
+    lines.push(
+      `  Uncategorized: ${reviewQueue.uncategorized_transactions} (${uncategorizedPct.toFixed(1)}%)`
+    );
+    lines.push(`  Categorization rules: ${reviewQueue.merchant_rules}`);
+    lines.push(`  Detected recurring patterns needing confirmation: ${reviewQueue.detected_recurring}`);
   }
 
   // ── Investment Portfolio ─────────────────────────────────────────────────
@@ -210,22 +456,6 @@ export function buildFinancialContext(): string {
     lines.push('### Net Worth Trend (last 6 months)');
     for (const snap of nwHistory) {
       lines.push(`  ${snap.date}: ${fmt(snap.net_worth)}`);
-    }
-  }
-
-  // ── Upcoming Bills ───────────────────────────────────────────────────────
-  const upcoming = db.prepare(`
-    SELECT merchant_name, average_amount, next_expected, frequency
-    FROM recurring_patterns
-    WHERE is_active = 1 AND next_expected >= date('now') AND next_expected <= date('now', '+14 days')
-    ORDER BY next_expected ASC
-  `).all() as Array<{ merchant_name: string; average_amount: number; next_expected: string; frequency: string }>;
-
-  if (upcoming.length > 0) {
-    lines.push('');
-    lines.push('### Upcoming Bills (next 14 days)');
-    for (const bill of upcoming) {
-      lines.push(`  ${bill.next_expected}: ${bill.merchant_name} - ${fmt(bill.average_amount)} (${bill.frequency})`);
     }
   }
 
