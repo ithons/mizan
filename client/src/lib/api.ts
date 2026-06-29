@@ -292,11 +292,20 @@ export const plaidApi = {
 
 export const coinbaseApi = {
   connect: (body: { keyName: string; privateKey: string }) =>
-    apiFetch<{ accountCount: number; displayName: string }>('/api/coinbase/connect', {
+    apiFetch<{
+      accountCount: number;
+      transactionCount: number;
+      staleAccountCount: number;
+      displayName: string;
+    }>('/api/coinbase/connect', {
       method: 'POST',
       body: JSON.stringify(body),
     }),
-  sync: () => apiFetch<void>('/api/coinbase/sync', { method: 'POST' }),
+  sync: () => apiFetch<{
+    accountCount: number;
+    transactionCount: number;
+    staleAccountCount: number;
+  }>('/api/coinbase/sync', { method: 'POST' }),
   disconnect: () => apiFetch<void>('/api/coinbase/disconnect', { method: 'DELETE' }),
 };
 

@@ -54,11 +54,7 @@ export async function runFullSync(): Promise<void> {
     const creds = getCredentials();
     if (creds.coinbase) {
       emitSyncEvent({ type: 'sync_progress', message: 'Syncing Coinbase...', progress: 50 });
-      try {
-        await syncCoinbase();
-      } catch (err) {
-        console.error('[syncManager] Coinbase sync failed:', (err as Error).message);
-      }
+      await syncCoinbase();
     }
 
     // Detect recurring

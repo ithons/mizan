@@ -4,7 +4,46 @@ import { v4 as uuidv4 } from 'uuid';
 import { getCredentials } from './credentials';
 import { getDb } from '../db/index';
 
-const BROKERAGE_BASE = 'https://api.coinbase.com/api/v3/brokerage';
+export interface CoinbaseSyncResult {
+  accountCount: number;
+  transactionCount: number;
+  staleAccountCount: number;
+}
+
+interface CoinbaseConnectionRow {
+  id: string;
+}
+
+interface CoinbaseAccountRow {
+  id: string;
+  coinbase_account_id: string;
+}
+
+function parseCoinbaseNumber(value: string | undefined, label: string): number {
+  const parsed = Number.parseFloat(value ?? '0');
+  if (!Number.isFinite(parsed)) {
+    throw new Error(`Invalid Coinbase ${label}: ${value ?? 'missing'}`);
+  }
+  return parsed;
+}
+
+async function getUsdSpotPrice(currency: string): Promise<number> {
+  if (currency === 'USD') return 1;
+
+  try {
+    const spotResponse = await axios.get<{ data: { amount: string } }>(
+      `https://api.coinbase.com/v2/prices/${currency}-USD/spot`
+    );
+    const spotPrice = parseCoinbaseNumber(spotResponse.data.data.amount, `${currency}-USD spot price`);
+    if (spotPrice <= 0) {
+      throw new Error(`Coinbase returned non-positive ${currency}-USD spot price`);
+    }
+    return spotPrice;
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'unknown price error';
+    throw new Error(`Unable to price ${currency} in USD: ${message}`);
+  }
+}
 
 function buildJwt(method: string, path: string): string {
   const creds = getCredentials();
@@ -98,7 +137,7 @@ export async function testConnection(): Promise<{ userId: string; displayName: s
   };
 }
 
-export async function syncCoinbase(): Promise<number> {
+export async function syncCoinbase(): Promise<CoinbaseSyncResult> {
   const db = getDb();
   const now = new Date().toISOString();
 
@@ -123,6 +162,10 @@ export async function syncCoinbase(): Promise<number> {
   let cursor: string | undefined;
   let hasNext = true;
   let syncedCount = 0;
+  const seenAccountIds = new Set<string>();
+  const activeConnection = db.prepare(
+    "SELECT id FROM coinbase_connections WHERE status = 'active'"
+  ).get() as CoinbaseConnectionRow | undefined;
 
   while (hasNext) {
     const params = new URLSearchParams({ limit: '250' });
@@ -134,28 +177,21 @@ export async function syncCoinbase(): Promise<number> {
     );
 
     for (const account of data.accounts || []) {
-      const balanceValue = parseFloat(account.available_balance?.value || '0');
-      if (balanceValue <= 0) continue;
+      seenAccountIds.add(account.uuid);
 
       const currency = account.available_balance?.currency || account.currency;
-      let spotPrice = 1;
-
-      if (currency !== 'USD') {
-        try {
-          const spotResponse = await axios.get<{ data: { amount: string } }>(
-            `https://api.coinbase.com/v2/prices/${currency}-USD/spot`
-          );
-          spotPrice = parseFloat(spotResponse.data.data.amount);
-        } catch {
-          spotPrice = 0;
-        }
-      }
-
-      const currentBalance = balanceValue * spotPrice;
-
+      const balanceValue = parseCoinbaseNumber(
+        account.available_balance?.value,
+        `${currency} available balance`
+      );
       const existing = db.prepare(
         'SELECT id FROM accounts WHERE coinbase_account_id = ?'
       ).get(account.uuid) as { id: string } | undefined;
+
+      if (balanceValue <= 0 && !existing) continue;
+
+      const spotPrice = balanceValue === 0 ? 0 : await getUsdSpotPrice(currency);
+      const currentBalance = balanceValue * spotPrice;
 
       if (existing) {
         db.prepare(`
@@ -191,15 +227,41 @@ export async function syncCoinbase(): Promise<number> {
     if (!hasNext) break;
   }
 
-  // Update coinbase_connections.last_synced_at
+  const staleAccounts = db.prepare(`
+    SELECT id, coinbase_account_id
+    FROM accounts
+    WHERE connection_type = 'coinbase'
+      AND coinbase_account_id IS NOT NULL
+  `).all() as CoinbaseAccountRow[];
+
+  let staleAccountCount = 0;
+  for (const account of staleAccounts) {
+    if (seenAccountIds.has(account.coinbase_account_id)) continue;
+
+    db.prepare(`
+      UPDATE accounts
+      SET current_balance = 0, native_balance = 0, updated_at = ?
+      WHERE id = ?
+    `).run(now, account.id);
+    staleAccountCount++;
+  }
+
+  const transactionCount = activeConnection
+    ? await syncTradeHistory(activeConnection.id)
+    : 0;
+
   db.prepare(
     "UPDATE coinbase_connections SET last_synced_at = ? WHERE status = 'active'"
   ).run(now);
 
-  return syncedCount;
+  return {
+    accountCount: syncedCount,
+    transactionCount,
+    staleAccountCount,
+  };
 }
 
-export async function syncTradeHistory(connectionId: string): Promise<void> {
+export async function syncTradeHistory(connectionId: string): Promise<number> {
   const db = getDb();
   const now = new Date().toISOString();
 
@@ -223,13 +285,16 @@ export async function syncTradeHistory(connectionId: string): Promise<void> {
 
   let cursor: string | undefined;
   let hasNext = true;
+  let insertedCount = 0;
 
-  // Look up coinbase_connection to get the user's account id
   const connection = db.prepare(
     'SELECT id FROM coinbase_connections WHERE id = ?'
   ).get(connectionId) as { id: string } | undefined;
 
-  if (!connection) return;
+  if (!connection) {
+    console.warn('[coinbase] Trade history skipped: connection not found');
+    return 0;
+  }
 
   while (hasNext) {
     const params = new URLSearchParams({
@@ -250,7 +315,6 @@ export async function syncTradeHistory(connectionId: string): Promise<void> {
 
       if (existing) continue;
 
-      // Find matching account by product currency
       const currency = order.product_id.split('-')[0];
       const acct = db.prepare(
         'SELECT id FROM accounts WHERE coinbase_account_id IS NOT NULL AND native_currency = ?'
@@ -259,7 +323,14 @@ export async function syncTradeHistory(connectionId: string): Promise<void> {
       if (!acct) continue;
 
       const side = order.side.toUpperCase();
-      const amount = parseFloat(order.total_value_after_fees || '0');
+      if (side !== 'BUY' && side !== 'SELL') {
+        throw new Error(`Unsupported Coinbase order side: ${order.side}`);
+      }
+
+      const amount = parseCoinbaseNumber(
+        order.total_value_after_fees,
+        `order ${order.order_id} total value`
+      );
       const signedAmount = side === 'BUY' ? -amount : amount;
 
       const date = order.created_time
@@ -284,10 +355,13 @@ export async function syncTradeHistory(connectionId: string): Promise<void> {
         now,
         now
       );
+      insertedCount++;
     }
 
     hasNext = data.has_next || false;
     cursor = data.cursor;
     if (!hasNext) break;
   }
+
+  return insertedCount;
 }

@@ -60,11 +60,11 @@ router.post(
       }
 
       // Sync accounts
-      const accountCount = await syncCoinbase();
+      const syncResult = await syncCoinbase();
 
       res.json({
         data: {
-          accountCount,
+          ...syncResult,
           displayName: connectionInfo.displayName,
         },
       });
@@ -77,8 +77,8 @@ router.post(
 // POST /sync
 router.post('/sync', async (_req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
-    const count = await syncCoinbase();
-    res.json({ data: { accountCount: count } });
+    const syncResult = await syncCoinbase();
+    res.json({ data: syncResult });
   } catch (err) {
     next(err);
   }
