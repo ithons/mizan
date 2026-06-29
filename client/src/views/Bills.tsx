@@ -7,9 +7,10 @@ import {
   CheckCircle2,
   Clock3,
   RefreshCw,
+  Wallet,
 } from 'lucide-react';
-import type { RecurringForecastOccurrence } from '@shared/types';
-import { recurringApi } from '../lib/api';
+import type { Account, RecurringForecastOccurrence } from '@shared/types';
+import { accountsApi, recurringApi } from '../lib/api';
 import { formatCurrency, formatDate } from '../lib/formatters';
 import { PageLoader } from '../components/LoadingSpinner';
 import { EmptyState } from '../components/EmptyState';
@@ -21,6 +22,40 @@ const FREQUENCY_LABELS: Record<RecurringForecastOccurrence['frequency'], string>
   quarterly: 'Quarterly',
   annual: 'Annual',
 };
+
+const LIQUID_ACCOUNT_TYPES = new Set(['checking', 'savings', 'cash']);
+
+interface ProjectionPoint {
+  date: string;
+  delta: number;
+  balance: number;
+}
+
+function isLiquidAccount(account: Account): boolean {
+  return !account.is_hidden && !account.is_liability && LIQUID_ACCOUNT_TYPES.has(account.type);
+}
+
+function buildProjection(
+  startingBalance: number,
+  occurrences: RecurringForecastOccurrence[]
+): ProjectionPoint[] {
+  const deltaByDate = new Map<string, number>();
+
+  for (const occurrence of occurrences) {
+    deltaByDate.set(
+      occurrence.expected_date,
+      (deltaByDate.get(occurrence.expected_date) ?? 0) + occurrence.amount
+    );
+  }
+
+  let balance = startingBalance;
+  return Array.from(deltaByDate.entries())
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([date, delta]) => {
+      balance += delta;
+      return { date, delta, balance };
+    });
+}
 
 function Stat({
   label,
@@ -89,9 +124,26 @@ export function Bills() {
     queryFn: () => recurringApi.forecast(days),
   });
 
+  const { data: accounts = [] } = useQuery({
+    queryKey: ['accounts'],
+    queryFn: accountsApi.list,
+  });
+
   const occurrences = forecast?.occurrences ?? [];
   const confirmedCount = occurrences.filter((occurrence) => occurrence.is_confirmed).length;
   const detectedCount = occurrences.length - confirmedCount;
+  const liquidAccounts = accounts.filter(isLiquidAccount);
+  const startingBalance = liquidAccounts.reduce((sum, account) => sum + account.current_balance, 0);
+  const projection = useMemo(
+    () => buildProjection(startingBalance, occurrences),
+    [occurrences, startingBalance]
+  );
+  const endingBalance = projection.at(-1)?.balance ?? startingBalance;
+  const lowestPoint = projection.reduce<ProjectionPoint | null>(
+    (lowest, point) => (!lowest || point.balance < lowest.balance ? point : lowest),
+    null
+  );
+  const lowestBalance = lowestPoint?.balance ?? startingBalance;
 
   const nextOccurrence = occurrences[0];
   const grouped = useMemo(() => {
@@ -138,6 +190,58 @@ export function Bills() {
         <Stat label="Incoming" value={forecast?.income ?? 0} tone="income" />
         <Stat label="Bills" value={-(forecast?.bills ?? 0)} tone="bill" />
         <Stat label="Net Impact" value={forecast?.net ?? 0} tone="net" />
+      </div>
+
+      <div className="border border-border bg-surface rounded p-4">
+        <div className="flex items-center justify-between gap-3 mb-4">
+          <div>
+            <h2 className="text-sm font-medium text-text">Cash Projection</h2>
+            <p className="text-xs text-muted mt-1">
+              {liquidAccounts.length} liquid {liquidAccounts.length === 1 ? 'account' : 'accounts'}
+            </p>
+          </div>
+          <Wallet size={18} className="text-[#7aa2f7]" />
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-4">
+          <div>
+            <p className="text-xs text-muted mb-1">Starting Cash</p>
+            <p className="font-mono text-lg text-text">{formatCurrency(startingBalance)}</p>
+          </div>
+          <div>
+            <p className="text-xs text-muted mb-1">Lowest Point</p>
+            <p
+              className="font-mono text-lg"
+              style={{ color: lowestBalance >= 0 ? '#4ecba3' : '#e07070' }}
+            >
+              {formatCurrency(lowestBalance)}
+            </p>
+            {lowestPoint && (
+              <p className="text-xs text-muted mt-0.5">{formatDate(lowestPoint.date)}</p>
+            )}
+          </div>
+          <div>
+            <p className="text-xs text-muted mb-1">Projected Ending</p>
+            <p
+              className="font-mono text-lg"
+              style={{ color: endingBalance >= startingBalance ? '#4ecba3' : '#e07070' }}
+            >
+              {formatCurrency(endingBalance)}
+            </p>
+          </div>
+        </div>
+        {projection.length > 0 && (
+          <div className="divide-y divide-border border border-border rounded bg-background">
+            {projection.slice(0, 5).map((point) => (
+              <div key={point.date} className="grid grid-cols-[120px_1fr_auto] gap-3 px-3 py-2 text-xs items-center">
+                <span className="font-mono text-muted">{formatDate(point.date)}</span>
+                <span style={{ color: point.delta >= 0 ? '#4ecba3' : '#e07070' }}>
+                  {formatCurrency(point.delta, { showSign: true })}
+                </span>
+                <span className="font-mono text-text">{formatCurrency(point.balance)}</span>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
