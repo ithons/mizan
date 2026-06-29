@@ -262,6 +262,18 @@ export interface AiStreamEvent {
   message?: string;
 }
 
+export type InsightSeverity = 'critical' | 'warning' | 'positive' | 'info';
+
+export interface Insight {
+  id: string;
+  severity: InsightSeverity;
+  title: string;
+  message: string;
+  metric?: string;
+  action_label?: string;
+  action_route?: string;
+}
+
 export interface ApiResponse<T> {
   data: T;
 }

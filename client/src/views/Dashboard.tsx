@@ -8,9 +8,20 @@ import {
   Tooltip,
   ResponsiveContainer,
 } from 'recharts';
-import { TrendingUp, TrendingDown, RefreshCw, ArrowRight } from 'lucide-react';
+import {
+  AlertTriangle,
+  ArrowRight,
+  CheckCircle2,
+  CircleAlert,
+  Info,
+  Lightbulb,
+  TrendingDown,
+  TrendingUp,
+} from 'lucide-react';
+import type { LucideIcon } from 'lucide-react';
 import { format, startOfMonth, endOfMonth, subMonths, parseISO } from 'date-fns';
-import { networthApi, reportsApi, recurringApi, budgetsApi, transactionsApi, investmentsApi } from '../lib/api';
+import type { Insight } from '@shared/types';
+import { networthApi, reportsApi, recurringApi, budgetsApi, transactionsApi, investmentsApi, insightsApi } from '../lib/api';
 import { formatCurrency, formatDate, formatDateShort, formatMonth } from '../lib/formatters';
 import { AmountBadge } from '../components/AmountBadge';
 import { CategoryBadge } from '../components/CategoryBadge';
@@ -73,6 +84,88 @@ function CustomTooltip({ active, payload }: { active?: boolean; payload?: Array<
   );
 }
 
+const insightStyles: Record<Insight['severity'], {
+  icon: LucideIcon;
+  color: string;
+  label: string;
+}> = {
+  critical: { icon: CircleAlert, color: '#e07070', label: 'Critical' },
+  warning: { icon: AlertTriangle, color: '#d4a44c', label: 'Warning' },
+  positive: { icon: CheckCircle2, color: '#4ecba3', label: 'Good' },
+  info: { icon: Info, color: '#5b8dee', label: 'Info' },
+};
+
+function SignalsPanel({
+  insights,
+  onNavigate,
+}: {
+  insights?: Insight[];
+  onNavigate: (route: string) => void;
+}) {
+  const visibleInsights = insights?.slice(0, 4) ?? [];
+
+  return (
+    <div className="bg-surface border border-border rounded">
+      <div className="px-4 py-3 border-b border-border flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <Lightbulb size={15} className="text-[#d4a44c]" />
+          <h2 className="text-sm font-medium text-text">Signals</h2>
+        </div>
+        <button
+          onClick={() => onNavigate('/advisor')}
+          className="text-xs text-muted hover:text-[#4ecba3] flex items-center gap-1"
+        >
+          Ask advisor <ArrowRight size={11} />
+        </button>
+      </div>
+
+      {visibleInsights.length > 0 ? (
+        <div className="divide-y divide-border">
+          {visibleInsights.map((insight) => {
+            const style = insightStyles[insight.severity];
+            const Icon = style.icon;
+            const actionRoute = insight.action_route;
+            const actionLabel = insight.action_label;
+            return (
+              <div key={insight.id} className="px-4 py-3 flex items-start gap-3">
+                <div
+                  className="w-7 h-7 rounded flex items-center justify-center flex-shrink-0"
+                  style={{ backgroundColor: `${style.color}18` }}
+                  title={style.label}
+                >
+                  <Icon size={14} style={{ color: style.color }} />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-2 mb-0.5">
+                    <p className="text-sm font-medium text-text truncate">{insight.title}</p>
+                    {insight.metric && (
+                      <span className="font-mono text-xs text-muted flex-shrink-0">{insight.metric}</span>
+                    )}
+                  </div>
+                  <p className="text-xs text-muted leading-relaxed">{insight.message}</p>
+                </div>
+                {actionRoute && actionLabel && (
+                  <button
+                    onClick={() => onNavigate(actionRoute)}
+                    className="text-xs text-muted hover:text-[#4ecba3] flex items-center gap-1 flex-shrink-0 pt-1"
+                  >
+                    {actionLabel}
+                    <ArrowRight size={11} />
+                  </button>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      ) : (
+        <div className="px-4 py-8 flex items-center justify-center text-muted text-sm">
+          No signals yet
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function Dashboard() {
   const navigate = useNavigate();
   const now = new Date();
@@ -113,6 +206,11 @@ export function Dashboard() {
   const { data: holdings } = useQuery({
     queryKey: ['holdings'],
     queryFn: () => investmentsApi.holdings(),
+  });
+
+  const { data: insights } = useQuery({
+    queryKey: ['insights', 'dashboard'],
+    queryFn: () => insightsApi.list(),
   });
 
   if (nwLoading) {
@@ -221,6 +319,8 @@ export function Dashboard() {
           )}
         </div>
       </div>
+
+      <SignalsPanel insights={insights} onNavigate={navigate} />
 
       {/* Row 2: Asset Breakdown */}
       <div className="bg-surface border border-border rounded p-4">

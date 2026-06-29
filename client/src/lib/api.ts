@@ -10,6 +10,7 @@ import type {
   RecurringForecast,
   NetWorthSnapshot,
   PlaidItem,
+  Insight,
   CashflowReport,
   SpendingReport,
   NetWorthHistory,
@@ -280,6 +281,12 @@ export const goalsApi = {
     }),
   delete: (id: string) =>
     apiFetch<void>(`/api/goals/${id}`, { method: 'DELETE' }),
+};
+
+// Insights
+
+export const insightsApi = {
+  list: () => apiFetch<Insight[]>('/api/insights'),
 };
 
 // ─── Reports ─────────────────────────────────────────────────────────────────
