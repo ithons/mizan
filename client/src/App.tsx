@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { lazy, Suspense, useEffect, type ReactNode } from 'react';
 import { Routes, Route } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import { Layout } from './components/Layout';
@@ -6,15 +6,16 @@ import { ToastContainer } from './components/Toast';
 import { useSyncStatus } from './hooks/useSyncStatus';
 import { useAppStore } from './store';
 import { plaidApi } from './lib/api';
-import { Dashboard } from './views/Dashboard';
-import { Accounts } from './views/Accounts';
-import { Transactions } from './views/Transactions';
-import { CashFlow } from './views/CashFlow';
-import { Budget } from './views/Budget';
-import { Investments } from './views/Investments';
-import { Reports } from './views/Reports';
-import { Settings } from './views/Settings';
-import { Advisor } from './views/Advisor';
+
+const Dashboard = lazy(() => import('./views/Dashboard').then((module) => ({ default: module.Dashboard })));
+const Accounts = lazy(() => import('./views/Accounts').then((module) => ({ default: module.Accounts })));
+const Transactions = lazy(() => import('./views/Transactions').then((module) => ({ default: module.Transactions })));
+const CashFlow = lazy(() => import('./views/CashFlow').then((module) => ({ default: module.CashFlow })));
+const Budget = lazy(() => import('./views/Budget').then((module) => ({ default: module.Budget })));
+const Investments = lazy(() => import('./views/Investments').then((module) => ({ default: module.Investments })));
+const Reports = lazy(() => import('./views/Reports').then((module) => ({ default: module.Reports })));
+const Settings = lazy(() => import('./views/Settings').then((module) => ({ default: module.Settings })));
+const Advisor = lazy(() => import('./views/Advisor').then((module) => ({ default: module.Advisor })));
 
 interface PlaidHandler {
   open: () => void;
@@ -37,6 +38,23 @@ declare global {
 
 function errorMessage(err: unknown, fallback: string) {
   return err instanceof Error && err.message ? err.message : fallback;
+}
+
+function ViewFallback() {
+  return (
+    <div className="p-6 space-y-4">
+      <div className="h-8 w-48 rounded bg-white/5 animate-pulse" />
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+        <div className="h-28 rounded border border-border bg-white/[0.02] animate-pulse" />
+        <div className="h-28 rounded border border-border bg-white/[0.02] animate-pulse" />
+        <div className="h-28 rounded border border-border bg-white/[0.02] animate-pulse" />
+      </div>
+    </div>
+  );
+}
+
+function lazyView(view: ReactNode) {
+  return <Suspense fallback={<ViewFallback />}>{view}</Suspense>;
 }
 
 function AppRoutes() {
@@ -89,15 +107,15 @@ function AppRoutes() {
     <>
       <Routes>
         <Route element={<Layout />}>
-          <Route path="/" element={<Dashboard />} />
-          <Route path="/accounts" element={<Accounts />} />
-          <Route path="/transactions" element={<Transactions />} />
-          <Route path="/cashflow" element={<CashFlow />} />
-          <Route path="/budget" element={<Budget />} />
-          <Route path="/investments" element={<Investments />} />
-          <Route path="/reports" element={<Reports />} />
-          <Route path="/advisor" element={<Advisor />} />
-          <Route path="/settings" element={<Settings />} />
+          <Route path="/" element={lazyView(<Dashboard />)} />
+          <Route path="/accounts" element={lazyView(<Accounts />)} />
+          <Route path="/transactions" element={lazyView(<Transactions />)} />
+          <Route path="/cashflow" element={lazyView(<CashFlow />)} />
+          <Route path="/budget" element={lazyView(<Budget />)} />
+          <Route path="/investments" element={lazyView(<Investments />)} />
+          <Route path="/reports" element={lazyView(<Reports />)} />
+          <Route path="/advisor" element={lazyView(<Advisor />)} />
+          <Route path="/settings" element={lazyView(<Settings />)} />
         </Route>
       </Routes>
       <ToastContainer />
