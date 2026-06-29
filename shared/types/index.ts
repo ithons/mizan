@@ -138,6 +138,7 @@ export interface RecurringPattern {
   merchant_name: string;
   category_id?: string | null;
   average_amount: number;
+  average_signed_amount?: number | null;
   frequency: 'weekly' | 'biweekly' | 'monthly' | 'quarterly' | 'annual';
   last_seen: string;
   next_expected: string;
@@ -149,6 +150,28 @@ export interface RecurringPattern {
   // joined
   category_name?: string | null;
   category_color?: string | null;
+}
+
+export interface RecurringForecastOccurrence {
+  id: string;
+  pattern_id: string;
+  merchant_name: string;
+  category_id?: string | null;
+  category_name?: string | null;
+  category_color?: string | null;
+  frequency: RecurringPattern['frequency'];
+  expected_date: string;
+  amount: number;
+  is_income: boolean;
+  is_confirmed: boolean;
+}
+
+export interface RecurringForecast {
+  days: number;
+  income: number;
+  bills: number;
+  net: number;
+  occurrences: RecurringForecastOccurrence[];
 }
 
 export interface MerchantRule {

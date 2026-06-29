@@ -2,9 +2,12 @@ import { Router, Request, Response, NextFunction } from 'express';
 import { getDb } from '../db/index';
 import { validate } from '../middleware/validate';
 import { UpdateRecurringSchema } from '../../../shared/schemas';
-import { format, addDays } from 'date-fns';
+import type { RecurringForecastOccurrence, RecurringPattern } from '../../../shared/types';
+import { format, addDays, addMonths, parseISO } from 'date-fns';
 
 const router = Router();
+
+type Frequency = RecurringPattern['frequency'];
 
 function parseDays(value: unknown): number | null {
   if (value === undefined) return 30;
@@ -14,6 +17,21 @@ function parseDays(value: unknown): number | null {
   if (!Number.isSafeInteger(parsed)) return null;
 
   return Math.min(Math.max(parsed, 1), 365);
+}
+
+function nextOccurrenceDate(date: Date, frequency: Frequency): Date {
+  switch (frequency) {
+    case 'weekly':
+      return addDays(date, 7);
+    case 'biweekly':
+      return addDays(date, 14);
+    case 'monthly':
+      return addMonths(date, 1);
+    case 'quarterly':
+      return addMonths(date, 3);
+    case 'annual':
+      return addMonths(date, 12);
+  }
 }
 
 // GET / - all active recurring_patterns JOIN categories
@@ -63,6 +81,98 @@ router.get('/upcoming', (req: Request, res: Response, next: NextFunction): void 
     `).all(endDate);
 
     res.json({ data: patterns });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// GET /forecast?days=60 - recurring income and bills expanded into dates
+router.get('/forecast', (req: Request, res: Response, next: NextFunction): void => {
+  try {
+    const db = getDb();
+    const days = parseDays(req.query.days ?? '60');
+    if (days === null) {
+      res.status(400).json({ error: 'Invalid days filter' });
+      return;
+    }
+
+    const today = format(new Date(), 'yyyy-MM-dd');
+    const endDate = format(addDays(new Date(), days), 'yyyy-MM-dd');
+
+    const patterns = db.prepare(`
+      SELECT
+        rp.*,
+        c.name AS category_name,
+        c.color AS category_color,
+        c.is_income AS category_is_income,
+        COALESCE(
+          (
+            SELECT AVG(t.amount)
+            FROM transactions t
+            WHERE t.recurring_id = rp.id
+          ),
+          CASE WHEN COALESCE(c.is_income, 0) = 1 THEN rp.average_amount ELSE -rp.average_amount END
+        ) AS average_signed_amount
+      FROM recurring_patterns rp
+      LEFT JOIN categories c ON c.id = rp.category_id
+      WHERE rp.is_active = 1
+        AND rp.next_expected <= ?
+        AND (rp.is_confirmed = 1 OR rp.transaction_count >= 3)
+      ORDER BY rp.next_expected ASC
+    `).all(endDate) as Array<RecurringPattern & {
+      category_is_income: number | null;
+      average_signed_amount: number;
+    }>;
+
+    const occurrences: RecurringForecastOccurrence[] = [];
+
+    for (const pattern of patterns) {
+      let expected = parseISO(pattern.next_expected);
+      let guard = 0;
+
+      while (format(expected, 'yyyy-MM-dd') < today && guard < 500) {
+        expected = nextOccurrenceDate(expected, pattern.frequency);
+        guard++;
+      }
+
+      while (format(expected, 'yyyy-MM-dd') <= endDate && guard < 500) {
+        const expectedDate = format(expected, 'yyyy-MM-dd');
+        const amount = pattern.average_signed_amount;
+        occurrences.push({
+          id: `${pattern.id}:${expectedDate}`,
+          pattern_id: pattern.id,
+          merchant_name: pattern.merchant_name,
+          category_id: pattern.category_id,
+          category_name: pattern.category_name,
+          category_color: pattern.category_color,
+          frequency: pattern.frequency,
+          expected_date: expectedDate,
+          amount,
+          is_income: amount > 0,
+          is_confirmed: Boolean(pattern.is_confirmed),
+        });
+
+        expected = nextOccurrenceDate(expected, pattern.frequency);
+        guard++;
+      }
+    }
+
+    occurrences.sort((a, b) => a.expected_date.localeCompare(b.expected_date));
+
+    const income = occurrences.reduce((sum, occurrence) =>
+      occurrence.amount > 0 ? sum + occurrence.amount : sum, 0);
+    const bills = occurrences.reduce((sum, occurrence) =>
+      occurrence.amount < 0 ? sum + Math.abs(occurrence.amount) : sum, 0);
+
+    res.json({
+      data: {
+        days,
+        income,
+        bills,
+        net: income - bills,
+        occurrences,
+      },
+    });
   } catch (err) {
     next(err);
   }

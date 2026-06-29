@@ -13,6 +13,7 @@ const Dashboard = lazy(() => import('./views/Dashboard').then((module) => ({ def
 const Accounts = lazy(() => import('./views/Accounts').then((module) => ({ default: module.Accounts })));
 const Transactions = lazy(() => import('./views/Transactions').then((module) => ({ default: module.Transactions })));
 const CashFlow = lazy(() => import('./views/CashFlow').then((module) => ({ default: module.CashFlow })));
+const Bills = lazy(() => import('./views/Bills').then((module) => ({ default: module.Bills })));
 const Budget = lazy(() => import('./views/Budget').then((module) => ({ default: module.Budget })));
 const Goals = lazy(() => import('./views/Goals').then((module) => ({ default: module.Goals })));
 const Investments = lazy(() => import('./views/Investments').then((module) => ({ default: module.Investments })));
@@ -100,6 +101,7 @@ function AppRoutes() {
           <Route path="/accounts" element={lazyView(<Accounts />)} />
           <Route path="/transactions" element={lazyView(<Transactions />)} />
           <Route path="/cashflow" element={lazyView(<CashFlow />)} />
+          <Route path="/bills" element={lazyView(<Bills />)} />
           <Route path="/budget" element={lazyView(<Budget />)} />
           <Route path="/goals" element={lazyView(<Goals />)} />
           <Route path="/investments" element={lazyView(<Investments />)} />

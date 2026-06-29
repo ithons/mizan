@@ -7,6 +7,7 @@ import type {
   MerchantRule,
   Budget,
   RecurringPattern,
+  RecurringForecast,
   NetWorthSnapshot,
   PlaidItem,
   CashflowReport,
@@ -250,6 +251,8 @@ export const recurringApi = {
   list: () => apiFetch<RecurringPattern[]>('/api/recurring'),
   upcoming: (days?: number) =>
     apiFetch<RecurringPattern[]>(`/api/recurring/upcoming${days ? `?days=${days}` : ''}`),
+  forecast: (days?: number) =>
+    apiFetch<RecurringForecast>(`/api/recurring/forecast${days ? `?days=${days}` : ''}`),
   confirm: (id: string) =>
     apiFetch<RecurringPattern>(`/api/recurring/${id}/confirm`, { method: 'POST' }),
   dismiss: (id: string) =>

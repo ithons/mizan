@@ -8,6 +8,7 @@ import {
   PieChart,
   WalletCards,
   Target,
+  CalendarDays,
   Settings,
   TrendingUp,
   BrainCircuit,
@@ -32,11 +33,12 @@ const navItems = [
   { to: '/accounts', label: 'Accounts', icon: CreditCard, shortcut: '2' },
   { to: '/transactions', label: 'Transactions', icon: ArrowLeftRight, shortcut: '3' },
   { to: '/cashflow', label: 'Cash Flow', icon: BarChart2, shortcut: '4' },
-  { to: '/budget', label: 'Budget', icon: WalletCards, shortcut: '5' },
-  { to: '/goals', label: 'Goals', icon: Target, shortcut: '6' },
-  { to: '/investments', label: 'Investments', icon: TrendingUp, shortcut: '7' },
-  { to: '/reports', label: 'Reports', icon: PieChart, shortcut: '8' },
-  { to: '/advisor', label: 'AI Advisor', icon: BrainCircuit, shortcut: '9' },
+  { to: '/bills', label: 'Bills', icon: CalendarDays, shortcut: '5' },
+  { to: '/budget', label: 'Budget', icon: WalletCards, shortcut: '6' },
+  { to: '/goals', label: 'Goals', icon: Target, shortcut: '7' },
+  { to: '/investments', label: 'Investments', icon: TrendingUp, shortcut: '8' },
+  { to: '/reports', label: 'Reports', icon: PieChart, shortcut: '9' },
+  { to: '/advisor', label: 'AI Advisor', icon: BrainCircuit },
   { to: '/settings', label: 'Settings', icon: Settings, shortcut: '0', separator: true },
 ];
 
@@ -61,10 +63,10 @@ export function Sidebar({ collapsed = false, onToggle }: SidebarProps) {
       if (!mod) return;
 
       const key = e.key;
-      if ((key >= '1' && key <= '9') || key === '0') {
+      const shortcutItem = navItems.find((item) => item.shortcut === key);
+      if (shortcutItem) {
         e.preventDefault();
-        const index = key === '0' ? 9 : parseInt(key, 10) - 1;
-        navigate(navItems[index].to);
+        navigate(shortcutItem.to);
       }
       if (key === 's') {
         e.preventDefault();
@@ -122,9 +124,11 @@ export function Sidebar({ collapsed = false, onToggle }: SidebarProps) {
                 <>
                   <item.icon size={16} className={isActive ? 'text-[#4ecba3]' : ''} />
                   <span className="flex-1 truncate">{item.label}</span>
-                  <span className="text-xs text-muted/50 font-mono hidden group-hover:block flex-shrink-0">
-                    ⌘{item.shortcut}
-                  </span>
+                  {item.shortcut && (
+                    <span className="text-xs text-muted/50 font-mono hidden group-hover:block flex-shrink-0">
+                      ⌘{item.shortcut}
+                    </span>
+                  )}
                 </>
               )}
             </NavLink>

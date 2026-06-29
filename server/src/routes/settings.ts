@@ -305,6 +305,7 @@ router.delete(
         DELETE FROM securities;
         DELETE FROM merchant_rules;
         DELETE FROM recurring_patterns;
+        DELETE FROM goals;
         DELETE FROM transactions;
         DELETE FROM budgets;
         DELETE FROM accounts;
