@@ -6,6 +6,7 @@ import { budgetsApi, recurringApi, categoriesApi, flattenCategories } from '../l
 import { formatCurrency, formatDate, formatMonth, formatPercent } from '../lib/formatters';
 import { FREQUENCY_LABELS } from '../lib/constants';
 import { useAppStore } from '../store';
+import { invalidateFinancialData } from '../lib/queryInvalidation';
 import { Modal } from '../components/Modal';
 import { CategoryBadge } from '../components/CategoryBadge';
 import { PageLoader } from '../components/LoadingSpinner';
@@ -139,7 +140,7 @@ function AddBudgetModal({
         rollover: form.rollover,
       }),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['budgets'] });
+      invalidateFinancialData(qc);
       addToast({ type: 'success', message: 'Budget saved' });
       onClose();
     },
@@ -225,18 +226,18 @@ function RecurringTab() {
 
   const confirmMutation = useMutation({
     mutationFn: recurringApi.confirm,
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['recurring'] }),
+    onSuccess: () => invalidateFinancialData(qc),
   });
 
   const dismissMutation = useMutation({
     mutationFn: recurringApi.dismiss,
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['recurring'] }),
+    onSuccess: () => invalidateFinancialData(qc),
   });
 
   const updateCatMutation = useMutation({
     mutationFn: ({ id, category_id }: { id: string; category_id: string }) =>
       recurringApi.update(id, { category_id }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['recurring'] }),
+    onSuccess: () => invalidateFinancialData(qc),
   });
 
   const confirmed = recurring.filter((r) => r.is_confirmed && r.is_active);
@@ -382,13 +383,13 @@ export function Budget() {
   const editMutation = useMutation({
     mutationFn: ({ categoryId, amount }: { categoryId: string; amount: number }) =>
       budgetsApi.upsert(categoryId, { amount }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['budgets'] }),
+    onSuccess: () => invalidateFinancialData(qc),
     onError: (err: Error) => addToast({ type: 'error', message: err.message }),
   });
 
   const deleteMutation = useMutation({
     mutationFn: budgetsApi.delete,
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['budgets'] }),
+    onSuccess: () => invalidateFinancialData(qc),
     onError: (err: Error) => addToast({ type: 'error', message: err.message }),
   });
 
