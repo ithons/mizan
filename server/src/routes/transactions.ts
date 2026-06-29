@@ -84,14 +84,48 @@ function parseQueryNumber(value: string | string[] | undefined): number | null {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
+function parsePositiveIntegerQuery(
+  value: string | string[] | undefined,
+  defaultValue: number,
+  max?: number
+): number | null {
+  if (value === undefined) return defaultValue;
+
+  const raw = Array.isArray(value) ? value[0] : value;
+  if (!/^\d+$/.test(raw)) return null;
+
+  const parsed = Number(raw);
+  if (!Number.isSafeInteger(parsed) || parsed < 1) return null;
+
+  return max === undefined ? parsed : Math.min(parsed, max);
+}
+
+function parseBooleanQuery(value: string | string[] | undefined): boolean | null | undefined {
+  if (value === undefined) return undefined;
+
+  const raw = Array.isArray(value) ? value[0] : value;
+  if (raw === 'true') return true;
+  if (raw === 'false') return false;
+  return null;
+}
+
 // GET / - list transactions with filters
 router.get('/', (req: Request, res: Response, next: NextFunction): void => {
   try {
     const db = getDb();
     const query = req.query as Record<string, string | string[]>;
 
-    const page = Math.max(1, parseInt(query.page as string) || 1);
-    const limit = Math.min(500, Math.max(1, parseInt(query.limit as string) || 50));
+    const page = parsePositiveIntegerQuery(query.page, 1);
+    const limit = parsePositiveIntegerQuery(query.limit, 50, 500);
+    if (page === null) {
+      res.status(400).json({ error: 'Invalid page filter' });
+      return;
+    }
+    if (limit === null) {
+      res.status(400).json({ error: 'Invalid limit filter' });
+      return;
+    }
+
     const offset = (page - 1) * limit;
 
     const conditions: string[] = [];
@@ -158,18 +192,32 @@ router.get('/', (req: Request, res: Response, next: NextFunction): void => {
       params.push(maxAmount);
     }
     if (query.pending !== undefined) {
+      const pending = parseBooleanQuery(query.pending);
+      if (pending === null) {
+        res.status(400).json({ error: 'Invalid pending filter' });
+        return;
+      }
       conditions.push('t.pending = ?');
-      params.push(query.pending === 'true' ? 1 : 0);
+      params.push(pending ? 1 : 0);
     }
-    if (query.recurring === 'true') {
-      conditions.push('t.recurring_id IS NOT NULL');
-    } else if (query.recurring === 'false') {
-      conditions.push('t.recurring_id IS NULL');
+    if (query.recurring !== undefined) {
+      const recurring = parseBooleanQuery(query.recurring);
+      if (recurring === null) {
+        res.status(400).json({ error: 'Invalid recurring filter' });
+        return;
+      }
+      conditions.push(recurring ? 't.recurring_id IS NOT NULL' : 't.recurring_id IS NULL');
     }
-    if (query.type === 'income') {
-      conditions.push('t.amount > 0');
-    } else if (query.type === 'expense') {
-      conditions.push('t.amount < 0');
+    if (query.type !== undefined) {
+      const type = Array.isArray(query.type) ? query.type[0] : query.type;
+      if (type === 'income') {
+        conditions.push('t.amount > 0');
+      } else if (type === 'expense') {
+        conditions.push('t.amount < 0');
+      } else if (type !== '') {
+        res.status(400).json({ error: 'Invalid type filter' });
+        return;
+      }
     }
 
     const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
