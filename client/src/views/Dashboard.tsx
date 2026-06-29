@@ -15,13 +15,14 @@ import {
   CircleAlert,
   Info,
   Lightbulb,
+  Target,
   TrendingDown,
   TrendingUp,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { format, startOfMonth, endOfMonth, subMonths, parseISO } from 'date-fns';
-import type { Insight } from '@shared/types';
-import { networthApi, reportsApi, recurringApi, budgetsApi, transactionsApi, investmentsApi, insightsApi } from '../lib/api';
+import type { Goal, Insight } from '@shared/types';
+import { networthApi, reportsApi, recurringApi, budgetsApi, transactionsApi, investmentsApi, insightsApi, goalsApi } from '../lib/api';
 import { formatCurrency, formatDate, formatDateShort, formatMonth } from '../lib/formatters';
 import { AmountBadge } from '../components/AmountBadge';
 import { CategoryBadge } from '../components/CategoryBadge';
@@ -166,6 +167,32 @@ function SignalsPanel({
   );
 }
 
+function GoalProgressRow({ goal }: { goal: Goal }) {
+  const progress = Math.min(goal.progress_percent, 100);
+  const tone = goal.type === 'debt' ? '#d4a44c' : '#4ecba3';
+
+  return (
+    <div>
+      <div className="flex items-center justify-between gap-3 text-xs mb-1">
+        <span className="text-text truncate">{goal.name}</span>
+        <span className="font-mono text-muted flex-shrink-0">{Math.round(progress)}%</span>
+      </div>
+      <div className="h-1.5 bg-border rounded-full overflow-hidden">
+        <div
+          className="h-full rounded-full"
+          style={{ width: `${progress}%`, backgroundColor: tone }}
+        />
+      </div>
+      <div className="flex items-center justify-between gap-3 text-[11px] text-muted mt-1">
+        <span className="truncate">
+          {goal.account_name ?? (goal.type === 'debt' ? 'Debt goal' : 'Savings goal')}
+        </span>
+        <span className="font-mono flex-shrink-0">{formatCurrency(goal.remaining_amount)} left</span>
+      </div>
+    </div>
+  );
+}
+
 export function Dashboard() {
   const navigate = useNavigate();
   const now = new Date();
@@ -211,6 +238,11 @@ export function Dashboard() {
   const { data: insights } = useQuery({
     queryKey: ['insights', 'dashboard'],
     queryFn: () => insightsApi.list(),
+  });
+
+  const { data: goals } = useQuery({
+    queryKey: ['goals', 'dashboard'],
+    queryFn: () => goalsApi.list(),
   });
 
   if (nwLoading) {
@@ -464,8 +496,8 @@ export function Dashboard() {
         </div>
       </div>
 
-      {/* Row 4: Budget + Investments */}
-      <div className="grid grid-cols-2 gap-4">
+      {/* Row 4: Budget + Goals + Investments */}
+      <div className="grid grid-cols-3 gap-4">
         {/* Budget progress */}
         <div className="bg-surface border border-border rounded p-4">
           <div className="flex items-center justify-between mb-4">
@@ -504,6 +536,30 @@ export function Dashboard() {
           ) : (
             <div className="h-32 flex items-center justify-center text-muted text-sm">
               No budgets set
+            </div>
+          )}
+        </div>
+
+        {/* Goal progress */}
+        <div className="bg-surface border border-border rounded p-4">
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center gap-2">
+              <Target size={14} className="text-[#d4a44c]" />
+              <h2 className="text-sm font-medium text-text">Goals</h2>
+            </div>
+            <button onClick={() => navigate('/goals')} className="text-xs text-muted hover:text-[#4ecba3] flex items-center gap-1">
+              View all <ArrowRight size={11} />
+            </button>
+          </div>
+          {goals && goals.length > 0 ? (
+            <div className="space-y-3">
+              {goals.slice(0, 4).map((goal) => (
+                <GoalProgressRow key={goal.id} goal={goal} />
+              ))}
+            </div>
+          ) : (
+            <div className="h-32 flex items-center justify-center text-muted text-sm">
+              No goals set
             </div>
           )}
         </div>
