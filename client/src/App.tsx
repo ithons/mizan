@@ -7,6 +7,7 @@ import { useSyncStatus } from './hooks/useSyncStatus';
 import { useAppStore } from './store';
 import { plaidApi } from './lib/api';
 import { loadPlaidLink } from './lib/plaidLink';
+import { invalidateFinancialData } from './lib/queryInvalidation';
 
 const Dashboard = lazy(() => import('./views/Dashboard').then((module) => ({ default: module.Dashboard })));
 const Accounts = lazy(() => import('./views/Accounts').then((module) => ({ default: module.Accounts })));
@@ -65,7 +66,7 @@ function AppRoutes() {
           receivedRedirectUri,
           onSuccess: async (publicToken: string, metadata: unknown) => {
             await plaidApi.exchangeToken(publicToken, metadata);
-            qc.invalidateQueries({ queryKey: ['accounts'] });
+            invalidateFinancialData(qc);
             addToast({ type: 'success', message: 'Bank connected successfully' });
             window.history.replaceState({}, '', window.location.pathname);
           },
