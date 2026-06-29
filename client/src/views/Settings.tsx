@@ -35,6 +35,11 @@ const CATEGORY_PRESET_COLORS = [
   '#c4a86e', '#6e8ec4',
 ];
 
+function invalidateCategoryData(queryClient: ReturnType<typeof useQueryClient>): void {
+  void queryClient.invalidateQueries({ queryKey: ['categories'] });
+  invalidateFinancialData(queryClient);
+}
+
 // ─── Plaid Section ────────────────────────────────────────────────────────────
 
 function PlaidSection() {
@@ -557,12 +562,12 @@ function CategoriesSection() {
   const editMutation = useMutation({
     mutationFn: ({ id, name, color, icon }: { id: string; name: string; color: string; icon: string }) =>
       categoriesApi.update(id, { name, color, icon }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['categories'] }),
+    onSuccess: () => invalidateCategoryData(qc),
   });
 
   const deleteMutation = useMutation({
     mutationFn: categoriesApi.delete,
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['categories'] }),
+    onSuccess: () => invalidateCategoryData(qc),
     onError: (err: Error) => addToast({ type: 'error', message: err.message }),
   });
 
@@ -579,7 +584,7 @@ function CategoriesSection() {
         sort_order: 0,
       }),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['categories'] });
+      invalidateCategoryData(qc);
       setAddName('');
       setAddColor(CATEGORY_PRESET_COLORS[0]);
       setAddIcon('');
