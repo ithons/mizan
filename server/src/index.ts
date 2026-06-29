@@ -18,6 +18,7 @@ import investmentsRouter from './routes/investments';
 import categoriesRouter from './routes/categories';
 import budgetsRouter from './routes/budgets';
 import recurringRouter from './routes/recurring';
+import goalsRouter from './routes/goals';
 import reportsRouter from './routes/reports';
 import networthRouter from './routes/networth';
 import plaidRouter from './routes/plaid';
@@ -70,6 +71,7 @@ async function main() {
   app.use('/api/categories', categoriesRouter);
   app.use('/api/budgets', budgetsRouter);
   app.use('/api/recurring', recurringRouter);
+  app.use('/api/goals', goalsRouter);
   app.use('/api/reports', reportsRouter);
   app.use('/api/networth', networthRouter);
   app.use('/api/plaid', plaidRouter);

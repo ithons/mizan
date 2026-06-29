@@ -6,6 +6,8 @@ import {
   ArrowLeftRight,
   BarChart2,
   PieChart,
+  WalletCards,
+  Target,
   Settings,
   TrendingUp,
   BrainCircuit,
@@ -30,10 +32,12 @@ const navItems = [
   { to: '/accounts', label: 'Accounts', icon: CreditCard, shortcut: '2' },
   { to: '/transactions', label: 'Transactions', icon: ArrowLeftRight, shortcut: '3' },
   { to: '/cashflow', label: 'Cash Flow', icon: BarChart2, shortcut: '4' },
-  { to: '/investments', label: 'Investments', icon: TrendingUp, shortcut: '5' },
-  { to: '/reports', label: 'Reports', icon: PieChart, shortcut: '6' },
-  { to: '/advisor', label: 'AI Advisor', icon: BrainCircuit, shortcut: '7' },
-  { to: '/settings', label: 'Settings', icon: Settings, shortcut: '8', separator: true },
+  { to: '/budget', label: 'Budget', icon: WalletCards, shortcut: '5' },
+  { to: '/goals', label: 'Goals', icon: Target, shortcut: '6' },
+  { to: '/investments', label: 'Investments', icon: TrendingUp, shortcut: '7' },
+  { to: '/reports', label: 'Reports', icon: PieChart, shortcut: '8' },
+  { to: '/advisor', label: 'AI Advisor', icon: BrainCircuit, shortcut: '9' },
+  { to: '/settings', label: 'Settings', icon: Settings, shortcut: '0', separator: true },
 ];
 
 interface SidebarProps {
@@ -57,9 +61,9 @@ export function Sidebar({ collapsed = false, onToggle }: SidebarProps) {
       if (!mod) return;
 
       const key = e.key;
-      if (key >= '1' && key <= '8') {
+      if ((key >= '1' && key <= '9') || key === '0') {
         e.preventDefault();
-        const index = parseInt(key, 10) - 1;
+        const index = key === '0' ? 9 : parseInt(key, 10) - 1;
         navigate(navItems[index].to);
       }
       if (key === 's') {

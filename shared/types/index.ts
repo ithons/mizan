@@ -158,6 +158,30 @@ export interface MerchantRule {
   created_at: string;
 }
 
+export type GoalType = 'savings' | 'debt';
+
+export interface Goal {
+  id: string;
+  name: string;
+  type: GoalType;
+  target_amount: number;
+  current_amount: number;
+  starting_amount?: number | null;
+  account_id?: string | null;
+  target_date?: string | null;
+  color?: string | null;
+  is_archived: boolean;
+  created_at: string;
+  updated_at: string;
+  progress_amount: number;
+  remaining_amount: number;
+  progress_percent: number;
+  account_name?: string | null;
+  institution_name?: string | null;
+  account_balance?: number | null;
+  account_is_liability?: boolean | null;
+}
+
 export interface PlaidItem {
   id: string;
   item_id: string;

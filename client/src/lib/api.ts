@@ -3,6 +3,7 @@ import type {
   Transaction,
   TransactionFilters,
   Category,
+  Goal,
   Budget,
   RecurringPattern,
   NetWorthSnapshot,
@@ -228,6 +229,24 @@ export const recurringApi = {
       method: 'PATCH',
       body: JSON.stringify(body),
     }),
+};
+
+// ─── Goals ──────────────────────────────────────────────────────────────────
+
+export const goalsApi = {
+  list: () => apiFetch<Goal[]>('/api/goals'),
+  create: (body: Partial<Goal>) =>
+    apiFetch<Goal>('/api/goals', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+  update: (id: string, body: Partial<Goal>) =>
+    apiFetch<Goal>(`/api/goals/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(body),
+    }),
+  delete: (id: string) =>
+    apiFetch<void>(`/api/goals/${id}`, { method: 'DELETE' }),
 };
 
 // ─── Reports ─────────────────────────────────────────────────────────────────

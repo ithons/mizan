@@ -14,6 +14,7 @@ const Accounts = lazy(() => import('./views/Accounts').then((module) => ({ defau
 const Transactions = lazy(() => import('./views/Transactions').then((module) => ({ default: module.Transactions })));
 const CashFlow = lazy(() => import('./views/CashFlow').then((module) => ({ default: module.CashFlow })));
 const Budget = lazy(() => import('./views/Budget').then((module) => ({ default: module.Budget })));
+const Goals = lazy(() => import('./views/Goals').then((module) => ({ default: module.Goals })));
 const Investments = lazy(() => import('./views/Investments').then((module) => ({ default: module.Investments })));
 const Reports = lazy(() => import('./views/Reports').then((module) => ({ default: module.Reports })));
 const Settings = lazy(() => import('./views/Settings').then((module) => ({ default: module.Settings })));
@@ -100,6 +101,7 @@ function AppRoutes() {
           <Route path="/transactions" element={lazyView(<Transactions />)} />
           <Route path="/cashflow" element={lazyView(<CashFlow />)} />
           <Route path="/budget" element={lazyView(<Budget />)} />
+          <Route path="/goals" element={lazyView(<Goals />)} />
           <Route path="/investments" element={lazyView(<Investments />)} />
           <Route path="/reports" element={lazyView(<Reports />)} />
           <Route path="/advisor" element={lazyView(<Advisor />)} />

@@ -76,6 +76,21 @@ export const UpdateRecurringSchema = z.object({
   category_id: z.string().nullable().optional(),
 });
 
+export const CreateGoalSchema = z.object({
+  name: z.string().min(1),
+  type: z.enum(['savings', 'debt']),
+  target_amount: z.number().positive(),
+  current_amount: z.number().nonnegative().default(0),
+  starting_amount: z.number().nonnegative().nullable().optional(),
+  account_id: z.string().nullable().optional(),
+  target_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(),
+  color: z.string().nullable().optional(),
+});
+
+export const UpdateGoalSchema = CreateGoalSchema.partial().extend({
+  is_archived: z.boolean().optional(),
+});
+
 export const PlaidCredentialsSchema = z.object({
   clientId: z.string().min(1),
   secret: z.string().min(1),
