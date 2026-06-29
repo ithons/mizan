@@ -89,9 +89,18 @@ router.post('/:id/dismiss', (req: Request, res: Response, next: NextFunction): v
       return;
     }
 
-    db.prepare(
-      'UPDATE recurring_patterns SET is_active = 0, updated_at = ? WHERE id = ?'
-    ).run(new Date().toISOString(), id);
+    const now = new Date().toISOString();
+    const dismissPattern = db.transaction(() => {
+      db.prepare(
+        'UPDATE recurring_patterns SET is_active = 0, updated_at = ? WHERE id = ?'
+      ).run(now, id);
+
+      db.prepare(
+        'UPDATE transactions SET recurring_id = NULL, updated_at = ? WHERE recurring_id = ?'
+      ).run(now, id);
+    });
+
+    dismissPattern();
 
     res.json({ data: { success: true } });
   } catch (err) {
