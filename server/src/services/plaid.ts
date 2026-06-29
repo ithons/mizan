@@ -94,6 +94,11 @@ function mapAccountType(
   return 'other';
 }
 
+function normalizePlaidTransactionAmount(amount: number): number {
+  // Plaid uses positive amounts for outflows. Mizān stores expenses as negative.
+  return -amount;
+}
+
 export async function createLinkToken(redirectUri: string = 'http://localhost:3001'): Promise<string> {
   const plaid = getPlaidClient();
   const creds = getCredentials();
@@ -296,7 +301,7 @@ export async function syncItem(dbItemId: string): Promise<PlaidSyncItemStatus> {
           txn.transaction_id,
           acct.id,
           txn.date,
-          txn.amount,
+          normalizePlaidTransactionAmount(txn.amount),
           txn.merchant_name || null,
           txn.name,
           txn.pending ? 1 : 0,
@@ -322,7 +327,7 @@ export async function syncItem(dbItemId: string): Promise<PlaidSyncItemStatus> {
         WHERE plaid_transaction_id = ?
       `).run(
         txn.date,
-        txn.amount,
+        normalizePlaidTransactionAmount(txn.amount),
         txn.merchant_name || null,
         txn.name,
         txn.pending ? 1 : 0,
