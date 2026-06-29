@@ -6,7 +6,7 @@ import { format, addDays } from 'date-fns';
 
 const router = Router();
 
-// GET / — all active recurring_patterns JOIN categories
+// GET / - all active recurring_patterns JOIN categories
 router.get('/', (_req: Request, res: Response, next: NextFunction): void => {
   try {
     const db = getDb();
@@ -27,12 +27,13 @@ router.get('/', (_req: Request, res: Response, next: NextFunction): void => {
   }
 });
 
-// GET /upcoming — patterns due within next 30 days
-router.get('/upcoming', (_req: Request, res: Response, next: NextFunction): void => {
+// GET /upcoming?days=30
+router.get('/upcoming', (req: Request, res: Response, next: NextFunction): void => {
   try {
     const db = getDb();
-    const today = format(new Date(), 'yyyy-MM-dd');
-    const thirtyDaysOut = format(addDays(new Date(), 30), 'yyyy-MM-dd');
+    const rawDays = parseInt(String(req.query.days ?? '30'), 10);
+    const days = Number.isFinite(rawDays) ? Math.min(Math.max(rawDays, 1), 365) : 30;
+    const endDate = format(addDays(new Date(), days), 'yyyy-MM-dd');
 
     const patterns = db.prepare(`
       SELECT
@@ -45,7 +46,7 @@ router.get('/upcoming', (_req: Request, res: Response, next: NextFunction): void
         AND rp.next_expected <= ?
         AND (rp.is_confirmed = 1 OR rp.transaction_count >= 3)
       ORDER BY rp.next_expected ASC
-    `).all(thirtyDaysOut);
+    `).all(endDate);
 
     res.json({ data: patterns });
   } catch (err) {
@@ -53,7 +54,7 @@ router.get('/upcoming', (_req: Request, res: Response, next: NextFunction): void
   }
 });
 
-// POST /:id/confirm — confirm recurring pattern
+// POST /:id/confirm - confirm recurring pattern
 router.post('/:id/confirm', (req: Request, res: Response, next: NextFunction): void => {
   try {
     const db = getDb();
@@ -76,7 +77,7 @@ router.post('/:id/confirm', (req: Request, res: Response, next: NextFunction): v
   }
 });
 
-// POST /:id/dismiss — deactivate recurring pattern
+// POST /:id/dismiss - deactivate recurring pattern
 router.post('/:id/dismiss', (req: Request, res: Response, next: NextFunction): void => {
   try {
     const db = getDb();
@@ -98,7 +99,7 @@ router.post('/:id/dismiss', (req: Request, res: Response, next: NextFunction): v
   }
 });
 
-// PATCH /:id — update category_id
+// PATCH /:id - update category_id
 router.patch(
   '/:id',
   validate(UpdateRecurringSchema),

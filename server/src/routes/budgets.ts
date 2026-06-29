@@ -6,7 +6,7 @@ import { UpsertBudgetSchema } from '../../../shared/schemas';
 
 const router = Router();
 
-// GET / — all budgets JOIN categories
+// GET / - all budgets JOIN categories
 router.get('/', (_req: Request, res: Response, next: NextFunction): void => {
   try {
     const db = getDb();
@@ -27,7 +27,7 @@ router.get('/', (_req: Request, res: Response, next: NextFunction): void => {
   }
 });
 
-// GET /month/:year/:month — budgets with spent amount for that month
+// GET /month/:year/:month - budgets with spent amount for that month
 router.get('/month/:year/:month', (req: Request, res: Response, next: NextFunction): void => {
   try {
     const db = getDb();
@@ -69,7 +69,7 @@ router.get('/month/:year/:month', (req: Request, res: Response, next: NextFuncti
   }
 });
 
-// PUT /:categoryId — upsert budget
+// PUT /:categoryId - upsert budget
 router.put(
   '/:categoryId',
   validate(UpsertBudgetSchema),

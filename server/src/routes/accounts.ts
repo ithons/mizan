@@ -10,18 +10,29 @@ import { takeSnapshot } from '../services/snapshot';
 
 const router = Router();
 
-// GET / — all accounts with current_balance, sorted by sort_order
+type AccountRow = Record<string, unknown> & {
+  is_manual: number;
+  is_hidden: number;
+  is_liability: number;
+};
+
+// GET / - all accounts with current_balance, sorted by sort_order
 router.get('/', (_req: Request, res: Response, next: NextFunction): void => {
   try {
     const db = getDb();
-    const accounts = db.prepare(`
+    const accounts = (db.prepare(`
       SELECT
         a.*,
         pi.last_synced_at
       FROM accounts a
       LEFT JOIN plaid_items pi ON pi.id = a.connection_id AND a.connection_type = 'plaid'
       ORDER BY a.sort_order ASC, a.created_at ASC
-    `).all();
+    `).all() as AccountRow[]).map((a) => ({
+      ...a,
+      is_manual: Boolean(a.is_manual),
+      is_hidden: Boolean(a.is_hidden),
+      is_liability: Boolean(a.is_liability),
+    }));
 
     res.json({ data: accounts });
   } catch (err) {
@@ -29,7 +40,7 @@ router.get('/', (_req: Request, res: Response, next: NextFunction): void => {
   }
 });
 
-// POST /manual — create manual account
+// POST /manual - create manual account
 router.post(
   '/manual',
   validate(CreateManualAccountSchema),
@@ -90,7 +101,7 @@ router.post(
   }
 );
 
-// PATCH /:id — update account
+// PATCH /:id - update account
 router.patch(
   '/:id',
   validate(UpdateAccountSchema),
@@ -100,15 +111,32 @@ router.patch(
       const { id } = req.params;
       const body = req.body as {
         account_name?: string;
+        institution_name?: string | null;
+        type?: string;
+        currency?: string;
+        is_liability?: boolean;
         color?: string | null;
         is_hidden?: boolean;
         sort_order?: number;
         current_balance?: number;
       };
 
-      const existing = db.prepare('SELECT * FROM accounts WHERE id = ?').get(id);
+      const existing = db.prepare('SELECT * FROM accounts WHERE id = ?').get(id) as
+        | { is_manual: number }
+        | undefined;
       if (!existing) {
         res.status(404).json({ error: 'Account not found' });
+        return;
+      }
+
+      const manualOnlyFields = [
+        body.institution_name,
+        body.type,
+        body.currency,
+        body.is_liability,
+      ];
+      if (!existing.is_manual && manualOnlyFields.some((field) => field !== undefined)) {
+        res.status(400).json({ error: 'Only manual accounts can be edited directly' });
         return;
       }
 
@@ -118,6 +146,25 @@ router.patch(
       if (body.account_name !== undefined) {
         updates.push('account_name = ?');
         values.push(body.account_name);
+      }
+      if (body.institution_name !== undefined) {
+        updates.push('institution_name = ?');
+        values.push(body.institution_name);
+      }
+      if (body.type !== undefined) {
+        updates.push('type = ?');
+        values.push(body.type);
+      }
+      if (body.currency !== undefined) {
+        updates.push('currency = ?');
+        values.push(body.currency);
+      }
+      if (body.is_liability !== undefined) {
+        updates.push('is_liability = ?');
+        values.push(body.is_liability ? 1 : 0);
+      } else if (body.type !== undefined) {
+        updates.push('is_liability = ?');
+        values.push(body.type === 'credit' ? 1 : 0);
       }
       if (body.color !== undefined) {
         updates.push('color = ?');
@@ -160,7 +207,7 @@ router.patch(
   }
 );
 
-// DELETE /:id — hard delete if manual, else hide
+// DELETE /:id - hard delete if manual, else hide
 router.delete('/:id', (req: Request, res: Response, next: NextFunction): void => {
   try {
     const db = getDb();

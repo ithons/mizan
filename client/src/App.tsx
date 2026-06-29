@@ -11,13 +11,32 @@ import { Accounts } from './views/Accounts';
 import { Transactions } from './views/Transactions';
 import { CashFlow } from './views/CashFlow';
 import { Budget } from './views/Budget';
+import { Investments } from './views/Investments';
 import { Reports } from './views/Reports';
 import { Settings } from './views/Settings';
+import { Advisor } from './views/Advisor';
+
+interface PlaidHandler {
+  open: () => void;
+}
+
+interface PlaidCreateOptions {
+  token: string;
+  receivedRedirectUri?: string;
+  onSuccess: (publicToken: string, metadata: unknown) => void | Promise<void>;
+  onExit?: () => void;
+}
 
 declare global {
   interface Window {
-    Plaid: any;
+    Plaid?: {
+      create: (options: PlaidCreateOptions) => PlaidHandler;
+    };
   }
+}
+
+function errorMessage(err: unknown, fallback: string) {
+  return err instanceof Error && err.message ? err.message : fallback;
 }
 
 function AppRoutes() {
@@ -30,7 +49,8 @@ function AppRoutes() {
   // the registered redirect URI with ?oauth_state_id=<id>. We must resume
   // the Link session by passing receivedRedirectUri to Plaid.create().
   useEffect(() => {
-    if (!window.location.href.includes('oauth_state_id')) return;
+    const oauthParams = new URLSearchParams(window.location.search);
+    if (!oauthParams.has('oauth_state_id')) return;
 
     const receivedRedirectUri = window.location.href;
 
@@ -58,8 +78,8 @@ function AppRoutes() {
           },
         });
         handler.open();
-      } catch (err: any) {
-        addToast({ type: 'error', message: err.message || 'Failed to resume Plaid OAuth' });
+      } catch (err: unknown) {
+        addToast({ type: 'error', message: errorMessage(err, 'Failed to resume Plaid OAuth') });
         window.history.replaceState({}, '', window.location.pathname);
       }
     })();
@@ -74,7 +94,9 @@ function AppRoutes() {
           <Route path="/transactions" element={<Transactions />} />
           <Route path="/cashflow" element={<CashFlow />} />
           <Route path="/budget" element={<Budget />} />
+          <Route path="/investments" element={<Investments />} />
           <Route path="/reports" element={<Reports />} />
+          <Route path="/advisor" element={<Advisor />} />
           <Route path="/settings" element={<Settings />} />
         </Route>
       </Routes>

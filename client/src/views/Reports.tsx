@@ -16,16 +16,52 @@ import {
   CartesianGrid,
   Legend,
 } from 'recharts';
+import { ChevronRight } from 'lucide-react';
 import { format, subMonths, startOfMonth, endOfMonth, startOfYear } from 'date-fns';
 import { reportsApi, networthApi, investmentsApi, categoriesApi } from '../lib/api';
 import { formatCurrency, formatMonth, formatDate, formatPercent } from '../lib/formatters';
 import { PageLoader } from '../components/LoadingSpinner';
+import { EmptyState } from '../components/EmptyState';
 const COLORS = [
   '#4ecba3', '#5b8dee', '#d4a44c', '#e07070', '#a78bfa',
   '#f472b6', '#34d399', '#fb923c', '#60a5fa', '#f87171',
 ];
 
 type DatePreset = 'this_month' | 'last_month' | '3m' | '6m' | '12m' | 'ytd' | 'all' | 'custom';
+
+interface TooltipPayload {
+  dataKey: string | number;
+  color?: string;
+  name?: string;
+  value: number;
+}
+
+interface ChartTooltipProps {
+  active?: boolean;
+  payload?: TooltipPayload[];
+  label?: string | number;
+}
+
+interface TreemapContentProps {
+  x?: number;
+  y?: number;
+  width?: number;
+  height?: number;
+  name?: string;
+  color?: string;
+  value?: number;
+}
+
+interface DrillCategory {
+  category_id: string;
+  category_name: string;
+  children?: unknown[];
+}
+
+interface SpendingTreemapContentProps extends TreemapContentProps {
+  categories?: DrillCategory[];
+  onDrill?: (categoryId: string, categoryName: string) => void;
+}
 
 function getDateRange(preset: DatePreset, customStart?: string, customEnd?: string) {
   const now = new Date();
@@ -51,19 +87,79 @@ function getDateRange(preset: DatePreset, customStart?: string, customEnd?: stri
   }
 }
 
-function ChartTooltip({ active, payload, label }: any) {
+function ChartTooltip({ active, payload, label }: ChartTooltipProps) {
   if (!active || !payload?.length) return null;
   return (
     <div className="bg-surface border border-border rounded px-3 py-2 text-xs">
       <p className="text-muted mb-1 font-mono">{label}</p>
-      {payload.map((p: any) => (
+      {payload.map((p) => (
         <div key={p.dataKey} className="flex items-center gap-2">
-          <span className="w-2 h-2 rounded-full" style={{ backgroundColor: p.color }} />
-          <span className="text-text">{p.name}:</span>
-          <span className="font-mono" style={{ color: p.color }}>{formatCurrency(Math.abs(p.value))}</span>
+          <span className="w-2 h-2 rounded-full" style={{ backgroundColor: p.color ?? '#6b6b7a' }} />
+          <span className="text-text">{p.name ?? p.dataKey}:</span>
+          <span className="font-mono" style={{ color: p.color ?? '#6b6b7a' }}>{formatCurrency(Math.abs(p.value))}</span>
         </div>
       ))}
     </div>
+  );
+}
+
+function getTreemapProps(rawProps: unknown): Required<TreemapContentProps> {
+  const props = rawProps as TreemapContentProps;
+  return {
+    x: props.x ?? 0,
+    y: props.y ?? 0,
+    width: props.width ?? 0,
+    height: props.height ?? 0,
+    name: props.name ?? '',
+    color: props.color ?? '#6b6b7a',
+    value: props.value ?? 0,
+  };
+}
+
+function SpendingTreemapContent({ categories = [], onDrill, ...rawProps }: SpendingTreemapContentProps) {
+  const { x, y, width, height, name, color, value } = getTreemapProps(rawProps);
+  return (
+    <g>
+      <rect
+        x={x + 1}
+        y={y + 1}
+        width={Math.max(width - 2, 0)}
+        height={Math.max(height - 2, 0)}
+        style={{ fill: color, opacity: 0.85, cursor: 'pointer' }}
+        onClick={() => {
+          const cat = categories.find((c) => c.category_name === name);
+          if (cat?.children?.length) onDrill?.(cat.category_id, cat.category_name);
+        }}
+      />
+      {width > 60 && height > 30 && (
+        <>
+          <text x={x + 8} y={y + 18} fill="#e8e8ec" fontSize={11} fontWeight={500}>{name}</text>
+          {height > 50 && (
+            <text x={x + 8} y={y + 34} fill="#6b6b7a" fontSize={10} fontFamily="JetBrains Mono">
+              {formatCurrency(value)}
+            </text>
+          )}
+        </>
+      )}
+    </g>
+  );
+}
+
+function BasicTreemapContent(rawProps: TreemapContentProps) {
+  const { x, y, width, height, name, color } = getTreemapProps(rawProps);
+  return (
+    <g>
+      <rect
+        x={x + 1}
+        y={y + 1}
+        width={Math.max(width - 2, 0)}
+        height={Math.max(height - 2, 0)}
+        style={{ fill: color, opacity: 0.85 }}
+      />
+      {width > 60 && height > 30 && (
+        <text x={x + 8} y={y + 18} fill="#e8e8ec" fontSize={11}>{name}</text>
+      )}
+    </g>
   );
 }
 
@@ -71,6 +167,7 @@ function ChartTooltip({ active, payload, label }: any) {
 
 function SpendingTab({ startDate, endDate }: { startDate: string; endDate: string }) {
   const [drillId, setDrillId] = useState<string | null>(null);
+  const [drillName, setDrillName] = useState<string | null>(null);
 
   const { data: spending, isLoading } = useQuery({
     queryKey: ['spending', startDate, endDate],
@@ -92,14 +189,22 @@ function SpendingTab({ startDate, endDate }: { startDate: string; endDate: strin
 
   return (
     <div className="space-y-6">
-      {drillId && (
+      {/* Breadcrumb */}
+      <div className="flex items-center gap-1 text-xs">
         <button
-          className="text-xs text-[#4ecba3] hover:opacity-80"
-          onClick={() => setDrillId(null)}
+          className={drillId ? 'text-[#4ecba3] hover:opacity-80' : 'text-muted cursor-default'}
+          onClick={() => { setDrillId(null); setDrillName(null); }}
         >
-          ← Back to all categories
+          All Categories
         </button>
-      )}
+        {drillId && drillName && (
+          <>
+            <ChevronRight size={12} className="text-muted" />
+            <span className="text-text">{drillName}</span>
+          </>
+        )}
+      </div>
+
       {treemapData.length > 0 ? (
         <div className="bg-surface border border-border rounded p-4">
           <ResponsiveContainer width="100%" height={280}>
@@ -107,40 +212,20 @@ function SpendingTab({ startDate, endDate }: { startDate: string; endDate: strin
               data={treemapData}
               dataKey="size"
               aspectRatio={4 / 3}
-              // eslint-disable-next-line @typescript-eslint/ban-ts-comment
-              // @ts-ignore Recharts type is overly restrictive for content
-              content={({ x, y, width, height, name, color, value }: any) => (
-                <g>
-                  <rect
-                    x={x + 1}
-                    y={y + 1}
-                    width={width - 2}
-                    height={height - 2}
-                    style={{ fill: color, opacity: 0.85, cursor: 'pointer' }}
-                    onClick={() => {
-                      const cat = categories.find((c) => c.category_name === name);
-                      if (cat?.children?.length) setDrillId(cat.category_id);
-                    }}
-                  />
-                  {width > 60 && height > 30 && (
-                    <>
-                      <text x={x + 8} y={y + 18} fill="#e8e8ec" fontSize={11} fontWeight={500}>{name}</text>
-                      {height > 50 && (
-                        <text x={x + 8} y={y + 34} fill="#6b6b7a" fontSize={10} fontFamily="JetBrains Mono">
-                          {formatCurrency(value)}
-                        </text>
-                      )}
-                    </>
-                  )}
-                </g>
-              )}
+              content={
+                <SpendingTreemapContent
+                  categories={categories}
+                  onDrill={(categoryId, categoryName) => {
+                    setDrillId(categoryId);
+                    setDrillName(categoryName);
+                  }}
+                />
+              }
             />
           </ResponsiveContainer>
         </div>
       ) : (
-        <div className="bg-surface border border-border rounded p-12 text-center text-muted text-sm">
-          No spending data for the selected period
-        </div>
+        <EmptyState icon={ChevronRight} title="No spending data for the selected period" />
       )}
 
       {/* Data table */}
@@ -207,22 +292,12 @@ function IncomeTab({ startDate, endDate }: { startDate: string; endDate: string 
             <Treemap
               data={treemapData}
               dataKey="size"
-              // @ts-ignore Recharts type is overly restrictive for content
-              content={({ x, y, width, height, name, color, value }: any) => (
-                <g>
-                  <rect x={x + 1} y={y + 1} width={width - 2} height={height - 2} style={{ fill: color, opacity: 0.85 }} />
-                  {width > 60 && height > 30 && (
-                    <text x={x + 8} y={y + 18} fill="#e8e8ec" fontSize={11}>{name}</text>
-                  )}
-                </g>
-              )}
+              content={<BasicTreemapContent />}
             />
           </ResponsiveContainer>
         </div>
       ) : (
-        <div className="bg-surface border border-border rounded p-12 text-center text-muted text-sm">
-          No income data for the selected period
-        </div>
+        <EmptyState icon={ChevronRight} title="No income data for the selected period" />
       )}
       <div className="bg-surface border border-border rounded overflow-hidden">
         <table className="w-full text-xs">
@@ -356,6 +431,39 @@ function TrendsTab({ startDate, endDate }: { startDate: string; endDate: string 
 
 // ─── Net Worth Tab ────────────────────────────────────────────────────────────
 
+const PIE_COLORS = { liquid: '#4ecba3', investments: '#5b8dee', crypto: '#f0c040', liabilities: '#e07070' };
+
+function AssetPieChart({ data, title }: { data: Array<{ name: string; value: number; color: string }>; title: string }) {
+  return (
+    <div className="flex-1 bg-surface border border-border rounded p-4">
+      <p className="text-xs text-muted font-medium uppercase tracking-wider mb-3">{title}</p>
+      <ResponsiveContainer width="100%" height={160}>
+        <PieChart>
+          <Pie data={data} cx="50%" cy="50%" innerRadius={45} outerRadius={70} dataKey="value" paddingAngle={2}>
+            {data.map((entry, i) => <Cell key={i} fill={entry.color} />)}
+          </Pie>
+          <Tooltip formatter={(v: number) => formatCurrency(v)} />
+        </PieChart>
+      </ResponsiveContainer>
+      <div className="flex flex-col gap-1 mt-2">
+        {data.map((entry) => {
+          const total = data.reduce((s, d) => s + d.value, 0);
+          const pct = total > 0 ? ((entry.value / total) * 100).toFixed(0) : '0';
+          return (
+            <div key={entry.name} className="flex items-center justify-between text-xs">
+              <div className="flex items-center gap-1.5">
+                <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: entry.color }} />
+                <span className="text-muted capitalize">{entry.name}</span>
+              </div>
+              <span className="font-mono text-text">{formatCurrency(entry.value)} <span className="text-muted">({pct}%)</span></span>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 function NetWorthTab() {
   const [showAssets, setShowAssets] = useState(true);
   const [showLiabilities, setShowLiabilities] = useState(true);
@@ -365,7 +473,33 @@ function NetWorthTab() {
     queryFn: () => networthApi.history(24),
   });
 
+  const { data: latestSnapshot } = useQuery({
+    queryKey: ['networth', 'snapshot'],
+    queryFn: () => networthApi.snapshot(),
+  });
+
   if (isLoading) return <PageLoader />;
+
+  // Asset breakdown pie data
+  const liquid = latestSnapshot?.liquid_assets ?? 0;
+  const investments = latestSnapshot?.investment_assets ?? 0;
+  const crypto = latestSnapshot?.crypto_assets ?? 0;
+  const liabilities = latestSnapshot?.total_liabilities ?? 0;
+  const hasAssetBreakdown = liquid > 0 || investments > 0 || crypto > 0;
+
+  const grossPieData = [
+    { name: 'Liquid', value: liquid, color: PIE_COLORS.liquid },
+    { name: 'Investments', value: investments, color: PIE_COLORS.investments },
+    { name: 'Crypto', value: crypto, color: PIE_COLORS.crypto },
+  ].filter((d) => d.value > 0);
+
+  // Net-of-debt: subtract liabilities from liquid first
+  const liquidAfterDebt = Math.max(0, liquid - liabilities);
+  const netPieData = [
+    { name: 'Liquid (after debt)', value: liquidAfterDebt, color: PIE_COLORS.liquid },
+    { name: 'Investments', value: investments, color: PIE_COLORS.investments },
+    { name: 'Crypto', value: crypto, color: PIE_COLORS.crypto },
+  ].filter((d) => d.value > 0);
 
   const chartData = snapshots.map((s) => ({
     date: format(new Date(s.date), 'MMM yy'),
@@ -376,6 +510,14 @@ function NetWorthTab() {
 
   return (
     <div className="space-y-6">
+      {/* Asset breakdown pie charts */}
+      {hasAssetBreakdown && (
+        <div className="flex gap-4">
+          <AssetPieChart data={grossPieData} title="Gross Assets" />
+          <AssetPieChart data={netPieData} title="Net Assets (after debt)" />
+        </div>
+      )}
+
       {/* Toggles */}
       <div className="flex gap-2">
         {[
@@ -451,7 +593,7 @@ function NetWorthTab() {
                   <td className="px-4 py-2 font-mono text-[#e07070]">{formatCurrency(s.total_liabilities)}</td>
                   <td className="px-4 py-2 font-mono text-text">{formatCurrency(s.net_worth)}</td>
                   <td className="px-4 py-2 font-mono" style={{ color: delta != null ? (delta >= 0 ? '#4ecba3' : '#e07070') : '#6b6b7a' }}>
-                    {delta != null ? `${delta >= 0 ? '+' : ''}${formatCurrency(delta)}` : '—'}
+                    {delta != null ? `${delta >= 0 ? '+' : ''}${formatCurrency(delta)}` : '-'}
                   </td>
                 </tr>
               );
@@ -502,11 +644,7 @@ function InvestmentsTab() {
   }));
 
   if (holdings.length === 0) {
-    return (
-      <div className="bg-surface border border-border rounded p-12 text-center text-muted text-sm">
-        No investment accounts connected
-      </div>
-    );
+    return <EmptyState icon={ChevronRight} title="No investment accounts connected" />;
   }
 
   return (
@@ -572,22 +710,43 @@ function InvestmentsTab() {
               const pnlPct = h.cost_basis && h.cost_basis > 0 ? ((h.institution_value - h.cost_basis) / h.cost_basis) * 100 : null;
               return (
                 <tr key={h.id} className="border-b border-border hover:bg-white/2">
-                  <td className="px-4 py-2 font-mono text-[#5b8dee] font-medium">{h.ticker ?? '—'}</td>
+                  <td className="px-4 py-2 font-mono text-[#5b8dee] font-medium">{h.ticker ?? '-'}</td>
                   <td className="px-4 py-2 text-text max-w-[160px] truncate">{h.security_name}</td>
                   <td className="px-4 py-2 font-mono text-muted">{h.quantity.toFixed(4)}</td>
                   <td className="px-4 py-2 font-mono text-muted">{formatCurrency(h.institution_price)}</td>
                   <td className="px-4 py-2 font-mono text-text">{formatCurrency(h.institution_value)}</td>
-                  <td className="px-4 py-2 font-mono text-muted">{h.cost_basis != null ? formatCurrency(h.cost_basis) : '—'}</td>
+                  <td className="px-4 py-2 font-mono text-muted">{h.cost_basis != null ? formatCurrency(h.cost_basis) : '-'}</td>
                   <td className="px-4 py-2 font-mono" style={{ color: unrealized != null ? (unrealized >= 0 ? '#4ecba3' : '#e07070') : '#6b6b7a' }}>
-                    {unrealized != null ? `${unrealized >= 0 ? '+' : ''}${formatCurrency(unrealized)}` : '—'}
+                    {unrealized != null ? `${unrealized >= 0 ? '+' : ''}${formatCurrency(unrealized)}` : '-'}
                   </td>
                   <td className="px-4 py-2 font-mono" style={{ color: pnlPct != null ? (pnlPct >= 0 ? '#4ecba3' : '#e07070') : '#6b6b7a' }}>
-                    {pnlPct != null ? `${pnlPct >= 0 ? '+' : ''}${formatPercent(pnlPct)}` : '—'}
+                    {pnlPct != null ? `${pnlPct >= 0 ? '+' : ''}${formatPercent(pnlPct)}` : '-'}
                   </td>
                 </tr>
               );
             })}
           </tbody>
+          {(() => {
+            const totalV = holdings.reduce((s, h) => s + h.institution_value, 0);
+            const totalPnl = holdings.reduce((s, h) => h.cost_basis != null ? s + h.institution_value - h.cost_basis : s, 0);
+            const hasCB = holdings.some((h) => h.cost_basis != null);
+            const totalCB = holdings.reduce((s, h) => s + (h.cost_basis ?? 0), 0);
+            const totalPct = hasCB && totalCB > 0 ? ((totalV - totalCB) / totalCB) * 100 : null;
+            return (
+              <tfoot className="border-t-2 border-border">
+                <tr>
+                  <td className="px-4 py-2 font-bold text-text" colSpan={5}>TOTAL</td>
+                  <td className="px-4 py-2 font-mono font-bold text-muted">{hasCB ? formatCurrency(totalCB) : '-'}</td>
+                  <td className="px-4 py-2 font-mono font-bold" style={{ color: hasCB ? (totalPnl >= 0 ? '#4ecba3' : '#e07070') : '#6b6b7a' }}>
+                    {hasCB ? `${totalPnl >= 0 ? '+' : ''}${formatCurrency(totalPnl)}` : '-'}
+                  </td>
+                  <td className="px-4 py-2 font-mono font-bold" style={{ color: totalPct != null ? (totalPct >= 0 ? '#4ecba3' : '#e07070') : '#6b6b7a' }}>
+                    {totalPct != null ? `${totalPct >= 0 ? '+' : ''}${formatPercent(totalPct)}` : '-'}
+                  </td>
+                </tr>
+              </tfoot>
+            );
+          })()}
         </table>
       </div>
     </div>

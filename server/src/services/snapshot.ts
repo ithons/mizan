@@ -6,14 +6,20 @@ export function takeSnapshot(): void {
   const db = getDb();
 
   const accounts = db.prepare(`
-    SELECT id, current_balance, is_liability
+    SELECT id, current_balance, is_liability, type
     FROM accounts
     WHERE is_hidden = 0
-  `).all() as Array<{ id: string; current_balance: number; is_liability: number }>;
+  `).all() as Array<{ id: string; current_balance: number; is_liability: number; type: string }>;
 
   let total_assets = 0;
   let total_liabilities = 0;
+  let liquid_assets = 0;
+  let investment_assets = 0;
+  let crypto_assets = 0;
   const breakdown: Record<string, number> = {};
+
+  const liquidTypes = new Set(['checking', 'savings', 'cash']);
+  const investmentTypes = new Set(['brokerage', 'ira_traditional', 'ira_roth']);
 
   for (const account of accounts) {
     breakdown[account.id] = account.current_balance;
@@ -21,6 +27,13 @@ export function takeSnapshot(): void {
       total_liabilities += account.current_balance;
     } else {
       total_assets += account.current_balance;
+      if (liquidTypes.has(account.type)) {
+        liquid_assets += account.current_balance;
+      } else if (investmentTypes.has(account.type)) {
+        investment_assets += account.current_balance;
+      } else if (account.type === 'crypto_wallet') {
+        crypto_assets += account.current_balance;
+      }
     }
   }
 
@@ -35,14 +48,19 @@ export function takeSnapshot(): void {
   if (existing) {
     db.prepare(`
       UPDATE net_worth_snapshots
-      SET total_assets = ?, total_liabilities = ?, net_worth = ?, breakdown = ?
+      SET total_assets = ?, total_liabilities = ?, net_worth = ?, breakdown = ?,
+          liquid_assets = ?, investment_assets = ?, crypto_assets = ?
       WHERE id = ?
-    `).run(total_assets, total_liabilities, net_worth, JSON.stringify(breakdown), existing.id);
+    `).run(total_assets, total_liabilities, net_worth, JSON.stringify(breakdown),
+           liquid_assets, investment_assets, crypto_assets, existing.id);
   } else {
     db.prepare(`
-      INSERT INTO net_worth_snapshots (id, date, total_assets, total_liabilities, net_worth, breakdown, is_estimated, created_at)
-      VALUES (?, ?, ?, ?, ?, ?, 0, ?)
-    `).run(uuidv4(), today, total_assets, total_liabilities, net_worth, JSON.stringify(breakdown), now);
+      INSERT INTO net_worth_snapshots
+        (id, date, total_assets, total_liabilities, net_worth, breakdown, is_estimated,
+         liquid_assets, investment_assets, crypto_assets, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?)
+    `).run(uuidv4(), today, total_assets, total_liabilities, net_worth, JSON.stringify(breakdown),
+           liquid_assets, investment_assets, crypto_assets, now);
   }
 }
 

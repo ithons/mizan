@@ -1,6 +1,6 @@
 # Mizān
 
-A local-first personal finance application — self-hosted alternative to Monarch Money.
+A local-first personal finance application - self-hosted alternative to Monarch Money.
 
 All data stays on your machine. No telemetry. No subscriptions.
 
@@ -18,21 +18,20 @@ npm install
 
 # Development (hot reload)
 npm run dev
-# → frontend at http://localhost:3000
-# → API at http://localhost:3001
+# -> app and API at http://localhost:3001
 
 # Production
 npm run build
 npm start
-# → http://localhost:3001
+# -> http://localhost:3001
 ```
 
 ## Data Location
 
-All data is stored in `~/.mizan/`:
+All data is stored in the project-local `.mizan/` directory:
 
 ```
-~/.mizan/
+.mizan/
   mizan.db            SQLite database
   credentials.json    AES-256-GCM encrypted API credentials
   logs/               Structured server logs
@@ -51,7 +50,7 @@ Credentials are encrypted at rest using a key derived from your machine's unique
 
 ### OAuth institutions (Chase, Wells Fargo, Bank of America, etc.)
 
-Some banks use OAuth — instead of entering credentials inside Plaid Link, the browser
+Some banks use OAuth - instead of entering credentials inside Plaid Link, the browser
 navigates to the bank's website and back. **This will not work until you register the
 redirect URI in your Plaid dashboard.** Symptoms of a missing registration: you land on
 the bank login page but never return to the app; or you see `plaid-link-oauth://handoff`
@@ -59,14 +58,14 @@ in the URL state.
 
 **Required one-time setup:**
 
-1. Go to [dashboard.plaid.com](https://dashboard.plaid.com) → **Team Settings → API → Allowed redirect URIs**
-2. Click **Add URI** and enter exactly: `http://localhost:3000`
+1. Go to [dashboard.plaid.com](https://dashboard.plaid.com) -> **Team Settings -> API -> Allowed redirect URIs**
+2. Click **Add URI** and enter exactly: `http://localhost:3001`
 3. Save
 
 Without step 2, Plaid embeds `plaid-link-oauth://handoff` (a mobile deep-link scheme) in
 the OAuth state instead of your localhost URL, and the browser cannot handle it.
 
-In production, replace `http://localhost:3000` with your actual domain.
+In production, replace `http://localhost:3001` with your actual domain.
 
 ## Coinbase Setup
 

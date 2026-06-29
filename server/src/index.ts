@@ -5,6 +5,7 @@ import morgan from 'morgan';
 import path from 'path';
 import fs from 'fs';
 import { createWriteStream } from 'fs';
+import ViteExpress from 'vite-express';
 
 import { runMigrations, closeDb, MIZAN_DIR } from './db/index';
 import { loadCredentials } from './services/credentials';
@@ -24,6 +25,7 @@ import coinbaseRouter from './routes/coinbase';
 import syncRouter from './routes/sync';
 import settingsRouter from './routes/settings';
 import healthRouter from './routes/health';
+import aiRouter from './routes/ai';
 
 const PORT = parseInt(process.env.PORT || '3001', 10);
 const IS_PROD = process.env.NODE_ENV === 'production';
@@ -52,7 +54,9 @@ async function main() {
   );
   app.use(
     cors({
-      origin: ['http://localhost:3000', 'http://127.0.0.1:3000'],
+      origin: IS_PROD
+        ? (process.env.CORS_ORIGIN ? process.env.CORS_ORIGIN.split(',') : false)
+        : [`http://localhost:${PORT}`, `http://127.0.0.1:${PORT}`],
       credentials: true,
     })
   );
@@ -73,6 +77,7 @@ async function main() {
   app.use('/api/sync/status', syncRouter);
   app.use('/api/settings', settingsRouter);
   app.use('/api/health', healthRouter);
+  app.use('/api/ai', aiRouter);
 
   // Serve built React app in production
   if (IS_PROD) {
@@ -85,9 +90,10 @@ async function main() {
 
   app.use(errorHandler);
 
-  const server = app.listen(PORT, '0.0.0.0', () => {
-    console.log(`\n  Mizān  →  http://localhost:${PORT}\n`);
-  });
+  const announce = () => console.log(`\n  Mizān  →  http://localhost:${PORT}\n`);
+  const server = IS_PROD
+    ? app.listen(PORT, '0.0.0.0', announce)
+    : ViteExpress.listen(app, PORT, announce);
 
   // 3. Background sync on startup (non-blocking)
   setTimeout(async () => {

@@ -1,25 +1,27 @@
 import React from 'react';
 import { useQuery } from '@tanstack/react-query';
+import { useNavigate } from 'react-router-dom';
 import {
   PieChart,
   Pie,
   Cell,
   Tooltip,
   ResponsiveContainer,
-  Legend,
 } from 'recharts';
-import { TrendingUp, TrendingDown, RefreshCw, AlertTriangle } from 'lucide-react';
-import { format, startOfMonth, endOfMonth } from 'date-fns';
+import { TrendingUp, TrendingDown, RefreshCw, ArrowRight } from 'lucide-react';
+import { format, startOfMonth, endOfMonth, subMonths, parseISO } from 'date-fns';
 import { networthApi, reportsApi, recurringApi, budgetsApi, transactionsApi, investmentsApi } from '../lib/api';
 import { formatCurrency, formatDate, formatDateShort, formatMonth } from '../lib/formatters';
 import { AmountBadge } from '../components/AmountBadge';
 import { CategoryBadge } from '../components/CategoryBadge';
-import { PageLoader } from '../components/LoadingSpinner';
+import { SkeletonCard } from '../components/SkeletonLoader';
 
 const CHART_COLORS = [
   '#4ecba3', '#5b8dee', '#d4a44c', '#e07070', '#a78bfa',
   '#f472b6', '#34d399', '#fb923c', '#60a5fa', '#f87171',
 ];
+
+const ASSET_COLORS = ['#4ecba3', '#5b8dee', '#d4a44c', '#9b8dee'];
 
 function StatCard({
   title,
@@ -27,18 +29,21 @@ function StatCard({
   delta,
   deltaLabel,
   positive,
+  onClick,
 }: {
   title: string;
   value: string;
   delta?: number;
   deltaLabel?: string;
   positive?: boolean;
+  onClick?: () => void;
 }) {
   const isGood = positive !== undefined ? positive : (delta ?? 0) >= 0;
+  const cls = `bg-surface border border-border rounded p-5 ${onClick ? 'cursor-pointer hover:bg-[#4ecba3]/5 transition-colors' : ''}`;
   return (
-    <div className="bg-surface border border-border rounded p-4">
+    <div className={cls} onClick={onClick}>
       <p className="text-xs text-muted mb-1">{title}</p>
-      <p className="font-mono text-xl font-medium text-text mb-2">{value}</p>
+      <p className="font-mono text-2xl font-medium text-text mb-2">{value}</p>
       {delta !== undefined && (
         <div className="flex items-center gap-1">
           {isGood ? (
@@ -69,6 +74,7 @@ function CustomTooltip({ active, payload }: { active?: boolean; payload?: Array<
 }
 
 export function Dashboard() {
+  const navigate = useNavigate();
   const now = new Date();
   const currentMonth = format(now, 'yyyy-MM');
   const startDate = format(startOfMonth(now), 'yyyy-MM-dd');
@@ -109,7 +115,18 @@ export function Dashboard() {
     queryFn: () => investmentsApi.holdings(),
   });
 
-  if (nwLoading) return <PageLoader />;
+  if (nwLoading) {
+    return (
+      <div className="p-6 space-y-6">
+        <div className="flex items-center justify-between">
+          <h1 className="text-xl font-semibold text-text">Dashboard</h1>
+        </div>
+        <div className="grid grid-cols-4 gap-4">
+          <SkeletonCard /><SkeletonCard /><SkeletonCard /><SkeletonCard />
+        </div>
+      </div>
+    );
+  }
 
   // Compute stats
   const snapshots = networthHistory ?? [];
@@ -119,7 +136,8 @@ export function Dashboard() {
 
   const months = cashflow?.months ?? [];
   const currentMonthCF = months.find((m) => m.month === currentMonth);
-  const prevMonthCF = months.find((m) => m.month !== currentMonth);
+  const prevMonthStr = format(subMonths(parseISO(currentMonth + '-01'), 1), 'yyyy-MM');
+  const prevMonthCF = months.find((m) => m.month === prevMonthStr);
 
   const monthlySpend = Math.abs(currentMonthCF?.expenses ?? 0);
   const prevSpend = Math.abs(prevMonthCF?.expenses ?? 0);
@@ -135,6 +153,18 @@ export function Dashboard() {
 
   // Investment total
   const investmentTotal = (holdings ?? []).reduce((sum, h) => sum + h.institution_value, 0);
+
+  // Asset breakdown donut data
+  const liquid = latestNW?.liquid_assets ?? 0;
+  const investmentAssets = latestNW?.investment_assets ?? 0;
+  const crypto = latestNW?.crypto_assets ?? 0;
+  const otherAssets = Math.max(0, (latestNW?.total_assets ?? 0) - liquid - investmentAssets - crypto);
+  const assetDonutData = [
+    { name: 'Liquid', value: liquid },
+    { name: 'Investments', value: investmentAssets },
+    { name: 'Crypto', value: crypto },
+    ...(otherAssets > 0 ? [{ name: 'Other', value: otherAssets }] : []),
+  ].filter((d) => d.value > 0);
 
   // Spending donut data
   const donutData = categories.slice(0, 8).map((c, i) => ({
@@ -158,6 +188,7 @@ export function Dashboard() {
           delta={nwDelta}
           deltaLabel="vs last month"
           positive={nwDelta !== undefined ? nwDelta >= 0 : undefined}
+          onClick={() => navigate('/reports')}
         />
         <StatCard
           title="Monthly Spend"
@@ -165,6 +196,7 @@ export function Dashboard() {
           delta={spendDelta}
           deltaLabel="vs last month"
           positive={spendDelta !== undefined ? spendDelta <= 0 : undefined}
+          onClick={() => navigate('/transactions')}
         />
         <StatCard
           title="Monthly Income"
@@ -172,13 +204,17 @@ export function Dashboard() {
           delta={incomeDelta}
           deltaLabel="vs last month"
           positive={incomeDelta !== undefined ? incomeDelta >= 0 : undefined}
+          onClick={() => navigate('/transactions')}
         />
-        <div className="bg-surface border border-border rounded p-4">
+        <div
+          className="bg-surface border border-border rounded p-5 cursor-pointer hover:bg-[#4ecba3]/5 transition-colors"
+          onClick={() => navigate('/reports')}
+        >
           <p className="text-xs text-muted mb-1">Top Category</p>
           {topCategory ? (
             <>
               <p className="text-sm font-medium text-text mb-1">{topCategory.category_name}</p>
-              <p className="font-mono text-base text-[#e07070]">{formatCurrency(topCategory.amount)}</p>
+              <p className="font-mono text-2xl font-medium text-[#e07070]">{formatCurrency(topCategory.amount)}</p>
             </>
           ) : (
             <p className="text-sm text-muted">No data</p>
@@ -186,7 +222,55 @@ export function Dashboard() {
         </div>
       </div>
 
-      {/* Row 2: Donut + Upcoming bills */}
+      {/* Row 2: Asset Breakdown */}
+      <div className="bg-surface border border-border rounded p-4">
+        <h2 className="text-sm font-medium text-text mb-4">Asset Breakdown</h2>
+        {assetDonutData.length > 0 ? (
+          <div className="flex items-center gap-8">
+            <div className="relative flex-shrink-0">
+              <ResponsiveContainer width={160} height={160}>
+                <PieChart>
+                  <Pie
+                    data={assetDonutData}
+                    cx="50%"
+                    cy="50%"
+                    innerRadius={48}
+                    outerRadius={72}
+                    dataKey="value"
+                    paddingAngle={2}
+                  >
+                    {assetDonutData.map((_entry, index) => (
+                      <Cell key={index} fill={ASSET_COLORS[index % ASSET_COLORS.length]} />
+                    ))}
+                  </Pie>
+                  <Tooltip content={<CustomTooltip />} />
+                </PieChart>
+              </ResponsiveContainer>
+              <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
+                <p className="text-xs text-muted">Net Worth</p>
+                <p className="font-mono text-sm font-medium text-text">{formatCurrency(latestNW?.net_worth ?? 0)}</p>
+              </div>
+            </div>
+            <div className="flex flex-wrap gap-x-6 gap-y-2">
+              {assetDonutData.map((entry, i) => (
+                <div key={i} className="flex items-center gap-2">
+                  <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: ASSET_COLORS[i % ASSET_COLORS.length] }} />
+                  <div>
+                    <p className="text-xs text-muted">{entry.name}</p>
+                    <p className="font-mono text-sm text-text">{formatCurrency(entry.value)}</p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        ) : (
+          <div className="h-24 flex items-center justify-center text-muted text-sm">
+            No asset data available
+          </div>
+        )}
+      </div>
+
+      {/* Row 3: Donut + Upcoming bills */}
       <div className="grid grid-cols-5 gap-4">
         {/* Spending Donut */}
         <div className="col-span-3 bg-surface border border-border rounded p-4">
@@ -254,11 +338,16 @@ export function Dashboard() {
         </div>
       </div>
 
-      {/* Row 3: Budget + Investments */}
+      {/* Row 4: Budget + Investments */}
       <div className="grid grid-cols-2 gap-4">
         {/* Budget progress */}
         <div className="bg-surface border border-border rounded p-4">
-          <h2 className="text-sm font-medium text-text mb-4">Budget Progress</h2>
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-sm font-medium text-text">Budget Progress</h2>
+            <button onClick={() => navigate('/budget')} className="text-xs text-muted hover:text-[#4ecba3] flex items-center gap-1">
+              View all <ArrowRight size={11} />
+            </button>
+          </div>
           {budgets && budgets.length > 0 ? (
             <div className="space-y-3">
               {budgets.slice(0, 6).map((budget) => {
@@ -295,7 +384,12 @@ export function Dashboard() {
 
         {/* Investment Snapshot */}
         <div className="bg-surface border border-border rounded p-4">
-          <h2 className="text-sm font-medium text-text mb-4">Investments</h2>
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-sm font-medium text-text">Investments</h2>
+            <button onClick={() => navigate('/investments')} className="text-xs text-muted hover:text-[#4ecba3] flex items-center gap-1">
+              View all <ArrowRight size={11} />
+            </button>
+          </div>
           {holdings && holdings.length > 0 ? (
             <>
               <p className="font-mono text-2xl text-[#5b8dee] mb-4">{formatCurrency(investmentTotal)}</p>
@@ -305,7 +399,7 @@ export function Dashboard() {
                   return (
                     <div key={h.id} className="flex items-center justify-between text-xs">
                       <div className="flex items-center gap-2">
-                        <span className="font-mono text-[#5b8dee] font-medium">{h.ticker ?? '—'}</span>
+                        <span className="font-mono text-[#5b8dee] font-medium">{h.ticker ?? '-'}</span>
                         <span className="text-muted truncate max-w-[120px]">{h.security_name}</span>
                       </div>
                       <div className="text-right">
@@ -329,15 +423,18 @@ export function Dashboard() {
         </div>
       </div>
 
-      {/* Row 4: Recent Transactions */}
+      {/* Row 5: Recent Transactions */}
       <div className="bg-surface border border-border rounded">
-        <div className="px-4 py-3 border-b border-border">
+        <div className="px-4 py-3 border-b border-border flex items-center justify-between">
           <h2 className="text-sm font-medium text-text">Recent Transactions</h2>
+          <button onClick={() => navigate('/transactions')} className="text-xs text-muted hover:text-[#4ecba3] flex items-center gap-1">
+            View all <ArrowRight size={11} />
+          </button>
         </div>
         {recentTxs && recentTxs.data.length > 0 ? (
           <div className="divide-y divide-border">
             {recentTxs.data.map((tx) => (
-              <div key={tx.id} className="flex items-center px-4 py-2.5 gap-4 hover:bg-white/2">
+              <div key={tx.id} className="flex items-center px-4 py-2.5 gap-4 hover:bg-white/2 cursor-pointer" onClick={() => navigate('/transactions')}>
                 <span className="font-mono text-xs text-muted w-20 flex-shrink-0">{formatDate(tx.date)}</span>
                 <span className="text-sm text-text flex-1 truncate">{tx.merchant_name || tx.original_name}</span>
                 <span className="text-xs text-muted flex-shrink-0">

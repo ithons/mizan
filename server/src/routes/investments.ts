@@ -3,7 +3,7 @@ import { getDb } from '../db/index';
 
 const router = Router();
 
-// GET /holdings — all holdings JOIN securities
+// GET /holdings - all holdings JOIN securities
 router.get('/holdings', (_req: Request, res: Response, next: NextFunction): void => {
   try {
     const db = getDb();
@@ -24,7 +24,7 @@ router.get('/holdings', (_req: Request, res: Response, next: NextFunction): void
   }
 });
 
-// GET /holdings/:accountId — holdings for specific account
+// GET /holdings/:accountId - holdings for specific account
 router.get('/holdings/:accountId', (req: Request, res: Response, next: NextFunction): void => {
   try {
     const db = getDb();
@@ -46,7 +46,7 @@ router.get('/holdings/:accountId', (req: Request, res: Response, next: NextFunct
   }
 });
 
-// GET /transactions — investment transactions with filters
+// GET /transactions - investment transactions with filters
 router.get('/transactions', (req: Request, res: Response, next: NextFunction): void => {
   try {
     const db = getDb();

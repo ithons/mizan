@@ -7,6 +7,14 @@
   * { box-sizing: border-box; }
 }
 
+/* resize panel separator hover */
+[data-separator]:hover {
+  background-color: rgba(78, 203, 163, 0.3) !important;
+}
+[data-separator][data-active] {
+  background-color: rgba(78, 203, 163, 0.5) !important;
+}
+
 /* scrollbar styling */
 ::-webkit-scrollbar { width: 6px; height: 6px; }
 ::-webkit-scrollbar-track { background: transparent; }

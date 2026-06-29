@@ -89,8 +89,28 @@ export function saveCredentials(store: CredentialsStore): void {
   fs.writeFileSync(CREDENTIALS_PATH, JSON.stringify(enc), { mode: 0o600 });
 }
 
+export function getEnvCredentials(): Partial<CredentialsStore> {
+  const result: Partial<CredentialsStore> = {};
+  if (process.env.PLAID_CLIENT_ID && process.env.PLAID_SECRET) {
+    result.plaid = {
+      clientId: process.env.PLAID_CLIENT_ID,
+      secret: process.env.PLAID_SECRET,
+      environment: (process.env.PLAID_ENVIRONMENT as 'sandbox' | 'production') ?? 'sandbox',
+    };
+  }
+  if (process.env.COINBASE_KEY_NAME && process.env.COINBASE_PRIVATE_KEY) {
+    result.coinbase = {
+      keyName: process.env.COINBASE_KEY_NAME,
+      privateKey: process.env.COINBASE_PRIVATE_KEY,
+    };
+  }
+  return result;
+}
+
 export function getCredentials(): CredentialsStore {
-  return loadCredentials();
+  const stored = loadCredentials();
+  const env = getEnvCredentials();
+  return { ...stored, ...env };
 }
 
 export function updatePlaidCredentials(plaid: PlaidCredentials): void {

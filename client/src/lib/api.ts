@@ -14,6 +14,8 @@ import type {
   Holding,
   InvestmentTransaction,
   PaginatedResponse,
+  ChatMessage,
+  AiStreamEvent,
 } from '@shared/types';
 
 async function apiFetch<T>(url: string, options?: RequestInit): Promise<T> {
@@ -30,8 +32,8 @@ async function apiFetch<T>(url: string, options?: RequestInit): Promise<T> {
     try {
       const body = await res.json();
       errMsg = body.error || errMsg;
-    } catch {
-      // ignore parse errors
+    } catch (err) {
+      console.warn('Failed to parse API error response', err);
     }
     throw new Error(errMsg);
   }
@@ -156,9 +158,9 @@ export const categoriesApi = {
   delete: (id: string) =>
     apiFetch<void>(`/api/categories/${id}`, { method: 'DELETE' }),
   merge: (sourceId: string, targetId: string) =>
-    apiFetch<void>('/api/categories/merge', {
+    apiFetch<void>(`/api/categories/${sourceId}/merge`, {
       method: 'POST',
-      body: JSON.stringify({ sourceId, targetId }),
+      body: JSON.stringify({ targetId }),
     }),
 };
 
@@ -313,10 +315,86 @@ export const settingsApi = {
     a.click();
     URL.revokeObjectURL(url);
   },
-  importCsv: (formData: FormData) =>
-    fetch('/api/settings/import-csv', { method: 'POST', body: formData }).then((r) => r.json()),
+  importCsv: (body: {
+    rows: Array<Record<string, string>>;
+    mapping: {
+      date: string;
+      amount: string;
+      merchant?: string;
+      category?: string;
+      account?: string;
+      notes?: string;
+      dateFormat?: string;
+      amountNegate?: boolean;
+    };
+  }) =>
+    apiFetch<{ imported: number; errors: string[] }>('/api/settings/import-csv', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
   deleteAllData: () =>
-    apiFetch<void>('/api/settings/data', { method: 'DELETE' }),
+    apiFetch<void>('/api/settings/data', {
+      method: 'DELETE',
+      body: JSON.stringify({ confirm: 'delete' }),
+    }),
+};
+
+// ─── AI Advisor ──────────────────────────────────────────────────────────────
+
+export const aiApi = {
+  getContext: () => apiFetch<{ context: string; configured: boolean }>('/api/ai/context'),
+
+  streamChat: async (
+    messages: ChatMessage[],
+    onChunk: (text: string) => void,
+    onDone: () => void,
+    onError: (msg: string) => void,
+    signal?: AbortSignal
+  ): Promise<void> => {
+    const res = await fetch('/api/ai/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ messages }),
+      signal,
+    });
+
+    if (!res.ok) {
+      let msg = `HTTP ${res.status}`;
+      try {
+        const body = await res.json();
+        msg = body.error || msg;
+      } catch (err) {
+        console.warn('Failed to parse AI error response', err);
+      }
+      onError(msg);
+      return;
+    }
+
+    const reader = res.body?.getReader();
+    if (!reader) { onError('No response body'); return; }
+
+    const decoder = new TextDecoder();
+    let buf = '';
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value, { stream: true });
+      const lines = buf.split('\n');
+      buf = lines.pop() ?? '';
+      for (const line of lines) {
+        if (!line.startsWith('data: ')) continue;
+        try {
+          const ev = JSON.parse(line.slice(6)) as AiStreamEvent;
+          if (ev.type === 'chunk' && ev.text) onChunk(ev.text);
+          else if (ev.type === 'done') onDone();
+          else if (ev.type === 'error') onError(ev.message ?? 'Unknown error');
+        } catch (err) {
+          console.warn('Ignoring malformed AI stream event', err);
+        }
+      }
+    }
+  },
 };
 
 // ─── Health ──────────────────────────────────────────────────────────────────

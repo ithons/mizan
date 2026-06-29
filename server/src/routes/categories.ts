@@ -11,7 +11,7 @@ import type { Category } from '../../../shared/types';
 
 const router = Router();
 
-// GET / — all categories as flat array with children nested
+// GET / - all categories as flat array with children nested
 router.get('/', (_req: Request, res: Response, next: NextFunction): void => {
   try {
     const db = getDb();
@@ -41,7 +41,7 @@ router.get('/', (_req: Request, res: Response, next: NextFunction): void => {
   }
 });
 
-// POST / — create category
+// POST / - create category
 router.post(
   '/',
   validate(CreateCategorySchema),
@@ -83,7 +83,7 @@ router.post(
   }
 );
 
-// PATCH /:id — update category
+// PATCH /:id - update category
 router.patch(
   '/:id',
   validate(UpdateCategorySchema),

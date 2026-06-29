@@ -10,7 +10,7 @@ import {
 
 const router = Router();
 
-// GET / — list transactions with filters
+// GET / - list transactions with filters
 router.get('/', (req: Request, res: Response, next: NextFunction): void => {
   try {
     const db = getDb();
@@ -111,7 +111,7 @@ router.get('/', (req: Request, res: Response, next: NextFunction): void => {
   }
 });
 
-// GET /:id — single transaction
+// GET /:id - single transaction
 router.get('/:id', (req: Request, res: Response, next: NextFunction): void => {
   try {
     const db = getDb();
@@ -140,7 +140,7 @@ router.get('/:id', (req: Request, res: Response, next: NextFunction): void => {
   }
 });
 
-// POST /manual — create manual transaction
+// POST /manual - create manual transaction
 router.post(
   '/manual',
   validate(CreateManualTransactionSchema),
@@ -186,7 +186,7 @@ router.post(
   }
 );
 
-// PATCH /:id — update transaction
+// PATCH /:id - update transaction
 router.patch(
   '/:id',
   validate(UpdateTransactionSchema),
@@ -272,7 +272,7 @@ router.patch(
   }
 );
 
-// DELETE /:id — delete only if manual
+// DELETE /:id - delete only if manual
 router.delete('/:id', (req: Request, res: Response, next: NextFunction): void => {
   try {
     const db = getDb();
@@ -299,7 +299,7 @@ router.delete('/:id', (req: Request, res: Response, next: NextFunction): void =>
   }
 });
 
-// POST /bulk-category — bulk update categories
+// POST /bulk-category - bulk update categories
 router.post(
   '/bulk-category',
   validate(BulkCategorySchema),

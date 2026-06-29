@@ -4,7 +4,7 @@ import { getCredentials } from '../services/credentials';
 
 const router = Router();
 
-// GET / — health check
+// GET / - health check
 router.get('/', (_req: Request, res: Response, next: NextFunction): void => {
   try {
     const db = getDb();

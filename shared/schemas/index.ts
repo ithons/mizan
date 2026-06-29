@@ -12,6 +12,10 @@ export const CreateManualAccountSchema = z.object({
 
 export const UpdateAccountSchema = z.object({
   account_name: z.string().min(1).optional(),
+  institution_name: z.string().nullable().optional(),
+  type: z.enum(['checking', 'savings', 'credit', 'brokerage', 'ira_traditional', 'ira_roth', 'crypto_wallet', 'cash', 'other']).optional(),
+  currency: z.string().min(1).optional(),
+  is_liability: z.boolean().optional(),
   color: z.string().nullable().optional(),
   is_hidden: z.boolean().optional(),
   sort_order: z.number().int().optional(),

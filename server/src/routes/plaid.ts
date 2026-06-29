@@ -15,10 +15,14 @@ import { removePlaidItemToken } from '../services/credentials';
 
 const router = Router();
 
+function defaultRedirectUri() {
+  return `http://localhost:${process.env.PORT || '3001'}`;
+}
+
 // POST /link-token
 router.post('/link-token', async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
-    const redirectUri: string = (req.body as { redirectUri?: string }).redirectUri || 'http://localhost:3000';
+    const redirectUri: string = (req.body as { redirectUri?: string }).redirectUri || defaultRedirectUri();
     const linkToken = await createLinkToken(redirectUri);
     res.json({ data: { link_token: linkToken, redirect_uri: redirectUri } });
   } catch (err) {
@@ -45,7 +49,7 @@ router.post(
   }
 );
 
-// POST /sync/all — must be registered before /sync/:itemId to avoid "all" matching as itemId
+// POST /sync/all - must be registered before /sync/:itemId to avoid "all" matching as itemId
 router.post('/sync/all', async (_req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
     await syncAllItems();
@@ -65,7 +69,7 @@ router.post('/sync/:itemId', async (req: Request, res: Response, next: NextFunct
   }
 });
 
-// GET /items — list plaid items
+// GET /items - list plaid items
 router.get('/items', (_req: Request, res: Response, next: NextFunction): void => {
   try {
     const db = getDb();
@@ -79,7 +83,7 @@ router.get('/items', (_req: Request, res: Response, next: NextFunction): void =>
   }
 });
 
-// DELETE /items/:id — remove plaid item
+// DELETE /items/:id - remove plaid item
 router.delete('/items/:id', async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
     const db = getDb();
@@ -115,10 +119,10 @@ router.delete('/items/:id', async (req: Request, res: Response, next: NextFuncti
   }
 });
 
-// POST /update-token/:id — get update mode link token
+// POST /update-token/:id - get update mode link token
 router.post('/update-token/:id', async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
-    const redirectUri: string = (req.body as { redirectUri?: string }).redirectUri || 'http://localhost:3000';
+    const redirectUri: string = (req.body as { redirectUri?: string }).redirectUri || defaultRedirectUri();
     const linkToken = await createUpdateToken(req.params['id'] as string, redirectUri);
     res.json({ data: { link_token: linkToken, redirect_uri: redirectUri } });
   } catch (err) {

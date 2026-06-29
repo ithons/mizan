@@ -42,6 +42,16 @@ export function resetPlaidClient(): void {
   _client = null;
 }
 
+function shouldSendRedirectUri(redirectUri: string): boolean {
+  try {
+    const url = new URL(redirectUri);
+    return url.protocol === 'https:' || ['localhost', '127.0.0.1'].includes(url.hostname);
+  } catch (err) {
+    console.warn('[plaid] Invalid redirect URI ignored:', redirectUri, err);
+    return false;
+  }
+}
+
 function mapAccountType(
   plaidType: string,
   plaidSubtype: string | null | undefined
@@ -63,7 +73,7 @@ function mapAccountType(
   return 'other';
 }
 
-export async function createLinkToken(redirectUri: string = 'http://localhost:3000'): Promise<string> {
+export async function createLinkToken(redirectUri: string = 'http://localhost:3001'): Promise<string> {
   const plaid = getPlaidClient();
   const creds = getCredentials();
 
@@ -73,7 +83,7 @@ export async function createLinkToken(redirectUri: string = 'http://localhost:30
     products: [Products.Transactions, Products.Investments],
     country_codes: [CountryCode.Us],
     language: 'en',
-    redirect_uri: redirectUri,
+    ...(shouldSendRedirectUri(redirectUri) ? { redirect_uri: redirectUri } : {}),
   };
 
   console.log(
@@ -136,6 +146,7 @@ export async function exchangeToken(
     const isLiability = acct.type === 'credit' || acct.type === 'loan' ? 1 : 0;
     const currentBalance = acct.balances.current ?? 0;
     const availableBalance = acct.balances.available ?? null;
+    const creditLimit = acct.balances.limit ?? null;
 
     const existingAcct = db.prepare(
       'SELECT id FROM accounts WHERE plaid_account_id = ?'
@@ -144,16 +155,16 @@ export async function exchangeToken(
     if (existingAcct) {
       db.prepare(`
         UPDATE accounts
-        SET current_balance = ?, available_balance = ?, updated_at = ?
+        SET current_balance = ?, available_balance = ?, credit_limit = ?, updated_at = ?
         WHERE id = ?
-      `).run(currentBalance, availableBalance, now, existingAcct.id);
+      `).run(currentBalance, availableBalance, creditLimit, now, existingAcct.id);
     } else {
       db.prepare(`
         INSERT INTO accounts
           (id, plaid_account_id, connection_id, connection_type, institution_name,
-           account_name, type, subtype, mask, current_balance, available_balance,
+           account_name, type, subtype, mask, current_balance, available_balance, credit_limit,
            currency, is_manual, is_hidden, is_liability, sort_order, created_at, updated_at)
-        VALUES (?, ?, ?, 'plaid', ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, ?, 0, ?, ?)
+        VALUES (?, ?, ?, 'plaid', ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, ?, 0, ?, ?)
       `).run(
         uuidv4(),
         acct.account_id,
@@ -165,6 +176,7 @@ export async function exchangeToken(
         acct.mask || null,
         currentBalance,
         availableBalance,
+        creditLimit,
         acct.balances.iso_currency_code || 'USD',
         isLiability,
         now,
@@ -522,7 +534,7 @@ export async function syncAllItems(): Promise<void> {
   }
 }
 
-export async function createUpdateToken(dbItemId: string, redirectUri: string = 'http://localhost:3000'): Promise<string> {
+export async function createUpdateToken(dbItemId: string, redirectUri: string = 'http://localhost:3001'): Promise<string> {
   const db = getDb();
   const plaid = getPlaidClient();
   const creds = getCredentials();
@@ -542,7 +554,7 @@ export async function createUpdateToken(dbItemId: string, redirectUri: string = 
     access_token: accessToken,
     country_codes: [CountryCode.Us],
     language: 'en',
-    redirect_uri: redirectUri,
+    ...(shouldSendRedirectUri(redirectUri) ? { redirect_uri: redirectUri } : {}),
   });
 
   return response.data.link_token;

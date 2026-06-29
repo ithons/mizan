@@ -9,6 +9,7 @@ import { useAppStore } from '../store';
 import { Modal } from '../components/Modal';
 import { CategoryBadge } from '../components/CategoryBadge';
 import { PageLoader } from '../components/LoadingSpinner';
+import type { Budget as BudgetModel, Category } from '@shared/types';
 
 // ─── Budget Progress Bar ─────────────────────────────────────────────────────
 
@@ -17,7 +18,7 @@ function BudgetRow({
   onEdit,
   onDelete,
 }: {
-  budget: any;
+  budget: BudgetModel;
   onEdit: (categoryId: string, amount: number) => void;
   onDelete: (id: string) => void;
 }) {
@@ -113,7 +114,7 @@ function AddBudgetModal({
   open: boolean;
   onClose: () => void;
   month: string;
-  categories: any[];
+  categories: Category[];
 }) {
   const qc = useQueryClient();
   const { addToast } = useAppStore();
@@ -180,7 +181,7 @@ function AddBudgetModal({
             onClick={() => mutation.mutate()}
             disabled={mutation.isPending}
           >
-            {mutation.isPending ? 'Saving…' : 'Save Budget'}
+            {mutation.isPending ? 'Saving...' : 'Save Budget'}
           </button>
           <button
             className="px-4 py-2 text-sm border border-border rounded text-muted hover:text-text"
@@ -469,7 +470,7 @@ export function Budget() {
             </div>
 
             {isLoading ? (
-              <div className="py-8 text-center text-muted text-sm">Loading…</div>
+              <div className="py-8 text-center text-muted text-sm">Loading...</div>
             ) : budgets.length > 0 ? (
               budgets.map((budget) => (
                 <BudgetRow

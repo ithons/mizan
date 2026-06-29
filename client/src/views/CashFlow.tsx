@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
+import { useNavigate } from 'react-router-dom';
 import {
   BarChart,
   Bar,
@@ -12,24 +13,38 @@ import {
   CartesianGrid,
   Legend,
 } from 'recharts';
-import { ChevronLeft, ChevronRight } from 'lucide-react';
+import { ChevronLeft, ChevronRight, ArrowRight, X } from 'lucide-react';
 import { format, subMonths, startOfMonth, endOfMonth, addMonths } from 'date-fns';
-import { reportsApi, transactionsApi, categoriesApi } from '../lib/api';
+import { reportsApi, transactionsApi, categoriesApi, flattenCategories } from '../lib/api';
 import { formatCurrency, formatMonth } from '../lib/formatters';
 import { PageLoader } from '../components/LoadingSpinner';
 import { AmountBadge } from '../components/AmountBadge';
 import { CategoryBadge } from '../components/CategoryBadge';
+import { EmptyState } from '../components/EmptyState';
 
-function CustomTooltip({ active, payload, label }: any) {
+interface TooltipPayload {
+  dataKey: string | number;
+  color?: string;
+  name?: string;
+  value: number;
+}
+
+interface CustomTooltipProps {
+  active?: boolean;
+  payload?: TooltipPayload[];
+  label?: string | number;
+}
+
+function CustomTooltip({ active, payload, label }: CustomTooltipProps) {
   if (!active || !payload?.length) return null;
   return (
     <div className="bg-surface border border-border rounded px-3 py-2 text-xs">
       <p className="text-muted mb-1 font-mono">{label}</p>
-      {payload.map((p: any) => (
+      {payload.map((p) => (
         <div key={p.dataKey} className="flex items-center gap-2">
-          <span className="w-2 h-2 rounded-full" style={{ backgroundColor: p.color }} />
-          <span className="text-text">{p.name}:</span>
-          <span className="font-mono" style={{ color: p.color }}>{formatCurrency(Math.abs(p.value))}</span>
+          <span className="w-2 h-2 rounded-full" style={{ backgroundColor: p.color ?? '#6b6b7a' }} />
+          <span className="text-text">{p.name ?? p.dataKey}:</span>
+          <span className="font-mono" style={{ color: p.color ?? '#6b6b7a' }}>{formatCurrency(Math.abs(p.value))}</span>
         </div>
       ))}
     </div>
@@ -37,6 +52,7 @@ function CustomTooltip({ active, payload, label }: any) {
 }
 
 export function CashFlow() {
+  const navigate = useNavigate();
   const now = new Date();
   const [currentMonth, setCurrentMonth] = useState(format(now, 'yyyy-MM'));
 
@@ -62,10 +78,11 @@ export function CashFlow() {
     }),
   });
 
-  const { data: categories = [] } = useQuery({
+  const { data: categoriesTree = [] } = useQuery({
     queryKey: ['categories'],
     queryFn: categoriesApi.list,
   });
+  const categories = flattenCategories(categoriesTree);
 
   const [filterCategoryId, setFilterCategoryId] = useState('');
 
@@ -114,7 +131,7 @@ export function CashFlow() {
 
       {/* Bar Chart */}
       <div className="bg-surface border border-border rounded p-4">
-        <h2 className="text-sm font-medium text-text mb-4">Income vs Expenses — Trailing 12 Months</h2>
+        <h2 className="text-sm font-medium text-text mb-4">Income vs Expenses - Trailing 12 Months</h2>
         <ResponsiveContainer width="100%" height={220}>
           <BarChart data={chartData} barCategoryGap="30%">
             <CartesianGrid vertical={false} stroke="#2a2a2f" />
@@ -130,7 +147,7 @@ export function CashFlow() {
 
       {/* Line Chart */}
       <div className="bg-surface border border-border rounded p-4">
-        <h2 className="text-sm font-medium text-text mb-4">Net Cash Flow — Trailing 12 Months</h2>
+        <h2 className="text-sm font-medium text-text mb-4">Net Cash Flow - Trailing 12 Months</h2>
         <ResponsiveContainer width="100%" height={180}>
           <LineChart data={chartData}>
             <CartesianGrid vertical={false} stroke="#2a2a2f" />
@@ -153,11 +170,17 @@ export function CashFlow() {
       {/* Selected month breakdown */}
       {selectedMonthData && (
         <div className="grid grid-cols-3 gap-4">
-          <div className="bg-surface border border-border rounded p-4">
+          <div
+            className="bg-surface border border-border rounded p-4 cursor-pointer hover:bg-[#4ecba3]/5 transition-colors"
+            onClick={() => navigate('/transactions')}
+          >
             <p className="text-xs text-muted mb-1">Income</p>
             <p className="font-mono text-xl text-[#4ecba3]">{formatCurrency(selectedMonthData.income)}</p>
           </div>
-          <div className="bg-surface border border-border rounded p-4">
+          <div
+            className="bg-surface border border-border rounded p-4 cursor-pointer hover:bg-[#4ecba3]/5 transition-colors"
+            onClick={() => navigate('/transactions')}
+          >
             <p className="text-xs text-muted mb-1">Expenses</p>
             <p className="font-mono text-xl text-[#e07070]">{formatCurrency(Math.abs(selectedMonthData.expenses))}</p>
           </div>
@@ -176,35 +199,62 @@ export function CashFlow() {
       {/* Transaction list for selected month */}
       <div className="bg-surface border border-border rounded">
         <div className="flex items-center justify-between px-4 py-3 border-b border-border">
-          <h2 className="text-sm font-medium text-text">Transactions — {formatMonth(currentMonth)}</h2>
-          <select
-            className="bg-background border border-border rounded px-2 py-1 text-xs text-text"
-            value={filterCategoryId}
-            onChange={(e) => setFilterCategoryId(e.target.value)}
-          >
-            <option value="">All Categories</option>
-            {categories.map((c) => (
-              <option key={c.id} value={c.id}>{c.name}</option>
-            ))}
-          </select>
+          <h2 className="text-sm font-medium text-text">Transactions - {formatMonth(currentMonth)}</h2>
+          <div className="flex items-center gap-2">
+            <select
+              className="bg-background border border-border rounded px-2 py-1 text-xs text-text"
+              value={filterCategoryId}
+              onChange={(e) => setFilterCategoryId(e.target.value)}
+            >
+              <option value="">All Categories</option>
+              {categories.map((c) => (
+                <option key={c.id} value={c.id}>{c.name}</option>
+              ))}
+            </select>
+            {filterCategoryId && (
+              <button
+                className="text-muted hover:text-text"
+                onClick={() => setFilterCategoryId('')}
+                title="Clear filter"
+              >
+                <X size={13} />
+              </button>
+            )}
+          </div>
         </div>
         <div className="divide-y divide-border">
-          {txs.slice(0, 50).map((tx) => (
-            <div key={tx.id} className="flex items-center px-4 py-2.5 gap-4 hover:bg-white/2">
-              <span className="font-mono text-xs text-muted w-20 flex-shrink-0">{tx.date}</span>
-              <span className="text-sm text-text flex-1 truncate">{tx.merchant_name || tx.original_name}</span>
-              {tx.category_name ? (
-                <CategoryBadge name={tx.category_name} color={tx.category_color} icon={tx.category_icon} />
-              ) : (
-                <span className="text-xs text-muted">Uncategorized</span>
+          {txs.length === 0 ? (
+            <EmptyState
+              icon={ArrowRight}
+              title={`No transactions for ${formatMonth(currentMonth)}`}
+              description={filterCategoryId ? 'Try clearing the category filter.' : undefined}
+            />
+          ) : (
+            <>
+              {txs.slice(0, 50).map((tx) => (
+                <div key={tx.id} className="flex items-center px-4 py-2.5 gap-4 hover:bg-white/2">
+                  <span className="font-mono text-xs text-muted w-20 flex-shrink-0">{tx.date}</span>
+                  <span className="text-sm text-text flex-1 truncate">{tx.merchant_name || tx.original_name}</span>
+                  {tx.category_name ? (
+                    <CategoryBadge name={tx.category_name} color={tx.category_color} icon={tx.category_icon} />
+                  ) : (
+                    <span className="text-xs text-muted">Uncategorized</span>
+                  )}
+                  <AmountBadge amount={tx.amount} className="flex-shrink-0" />
+                </div>
+              ))}
+              {txs.length > 50 && (
+                <div className="flex items-center justify-between px-4 py-3 border-t border-border">
+                  <span className="text-xs text-muted">Showing 50 of {txs.length}</span>
+                  <button
+                    className="text-xs text-[#4ecba3] hover:opacity-80 flex items-center gap-1"
+                    onClick={() => navigate('/transactions')}
+                  >
+                    View all <ArrowRight size={11} />
+                  </button>
+                </div>
               )}
-              <AmountBadge amount={tx.amount} className="flex-shrink-0" />
-            </div>
-          ))}
-          {txs.length === 0 && (
-            <div className="py-10 text-center text-muted text-sm">
-              No transactions for {formatMonth(currentMonth)}
-            </div>
+            </>
           )}
         </div>
       </div>

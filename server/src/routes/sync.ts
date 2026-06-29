@@ -3,7 +3,7 @@ import { addSseClient, removeSseClient } from '../services/syncManager';
 
 const router = Router();
 
-// GET / — SSE endpoint
+// GET / - SSE endpoint
 router.get('/', (req: Request, res: Response): void => {
   res.setHeader('Content-Type', 'text/event-stream');
   res.setHeader('Cache-Control', 'no-cache');

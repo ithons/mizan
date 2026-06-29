@@ -7,9 +7,11 @@ import {
   PlaidCredentialsSchema,
   CoinbaseCredentialsSchema,
   CsvImportMappingSchema,
+  DeleteDataSchema,
 } from '../../../shared/schemas';
 import {
   getCredentials,
+  getEnvCredentials,
   updatePlaidCredentials,
   updateCoinbaseCredentials,
 } from '../services/credentials';
@@ -23,11 +25,14 @@ const router = Router();
 router.get('/credentials', (_req: Request, res: Response, next: NextFunction): void => {
   try {
     const creds = getCredentials();
+    const envCreds = getEnvCredentials();
     res.json({
       data: {
         plaid: !!creds.plaid,
         plaidEnvironment: creds.plaid?.environment ?? null,
+        plaidFromEnv: !!envCreds.plaid,
         coinbase: !!creds.coinbase,
+        coinbaseFromEnv: !!envCreds.coinbase,
       },
     });
   } catch (err) {
@@ -255,9 +260,10 @@ router.post('/import-csv', (req: Request, res: Response, next: NextFunction): vo
   }
 });
 
-// DELETE /data — wipe all user data
+// DELETE /data - wipe all user data
 router.delete(
   '/data',
+  validate(DeleteDataSchema),
   (_req: Request, res: Response, next: NextFunction): void => {
     try {
       const db = getDb();

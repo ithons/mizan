@@ -57,7 +57,7 @@ export async function runFullSync(): Promise<void> {
     emitSyncEvent({ type: 'sync_progress', message: 'Taking net worth snapshot...', progress: 90 });
     takeSnapshot();
 
-    emitSyncEvent({ type: 'sync_complete', message: 'Sync complete', progress: 100 });
+    emitSyncEvent({ type: 'sync_complete', message: 'Sync complete', progress: 100, completedAt: new Date().toISOString() });
   } catch (err) {
     const message = (err as Error).message || 'Sync failed';
     emitSyncEvent({ type: 'sync_error', message });

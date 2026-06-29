@@ -1,13 +1,13 @@
 import Database from 'better-sqlite3';
 import fs from 'fs';
 import path from 'path';
-import os from 'os';
 
-const MIZAN_DIR = path.join(os.homedir(), '.mizan');
+// Store data in the project directory. process.cwd() is always the project
+// root because npm scripts run from there, in both dev and production.
+const MIZAN_DIR = path.join(process.cwd(), '.mizan');
 const DB_PATH = path.join(MIZAN_DIR, 'mizan.db');
 const MIGRATIONS_DIR = path.join(__dirname, 'migrations');
 
-// Ensure ~/.mizan exists
 fs.mkdirSync(MIZAN_DIR, { recursive: true });
 fs.mkdirSync(path.join(MIZAN_DIR, 'logs'), { recursive: true });
 

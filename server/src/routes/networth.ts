@@ -4,7 +4,7 @@ import { takeSnapshot } from '../services/snapshot';
 
 const router = Router();
 
-// GET /snapshot — return the latest net worth snapshot
+// GET /snapshot - return the latest net worth snapshot
 router.get('/snapshot', (_req: Request, res: Response, next: NextFunction): void => {
   try {
     const db = getDb();
@@ -18,7 +18,7 @@ router.get('/snapshot', (_req: Request, res: Response, next: NextFunction): void
   }
 });
 
-// POST /snapshot — take net worth snapshot
+// POST /snapshot - take net worth snapshot
 router.post('/snapshot', (_req: Request, res: Response, next: NextFunction): void => {
   try {
     takeSnapshot();

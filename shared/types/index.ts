@@ -24,6 +24,7 @@ export interface Account {
   mask?: string | null;
   current_balance: number;
   available_balance?: number | null;
+  credit_limit?: number | null;
   currency: string;
   native_currency?: string | null;
   native_balance?: number | null;
@@ -187,12 +188,27 @@ export interface NetWorthSnapshot {
   breakdown: string;
   is_estimated: boolean;
   created_at: string;
+  liquid_assets?: number | null;
+  investment_assets?: number | null;
+  crypto_assets?: number | null;
 }
 
 export interface SyncEvent {
   type: 'sync_start' | 'sync_progress' | 'sync_complete' | 'sync_error';
   message: string;
   progress?: number;
+  completedAt?: string;
+}
+
+export interface ChatMessage {
+  role: 'user' | 'assistant';
+  content: string;
+}
+
+export interface AiStreamEvent {
+  type: 'chunk' | 'done' | 'error';
+  text?: string;
+  message?: string;
 }
 
 export interface ApiResponse<T> {
@@ -254,5 +270,7 @@ export interface NetWorthHistory {
 export interface CredentialStatus {
   plaid: boolean;
   plaidEnvironment: 'sandbox' | 'production' | null;
+  plaidFromEnv: boolean;
   coinbase: boolean;
+  coinbaseFromEnv: boolean;
 }

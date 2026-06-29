@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState } from 'react';
 import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query';
 import {
   Eye,
@@ -10,18 +10,29 @@ import {
   Check,
   AlertTriangle,
   Download,
-  Upload,
-  Link,
+  Link2,
   Unlink,
   RefreshCw,
   Info,
+  Wallet,
+  Tag,
+  Database,
+  CheckCircle,
+  type LucideIcon,
 } from 'lucide-react';
 import { settingsApi, plaidApi, coinbaseApi, categoriesApi } from '../lib/api';
-import { formatDate, formatRelativeTime } from '../lib/formatters';
+import { formatRelativeTime } from '../lib/formatters';
 import { useAppStore } from '../store';
 import { Modal } from '../components/Modal';
+import { ConfirmRemoveModal } from '../components/ConfirmRemoveModal';
 import { PageLoader } from '../components/LoadingSpinner';
 import type { Category } from '@shared/types';
+
+const CATEGORY_PRESET_COLORS = [
+  '#4ecba3', '#5b8dee', '#e07070', '#f0c040', '#9b8dee',
+  '#ee8d5b', '#70c4e0', '#e070b8', '#70e07a', '#a0a0b8',
+  '#c4a86e', '#6e8ec4',
+];
 
 // ─── Plaid Section ────────────────────────────────────────────────────────────
 
@@ -30,6 +41,7 @@ function PlaidSection() {
   const { addToast } = useAppStore();
   const [showSecret, setShowSecret] = useState(false);
   const [form, setForm] = useState({ clientId: '', secret: '', environment: 'sandbox' });
+  const [unlinkTarget, setUnlinkTarget] = useState<{ id: string; name: string } | null>(null);
 
   const { data: credStatus } = useQuery({
     queryKey: ['credential-status'],
@@ -55,7 +67,8 @@ function PlaidSection() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['plaid-items'] });
       qc.invalidateQueries({ queryKey: ['accounts'] });
-      addToast({ type: 'success', message: 'Institution unlinked' });
+      setUnlinkTarget(null);
+      addToast({ type: 'success', message: 'Institution removed' });
     },
     onError: (err: Error) => addToast({ type: 'error', message: err.message }),
   });
@@ -72,7 +85,7 @@ function PlaidSection() {
       await plaidApi.createLinkToken();
     },
     onSuccess: () => addToast({ type: 'success', message: 'Plaid connection successful' }),
-    onError: () => addToast({ type: 'error', message: 'Plaid connection failed — check credentials' }),
+    onError: () => addToast({ type: 'error', message: 'Plaid connection failed - check credentials' }),
   });
 
   return (
@@ -92,96 +105,100 @@ function PlaidSection() {
             </span>
           )}
         </div>
-        <div className="space-y-3 max-w-md">
-          <div>
-            <label className="block text-xs text-muted mb-1">Client ID</label>
-            <input
-              className="w-full bg-background border border-border rounded px-3 py-2 text-sm text-text font-mono focus:outline-none focus:ring-1 focus:ring-[#4ecba3]/50"
-              value={form.clientId}
-              onChange={(e) => setForm({ ...form, clientId: e.target.value })}
-              placeholder="Plaid client ID"
-            />
+        {credStatus?.plaidFromEnv ? (
+          <div className="flex items-start gap-2 p-3 bg-[#4ecba3]/10 border border-[#4ecba3]/30 rounded max-w-md">
+            <Info size={13} className="text-[#4ecba3] mt-0.5 flex-shrink-0" />
+            <p className="text-xs text-muted">
+              Credentials loaded from <span className="font-mono text-text">.env</span>. To change them, edit that file and restart the server.
+            </p>
           </div>
-          <div>
-            <label className="block text-xs text-muted mb-1">Secret</label>
-            <div className="relative">
+        ) : (
+          <div className="space-y-3 max-w-md">
+            <div>
+              <label className="block text-xs text-muted mb-1">Client ID</label>
               <input
-                type={showSecret ? 'text' : 'password'}
-                className="w-full bg-background border border-border rounded px-3 py-2 text-sm text-text font-mono pr-10 focus:outline-none focus:ring-1 focus:ring-[#4ecba3]/50"
-                value={form.secret}
-                onChange={(e) => setForm({ ...form, secret: e.target.value })}
-                placeholder="Plaid secret"
+                className="w-full bg-background border border-border rounded px-3 py-2 text-sm text-text font-mono focus:outline-none focus:ring-1 focus:ring-[#4ecba3]/50"
+                value={form.clientId}
+                onChange={(e) => setForm({ ...form, clientId: e.target.value })}
+                placeholder="Plaid client ID"
               />
+            </div>
+            <div>
+              <label className="block text-xs text-muted mb-1">Secret</label>
+              <div className="relative">
+                <input
+                  type={showSecret ? 'text' : 'password'}
+                  className="w-full bg-background border border-border rounded px-3 py-2 text-sm text-text font-mono pr-10 focus:outline-none focus:ring-1 focus:ring-[#4ecba3]/50"
+                  value={form.secret}
+                  onChange={(e) => setForm({ ...form, secret: e.target.value })}
+                  placeholder="Plaid secret"
+                />
+                <button
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-muted hover:text-text"
+                  onClick={() => setShowSecret(!showSecret)}
+                  type="button"
+                >
+                  {showSecret ? <EyeOff size={14} /> : <Eye size={14} />}
+                </button>
+              </div>
+            </div>
+            <div>
+              <label className="block text-xs text-muted mb-1">Environment</label>
+              <div className="flex gap-2">
+                {['sandbox', 'production'].map((env) => (
+                  <button
+                    key={env}
+                    onClick={() => setForm({ ...form, environment: env })}
+                    className={`px-3 py-1.5 text-xs rounded border transition-all ${
+                      form.environment === env
+                        ? 'bg-[#4ecba3]/10 text-[#4ecba3] border-[#4ecba3]/40'
+                        : 'text-muted border-border hover:text-text'
+                    }`}
+                  >
+                    {env.charAt(0).toUpperCase() + env.slice(1)}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div className="flex items-start gap-2 p-3 bg-[#f0c040]/8 border border-[#f0c040]/30 rounded">
+              <AlertTriangle size={13} className="text-[#f0c040] mt-0.5 flex-shrink-0" />
+              <div className="text-xs text-muted space-y-1">
+                <p className="text-[#f0c040]/90 font-medium">Required for OAuth banks (Chase, Wells Fargo, etc.)</p>
+                <p>
+                  In your Plaid Dashboard go to{' '}
+                  <span className="font-mono text-text">Settings → API → Allowed redirect URIs</span>{' '}
+                  and add:
+                </p>
+                <p className="font-mono text-text bg-background px-2 py-0.5 rounded inline-block">
+                  {window.location.origin}
+                </p>
+              </div>
+            </div>
+            <div className="flex gap-2 pt-1">
               <button
-                className="absolute right-3 top-1/2 -translate-y-1/2 text-muted hover:text-text"
-                onClick={() => setShowSecret(!showSecret)}
-                type="button"
+                className="px-4 py-2 text-sm bg-[#4ecba3] text-[#0f0f11] font-medium rounded hover:opacity-90"
+                onClick={() => saveMutation.mutate()}
+                disabled={saveMutation.isPending}
               >
-                {showSecret ? <EyeOff size={14} /> : <Eye size={14} />}
+                {saveMutation.isPending ? 'Saving...' : 'Save Credentials'}
+              </button>
+              <button
+                className="px-4 py-2 text-sm border border-border rounded text-muted hover:text-text"
+                onClick={() => testMutation.mutate()}
+                disabled={testMutation.isPending}
+              >
+                {testMutation.isPending ? 'Testing...' : 'Test Connection'}
               </button>
             </div>
           </div>
-          <div>
-            <label className="block text-xs text-muted mb-1">Environment</label>
-            <div className="flex gap-2">
-              {['sandbox', 'production'].map((env) => (
-                <button
-                  key={env}
-                  onClick={() => setForm({ ...form, environment: env })}
-                  className={`px-3 py-1.5 text-xs rounded border transition-all ${
-                    form.environment === env
-                      ? 'bg-[#4ecba3]/10 text-[#4ecba3] border-[#4ecba3]/40'
-                      : 'text-muted border-border hover:text-text'
-                  }`}
-                >
-                  {env.charAt(0).toUpperCase() + env.slice(1)}
-                </button>
-              ))}
-            </div>
-          </div>
-          {/* OAuth redirect URI requirement */}
-          <div className="flex items-start gap-2 p-3 bg-[#f0c040]/8 border border-[#f0c040]/30 rounded">
-            <AlertTriangle size={13} className="text-[#f0c040] mt-0.5 flex-shrink-0" />
-            <div className="text-xs text-muted space-y-1">
-              <p className="text-[#f0c040]/90 font-medium">Required for OAuth banks (Chase, Wells Fargo, etc.)</p>
-              <p>
-                In your Plaid Dashboard go to{' '}
-                <span className="font-mono text-text">Settings → API → Allowed redirect URIs</span>{' '}
-                and add:
-              </p>
-              <p className="font-mono text-text bg-background px-2 py-0.5 rounded inline-block">
-                {window.location.origin}
-              </p>
-              <p className="text-muted/70">
-                Without this, OAuth institutions will redirect to a deep link that browsers cannot handle.
-              </p>
-            </div>
-          </div>
-
-          <div className="flex gap-2 pt-1">
-            <button
-              className="px-4 py-2 text-sm bg-[#4ecba3] text-[#0f0f11] font-medium rounded hover:opacity-90"
-              onClick={() => saveMutation.mutate()}
-              disabled={saveMutation.isPending}
-            >
-              {saveMutation.isPending ? 'Saving…' : 'Save Credentials'}
-            </button>
-            <button
-              className="px-4 py-2 text-sm border border-border rounded text-muted hover:text-text"
-              onClick={() => testMutation.mutate()}
-              disabled={testMutation.isPending}
-            >
-              {testMutation.isPending ? 'Testing…' : 'Test Connection'}
-            </button>
-          </div>
-        </div>
+        )}
       </div>
 
       {/* Connected institutions */}
       <div>
         <h3 className="text-sm font-medium text-text mb-3">Connected Institutions</h3>
         {itemsLoading ? (
-          <p className="text-xs text-muted">Loading…</p>
+          <p className="text-xs text-muted">Loading...</p>
         ) : items.length > 0 ? (
           <div className="space-y-2">
             {items.map((item) => (
@@ -199,16 +216,16 @@ function PlaidSection() {
                 <div className="flex gap-2">
                   <button
                     className="text-xs text-muted border border-border rounded px-2 py-1 hover:text-text flex items-center gap-1"
-                    onClick={() => syncMutation.mutate(item.item_id)}
+                    onClick={() => syncMutation.mutate(item.id)}
                     disabled={syncMutation.isPending}
                   >
                     <RefreshCw size={11} /> Sync
                   </button>
                   <button
                     className="text-xs text-[#e07070] border border-[#e07070]/30 rounded px-2 py-1 hover:bg-[#e07070]/10 flex items-center gap-1"
-                    onClick={() => deleteMutation.mutate(item.item_id)}
+                    onClick={() => setUnlinkTarget({ id: item.id, name: item.institution_name })}
                   >
-                    <Unlink size={11} /> Unlink
+                    <Unlink size={11} /> Remove
                   </button>
                 </div>
               </div>
@@ -218,6 +235,16 @@ function PlaidSection() {
           <p className="text-xs text-muted">No institutions connected yet</p>
         )}
       </div>
+
+      <ConfirmRemoveModal
+        open={!!unlinkTarget}
+        onClose={() => setUnlinkTarget(null)}
+        title="Remove Institution"
+        description={`This will remove ${unlinkTarget?.name ?? 'this institution'} and delete its access token. Existing accounts and transactions will be hidden, not deleted.`}
+        confirmLabel="Remove Institution"
+        onConfirm={() => unlinkTarget && deleteMutation.mutate(unlinkTarget.id)}
+        isPending={deleteMutation.isPending}
+      />
     </div>
   );
 }
@@ -229,16 +256,23 @@ function CoinbaseSection() {
   const qc = useQueryClient();
   const [showKey, setShowKey] = useState(false);
   const [form, setForm] = useState({ keyName: '', privateKey: '' });
-  const [connected, setConnected] = useState(false);
+  const [showDisconnectConfirm, setShowDisconnectConfirm] = useState(false);
+
+  const { data: credStatus } = useQuery({
+    queryKey: ['credential-status'],
+    queryFn: settingsApi.getCredentials,
+  });
+
+  const connected = !!credStatus?.coinbase;
 
   const connectMutation = useMutation({
     mutationFn: () => coinbaseApi.connect(form),
     onSuccess: (data) => {
       const detail = data?.accountCount != null
-        ? ` — ${data.accountCount} account(s) found`
+        ? ` - ${data.accountCount} account(s) found`
         : '';
       addToast({ type: 'success', message: `Coinbase connected${detail}` });
-      setConnected(true);
+      qc.invalidateQueries({ queryKey: ['credential-status'] });
       qc.invalidateQueries({ queryKey: ['accounts'] });
     },
     onError: (err: Error) => addToast({ type: 'error', message: err.message }),
@@ -254,52 +288,74 @@ function CoinbaseSection() {
     mutationFn: coinbaseApi.disconnect,
     onSuccess: () => {
       addToast({ type: 'info', message: 'Coinbase disconnected' });
-      setConnected(false);
+      qc.invalidateQueries({ queryKey: ['credential-status'] });
+      qc.invalidateQueries({ queryKey: ['accounts'] });
+      setShowDisconnectConfirm(false);
     },
     onError: (err: Error) => addToast({ type: 'error', message: err.message }),
   });
 
   return (
     <div className="space-y-4 max-w-md">
-      <div className="flex items-start gap-2 p-3 bg-[#5b8dee]/10 border border-[#5b8dee]/30 rounded">
-        <Info size={14} className="text-[#5b8dee] mt-0.5 flex-shrink-0" />
-        <p className="text-xs text-muted">
-          Create an API key at{' '}
-          <a href="https://portal.cdp.coinbase.com" target="_blank" rel="noopener noreferrer" className="text-[#5b8dee] hover:underline">
-            portal.cdp.coinbase.com
-          </a>{' '}
-          → Advanced Trade API with read-only permissions.
-        </p>
-      </div>
-      <div>
-        <label className="block text-xs text-muted mb-1">Key Name</label>
-        <input
-          className="w-full bg-background border border-border rounded px-3 py-2 text-sm text-text font-mono focus:outline-none focus:ring-1 focus:ring-[#4ecba3]/50"
-          value={form.keyName}
-          onChange={(e) => setForm({ ...form, keyName: e.target.value })}
-          placeholder="organizations/xxx/apiKeys/yyy"
-        />
-      </div>
-      <div>
-        <label className="block text-xs text-muted mb-1">Private Key</label>
-        <div className="relative">
-          <textarea
-            className="w-full bg-background border border-border rounded px-3 py-2 text-sm text-text font-mono resize-none focus:outline-none focus:ring-1 focus:ring-[#4ecba3]/50"
-            rows={4}
-            value={form.privateKey}
-            onChange={(e) => setForm({ ...form, privateKey: e.target.value })}
-            placeholder="-----BEGIN EC PRIVATE KEY-----&#10;..."
-            style={{ filter: showKey ? 'none' : 'blur(4px)' }}
-          />
-          <button
-            className="absolute right-2 top-2 text-muted hover:text-text"
-            onClick={() => setShowKey(!showKey)}
-          >
-            {showKey ? <EyeOff size={14} /> : <Eye size={14} />}
-          </button>
+      {credStatus?.coinbaseFromEnv ? (
+        <div className="flex items-start gap-2 p-3 bg-[#4ecba3]/10 border border-[#4ecba3]/30 rounded">
+          <Info size={13} className="text-[#4ecba3] mt-0.5 flex-shrink-0" />
+          <p className="text-xs text-muted">
+            Credentials loaded from <span className="font-mono text-text">.env</span>. To change them, edit that file and restart the server.
+          </p>
         </div>
-      </div>
-      {connected ? (
+      ) : connected ? (
+        <div className="flex items-center gap-3 p-3 bg-[#4ecba3]/10 border border-[#4ecba3]/30 rounded">
+          <CheckCircle size={16} className="text-[#4ecba3] flex-shrink-0" />
+          <div>
+            <p className="text-sm text-text">Coinbase connected</p>
+            <p className="text-xs text-muted">API key stored in local credentials</p>
+          </div>
+        </div>
+      ) : (
+        <>
+          <div className="flex items-start gap-2 p-3 bg-[#5b8dee]/10 border border-[#5b8dee]/30 rounded">
+            <Info size={14} className="text-[#5b8dee] mt-0.5 flex-shrink-0" />
+            <p className="text-xs text-muted">
+              Create an API key at{' '}
+              <a href="https://portal.cdp.coinbase.com" target="_blank" rel="noopener noreferrer" className="text-[#5b8dee] hover:underline">
+                portal.cdp.coinbase.com
+              </a>{' '}
+              → Advanced Trade API with read-only permissions.
+            </p>
+          </div>
+          <div>
+            <label className="block text-xs text-muted mb-1">Key Name</label>
+            <input
+              className="w-full bg-background border border-border rounded px-3 py-2 text-sm text-text font-mono focus:outline-none focus:ring-1 focus:ring-[#4ecba3]/50"
+              value={form.keyName}
+              onChange={(e) => setForm({ ...form, keyName: e.target.value })}
+              placeholder="organizations/xxx/apiKeys/yyy"
+            />
+          </div>
+          <div>
+            <label className="block text-xs text-muted mb-1">Private Key</label>
+            <div className="relative">
+              <textarea
+                className="w-full bg-background border border-border rounded px-3 py-2 text-sm text-text font-mono resize-none focus:outline-none focus:ring-1 focus:ring-[#4ecba3]/50"
+                rows={4}
+                value={form.privateKey}
+                onChange={(e) => setForm({ ...form, privateKey: e.target.value })}
+                placeholder="-----BEGIN EC PRIVATE KEY-----&#10;..."
+                style={{ filter: showKey ? 'none' : 'blur(4px)' }}
+              />
+              <button
+                className="absolute right-2 top-2 text-muted hover:text-text"
+                onClick={() => setShowKey(!showKey)}
+              >
+                {showKey ? <EyeOff size={14} /> : <Eye size={14} />}
+              </button>
+            </div>
+          </div>
+        </>
+      )}
+
+      {credStatus?.coinbaseFromEnv || connected ? (
         <div className="flex gap-2">
           <button
             className="px-4 py-2 text-sm border border-border rounded text-text hover:bg-white/5 flex items-center gap-1.5"
@@ -308,12 +364,15 @@ function CoinbaseSection() {
           >
             <RefreshCw size={13} /> Sync Now
           </button>
-          <button
-            className="px-4 py-2 text-sm border border-[#e07070]/30 rounded text-[#e07070] hover:bg-[#e07070]/10 flex items-center gap-1.5"
-            onClick={() => disconnectMutation.mutate()}
-          >
-            <Unlink size={13} /> Disconnect
-          </button>
+          {!credStatus?.coinbaseFromEnv && (
+            <button
+              className="px-4 py-2 text-sm border border-[#e07070]/30 rounded text-[#e07070] hover:bg-[#e07070]/10 flex items-center gap-1.5"
+              onClick={() => setShowDisconnectConfirm(true)}
+              disabled={disconnectMutation.isPending}
+            >
+              <Unlink size={13} /> Disconnect
+            </button>
+          )}
         </div>
       ) : (
         <button
@@ -321,9 +380,19 @@ function CoinbaseSection() {
           onClick={() => connectMutation.mutate()}
           disabled={connectMutation.isPending || !form.keyName || !form.privateKey}
         >
-          {connectMutation.isPending ? 'Connecting…' : 'Connect Coinbase'}
+          {connectMutation.isPending ? 'Connecting...' : 'Connect Coinbase'}
         </button>
       )}
+
+      <ConfirmRemoveModal
+        open={showDisconnectConfirm}
+        onClose={() => setShowDisconnectConfirm(false)}
+        title="Disconnect Coinbase"
+        description="This will remove your Coinbase API credentials. Existing Coinbase accounts and transactions will be hidden, not deleted."
+        confirmLabel="Disconnect Coinbase"
+        onConfirm={() => disconnectMutation.mutate()}
+        isPending={disconnectMutation.isPending}
+      />
     </div>
   );
 }
@@ -338,13 +407,20 @@ function CategoryRow({
   depth,
 }: {
   category: Category;
-  onEdit: (id: string, name: string) => void;
+  onEdit: (id: string, name: string, color: string, icon: string) => void;
   onDelete: (id: string) => void;
   onAddChild: (parentId: string) => void;
   depth: number;
 }) {
   const [editing, setEditing] = useState(false);
   const [editName, setEditName] = useState(category.name);
+  const [editColor, setEditColor] = useState(category.color || CATEGORY_PRESET_COLORS[0]);
+  const [editIcon, setEditIcon] = useState(category.icon || '');
+
+  const handleSave = () => {
+    onEdit(category.id, editName, editColor, editIcon);
+    setEditing(false);
+  };
 
   return (
     <div>
@@ -353,25 +429,50 @@ function CategoryRow({
         style={{ paddingLeft: `${8 + depth * 20}px` }}
       >
         <span className="w-3 h-3 rounded-full flex-shrink-0" style={{ backgroundColor: category.color || '#6b6b7a' }} />
-        {category.icon && <span className="text-sm">{category.icon}</span>}
+        {category.icon && !editing && <span className="text-sm">{category.icon}</span>}
         {editing ? (
-          <div className="flex items-center gap-1 flex-1">
-            <input
-              autoFocus
-              className="bg-background border border-border rounded px-2 py-0.5 text-xs text-text flex-1 focus:outline-none"
-              value={editName}
-              onChange={(e) => setEditName(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') { onEdit(category.id, editName); setEditing(false); }
-                if (e.key === 'Escape') setEditing(false);
-              }}
-            />
-            <button onClick={() => { onEdit(category.id, editName); setEditing(false); }}>
-              <Check size={12} className="text-[#4ecba3]" />
-            </button>
-            <button onClick={() => setEditing(false)}>
-              <X size={12} className="text-muted" />
-            </button>
+          <div className="flex flex-col gap-2 flex-1 py-1">
+            <div className="flex items-center gap-1">
+              <input
+                autoFocus
+                className="bg-background border border-border rounded px-2 py-0.5 text-xs text-text flex-1 focus:outline-none focus:ring-1 focus:ring-[#4ecba3]/50"
+                value={editName}
+                onChange={(e) => setEditName(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') handleSave();
+                  if (e.key === 'Escape') setEditing(false);
+                }}
+              />
+              <input
+                className="w-8 bg-background border border-border rounded px-1 py-0.5 text-xs text-center text-text focus:outline-none focus:ring-1 focus:ring-[#4ecba3]/50"
+                value={editIcon}
+                onChange={(e) => setEditIcon(e.target.value)}
+                maxLength={2}
+                placeholder="🏠"
+                title="Category icon (emoji)"
+              />
+              <button onClick={handleSave}>
+                <Check size={12} className="text-[#4ecba3]" />
+              </button>
+              <button onClick={() => setEditing(false)}>
+                <X size={12} className="text-muted" />
+              </button>
+            </div>
+            <div className="flex flex-wrap gap-1">
+              {CATEGORY_PRESET_COLORS.map((color) => (
+                <button
+                  key={color}
+                  onClick={() => setEditColor(color)}
+                  className="w-4 h-4 rounded-full transition-transform hover:scale-110"
+                  style={{
+                    backgroundColor: color,
+                    outline: editColor === color ? `2px solid white` : '2px solid transparent',
+                    outlineOffset: '1px',
+                  }}
+                  title={color}
+                />
+              ))}
+            </div>
           </div>
         ) : (
           <>
@@ -393,7 +494,15 @@ function CategoryRow({
             )}
             {!category.is_system && (
               <>
-                <button className="p-1 text-muted hover:text-text" onClick={() => setEditing(true)}>
+                <button
+                  className="p-1 text-muted hover:text-text"
+                  onClick={() => {
+                    setEditName(category.name);
+                    setEditColor(category.color || CATEGORY_PRESET_COLORS[0]);
+                    setEditIcon(category.icon || '');
+                    setEditing(true);
+                  }}
+                >
                   <Edit2 size={12} />
                 </button>
                 <button className="p-1 text-muted hover:text-[#e07070]" onClick={() => onDelete(category.id)}>
@@ -423,6 +532,8 @@ function CategoriesSection() {
   const { addToast } = useAppStore();
   const [addParentId, setAddParentId] = useState<string | null>(null);
   const [addName, setAddName] = useState('');
+  const [addColor, setAddColor] = useState(CATEGORY_PRESET_COLORS[0]);
+  const [addIcon, setAddIcon] = useState('');
   const [showAddModal, setShowAddModal] = useState(false);
 
   const { data: categories = [], isLoading } = useQuery({
@@ -431,8 +542,8 @@ function CategoriesSection() {
   });
 
   const editMutation = useMutation({
-    mutationFn: ({ id, name }: { id: string; name: string }) =>
-      categoriesApi.update(id, { name }),
+    mutationFn: ({ id, name, color, icon }: { id: string; name: string; color: string; icon: string }) =>
+      categoriesApi.update(id, { name, color, icon }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['categories'] }),
   });
 
@@ -446,6 +557,8 @@ function CategoriesSection() {
     mutationFn: () =>
       categoriesApi.create({
         name: addName,
+        color: addColor,
+        icon: addIcon || undefined,
         parent_id: addParentId ?? undefined,
         is_income: false,
         is_system: false,
@@ -455,18 +568,15 @@ function CategoriesSection() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['categories'] });
       setAddName('');
+      setAddColor(CATEGORY_PRESET_COLORS[0]);
+      setAddIcon('');
       setShowAddModal(false);
       addToast({ type: 'success', message: 'Category created' });
     },
     onError: (err: Error) => addToast({ type: 'error', message: err.message }),
   });
 
-  // Build tree
-  const topLevel = categories.filter((c) => !c.parent_id);
-  const withChildren = topLevel.map((c) => ({
-    ...c,
-    children: categories.filter((child) => child.parent_id === c.id),
-  }));
+  const rootCategories = categories.filter((c) => !c.parent_id);
 
   if (isLoading) return <PageLoader />;
 
@@ -482,11 +592,11 @@ function CategoriesSection() {
         </button>
       </div>
       <div className="bg-background border border-border rounded py-2">
-        {withChildren.map((cat) => (
+        {rootCategories.map((cat) => (
           <CategoryRow
             key={cat.id}
-            category={cat as Category}
-            onEdit={(id, name) => editMutation.mutate({ id, name })}
+            category={cat}
+            onEdit={(id, name, color, icon) => editMutation.mutate({ id, name, color, icon })}
             onDelete={(id) => deleteMutation.mutate(id)}
             onAddChild={(parentId) => { setAddParentId(parentId); setShowAddModal(true); }}
             depth={0}
@@ -505,14 +615,42 @@ function CategoriesSection() {
         <div className="space-y-4">
           <div>
             <label className="block text-xs text-muted mb-1">Name</label>
-            <input
-              autoFocus
-              className="w-full bg-background border border-border rounded px-3 py-2 text-sm text-text focus:outline-none focus:ring-1 focus:ring-[#4ecba3]/50"
-              value={addName}
-              onChange={(e) => setAddName(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && addMutation.mutate()}
-              placeholder="Category name"
-            />
+            <div className="flex gap-2">
+              <input
+                autoFocus
+                className="flex-1 bg-background border border-border rounded px-3 py-2 text-sm text-text focus:outline-none focus:ring-1 focus:ring-[#4ecba3]/50"
+                value={addName}
+                onChange={(e) => setAddName(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && addMutation.mutate()}
+                placeholder="Category name"
+              />
+              <input
+                className="w-10 bg-background border border-border rounded px-2 py-2 text-sm text-center text-text focus:outline-none focus:ring-1 focus:ring-[#4ecba3]/50"
+                value={addIcon}
+                onChange={(e) => setAddIcon(e.target.value)}
+                maxLength={2}
+                placeholder="🏠"
+                title="Icon (emoji)"
+              />
+            </div>
+          </div>
+          <div>
+            <label className="block text-xs text-muted mb-2">Color</label>
+            <div className="flex flex-wrap gap-2">
+              {CATEGORY_PRESET_COLORS.map((color) => (
+                <button
+                  key={color}
+                  onClick={() => setAddColor(color)}
+                  className="w-5 h-5 rounded-full transition-transform hover:scale-110"
+                  style={{
+                    backgroundColor: color,
+                    outline: addColor === color ? '2px solid white' : '2px solid transparent',
+                    outlineOffset: '1px',
+                  }}
+                  title={color}
+                />
+              ))}
+            </div>
           </div>
           <div className="flex gap-3">
             <button
@@ -520,7 +658,7 @@ function CategoriesSection() {
               onClick={() => addMutation.mutate()}
               disabled={addMutation.isPending || !addName}
             >
-              {addMutation.isPending ? 'Creating…' : 'Create'}
+              {addMutation.isPending ? 'Creating...' : 'Create'}
             </button>
             <button
               className="px-4 py-2 text-sm border border-border rounded text-muted hover:text-text"
@@ -542,7 +680,6 @@ function DataSection() {
   const qc = useQueryClient();
   const [showDangerModal, setShowDangerModal] = useState(false);
   const [deleteConfirm, setDeleteConfirm] = useState('');
-  const fileRef = useRef<HTMLInputElement>(null);
 
   const deleteAllMutation = useMutation({
     mutationFn: settingsApi.deleteAllData,
@@ -558,29 +695,13 @@ function DataSection() {
     try {
       await settingsApi.exportCsv();
       addToast({ type: 'success', message: 'Export complete' });
-    } catch (err: any) {
-      addToast({ type: 'error', message: err.message });
+    } catch (err: unknown) {
+      addToast({ type: 'error', message: err instanceof Error ? err.message : 'Export failed' });
     }
-  };
-
-  const handleImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    const fd = new FormData();
-    fd.append('file', file);
-    try {
-      await settingsApi.importCsv(fd);
-      qc.invalidateQueries({ queryKey: ['transactions'] });
-      addToast({ type: 'success', message: 'Import complete' });
-    } catch (err: any) {
-      addToast({ type: 'error', message: err.message || 'Import failed' });
-    }
-    e.target.value = '';
   };
 
   return (
     <div className="space-y-6">
-      {/* Export/Import */}
       <div>
         <h3 className="text-sm font-medium text-text mb-3">Data Management</h3>
         <div className="flex gap-3">
@@ -590,23 +711,9 @@ function DataSection() {
           >
             <Download size={14} /> Export CSV
           </button>
-          <button
-            className="flex items-center gap-2 px-4 py-2 text-sm border border-border rounded text-muted hover:text-text"
-            onClick={() => fileRef.current?.click()}
-          >
-            <Upload size={14} /> Import CSV
-          </button>
-          <input
-            ref={fileRef}
-            type="file"
-            accept=".csv"
-            className="hidden"
-            onChange={handleImport}
-          />
         </div>
       </div>
 
-      {/* Danger Zone */}
       <div className="border border-[#e07070]/30 rounded p-4 space-y-3">
         <div className="flex items-center gap-2 mb-2">
           <AlertTriangle size={14} className="text-[#e07070]" />
@@ -637,8 +744,8 @@ function DataSection() {
                 await Promise.all(items.map((i) => plaidApi.deleteItem(i.id)));
                 qc.invalidateQueries({ queryKey: ['accounts'] });
                 addToast({ type: 'success', message: 'All Plaid items disconnected' });
-              } catch (err: any) {
-                addToast({ type: 'error', message: err.message });
+              } catch (err: unknown) {
+                addToast({ type: 'error', message: err instanceof Error ? err.message : 'Disconnect failed' });
               }
             }}
           >
@@ -647,7 +754,6 @@ function DataSection() {
         </div>
       </div>
 
-      {/* Confirm delete modal */}
       <Modal
         open={showDangerModal}
         onClose={() => setShowDangerModal(false)}
@@ -677,7 +783,7 @@ function DataSection() {
               disabled={deleteConfirm !== 'delete' || deleteAllMutation.isPending}
               onClick={() => deleteAllMutation.mutate()}
             >
-              {deleteAllMutation.isPending ? 'Deleting…' : 'Delete Everything'}
+              {deleteAllMutation.isPending ? 'Deleting...' : 'Delete Everything'}
             </button>
             <button
               className="px-4 py-2 text-sm border border-border rounded text-muted hover:text-text"
@@ -707,15 +813,6 @@ function AboutSection() {
           <p className="text-text">MIT</p>
         </div>
       </div>
-      <div>
-        <p className="text-xs text-muted mb-0.5">GitHub</p>
-        <a
-          href="#"
-          className="text-sm text-[#5b8dee] hover:underline"
-        >
-          github.com/your-username/mizan
-        </a>
-      </div>
       <p className="text-xs text-muted pt-2">
         Mizān is a self-hosted personal finance app. Your data never leaves your machine.
       </p>
@@ -727,12 +824,12 @@ function AboutSection() {
 
 type SettingsSection = 'plaid' | 'coinbase' | 'categories' | 'data' | 'about';
 
-const sectionItems: { key: SettingsSection; label: string }[] = [
-  { key: 'plaid', label: 'Plaid' },
-  { key: 'coinbase', label: 'Coinbase' },
-  { key: 'categories', label: 'Categories' },
-  { key: 'data', label: 'Data' },
-  { key: 'about', label: 'About' },
+const sectionItems: { key: SettingsSection; label: string; icon: LucideIcon }[] = [
+  { key: 'plaid', label: 'Plaid', icon: Link2 },
+  { key: 'coinbase', label: 'Coinbase', icon: Wallet },
+  { key: 'categories', label: 'Categories', icon: Tag },
+  { key: 'data', label: 'Data', icon: Database },
+  { key: 'about', label: 'About', icon: Info },
 ];
 
 export function Settings() {
@@ -741,22 +838,27 @@ export function Settings() {
   return (
     <div className="p-6 flex gap-6">
       {/* Section nav */}
-      <div className="w-40 flex-shrink-0">
+      <div className="w-44 flex-shrink-0">
         <h1 className="text-xl font-semibold text-text mb-4">Settings</h1>
-        <nav className="space-y-1">
-          {sectionItems.map((s) => (
-            <button
-              key={s.key}
-              onClick={() => setActiveSection(s.key)}
-              className={`w-full text-left px-3 py-2 text-sm rounded transition-colors ${
-                activeSection === s.key
-                  ? 'bg-[#1e1e22] text-text'
-                  : 'text-muted hover:text-text'
-              }`}
-            >
-              {s.label}
-            </button>
-          ))}
+        <nav className="space-y-0.5">
+          {sectionItems.map((s) => {
+            const Icon = s.icon;
+            const active = activeSection === s.key;
+            return (
+              <button
+                key={s.key}
+                onClick={() => setActiveSection(s.key)}
+                className={`w-full text-left px-3 py-2 text-sm rounded transition-colors flex items-center gap-2.5 ${
+                  active
+                    ? 'bg-[#1e1e22] text-text'
+                    : 'text-muted hover:text-text'
+                }`}
+              >
+                <Icon size={14} className={active ? 'text-[#4ecba3]' : 'text-muted'} />
+                {s.label}
+              </button>
+            );
+          })}
         </nav>
       </div>
 

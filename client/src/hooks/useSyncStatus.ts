@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { useAppStore } from '../store';
+import type { SyncEvent } from '@shared/types';
 
 export function useSyncStatus() {
   const { setSyncStatus, setLastSynced, addToast } = useAppStore();
@@ -23,7 +24,7 @@ export function useSyncStatus() {
 
       es.onmessage = (event) => {
         try {
-          const data = JSON.parse(event.data);
+          const data = JSON.parse(event.data) as SyncEvent;
           switch (data.type) {
             case 'sync_start':
               setSyncStatus('syncing');
@@ -33,14 +34,16 @@ export function useSyncStatus() {
               break;
             case 'sync_complete':
               setSyncStatus('idle');
-              setLastSynced(new Date().toISOString());
-              // Invalidate all relevant queries
+              setLastSynced(data.completedAt ?? new Date().toISOString());
               queryClient.invalidateQueries({ queryKey: ['accounts'] });
+              queryClient.invalidateQueries({ queryKey: ['plaid-items'] });
               queryClient.invalidateQueries({ queryKey: ['transactions'] });
               queryClient.invalidateQueries({ queryKey: ['networth'] });
               queryClient.invalidateQueries({ queryKey: ['budgets'] });
               queryClient.invalidateQueries({ queryKey: ['recurring'] });
               queryClient.invalidateQueries({ queryKey: ['holdings'] });
+              queryClient.invalidateQueries({ queryKey: ['cashflow'] });
+              queryClient.invalidateQueries({ queryKey: ['reports'] });
               addToast({ type: 'success', message: 'Sync complete' });
               break;
             case 'sync_error':
@@ -48,8 +51,8 @@ export function useSyncStatus() {
               addToast({ type: 'error', message: data.message || 'Sync failed' });
               break;
           }
-        } catch {
-          // ignore parse errors
+        } catch (err) {
+          console.warn('Ignoring malformed sync event', err);
         }
       };
 
