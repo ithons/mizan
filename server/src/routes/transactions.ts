@@ -1,4 +1,5 @@
 import { Router, Request, Response, NextFunction } from 'express';
+import type Database from 'better-sqlite3';
 import { v4 as uuidv4 } from 'uuid';
 import { getDb } from '../db/index';
 import { validate } from '../middleware/validate';
@@ -11,6 +12,30 @@ import {
 } from '../../../shared/schemas';
 
 const router = Router();
+
+function upsertMerchantRule(
+  db: Database.Database,
+  pattern: string | null | undefined,
+  categoryId: string,
+  createdAt: string
+): void {
+  if (!pattern) return;
+
+  const existingRule = db.prepare(
+    'SELECT id FROM merchant_rules WHERE pattern = ?'
+  ).get(pattern) as { id: string } | undefined;
+
+  if (existingRule) {
+    db.prepare(
+      'UPDATE merchant_rules SET category_id = ? WHERE id = ?'
+    ).run(categoryId, existingRule.id);
+    return;
+  }
+
+  db.prepare(
+    'INSERT INTO merchant_rules (id, pattern, category_id, created_at) VALUES (?, ?, ?, ?)'
+  ).run(uuidv4(), pattern, categoryId, createdAt);
+}
 
 // GET / - list transactions with filters
 router.get('/', (req: Request, res: Response, next: NextFunction): void => {
@@ -281,21 +306,7 @@ router.patch(
       // If category changed, upsert merchant_rule
       if (body.category_id !== undefined && body.category_id !== null) {
         const merchantName = existing.merchant_name || existing.original_name;
-        if (merchantName) {
-          const existingRule = db.prepare(
-            'SELECT id FROM merchant_rules WHERE pattern = ?'
-          ).get(merchantName) as { id: string } | undefined;
-
-          if (existingRule) {
-            db.prepare(
-              'UPDATE merchant_rules SET category_id = ? WHERE id = ?'
-            ).run(body.category_id, existingRule.id);
-          } else {
-            db.prepare(
-              'INSERT INTO merchant_rules (id, pattern, category_id, created_at) VALUES (?, ?, ?, ?)'
-            ).run(uuidv4(), merchantName, body.category_id, now);
-          }
-        }
+        upsertMerchantRule(db, merchantName, body.category_id, now);
       }
 
       if (balanceChanged) {
@@ -360,9 +371,32 @@ router.post(
       const placeholders = body.ids.map(() => '?').join(',');
       const now = new Date().toISOString();
 
-      db.prepare(
-        `UPDATE transactions SET category_id = ?, updated_at = ? WHERE id IN (${placeholders})`
-      ).run(body.categoryId, now, ...body.ids);
+      const updateCategories = db.transaction(() => {
+        const selectedTransactions = db.prepare(`
+          SELECT merchant_name, original_name
+          FROM transactions
+          WHERE id IN (${placeholders})
+        `).all(...body.ids) as Array<{
+          merchant_name: string | null;
+          original_name: string;
+        }>;
+
+        db.prepare(
+          `UPDATE transactions SET category_id = ?, updated_at = ? WHERE id IN (${placeholders})`
+        ).run(body.categoryId, now, ...body.ids);
+
+        const patterns = new Set(
+          selectedTransactions
+            .map((transaction) => transaction.merchant_name || transaction.original_name)
+            .filter((pattern) => pattern.length > 0)
+        );
+
+        for (const pattern of patterns) {
+          upsertMerchantRule(db, pattern, body.categoryId, now);
+        }
+      });
+
+      updateCategories();
 
       res.json({ data: { updated: body.ids.length } });
     } catch (err) {
