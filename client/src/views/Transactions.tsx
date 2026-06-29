@@ -21,6 +21,7 @@ import { AmountBadge } from '../components/AmountBadge';
 import { CategoryBadge } from '../components/CategoryBadge';
 import { InlineEdit } from '../components/InlineEdit';
 import { SkeletonList } from '../components/SkeletonLoader';
+import { invalidateFinancialData } from '../lib/queryInvalidation';
 import type { TransactionFilters, Category } from '@shared/types';
 
 const PAGE_SIZE = 50;
@@ -172,7 +173,7 @@ function AddTransactionModal({
         original_name: form.merchant_name,
       }),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['transactions'] });
+      invalidateFinancialData(qc);
       addToast({ type: 'success', message: 'Transaction added' });
       onClose();
     },
@@ -325,27 +326,27 @@ export function Transactions() {
   const updateCatMutation = useMutation({
     mutationFn: ({ id, categoryId }: { id: string; categoryId: string }) =>
       transactionsApi.update(id, { category_id: categoryId }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['transactions'] }),
+    onSuccess: () => invalidateFinancialData(qc),
     onError: (err: Error) => addToast({ type: 'error', message: err.message }),
   });
 
   const updateMerchantMutation = useMutation({
     mutationFn: ({ id, merchant_name }: { id: string; merchant_name: string }) =>
       transactionsApi.update(id, { merchant_name }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['transactions'] }),
+    onSuccess: () => invalidateFinancialData(qc),
     onError: (err: Error) => addToast({ type: 'error', message: err.message }),
   });
 
   const updateNoteMutation = useMutation({
     mutationFn: ({ id, notes }: { id: string; notes: string }) =>
       transactionsApi.update(id, { notes }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['transactions'] }),
+    onSuccess: () => invalidateFinancialData(qc),
   });
 
   const deleteMutation = useMutation({
     mutationFn: (id: string) => transactionsApi.delete(id),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['transactions'] });
+      invalidateFinancialData(qc);
       setSelectedIds(new Set());
       addToast({ type: 'success', message: 'Transaction deleted' });
     },
@@ -356,7 +357,7 @@ export function Transactions() {
     mutationFn: ({ ids, categoryId }: { ids: string[]; categoryId: string }) =>
       transactionsApi.bulkCategory(ids, categoryId),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['transactions'] });
+      invalidateFinancialData(qc);
       setSelectedIds(new Set());
       addToast({ type: 'success', message: 'Categories updated' });
     },
