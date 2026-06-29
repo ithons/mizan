@@ -170,7 +170,28 @@ router.delete('/:id', (req: Request, res: Response, next: NextFunction): void =>
       return;
     }
 
-    db.prepare('DELETE FROM categories WHERE id = ?').run(id);
+    const children = db.prepare(
+      'SELECT COUNT(*) as count FROM categories WHERE parent_id = ?'
+    ).get(id) as { count: number };
+
+    if (children.count > 0) {
+      res.status(409).json({
+        error: `Cannot delete category with ${children.count} subcategories. Move or merge them first.`,
+      });
+      return;
+    }
+
+    const now = new Date().toISOString();
+
+    const deleteCategory = db.transaction(() => {
+      db.prepare(
+        'UPDATE recurring_patterns SET category_id = NULL, updated_at = ? WHERE category_id = ?'
+      ).run(now, id);
+
+      db.prepare('DELETE FROM categories WHERE id = ?').run(id);
+    });
+
+    deleteCategory();
     res.json({ data: { success: true } });
   } catch (err) {
     next(err);
@@ -187,15 +208,60 @@ router.post(
       const { id } = req.params;
       const { targetId } = req.body as { targetId: string };
 
-      const source = db.prepare('SELECT * FROM categories WHERE id = ?').get(id);
+      if (id === targetId) {
+        res.status(400).json({ error: 'Cannot merge a category into itself' });
+        return;
+      }
+
+      const source = db.prepare('SELECT * FROM categories WHERE id = ?').get(id) as
+        | { is_system: number }
+        | undefined;
       if (!source) {
         res.status(404).json({ error: 'Source category not found' });
+        return;
+      }
+
+      if (source.is_system) {
+        res.status(403).json({ error: 'Cannot merge system categories' });
         return;
       }
 
       const target = db.prepare('SELECT * FROM categories WHERE id = ?').get(targetId);
       if (!target) {
         res.status(404).json({ error: 'Target category not found' });
+        return;
+      }
+
+      const descendantTarget = db.prepare(`
+        WITH RECURSIVE descendants(id) AS (
+          SELECT id FROM categories WHERE parent_id = ?
+          UNION ALL
+          SELECT c.id FROM categories c
+          JOIN descendants d ON c.parent_id = d.id
+        )
+        SELECT id FROM descendants WHERE id = ?
+      `).get(id, targetId);
+
+      if (descendantTarget) {
+        res.status(409).json({
+          error: 'Cannot merge a category into one of its subcategories',
+        });
+        return;
+      }
+
+      const budgetConflict = db.prepare(`
+        SELECT COUNT(*) as count
+        FROM budgets source_budget
+        JOIN budgets target_budget
+          ON target_budget.category_id = ?
+         AND target_budget.period = source_budget.period
+        WHERE source_budget.category_id = ?
+      `).get(targetId, id) as { count: number };
+
+      if (budgetConflict.count > 0) {
+        res.status(409).json({
+          error: 'Cannot merge categories with overlapping budgets. Delete or adjust one budget first.',
+        });
         return;
       }
 
@@ -213,6 +279,10 @@ router.post(
         db.prepare(
           'UPDATE merchant_rules SET category_id = ? WHERE category_id = ?'
         ).run(targetId, id);
+
+        db.prepare(
+          'UPDATE recurring_patterns SET category_id = ?, updated_at = ? WHERE category_id = ?'
+        ).run(targetId, now, id);
 
         db.prepare(
           'UPDATE categories SET parent_id = ? WHERE parent_id = ?'
