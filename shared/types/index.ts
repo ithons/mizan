@@ -267,6 +267,7 @@ export interface TransactionFilters {
   maxAmount?: number;
   pending?: boolean;
   recurring?: boolean;
+  uncategorized?: boolean;
   type?: string;
 }
 

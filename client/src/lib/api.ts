@@ -106,6 +106,7 @@ export const transactionsApi = {
     if (params.maxAmount != null) q.set('maxAmount', String(params.maxAmount));
     if (params.pending != null) q.set('pending', String(params.pending));
     if (params.recurring != null) q.set('recurring', String(params.recurring));
+    if (params.uncategorized != null) q.set('uncategorized', String(params.uncategorized));
     if (params.type) q.set('type', params.type);
     params.accountId?.forEach((id) => q.append('accountId', id));
     params.categoryId?.forEach((id) => q.append('categoryId', id));

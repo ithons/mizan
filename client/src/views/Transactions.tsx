@@ -11,6 +11,7 @@ import {
   X,
   Trash2,
   SlidersHorizontal,
+  AlertCircle,
 } from 'lucide-react';
 import { format, subMonths } from 'date-fns';
 import { transactionsApi, accountsApi, categoriesApi, settingsApi, flattenCategories } from '../lib/api';
@@ -310,6 +311,7 @@ export function Transactions() {
     type: '',
     pending: undefined,
     recurring: undefined,
+    uncategorized: undefined,
   });
 
   const queryFilters = { ...filters, page, limit: PAGE_SIZE };
@@ -317,6 +319,16 @@ export function Transactions() {
   const { data: txData, isLoading, isError } = useQuery({
     queryKey: ['transactions', queryFilters],
     queryFn: () => transactionsApi.list(queryFilters),
+  });
+
+  const { data: uncategorizedData } = useQuery({
+    queryKey: ['transactions', 'uncategorized-count'],
+    queryFn: () => transactionsApi.list({
+      page: 1,
+      limit: 1,
+      uncategorized: true,
+      pending: false,
+    }),
   });
 
   const { data: accounts = [] } = useQuery({
@@ -415,16 +427,36 @@ export function Transactions() {
   };
 
   const clearFilter = (key: keyof TransactionFilters) => {
-    setFilters((f) => ({ ...f, [key]: key === 'pending' || key === 'recurring' ? undefined : '' }));
+    setFilters((f) => ({
+      ...f,
+      [key]: key === 'pending' || key === 'recurring' || key === 'uncategorized' ? undefined : '',
+    }));
     setPage(1);
+  };
+
+  const reviewUncategorized = () => {
+    setFilters({
+      startDate: '',
+      endDate: '',
+      search: '',
+      type: '',
+      pending: false,
+      recurring: undefined,
+      uncategorized: true,
+    });
+    setPage(1);
+    setSelectedIds(new Set());
   };
 
   const hasSearch = !!filters.search;
   const hasType = !!filters.type;
   const hasPending = filters.pending !== undefined;
   const hasRecurring = filters.recurring !== undefined;
+  const hasUncategorized = filters.uncategorized !== undefined;
   const isDefaultDateRange = filters.startDate === DEFAULT_START && filters.endDate === DEFAULT_END;
   const hasDateRange = !isDefaultDateRange;
+  const dateRangeLabel = `${filters.startDate || 'Any'} → ${filters.endDate || 'Any'}`;
+  const uncategorizedTotal = uncategorizedData?.total ?? 0;
 
   return (
     <div className="p-6 flex flex-col h-full">
@@ -434,7 +466,7 @@ export function Transactions() {
         {/* Active filter chips */}
         {hasDateRange && (
           <FilterChip
-            label={`${filters.startDate} → ${filters.endDate}`}
+            label={dateRangeLabel}
             onRemove={() => { setFilters((f) => ({ ...f, startDate: DEFAULT_START, endDate: DEFAULT_END })); setPage(1); }}
           />
         )}
@@ -442,6 +474,7 @@ export function Transactions() {
         {hasType && <FilterChip label={filters.type as string} onRemove={() => clearFilter('type')} />}
         {hasPending && <FilterChip label={filters.pending ? 'Pending' : 'Posted'} onRemove={() => clearFilter('pending')} />}
         {hasRecurring && <FilterChip label={filters.recurring ? 'Recurring' : 'One-time'} onRemove={() => clearFilter('recurring')} />}
+        {hasUncategorized && <FilterChip label={filters.uncategorized ? 'Needs category' : 'Categorized'} onRemove={() => clearFilter('uncategorized')} />}
 
         <button
           className={`flex items-center gap-1.5 text-xs border rounded px-3 py-1.5 transition-colors ${
@@ -529,17 +562,53 @@ export function Transactions() {
             <option value="true">Recurring</option>
             <option value="false">One-time</option>
           </select>
-          {(hasSearch || hasType || hasPending || hasRecurring || hasDateRange) && (
+          <select
+            className="bg-background border border-border rounded px-2 py-1 text-xs text-text focus:outline-none focus:ring-1 focus:ring-[#4ecba3]/50"
+            value={filters.uncategorized === undefined ? '' : String(filters.uncategorized)}
+            onChange={(e) => {
+              const v = e.target.value;
+              setFilters({ ...filters, uncategorized: v === '' ? undefined : v === 'true' });
+              setPage(1);
+            }}
+          >
+            <option value="">All Categories</option>
+            <option value="true">Needs Category</option>
+            <option value="false">Categorized</option>
+          </select>
+          {(hasSearch || hasType || hasPending || hasRecurring || hasUncategorized || hasDateRange) && (
             <button
               className="flex items-center gap-1 text-xs text-muted hover:text-text"
               onClick={() => {
-                setFilters({ startDate: DEFAULT_START, endDate: DEFAULT_END, search: '', type: '', pending: undefined, recurring: undefined });
+                setFilters({
+                  startDate: DEFAULT_START,
+                  endDate: DEFAULT_END,
+                  search: '',
+                  type: '',
+                  pending: undefined,
+                  recurring: undefined,
+                  uncategorized: undefined,
+                });
                 setPage(1);
               }}
             >
               <X size={12} /> Clear All
             </button>
           )}
+        </div>
+      )}
+
+      {uncategorizedTotal > 0 && !filters.uncategorized && (
+        <div className="flex items-center gap-3 mb-3 px-3 py-2 bg-[#f0c040]/10 border border-[#f0c040]/30 rounded">
+          <AlertCircle size={14} className="text-[#f0c040] flex-shrink-0" />
+          <span className="text-xs text-text">
+            <span className="font-mono">{uncategorizedTotal}</span> posted transactions need categories
+          </span>
+          <button
+            className="ml-auto text-xs text-[#f0c040] hover:opacity-80"
+            onClick={reviewUncategorized}
+          >
+            Review
+          </button>
         </div>
       )}
 

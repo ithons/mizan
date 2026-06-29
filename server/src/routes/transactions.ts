@@ -185,6 +185,14 @@ router.get('/', (req: Request, res: Response, next: NextFunction): void => {
       }
       conditions.push(recurring ? 't.recurring_id IS NOT NULL' : 't.recurring_id IS NULL');
     }
+    if (query.uncategorized !== undefined) {
+      const uncategorized = parseBooleanQuery(query.uncategorized);
+      if (uncategorized === null) {
+        res.status(400).json({ error: 'Invalid uncategorized filter' });
+        return;
+      }
+      conditions.push(uncategorized ? 't.category_id IS NULL' : 't.category_id IS NOT NULL');
+    }
     if (query.type !== undefined) {
       const type = Array.isArray(query.type) ? query.type[0] : query.type;
       if (type === 'income') {
