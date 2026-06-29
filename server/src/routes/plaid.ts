@@ -52,8 +52,13 @@ router.post(
 // POST /sync/all - must be registered before /sync/:itemId to avoid "all" matching as itemId
 router.post('/sync/all', async (_req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
-    await syncAllItems();
-    res.json({ data: { success: true } });
+    const summary = await syncAllItems();
+    res.json({
+      data: {
+        success: summary.failed.length === 0 && summary.reauthRequired.length === 0,
+        ...summary,
+      },
+    });
   } catch (err) {
     next(err);
   }
@@ -62,8 +67,8 @@ router.post('/sync/all', async (_req: Request, res: Response, next: NextFunction
 // POST /sync/:itemId
 router.post('/sync/:itemId', async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
-    await syncItem(req.params['itemId'] as string);
-    res.json({ data: { success: true } });
+    const status = await syncItem(req.params['itemId'] as string);
+    res.json({ data: { success: status === 'synced', status } });
   } catch (err) {
     next(err);
   }

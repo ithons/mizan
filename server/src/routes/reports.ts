@@ -91,51 +91,107 @@ router.get('/spending', (req: Request, res: Response, next: NextFunction): void 
 
     const total = rows.reduce((sum, r) => sum + (r.amount || 0), 0);
 
-    // Roll up to parent if requested
-    if (parentOnly === 'true') {
-      const parentTotals = new Map<string, { category_id: string; category_name: string; color: string | null; amount: number }>();
+    const categoryRows = db.prepare(`
+      SELECT id, name, color, parent_id
+      FROM categories
+    `).all() as Array<{
+      id: string;
+      name: string;
+      color: string | null;
+      parent_id: string | null;
+    }>;
+    const categoriesById = new Map(categoryRows.map((c) => [c.id, c]));
 
-      for (const row of rows) {
-        // If the category has a parent, roll up to the parent
-        const key = row.parent_id || row.category_id || 'uncategorized';
-        const name = row.category_id
-          ? row.parent_id
-            ? (db.prepare('SELECT name, color FROM categories WHERE id = ?').get(row.parent_id) as { name: string; color: string | null } | undefined)?.name || row.category_name || 'Other'
-            : row.category_name || 'Other'
-          : 'Uncategorized';
-        const color = row.parent_id
-          ? (db.prepare('SELECT color FROM categories WHERE id = ?').get(row.parent_id) as { color: string | null } | undefined)?.color || null
-          : row.color;
-
-        if (!parentTotals.has(key)) {
-          parentTotals.set(key, {
-            category_id: key,
-            category_name: name as string,
-            color: color || null,
-            amount: 0,
-          });
-        }
-        parentTotals.get(key)!.amount += row.amount || 0;
-      }
-
-      const categories = Array.from(parentTotals.values())
-        .sort((a, b) => b.amount - a.amount)
-        .map(c => ({
-          ...c,
-          percentage: total > 0 ? (c.amount / total) * 100 : 0,
-        }));
-
-      res.json({ data: { categories, total } });
-      return;
+    interface SpendingCategory {
+      category_id: string;
+      category_name: string;
+      color: string | null;
+      amount: number;
+      percentage: number;
+      children?: SpendingCategory[];
     }
 
-    const categories = rows.map(r => ({
-      category_id: r.category_id || 'uncategorized',
-      category_name: r.category_name || 'Uncategorized',
-      color: r.color,
-      amount: r.amount || 0,
-      percentage: total > 0 ? ((r.amount || 0) / total) * 100 : 0,
-    }));
+    const rootsById = new Map<string, SpendingCategory & { children: SpendingCategory[] }>();
+
+    const ensureRoot = (
+      categoryId: string,
+      categoryName: string,
+      color: string | null
+    ): SpendingCategory & { children: SpendingCategory[] } => {
+      const existing = rootsById.get(categoryId);
+      if (existing) return existing;
+
+      const root = {
+        category_id: categoryId,
+        category_name: categoryName,
+        color,
+        amount: 0,
+        percentage: 0,
+        children: [],
+      };
+      rootsById.set(categoryId, root);
+      return root;
+    };
+
+    for (const row of rows) {
+      const amount = row.amount || 0;
+
+      if (!row.category_id) {
+        const root = ensureRoot('uncategorized', 'Uncategorized', row.color);
+        root.amount += amount;
+        continue;
+      }
+
+      if (row.parent_id) {
+        const parent = categoriesById.get(row.parent_id);
+        const root = ensureRoot(
+          row.parent_id,
+          parent?.name ?? row.category_name ?? 'Other',
+          parent?.color ?? row.color
+        );
+        root.amount += amount;
+        root.children.push({
+          category_id: row.category_id,
+          category_name: row.category_name ?? 'Other',
+          color: row.color,
+          amount,
+          percentage: 0,
+        });
+        continue;
+      }
+
+      const root = ensureRoot(
+        row.category_id,
+        row.category_name ?? 'Other',
+        row.color
+      );
+      root.amount += amount;
+    }
+
+    const categories = Array.from(rootsById.values())
+      .map((category) => {
+        const children = category.children
+          .sort((a, b) => b.amount - a.amount)
+          .map((child) => ({
+            ...child,
+            percentage: total > 0 ? (child.amount / total) * 100 : 0,
+          }));
+
+        const result: SpendingCategory = {
+          category_id: category.category_id,
+          category_name: category.category_name,
+          color: category.color,
+          amount: category.amount,
+          percentage: total > 0 ? (category.amount / total) * 100 : 0,
+        };
+
+        if (parentOnly !== 'true' && children.length > 0) {
+          result.children = children;
+        }
+
+        return result;
+      })
+      .sort((a, b) => b.amount - a.amount);
 
     res.json({ data: { categories, total } });
   } catch (err) {
@@ -338,7 +394,8 @@ router.get('/investments', (req: Request, res: Response, next: NextFunction): vo
       ORDER BY h.institution_value DESC
     `).all();
 
-    // Portfolio value over time (from investment_transactions aggregated)
+    // Portfolio value over time from net worth snapshots. Investment transaction
+    // volume is not portfolio value and should not drive a value-history chart.
     const conditions: string[] = [];
     const params: unknown[] = [];
 
@@ -353,14 +410,13 @@ router.get('/investments', (req: Request, res: Response, next: NextFunction): vo
 
     const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
 
-    const transactions = db.prepare(`
+    const snapshots = db.prepare(`
       SELECT
-        strftime('%Y-%m', date) AS month,
-        SUM(ABS(amount)) AS total_volume
-      FROM investment_transactions
+        date,
+        COALESCE(investment_assets, 0) AS value
+      FROM net_worth_snapshots
       ${where}
-      GROUP BY month
-      ORDER BY month ASC
+      ORDER BY date ASC
     `).all(...params);
 
     // Total portfolio value
@@ -368,9 +424,9 @@ router.get('/investments', (req: Request, res: Response, next: NextFunction): vo
       'SELECT SUM(institution_value) AS total FROM holdings'
     ).get() as { total: number | null };
 
-    const history = (transactions as Array<{ month: string; total_volume: number }>).map((t) => ({
-      date: t.month,
-      value: t.total_volume,
+    const history = (snapshots as Array<{ date: string; value: number }>).map((snapshot) => ({
+      date: snapshot.date,
+      value: snapshot.value,
     }));
 
     res.json({

@@ -60,8 +60,9 @@ router.get('/month/:year/:month', (req: Request, res: Response, next: NextFuncti
         ), 0) AS spent
       FROM budgets b
       JOIN categories c ON c.id = b.category_id
+      WHERE b.period = 'monthly' OR b.period = ?
       ORDER BY c.name ASC
-    `).all(startDate, endDate);
+    `).all(startDate, endDate, `${year}-${String(month).padStart(2, '0')}`);
 
     res.json({ data: budgets });
   } catch (err) {

@@ -15,8 +15,10 @@ import {
   updatePlaidCredentials,
   updateCoinbaseCredentials,
 } from '../services/credentials';
+import { adjustManualAccountBalance } from '../services/manualAccountBalance';
 import type { PlaidCredentials } from '../services/credentials';
 import { resetPlaidClient } from '../services/plaid';
+import { takeSnapshot } from '../services/snapshot';
 import type { z } from 'zod';
 
 const router = Router();
@@ -162,6 +164,7 @@ router.post('/import-csv', (req: Request, res: Response, next: NextFunction): vo
     const rows = body.rows || [];
     const now = new Date().toISOString();
     let imported = 0;
+    let balanceChanged = false;
     const errors: string[] = [];
 
     for (let i = 0; i < rows.length; i++) {
@@ -173,11 +176,7 @@ router.post('/import-csv', (req: Request, res: Response, next: NextFunction): vo
         const dateFormat = mapping.dateFormat || 'yyyy-MM-dd';
         let parsedDate: Date;
 
-        if (dateFormat === 'yyyy-MM-dd') {
-          parsedDate = new Date(dateStr);
-        } else {
-          parsedDate = parse(dateStr, dateFormat, new Date());
-        }
+        parsedDate = parse(dateStr, dateFormat, new Date());
 
         if (!isValid(parsedDate)) {
           errors.push(`Row ${i + 1}: Invalid date "${dateStr}"`);
@@ -230,28 +229,40 @@ router.post('/import-csv', (req: Request, res: Response, next: NextFunction): vo
         const originalName = merchantName || `Imported transaction`;
         const notes = mapping.notes ? (row[mapping.notes] || null) : null;
 
-        db.prepare(`
-          INSERT INTO transactions
-            (id, account_id, date, amount, merchant_name, original_name,
-             category_id, pending, notes, is_manual, created_at, updated_at)
-          VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, 1, ?, ?)
-        `).run(
-          uuidv4(),
-          accountId,
-          dateStr,
-          amount,
-          merchantName,
-          originalName,
-          categoryId,
-          notes,
-          now,
-          now
-        );
+        const importRow = db.transaction(() => {
+          db.prepare(`
+            INSERT INTO transactions
+              (id, account_id, date, amount, merchant_name, original_name,
+               category_id, pending, notes, is_manual, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, 1, ?, ?)
+          `).run(
+            uuidv4(),
+            accountId,
+            dateStr,
+            amount,
+            merchantName,
+            originalName,
+            categoryId,
+            notes,
+            now,
+            now
+          );
+
+          return adjustManualAccountBalance(db, accountId, amount, now);
+        });
+
+        if (importRow()) {
+          balanceChanged = true;
+        }
 
         imported++;
       } catch (rowErr) {
         errors.push(`Row ${i + 1}: ${(rowErr as Error).message}`);
       }
+    }
+
+    if (balanceChanged) {
+      takeSnapshot();
     }
 
     res.json({ data: { imported, errors } });

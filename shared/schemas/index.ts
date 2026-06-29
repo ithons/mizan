@@ -68,7 +68,7 @@ export const MergeCategorySchema = z.object({
 
 export const UpsertBudgetSchema = z.object({
   amount: z.number().positive(),
-  period: z.string().default('monthly'),
+  period: z.literal('monthly').default('monthly'),
   rollover: z.boolean().default(false),
 });
 

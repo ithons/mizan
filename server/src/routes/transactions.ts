@@ -2,6 +2,8 @@ import { Router, Request, Response, NextFunction } from 'express';
 import { v4 as uuidv4 } from 'uuid';
 import { getDb } from '../db/index';
 import { validate } from '../middleware/validate';
+import { adjustManualAccountBalance } from '../services/manualAccountBalance';
+import { takeSnapshot } from '../services/snapshot';
 import {
   CreateManualTransactionSchema,
   UpdateTransactionSchema,
@@ -159,24 +161,35 @@ router.post(
 
       const id = uuidv4();
       const now = new Date().toISOString();
+      let balanceChanged = false;
 
-      db.prepare(`
-        INSERT INTO transactions
-          (id, account_id, date, amount, merchant_name, original_name,
-           category_id, pending, notes, is_manual, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, 1, ?, ?)
-      `).run(
-        id,
-        body.account_id,
-        body.date,
-        body.amount,
-        body.merchant_name || null,
-        body.original_name,
-        body.category_id || null,
-        body.notes || null,
-        now,
-        now
-      );
+      const insertTransaction = db.transaction(() => {
+        db.prepare(`
+          INSERT INTO transactions
+            (id, account_id, date, amount, merchant_name, original_name,
+             category_id, pending, notes, is_manual, created_at, updated_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, 1, ?, ?)
+        `).run(
+          id,
+          body.account_id,
+          body.date,
+          body.amount,
+          body.merchant_name || null,
+          body.original_name,
+          body.category_id || null,
+          body.notes || null,
+          now,
+          now
+        );
+
+        balanceChanged = adjustManualAccountBalance(db, body.account_id, body.amount, now);
+      });
+
+      insertTransaction();
+
+      if (balanceChanged) {
+        takeSnapshot();
+      }
 
       const txn = db.prepare('SELECT * FROM transactions WHERE id = ?').get(id);
       res.status(201).json({ data: txn });
@@ -203,7 +216,14 @@ router.patch(
       };
 
       const existing = db.prepare('SELECT * FROM transactions WHERE id = ?').get(id) as
-        | { category_id: string | null; merchant_name: string | null; original_name: string }
+        | {
+            account_id: string;
+            amount: number;
+            category_id: string | null;
+            is_manual: number;
+            merchant_name: string | null;
+            original_name: string;
+          }
         | undefined;
 
       if (!existing) {
@@ -240,8 +260,22 @@ router.patch(
       values.push(now);
       values.push(id);
 
+      let balanceChanged = false;
       if (updates.length > 1) {
-        db.prepare(`UPDATE transactions SET ${updates.join(', ')} WHERE id = ?`).run(...values);
+        const updateTransaction = db.transaction(() => {
+          db.prepare(`UPDATE transactions SET ${updates.join(', ')} WHERE id = ?`).run(...values);
+
+          if (body.amount !== undefined && existing.is_manual) {
+            balanceChanged = adjustManualAccountBalance(
+              db,
+              existing.account_id,
+              body.amount - existing.amount,
+              now
+            );
+          }
+        });
+
+        updateTransaction();
       }
 
       // If category changed, upsert merchant_rule
@@ -264,6 +298,10 @@ router.patch(
         }
       }
 
+      if (balanceChanged) {
+        takeSnapshot();
+      }
+
       const updated = db.prepare('SELECT * FROM transactions WHERE id = ?').get(id);
       res.json({ data: updated });
     } catch (err) {
@@ -278,8 +316,8 @@ router.delete('/:id', (req: Request, res: Response, next: NextFunction): void =>
     const db = getDb();
     const { id } = req.params;
 
-    const txn = db.prepare('SELECT is_manual FROM transactions WHERE id = ?').get(id) as
-      | { is_manual: number }
+    const txn = db.prepare('SELECT account_id, amount, is_manual FROM transactions WHERE id = ?').get(id) as
+      | { account_id: string; amount: number; is_manual: number }
       | undefined;
 
     if (!txn) {
@@ -292,7 +330,18 @@ router.delete('/:id', (req: Request, res: Response, next: NextFunction): void =>
       return;
     }
 
-    db.prepare('DELETE FROM transactions WHERE id = ?').run(id);
+    let balanceChanged = false;
+    const deleteTransaction = db.transaction(() => {
+      db.prepare('DELETE FROM transactions WHERE id = ?').run(id);
+      balanceChanged = adjustManualAccountBalance(db, txn.account_id, -txn.amount, new Date().toISOString());
+    });
+
+    deleteTransaction();
+
+    if (balanceChanged) {
+      takeSnapshot();
+    }
+
     res.json({ data: { success: true } });
   } catch (err) {
     next(err);

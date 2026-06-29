@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query';
 import { ChevronLeft, ChevronRight, Plus, Check, X, Trash2 } from 'lucide-react';
 import { format, subMonths, addMonths } from 'date-fns';
@@ -108,12 +108,10 @@ function BudgetRow({
 function AddBudgetModal({
   open,
   onClose,
-  month,
   categories,
 }: {
   open: boolean;
   onClose: () => void;
-  month: string;
   categories: Category[];
 }) {
   const qc = useQueryClient();
@@ -121,15 +119,23 @@ function AddBudgetModal({
   const [form, setForm] = useState({
     category_id: categories[0]?.id ?? '',
     amount: '',
-    period: month,
     rollover: false,
   });
+
+  useEffect(() => {
+    if (!open) return;
+    const defaultCategory = categories.find((c) => !c.is_income)?.id ?? categories[0]?.id ?? '';
+    setForm({
+      category_id: defaultCategory,
+      amount: '',
+      rollover: false,
+    });
+  }, [categories, open]);
 
   const mutation = useMutation({
     mutationFn: () =>
       budgetsApi.upsert(form.category_id, {
         amount: parseFloat(form.amount) || 0,
-        period: form.period,
         rollover: form.rollover,
       }),
     onSuccess: () => {
@@ -500,7 +506,6 @@ export function Budget() {
       <AddBudgetModal
         open={showAddModal}
         onClose={() => setShowAddModal(false)}
-        month={currentMonth}
         categories={categories}
       />
     </div>

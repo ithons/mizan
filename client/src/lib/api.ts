@@ -172,10 +172,14 @@ export const budgetsApi = {
     const [year, m] = month.split('-');
     return apiFetch<Budget[]>(`/api/budgets/month/${year}/${parseInt(m, 10)}`);
   },
-  upsert: (categoryId: string, body: { amount: number; period?: string; rollover?: boolean }) =>
+  upsert: (categoryId: string, body: { amount: number; period?: 'monthly'; rollover?: boolean }) =>
     apiFetch<Budget>(`/api/budgets/${categoryId}`, {
       method: 'PUT',
-      body: JSON.stringify({ amount: body.amount, period: body.period ?? 'monthly', rollover: body.rollover ?? false }),
+      body: JSON.stringify({
+        amount: body.amount,
+        period: body.period ?? 'monthly',
+        rollover: body.rollover ?? false,
+      }),
     }),
   delete: (id: string) =>
     apiFetch<void>(`/api/budgets/${id}`, { method: 'DELETE' }),

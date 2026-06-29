@@ -19,8 +19,7 @@ function buildJwt(method: string, path: string): string {
 
   // Validate PEM format before attempting to sign
   if (!privateKey.includes('-----BEGIN EC PRIVATE KEY-----')) {
-    const header = privateKey.substring(0, 50);
-    console.error('[coinbase] Invalid private key format - expected EC PRIVATE KEY, got:', header);
+    console.error('[coinbase] Invalid private key format - expected EC PRIVATE KEY');
     throw new Error(
       'Invalid private key format: expected -----BEGIN EC PRIVATE KEY-----. ' +
       'Make sure you are pasting the full PEM key from the Coinbase portal.'
@@ -28,7 +27,6 @@ function buildJwt(method: string, path: string): string {
   }
 
   const now = Math.floor(Date.now() / 1000);
-  console.log('[coinbase] Building JWT: method=%s path=%s keyName=%s clock=%d', method, path, keyName, now);
 
   // Strip query string from the URI claim - Coinbase validates against path only
   const pathWithoutQuery = path.split('?')[0];

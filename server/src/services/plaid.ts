@@ -16,6 +16,20 @@ import type { Account, AccountType } from '../../../shared/types';
 
 let _client: PlaidApi | null = null;
 
+export type PlaidSyncItemStatus = 'synced' | 'reauth_required';
+
+export interface PlaidSyncIssue {
+  itemId: string;
+  institutionName: string;
+  message: string;
+}
+
+export interface PlaidSyncSummary {
+  synced: number;
+  reauthRequired: PlaidSyncIssue[];
+  failed: PlaidSyncIssue[];
+}
+
 function getPlaidClient(): PlaidApi {
   if (_client) return _client;
   const creds = getCredentials();
@@ -91,11 +105,9 @@ export async function createLinkToken(redirectUri: string = 'http://localhost:30
     creds.plaid?.environment,
     PlaidEnvironments[creds.plaid?.environment ?? 'sandbox']
   );
-  console.log('[plaid] createLinkToken request:', JSON.stringify(requestPayload));
 
   const response = await plaid.linkTokenCreate(requestPayload);
 
-  console.log('[plaid] link_token (first 20 chars):', response.data.link_token.substring(0, 20));
   console.log('[plaid] response request_id:', response.data.request_id);
 
   return response.data.link_token;
@@ -195,7 +207,7 @@ export async function exchangeToken(
   return { itemId: dbItemId, accounts: [] };
 }
 
-export async function syncItem(dbItemId: string): Promise<void> {
+export async function syncItem(dbItemId: string): Promise<PlaidSyncItemStatus> {
   const db = getDb();
   const plaid = getPlaidClient();
   const creds = getCredentials();
@@ -231,7 +243,7 @@ export async function syncItem(dbItemId: string): Promise<void> {
         db.prepare(
           "UPDATE plaid_items SET status = 'reauth_required' WHERE id = ?"
         ).run(dbItemId);
-        return;
+        return 'reauth_required';
       }
       throw err;
     }
@@ -326,6 +338,8 @@ export async function syncItem(dbItemId: string): Promise<void> {
   db.prepare(
     "UPDATE plaid_items SET last_synced_at = ?, status = 'active' WHERE id = ?"
   ).run(new Date().toISOString(), dbItemId);
+
+  return 'synced';
 }
 
 export async function syncInvestments(dbItemId: string): Promise<void> {
@@ -518,20 +532,43 @@ export async function syncInvestments(dbItemId: string): Promise<void> {
   }
 }
 
-export async function syncAllItems(): Promise<void> {
+export async function syncAllItems(): Promise<PlaidSyncSummary> {
   const db = getDb();
 
   const items = db.prepare(
-    "SELECT id FROM plaid_items WHERE status != 'removed'"
-  ).all() as Array<{ id: string }>;
+    "SELECT id, institution_name FROM plaid_items WHERE status != 'removed'"
+  ).all() as Array<{ id: string; institution_name: string }>;
+
+  const summary: PlaidSyncSummary = {
+    synced: 0,
+    reauthRequired: [],
+    failed: [],
+  };
 
   for (const item of items) {
     try {
-      await syncItem(item.id);
+      const status = await syncItem(item.id);
+      if (status === 'reauth_required') {
+        summary.reauthRequired.push({
+          itemId: item.id,
+          institutionName: item.institution_name,
+          message: 'Reconnect required',
+        });
+      } else {
+        summary.synced++;
+      }
     } catch (err) {
-      console.error(`[plaid] Failed to sync item ${item.id}:`, (err as Error).message);
+      const message = (err as Error).message || 'Unknown sync error';
+      summary.failed.push({
+        itemId: item.id,
+        institutionName: item.institution_name,
+        message,
+      });
+      console.error(`[plaid] Failed to sync item ${item.id}:`, message);
     }
   }
+
+  return summary;
 }
 
 export async function createUpdateToken(dbItemId: string, redirectUri: string = 'http://localhost:3001'): Promise<string> {
