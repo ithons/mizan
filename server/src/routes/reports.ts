@@ -110,18 +110,20 @@ router.get('/spending', (req: Request, res: Response, next: NextFunction): void 
       percentage: number;
       children?: SpendingCategory[];
     }
+    type SpendingCategoryNode = SpendingCategory & { children: SpendingCategoryNode[] };
 
-    const rootsById = new Map<string, SpendingCategory & { children: SpendingCategory[] }>();
+    const rootsById = new Map<string, SpendingCategoryNode>();
+    const nodesById = new Map<string, SpendingCategoryNode>();
 
-    const ensureRoot = (
+    const ensureNode = (
       categoryId: string,
       categoryName: string,
       color: string | null
-    ): SpendingCategory & { children: SpendingCategory[] } => {
-      const existing = rootsById.get(categoryId);
+    ): SpendingCategoryNode => {
+      const existing = nodesById.get(categoryId);
       if (existing) return existing;
 
-      const root = {
+      const node = {
         category_id: categoryId,
         category_name: categoryName,
         color,
@@ -129,68 +131,101 @@ router.get('/spending', (req: Request, res: Response, next: NextFunction): void 
         percentage: 0,
         children: [],
       };
-      rootsById.set(categoryId, root);
-      return root;
+      nodesById.set(categoryId, node);
+      return node;
+    };
+
+    const attachChild = (
+      parent: SpendingCategory & { children: SpendingCategory[] },
+      child: SpendingCategoryNode
+    ): void => {
+      if (parent.children.some((existing) => existing.category_id === child.category_id)) return;
+      parent.children.push(child);
+    };
+
+    const categoryPath = (categoryId: string): Array<{
+      id: string;
+      name: string;
+      color: string | null;
+      parent_id: string | null;
+    }> => {
+      const path: Array<{
+        id: string;
+        name: string;
+        color: string | null;
+        parent_id: string | null;
+      }> = [];
+      const seen = new Set<string>();
+      let currentId: string | null = categoryId;
+
+      while (currentId && !seen.has(currentId)) {
+        seen.add(currentId);
+        const category = categoriesById.get(currentId);
+        if (!category) break;
+        path.push(category);
+        currentId = category.parent_id;
+      }
+
+      return path.reverse();
     };
 
     for (const row of rows) {
       const amount = row.amount || 0;
 
       if (!row.category_id) {
-        const root = ensureRoot('uncategorized', 'Uncategorized', row.color);
+        const root = ensureNode('uncategorized', 'Uncategorized', row.color);
+        rootsById.set(root.category_id, root);
         root.amount += amount;
         continue;
       }
 
-      if (row.parent_id) {
-        const parent = categoriesById.get(row.parent_id);
-        const root = ensureRoot(
-          row.parent_id,
-          parent?.name ?? row.category_name ?? 'Other',
-          parent?.color ?? row.color
-        );
+      const path = categoryPath(row.category_id);
+      if (path.length === 0) {
+        const root = ensureNode(row.category_id, row.category_name ?? 'Other', row.color);
+        rootsById.set(root.category_id, root);
         root.amount += amount;
-        root.children.push({
-          category_id: row.category_id,
-          category_name: row.category_name ?? 'Other',
-          color: row.color,
-          amount,
-          percentage: 0,
-        });
         continue;
       }
 
-      const root = ensureRoot(
-        row.category_id,
-        row.category_name ?? 'Other',
-        row.color
-      );
-      root.amount += amount;
-    }
+      let parentNode: SpendingCategoryNode | null = null;
+      for (const category of path) {
+        const node = ensureNode(category.id, category.name, category.color);
+        node.amount += amount;
 
-    const categories = Array.from(rootsById.values())
-      .map((category) => {
-        const children = category.children
-          .sort((a, b) => b.amount - a.amount)
-          .map((child) => ({
-            ...child,
-            percentage: total > 0 ? (child.amount / total) * 100 : 0,
-          }));
-
-        const result: SpendingCategory = {
-          category_id: category.category_id,
-          category_name: category.category_name,
-          color: category.color,
-          amount: category.amount,
-          percentage: total > 0 ? (category.amount / total) * 100 : 0,
-        };
-
-        if (parentOnly !== 'true' && children.length > 0) {
-          result.children = children;
+        if (parentNode) {
+          attachChild(parentNode, node);
+        } else {
+          rootsById.set(node.category_id, node);
         }
 
-        return result;
-      })
+        parentNode = node;
+      }
+    }
+
+    const serializeCategory = (
+      category: SpendingCategoryNode
+    ): SpendingCategory => {
+      const children = category.children
+        .sort((a, b) => b.amount - a.amount)
+        .map(serializeCategory);
+
+      const result: SpendingCategory = {
+        category_id: category.category_id,
+        category_name: category.category_name,
+        color: category.color,
+        amount: category.amount,
+        percentage: total > 0 ? (category.amount / total) * 100 : 0,
+      };
+
+      if (parentOnly !== 'true' && children.length > 0) {
+        result.children = children;
+      }
+
+      return result;
+    };
+
+    const categories = Array.from(rootsById.values())
+      .map(serializeCategory)
       .sort((a, b) => b.amount - a.amount);
 
     res.json({ data: { categories, total } });

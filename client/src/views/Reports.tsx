@@ -56,7 +56,7 @@ interface TreemapContentProps {
 interface DrillCategory {
   category_id: string;
   category_name: string;
-  children?: unknown[];
+  children?: DrillCategory[];
 }
 
 interface SpendingTreemapContentProps extends TreemapContentProps {
@@ -188,6 +188,15 @@ function flattenCategoryOptions(categories: Category[], parentLabel?: string): C
   });
 }
 
+function findDrillCategory(categories: DrillCategory[], categoryId: string): DrillCategory | null {
+  for (const category of categories) {
+    if (category.category_id === categoryId) return category;
+    const child = findDrillCategory(category.children ?? [], categoryId);
+    if (child) return child;
+  }
+  return null;
+}
+
 // ─── Spending Tab ─────────────────────────────────────────────────────────────
 
 function SpendingTab({ startDate, endDate }: { startDate: string; endDate: string }) {
@@ -203,7 +212,7 @@ function SpendingTab({ startDate, endDate }: { startDate: string; endDate: strin
 
   const categories = spending?.categories ?? [];
   const displayCats = drillId
-    ? categories.find((c) => c.category_id === drillId)?.children ?? []
+    ? findDrillCategory(categories, drillId)?.children ?? []
     : categories;
 
   const treemapData = displayCats.map((c, i) => ({
@@ -239,7 +248,7 @@ function SpendingTab({ startDate, endDate }: { startDate: string; endDate: strin
               aspectRatio={4 / 3}
               content={
                 <SpendingTreemapContent
-                  categories={categories}
+                  categories={displayCats}
                   onDrill={(categoryId, categoryName) => {
                     setDrillId(categoryId);
                     setDrillName(categoryName);
