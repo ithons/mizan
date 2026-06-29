@@ -19,6 +19,7 @@ import { adjustManualAccountBalance } from '../services/manualAccountBalance';
 import type { PlaidCredentials } from '../services/credentials';
 import { resetPlaidClient } from '../services/plaid';
 import { takeSnapshot } from '../services/snapshot';
+import { detectRecurring } from '../services/recurring';
 import type { z } from 'zod';
 
 const router = Router();
@@ -278,6 +279,9 @@ router.post('/import-csv', (req: Request, res: Response, next: NextFunction): vo
 
     if (balanceChanged) {
       takeSnapshot();
+    }
+    if (imported > 0) {
+      detectRecurring();
     }
 
     res.json({ data: { imported, errors } });

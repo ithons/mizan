@@ -5,6 +5,7 @@ import { getDb } from '../db/index';
 import { validate } from '../middleware/validate';
 import { adjustManualAccountBalance } from '../services/manualAccountBalance';
 import { takeSnapshot } from '../services/snapshot';
+import { detectRecurring } from '../services/recurring';
 import {
   CreateManualTransactionSchema,
   UpdateTransactionSchema,
@@ -215,6 +216,7 @@ router.post(
       if (balanceChanged) {
         takeSnapshot();
       }
+      detectRecurring();
 
       const txn = db.prepare('SELECT * FROM transactions WHERE id = ?').get(id);
       res.status(201).json({ data: txn });
@@ -312,6 +314,7 @@ router.patch(
       if (balanceChanged) {
         takeSnapshot();
       }
+      detectRecurring();
 
       const updated = db.prepare('SELECT * FROM transactions WHERE id = ?').get(id);
       res.json({ data: updated });
@@ -352,6 +355,7 @@ router.delete('/:id', (req: Request, res: Response, next: NextFunction): void =>
     if (balanceChanged) {
       takeSnapshot();
     }
+    detectRecurring();
 
     res.json({ data: { success: true } });
   } catch (err) {
