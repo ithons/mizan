@@ -152,7 +152,7 @@ export function flattenCategories(cats: import('@shared/types').Category[]): imp
   for (const cat of cats) {
     result.push(cat);
     if (cat.children?.length) {
-      result.push(...cat.children);
+      result.push(...flattenCategories(cat.children));
     }
   }
   return result;
