@@ -15,15 +15,16 @@ import {
   CircleAlert,
   Info,
   Lightbulb,
+  RefreshCw,
   Target,
   TrendingDown,
   TrendingUp,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { format, startOfMonth, endOfMonth, subMonths, parseISO } from 'date-fns';
-import type { Goal, Insight } from '@shared/types';
-import { networthApi, reportsApi, recurringApi, budgetsApi, transactionsApi, investmentsApi, insightsApi, goalsApi } from '../lib/api';
-import { formatCurrency, formatDate, formatDateShort, formatMonth } from '../lib/formatters';
+import type { Goal, Insight, SyncHealth } from '@shared/types';
+import { networthApi, reportsApi, recurringApi, budgetsApi, transactionsApi, investmentsApi, insightsApi, goalsApi, syncApi } from '../lib/api';
+import { formatCurrency, formatDate, formatDateShort, formatMonth, formatRelativeTime } from '../lib/formatters';
 import { AmountBadge } from '../components/AmountBadge';
 import { CategoryBadge } from '../components/CategoryBadge';
 import { SkeletonCard } from '../components/SkeletonLoader';
@@ -193,6 +194,96 @@ function GoalProgressRow({ goal }: { goal: Goal }) {
   );
 }
 
+const syncHealthTone: Record<SyncHealth['status'], { label: string; color: string }> = {
+  empty: { label: 'Not connected', color: '#6b6b7a' },
+  healthy: { label: 'Fresh', color: '#4ecba3' },
+  stale: { label: 'Stale', color: '#d4a44c' },
+  attention: { label: 'Needs attention', color: '#e07070' },
+};
+
+function SyncHealthPanel({
+  health,
+  onNavigate,
+}: {
+  health?: SyncHealth;
+  onNavigate: (route: string) => void;
+}) {
+  const tone = syncHealthTone[health?.status ?? 'empty'];
+  const topConnections = health?.connections.slice(0, 3) ?? [];
+
+  return (
+    <div className="bg-surface border border-border rounded p-4">
+      <div className="flex items-center justify-between mb-4">
+        <div className="flex items-center gap-2">
+          <RefreshCw size={14} style={{ color: tone.color }} />
+          <h2 className="text-sm font-medium text-text">Sync Health</h2>
+        </div>
+        <button onClick={() => onNavigate('/accounts')} className="text-xs text-muted hover:text-[#4ecba3] flex items-center gap-1">
+          Accounts <ArrowRight size={11} />
+        </button>
+      </div>
+
+      <div className="flex items-baseline justify-between gap-3 mb-3">
+        <div>
+          <p className="text-xs text-muted mb-1">Status</p>
+          <p className="text-sm font-medium" style={{ color: tone.color }}>{tone.label}</p>
+        </div>
+        <div className="text-right">
+          <p className="text-xs text-muted mb-1">Last sync</p>
+          <p className="text-xs font-mono text-text">
+            {health?.last_synced_at ? formatRelativeTime(health.last_synced_at) : 'Never'}
+          </p>
+        </div>
+      </div>
+
+      {health && health.connection_count > 0 ? (
+        <div className="space-y-2">
+          <div className="grid grid-cols-3 gap-2 text-xs">
+            <div>
+              <p className="text-muted mb-0.5">Connections</p>
+              <p className="font-mono text-text">{health.connection_count}</p>
+            </div>
+            <div>
+              <p className="text-muted mb-0.5">Stale</p>
+              <p className="font-mono" style={{ color: health.stale_count > 0 ? '#d4a44c' : '#4ecba3' }}>
+                {health.stale_count}
+              </p>
+            </div>
+            <div>
+              <p className="text-muted mb-0.5">Attention</p>
+              <p className="font-mono" style={{ color: health.attention_count > 0 ? '#e07070' : '#4ecba3' }}>
+                {health.attention_count}
+              </p>
+            </div>
+          </div>
+
+          <div className="space-y-1.5">
+            {topConnections.map((connection) => {
+              const connectionTone = connection.needs_attention
+                ? '#e07070'
+                : connection.is_stale
+                  ? '#d4a44c'
+                  : '#4ecba3';
+              return (
+                <div key={`${connection.provider}:${connection.id}`} className="flex items-center justify-between gap-3 text-xs">
+                  <span className="text-text truncate">{connection.institution_name}</span>
+                  <span className="font-mono flex-shrink-0" style={{ color: connectionTone }}>
+                    {connection.last_synced_at ? formatRelativeTime(connection.last_synced_at) : connection.status}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      ) : (
+        <div className="h-24 flex items-center justify-center text-muted text-sm">
+          No connected institutions
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function Dashboard() {
   const navigate = useNavigate();
   const now = new Date();
@@ -243,6 +334,11 @@ export function Dashboard() {
   const { data: goals } = useQuery({
     queryKey: ['goals', 'dashboard'],
     queryFn: () => goalsApi.list(),
+  });
+
+  const { data: syncHealth } = useQuery({
+    queryKey: ['sync', 'health', 'dashboard'],
+    queryFn: () => syncApi.health(),
   });
 
   if (nwLoading) {
@@ -352,7 +448,12 @@ export function Dashboard() {
         </div>
       </div>
 
-      <SignalsPanel insights={insights} onNavigate={navigate} />
+      <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
+        <div className="xl:col-span-2">
+          <SignalsPanel insights={insights} onNavigate={navigate} />
+        </div>
+        <SyncHealthPanel health={syncHealth} onNavigate={navigate} />
+      </div>
 
       {/* Row 2: Asset Breakdown */}
       <div className="bg-surface border border-border rounded p-4">

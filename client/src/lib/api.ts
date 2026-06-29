@@ -11,6 +11,7 @@ import type {
   NetWorthSnapshot,
   PlaidItem,
   Insight,
+  SyncHealth,
   CashflowReport,
   SpendingReport,
   NetWorthHistory,
@@ -347,6 +348,7 @@ export const networthApi = {
 
 export const syncApi = {
   run: () => apiFetch<void>('/api/sync/run', { method: 'POST' }),
+  health: () => apiFetch<SyncHealth>('/api/sync/health'),
 };
 
 // ─── Plaid ───────────────────────────────────────────────────────────────────

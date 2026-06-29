@@ -7,6 +7,7 @@ const FINANCIAL_QUERY_KEYS = [
   'networth',
   'budgets',
   'recurring',
+  'sync',
   'goals',
   'rules',
   'holdings',

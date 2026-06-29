@@ -251,6 +251,28 @@ export interface SyncEvent {
   completedAt?: string;
 }
 
+export type SyncHealthStatus = 'empty' | 'healthy' | 'stale' | 'attention';
+
+export interface SyncHealthConnection {
+  id: string;
+  provider: 'plaid' | 'coinbase';
+  institution_name: string;
+  status: string;
+  last_synced_at?: string | null;
+  account_count: number;
+  is_stale: boolean;
+  needs_attention: boolean;
+}
+
+export interface SyncHealth {
+  status: SyncHealthStatus;
+  connection_count: number;
+  stale_count: number;
+  attention_count: number;
+  last_synced_at?: string | null;
+  connections: SyncHealthConnection[];
+}
+
 export interface ChatMessage {
   role: 'user' | 'assistant';
   content: string;
