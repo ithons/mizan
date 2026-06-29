@@ -84,6 +84,12 @@ router.put(
         rollover: boolean;
       };
 
+      const category = db.prepare('SELECT id FROM categories WHERE id = ?').get(categoryId);
+      if (!category) {
+        res.status(404).json({ error: 'Category not found' });
+        return;
+      }
+
       const now = new Date().toISOString();
 
       const existing = db.prepare(

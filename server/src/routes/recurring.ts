@@ -117,6 +117,7 @@ router.patch(
       const db = getDb();
       const { id } = req.params;
       const body = req.body as { category_id?: string | null };
+      const categoryId = body.category_id || null;
 
       const pattern = db.prepare('SELECT id FROM recurring_patterns WHERE id = ?').get(id);
       if (!pattern) {
@@ -124,9 +125,17 @@ router.patch(
         return;
       }
 
+      if (categoryId) {
+        const category = db.prepare('SELECT id FROM categories WHERE id = ?').get(categoryId);
+        if (!category) {
+          res.status(404).json({ error: 'Category not found' });
+          return;
+        }
+      }
+
       db.prepare(
         'UPDATE recurring_patterns SET category_id = ?, updated_at = ? WHERE id = ?'
-      ).run(body.category_id ?? null, new Date().toISOString(), id);
+      ).run(categoryId, new Date().toISOString(), id);
 
       const updated = db.prepare('SELECT * FROM recurring_patterns WHERE id = ?').get(id);
       res.json({ data: updated });

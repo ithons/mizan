@@ -38,6 +38,14 @@ function upsertMerchantRule(
   ).run(uuidv4(), pattern, categoryId, createdAt);
 }
 
+function accountExists(db: Database.Database, accountId: string): boolean {
+  return Boolean(db.prepare('SELECT id FROM accounts WHERE id = ?').get(accountId));
+}
+
+function categoryExists(db: Database.Database, categoryId: string): boolean {
+  return Boolean(db.prepare('SELECT id FROM categories WHERE id = ?').get(categoryId));
+}
+
 function parseQueryNumber(value: string | string[] | undefined): number | null {
   if (value === undefined) return null;
   const raw = Array.isArray(value) ? value[0] : value;
@@ -205,6 +213,17 @@ router.post(
       const id = uuidv4();
       const now = new Date().toISOString();
       let balanceChanged = false;
+      const categoryId = body.category_id || null;
+
+      if (!accountExists(db, body.account_id)) {
+        res.status(404).json({ error: 'Account not found' });
+        return;
+      }
+
+      if (categoryId && !categoryExists(db, categoryId)) {
+        res.status(404).json({ error: 'Category not found' });
+        return;
+      }
 
       const insertTransaction = db.transaction(() => {
         db.prepare(`
@@ -219,7 +238,7 @@ router.post(
           body.amount,
           body.merchant_name || null,
           body.original_name,
-          body.category_id || null,
+          categoryId,
           body.notes || null,
           now,
           now
@@ -275,12 +294,18 @@ router.patch(
         return;
       }
 
+      const categoryId = body.category_id || null;
+      if (body.category_id !== undefined && categoryId && !categoryExists(db, categoryId)) {
+        res.status(404).json({ error: 'Category not found' });
+        return;
+      }
+
       const updates: string[] = [];
       const values: unknown[] = [];
 
       if (body.category_id !== undefined) {
         updates.push('category_id = ?');
-        values.push(body.category_id);
+        values.push(categoryId);
       }
       if (body.notes !== undefined) {
         updates.push('notes = ?');
@@ -323,9 +348,9 @@ router.patch(
       }
 
       // If category changed, upsert merchant_rule
-      if (body.category_id !== undefined && body.category_id !== null) {
+      if (body.category_id !== undefined && categoryId) {
         const merchantName = existing.merchant_name || existing.original_name;
-        upsertMerchantRule(db, merchantName, body.category_id, now);
+        upsertMerchantRule(db, merchantName, categoryId, now);
       }
 
       if (balanceChanged) {
@@ -388,23 +413,34 @@ router.post(
     try {
       const db = getDb();
       const body = req.body as { ids: string[]; categoryId: string };
+      const transactionIds = Array.from(new Set(body.ids));
 
-      const placeholders = body.ids.map(() => '?').join(',');
+      if (!categoryExists(db, body.categoryId)) {
+        res.status(404).json({ error: 'Category not found' });
+        return;
+      }
+
+      const placeholders = transactionIds.map(() => '?').join(',');
       const now = new Date().toISOString();
 
       const updateCategories = db.transaction(() => {
         const selectedTransactions = db.prepare(`
-          SELECT merchant_name, original_name
+          SELECT id, merchant_name, original_name
           FROM transactions
           WHERE id IN (${placeholders})
-        `).all(...body.ids) as Array<{
+        `).all(...transactionIds) as Array<{
+          id: string;
           merchant_name: string | null;
           original_name: string;
         }>;
 
+        if (selectedTransactions.length !== transactionIds.length) {
+          throw new Error('MISSING_TRANSACTIONS');
+        }
+
         db.prepare(
           `UPDATE transactions SET category_id = ?, updated_at = ? WHERE id IN (${placeholders})`
-        ).run(body.categoryId, now, ...body.ids);
+        ).run(body.categoryId, now, ...transactionIds);
 
         const patterns = new Set(
           selectedTransactions
@@ -417,9 +453,17 @@ router.post(
         }
       });
 
-      updateCategories();
+      try {
+        updateCategories();
+      } catch (err) {
+        if ((err as Error).message === 'MISSING_TRANSACTIONS') {
+          res.status(404).json({ error: 'One or more transactions were not found' });
+          return;
+        }
+        throw err;
+      }
 
-      res.json({ data: { updated: body.ids.length } });
+      res.json({ data: { updated: transactionIds.length } });
     } catch (err) {
       next(err);
     }
