@@ -10,7 +10,8 @@ import {
   RefreshCw,
   AlertTriangle,
 } from 'lucide-react';
-import { aiApi } from '../lib/api';
+import type { Insight } from '@shared/types';
+import { aiApi, insightsApi } from '../lib/api';
 import { useAiChat } from '../hooks/useAiChat';
 
 // ── Simple inline markdown renderer ──────────────────────────────────────────
@@ -152,13 +153,51 @@ function NoApiKey() {
 
 const SUGGESTED_PROMPTS = [
   'Give me an overview of my financial health',
-  'How is my investment portfolio allocated?',
-  'Where am I overspending this month?',
-  'Do I have enough in my emergency fund?',
-  'Which positions have the best and worst returns?',
+  'What changed in my cash flow this month?',
+  'Which transactions or categories need attention?',
+  'Am I on track for my goals?',
+  'What upcoming bills should I plan for?',
 ];
 
-function EmptyChat({ onSend }: { onSend: (text: string) => void }) {
+function promptForInsight(insight: Insight): string {
+  switch (insight.id) {
+    case 'connect-accounts':
+      return 'What accounts should I connect first to get a complete financial picture?';
+    case 'sync-reconnect':
+    case 'sync-stale':
+      return 'What parts of my financial picture are least trustworthy until sync is fixed?';
+    case 'uncategorized-transactions':
+      return 'Help me prioritize my uncategorized transactions and explain what reports they affect.';
+    case 'confirm-recurring':
+      return 'Which recurring bills or income patterns should I confirm first?';
+    case 'budget-over':
+    case 'budget-tight':
+      return 'What should I do about the budget category that needs attention?';
+    case 'cash-projection-negative':
+    case 'cash-projection-down':
+      return 'Explain my upcoming cash flow risk and what I should adjust this month.';
+    case 'goal-deadline':
+    case 'goal-close':
+      return 'Am I on track for my active goals, and what should I do next?';
+    default:
+      return `What should I do about this signal: ${insight.title}?`;
+  }
+}
+
+function buildPrompts(insights?: Insight[]): string[] {
+  const signalPrompts = (insights ?? []).slice(0, 3).map(promptForInsight);
+  return [...signalPrompts, ...SUGGESTED_PROMPTS].slice(0, 5);
+}
+
+function EmptyChat({
+  onSend,
+  insights,
+}: {
+  onSend: (text: string) => void;
+  insights?: Insight[];
+}) {
+  const prompts = buildPrompts(insights);
+
   return (
     <div className="flex flex-col items-center justify-center h-full gap-6 px-8">
       <div className="text-center">
@@ -166,10 +205,10 @@ function EmptyChat({ onSend }: { onSend: (text: string) => void }) {
           <BrainCircuit size={22} className="text-[#4ecba3]" />
         </div>
         <p className="text-sm font-medium text-text mb-1">AI Financial Advisor</p>
-        <p className="text-xs text-muted">Ask questions about your finances. Claude has access to your accounts, investments, and spending.</p>
+        <p className="text-xs text-muted">Ask questions about your accounts, transactions, budgets, goals, and recurring cash flow.</p>
       </div>
       <div className="w-full max-w-md space-y-2">
-        {SUGGESTED_PROMPTS.map((prompt) => (
+        {prompts.map((prompt) => (
           <button
             key={prompt}
             onClick={() => onSend(prompt)}
@@ -196,6 +235,12 @@ export function Advisor() {
     queryKey: ['ai-context'],
     queryFn: aiApi.getContext,
     retry: false,
+    staleTime: 5 * 60 * 1000,
+  });
+
+  const { data: insights } = useQuery({
+    queryKey: ['insights', 'advisor'],
+    queryFn: () => insightsApi.list(),
     staleTime: 5 * 60 * 1000,
   });
 
@@ -252,7 +297,7 @@ export function Advisor() {
             {apiError ? (
               <NoApiKey />
             ) : messages.length === 0 ? (
-              <EmptyChat onSend={(text) => { setInput(''); sendMessage(text); }} />
+              <EmptyChat insights={insights} onSend={(text) => { setInput(''); sendMessage(text); }} />
             ) : (
               <>
                 {messages.map((msg) => (
