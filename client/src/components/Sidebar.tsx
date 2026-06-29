@@ -15,7 +15,7 @@ import {
   PanelLeftClose,
 } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
-import { networthApi, plaidApi } from '../lib/api';
+import { networthApi, syncApi } from '../lib/api';
 import { formatCurrency, formatRelativeTime } from '../lib/formatters';
 import { useAppStore } from '../store';
 
@@ -43,7 +43,7 @@ interface SidebarProps {
 
 export function Sidebar({ collapsed = false, onToggle }: SidebarProps) {
   const navigate = useNavigate();
-  const { syncStatus, lastSynced } = useAppStore();
+  const { syncStatus, lastSynced, addToast } = useAppStore();
 
   const { data: netWorthData } = useQuery({
     queryKey: ['networth', 'latest'],
@@ -64,12 +64,14 @@ export function Sidebar({ collapsed = false, onToggle }: SidebarProps) {
       }
       if (key === 's') {
         e.preventDefault();
-        plaidApi.syncAll().catch(() => {});
+        syncApi.run().catch((err: unknown) => {
+          addToast({ type: 'error', message: err instanceof Error ? err.message : 'Sync failed' });
+        });
       }
     };
     window.addEventListener('keydown', handleKey);
     return () => window.removeEventListener('keydown', handleKey);
-  }, [navigate]);
+  }, [addToast, navigate]);
 
   const netWorth = netWorthData?.net_worth ?? 0;
   const totalAssets = netWorthData?.total_assets ?? 0;

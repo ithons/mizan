@@ -252,6 +252,12 @@ export const networthApi = {
     apiFetch<NetWorthSnapshot[]>(`/api/networth/history${months ? `?months=${months}` : ''}`),
 };
 
+// ─── Sync ────────────────────────────────────────────────────────────────────
+
+export const syncApi = {
+  run: () => apiFetch<void>('/api/sync/run', { method: 'POST' }),
+};
+
 // ─── Plaid ───────────────────────────────────────────────────────────────────
 
 export const plaidApi = {

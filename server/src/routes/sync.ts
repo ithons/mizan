@@ -1,10 +1,19 @@
-import { Router, Request, Response } from 'express';
-import { addSseClient, removeSseClient } from '../services/syncManager';
+import { Router, Request, Response, NextFunction } from 'express';
+import { addSseClient, removeSseClient, runFullSync } from '../services/syncManager';
 
 const router = Router();
 
-// GET / - SSE endpoint
-router.get('/', (req: Request, res: Response): void => {
+router.post('/run', async (_req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    await runFullSync();
+    res.json({ data: { success: true } });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// GET /status - SSE endpoint
+router.get('/status', (req: Request, res: Response): void => {
   res.setHeader('Content-Type', 'text/event-stream');
   res.setHeader('Cache-Control', 'no-cache');
   res.setHeader('Connection', 'keep-alive');

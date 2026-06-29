@@ -74,7 +74,7 @@ async function main() {
   app.use('/api/networth', networthRouter);
   app.use('/api/plaid', plaidRouter);
   app.use('/api/coinbase', coinbaseRouter);
-  app.use('/api/sync/status', syncRouter);
+  app.use('/api/sync', syncRouter);
   app.use('/api/settings', settingsRouter);
   app.use('/api/health', healthRouter);
   app.use('/api/ai', aiRouter);
@@ -95,14 +95,16 @@ async function main() {
     ? app.listen(PORT, '0.0.0.0', announce)
     : ViteExpress.listen(app, PORT, announce);
 
-  // 3. Background sync on startup (non-blocking)
-  setTimeout(async () => {
-    try {
-      await runFullSync();
-    } catch (err) {
-      console.error('[startup] Sync failed:', (err as Error).message);
-    }
-  }, 2000);
+  // Startup sync is opt-in because it calls external providers.
+  if (process.env.MIZAN_AUTO_SYNC_ON_STARTUP === 'true') {
+    setTimeout(async () => {
+      try {
+        await runFullSync();
+      } catch (err) {
+        console.error('[startup] Sync failed:', (err as Error).message);
+      }
+    }, 2000);
+  }
 
   // Graceful shutdown
   const shutdown = () => {

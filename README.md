@@ -26,6 +26,10 @@ npm start
 # -> http://localhost:3001
 ```
 
+By default, Mizān does not sync external providers on server startup. Use the in-app
+sync controls, or set `MIZAN_AUTO_SYNC_ON_STARTUP=true` if you explicitly want startup
+sync.
+
 ## Data Location
 
 All data is stored in the project-local `.mizan/` directory:
