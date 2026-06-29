@@ -15,7 +15,13 @@ import {
 } from 'recharts';
 import { ChevronLeft, ChevronRight, ArrowRight, X } from 'lucide-react';
 import { format, subMonths, startOfMonth, endOfMonth, addMonths } from 'date-fns';
-import { reportsApi, transactionsApi, categoriesApi, flattenCategories } from '../lib/api';
+import {
+  reportsApi,
+  transactionsApi,
+  categoriesApi,
+  flattenCategories,
+  collectCategoryAndDescendantIds,
+} from '../lib/api';
 import { formatCurrency, formatMonth } from '../lib/formatters';
 import { PageLoader } from '../components/LoadingSpinner';
 import { AmountBadge } from '../components/AmountBadge';
@@ -98,8 +104,11 @@ export function CashFlow() {
 
   // Selected month data
   const selectedMonthData = months.find((m) => m.month === currentMonth);
+  const filterCategoryIds = new Set(
+    filterCategoryId ? collectCategoryAndDescendantIds(categoriesTree, filterCategoryId) : []
+  );
   const txs = (txData?.data ?? []).filter(
-    (t) => !filterCategoryId || t.category_id === filterCategoryId
+    (t) => !filterCategoryId || (t.category_id ? filterCategoryIds.has(t.category_id) : false)
   );
 
   if (isLoading) return <PageLoader />;

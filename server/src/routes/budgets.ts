@@ -52,22 +52,29 @@ router.get('/month/:year/:month', (req: Request, res: Response, next: NextFuncti
     const endDate = `${year}-${String(month).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`;
 
     const budgets = db.prepare(`
+      WITH RECURSIVE budget_categories(root_id, category_id) AS (
+        SELECT id, id FROM categories
+        UNION ALL
+        SELECT bc.root_id, c.id
+        FROM categories c
+        JOIN budget_categories bc ON c.parent_id = bc.category_id
+      )
       SELECT
         b.*,
         c.name AS category_name,
         c.color AS category_color,
         c.icon AS category_icon,
-        COALESCE((
-          SELECT SUM(ABS(t.amount))
-          FROM transactions t
-          WHERE t.category_id = b.category_id
-            AND t.date BETWEEN ? AND ?
-            AND t.amount < 0
-            AND t.pending = 0
-        ), 0) AS spent
+        COALESCE(SUM(ABS(t.amount)), 0) AS spent
       FROM budgets b
       JOIN categories c ON c.id = b.category_id
+      LEFT JOIN budget_categories bc ON bc.root_id = b.category_id
+      LEFT JOIN transactions t
+        ON t.category_id = bc.category_id
+       AND t.date BETWEEN ? AND ?
+       AND t.amount < 0
+       AND t.pending = 0
       WHERE b.period = 'monthly' OR b.period = ?
+      GROUP BY b.id
       ORDER BY c.name ASC
     `).all(startDate, endDate, `${year}-${String(month).padStart(2, '0')}`);
 

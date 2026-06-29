@@ -46,6 +46,37 @@ function categoryExists(db: Database.Database, categoryId: string): boolean {
   return Boolean(db.prepare('SELECT id FROM categories WHERE id = ?').get(categoryId));
 }
 
+function expandCategoryIds(db: Database.Database, categoryIds: string[]): string[] {
+  const categories = db.prepare('SELECT id, parent_id FROM categories').all() as Array<{
+    id: string;
+    parent_id: string | null;
+  }>;
+  const childrenByParent = new Map<string, string[]>();
+
+  for (const category of categories) {
+    if (!category.parent_id) continue;
+    const children = childrenByParent.get(category.parent_id) ?? [];
+    children.push(category.id);
+    childrenByParent.set(category.parent_id, children);
+  }
+
+  const expanded = new Set<string>();
+  const addWithDescendants = (categoryId: string): void => {
+    if (expanded.has(categoryId)) return;
+    expanded.add(categoryId);
+
+    for (const childId of childrenByParent.get(categoryId) ?? []) {
+      addWithDescendants(childId);
+    }
+  };
+
+  for (const categoryId of categoryIds) {
+    addWithDescendants(categoryId);
+  }
+
+  return Array.from(expanded);
+}
+
 function parseQueryNumber(value: string | string[] | undefined): number | null {
   if (value === undefined) return null;
   const raw = Array.isArray(value) ? value[0] : value;
@@ -84,8 +115,15 @@ router.get('/', (req: Request, res: Response, next: NextFunction): void => {
         : [query.categoryId]
       : [];
     if (categoryIds.length > 0) {
-      conditions.push(`t.category_id IN (${categoryIds.map(() => '?').join(',')})`);
-      params.push(...categoryIds);
+      const expandedCategoryIds = expandCategoryIds(
+        db,
+        categoryIds.map((id) => id.trim()).filter(Boolean)
+      );
+
+      if (expandedCategoryIds.length > 0) {
+        conditions.push(`t.category_id IN (${expandedCategoryIds.map(() => '?').join(',')})`);
+        params.push(...expandedCategoryIds);
+      }
     }
 
     if (query.startDate) {

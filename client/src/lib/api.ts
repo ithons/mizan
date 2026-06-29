@@ -158,6 +158,19 @@ export function flattenCategories(cats: import('@shared/types').Category[]): imp
   return result;
 }
 
+export function collectCategoryAndDescendantIds(cats: Category[], categoryId: string): string[] {
+  for (const cat of cats) {
+    if (cat.id === categoryId) {
+      return flattenCategories([cat]).map((category) => category.id);
+    }
+
+    const childMatch = collectCategoryAndDescendantIds(cat.children ?? [], categoryId);
+    if (childMatch.length > 0) return childMatch;
+  }
+
+  return [];
+}
+
 export const categoriesApi = {
   list: () => apiFetch<Category[]>('/api/categories'),
   create: (body: Partial<Category>) =>
