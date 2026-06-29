@@ -83,20 +83,32 @@ export function backfillSnapshots(): void {
 
   // Current balances as the starting point (today's balances)
   const accounts = db.prepare(`
-    SELECT id, current_balance, is_liability, is_hidden
+    SELECT id, current_balance, is_liability, is_hidden, type
     FROM accounts
     WHERE is_hidden = 0
-  `).all() as Array<{ id: string; current_balance: number; is_liability: number; is_hidden: number }>;
+  `).all() as Array<{
+    id: string;
+    current_balance: number;
+    is_liability: number;
+    is_hidden: number;
+    type: string;
+  }>;
 
   const balances: Record<string, number> = {};
   for (const account of accounts) {
     balances[account.id] = account.current_balance;
   }
 
-  const accountMap: Record<string, { is_liability: number }> = {};
+  const accountMap: Record<string, { is_liability: number; type: string }> = {};
   for (const account of accounts) {
-    accountMap[account.id] = { is_liability: account.is_liability };
+    accountMap[account.id] = {
+      is_liability: account.is_liability,
+      type: account.type,
+    };
   }
+
+  const liquidTypes = new Set(['checking', 'savings', 'cash']);
+  const investmentTypes = new Set(['brokerage', 'ira_traditional', 'ira_roth']);
 
   // Walk backwards month by month for 12 months
   for (let monthsBack = 1; monthsBack <= 12; monthsBack++) {
@@ -126,6 +138,9 @@ export function backfillSnapshots(): void {
 
     let total_assets = 0;
     let total_liabilities = 0;
+    let liquid_assets = 0;
+    let investment_assets = 0;
+    let crypto_assets = 0;
     const breakdown: Record<string, number> = {};
 
     for (const accountId of Object.keys(approxBalances)) {
@@ -137,14 +152,23 @@ export function backfillSnapshots(): void {
         total_liabilities += balance;
       } else {
         total_assets += balance;
+        if (liquidTypes.has(account.type)) {
+          liquid_assets += balance;
+        } else if (investmentTypes.has(account.type)) {
+          investment_assets += balance;
+        } else if (account.type === 'crypto_wallet') {
+          crypto_assets += balance;
+        }
       }
     }
 
     const net_worth = total_assets - total_liabilities;
 
     db.prepare(`
-      INSERT INTO net_worth_snapshots (id, date, total_assets, total_liabilities, net_worth, breakdown, is_estimated, created_at)
-      VALUES (?, ?, ?, ?, ?, ?, 1, ?)
+      INSERT INTO net_worth_snapshots
+        (id, date, total_assets, total_liabilities, net_worth, breakdown, is_estimated,
+         liquid_assets, investment_assets, crypto_assets, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?)
     `).run(
       uuidv4(),
       targetStr,
@@ -152,6 +176,9 @@ export function backfillSnapshots(): void {
       total_liabilities,
       net_worth,
       JSON.stringify(breakdown),
+      liquid_assets,
+      investment_assets,
+      crypto_assets,
       new Date().toISOString()
     );
   }
