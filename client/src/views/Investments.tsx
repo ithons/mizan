@@ -42,9 +42,55 @@ const ACCOUNT_TYPE_LABELS: Record<string, string> = {
   crypto_wallet: 'Crypto',
 };
 
+interface CostBasisStats {
+  totalCount: number;
+  knownCount: number;
+  missingCount: number;
+  knownCostBasis: number;
+  unrealized: number | null;
+  returnPct: number | null;
+  coveragePct: number;
+  label: 'Complete' | 'Partial' | 'Missing' | 'No holdings';
+}
+
 function formatPct(n: number | null): string {
   if (n == null) return '-';
   return `${n >= 0 ? '+' : ''}${n.toFixed(1)}%`;
+}
+
+function getCostBasisStats(holdings: Holding[]): CostBasisStats {
+  const known = holdings.filter((holding) => holding.cost_basis != null);
+  const knownCostBasis = known.reduce((sum, holding) => sum + (holding.cost_basis ?? 0), 0);
+  const knownValue = known.reduce((sum, holding) => sum + holding.institution_value, 0);
+  const missingCount = holdings.length - known.length;
+  const unrealized = known.length > 0 ? knownValue - knownCostBasis : null;
+  const returnPct = unrealized != null && knownCostBasis > 0
+    ? (unrealized / knownCostBasis) * 100
+    : null;
+  const label = holdings.length === 0
+    ? 'No holdings'
+    : missingCount === 0
+      ? 'Complete'
+      : known.length === 0
+        ? 'Missing'
+        : 'Partial';
+
+  return {
+    totalCount: holdings.length,
+    knownCount: known.length,
+    missingCount,
+    knownCostBasis,
+    unrealized,
+    returnPct,
+    coveragePct: holdings.length > 0 ? (known.length / holdings.length) * 100 : 0,
+    label,
+  };
+}
+
+function costBasisTone(label: CostBasisStats['label']): string {
+  if (label === 'Complete') return '#32bfa3';
+  if (label === 'No holdings') return '#718087';
+  return '#e2a53f';
 }
 
 function PnlCell({ value, pct }: { value: number | null; pct: number | null }) {
@@ -168,11 +214,15 @@ export function Investments() {
   }, [allHoldings]);
 
   // Summary stats
+  const costBasisStats = useMemo(
+    () => getCostBasisStats(filteredHoldings),
+    [filteredHoldings]
+  );
   const totalValue = filteredHoldings.reduce((s, h) => s + h.institution_value, 0);
-  const totalCostBasis = filteredHoldings.reduce((s, h) => s + (h.cost_basis ?? 0), 0);
-  const hasCostBasis = filteredHoldings.some((h) => h.cost_basis != null);
-  const unrealized = hasCostBasis ? totalValue - totalCostBasis : null;
-  const totalReturn = hasCostBasis && totalCostBasis > 0 ? ((totalValue - totalCostBasis) / totalCostBasis) * 100 : null;
+  const totalCostBasis = costBasisStats.knownCostBasis;
+  const hasCostBasis = costBasisStats.knownCount > 0;
+  const unrealized = costBasisStats.unrealized;
+  const totalReturn = costBasisStats.returnPct;
 
   // Sort holdings
   const sortedHoldings = useMemo(() => {
@@ -262,9 +312,9 @@ export function Investments() {
       <h1 className="text-xl font-semibold text-text">Investments</h1>
 
       {/* Summary cards */}
-      <div className="grid grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-5 gap-4">
         {holdingsLoading ? (
-          <><SkeletonCard /><SkeletonCard /><SkeletonCard /><SkeletonCard /></>
+          <><SkeletonCard /><SkeletonCard /><SkeletonCard /><SkeletonCard /><SkeletonCard /></>
         ) : (
           <>
             <div className="bg-surface border border-border rounded p-5">
@@ -276,6 +326,11 @@ export function Investments() {
               <p className="font-mono text-2xl font-medium text-text">
                 {hasCostBasis ? formatCurrency(totalCostBasis) : '-'}
               </p>
+              {costBasisStats.missingCount > 0 && (
+                <p className="text-[11px] text-[#e2a53f] mt-1">
+                  {costBasisStats.missingCount} holding{costBasisStats.missingCount === 1 ? '' : 's'} missing
+                </p>
+              )}
             </div>
             <div className="bg-surface border border-border rounded p-5">
               <p className="text-xs text-muted mb-1">Unrealized P&L</p>
@@ -296,6 +351,20 @@ export function Investments() {
               >
                 {totalReturn == null ? '-' : formatPct(totalReturn)}
               </p>
+            </div>
+            <div className="bg-surface border border-border rounded p-5">
+              <p className="text-xs text-muted mb-1">Cost Basis Quality</p>
+              <p
+                className="font-mono text-2xl font-medium"
+                style={{ color: costBasisTone(costBasisStats.label) }}
+              >
+                {costBasisStats.label}
+              </p>
+              {costBasisStats.totalCount > 0 && (
+                <p className="text-[11px] text-muted mt-1">
+                  {costBasisStats.coveragePct.toFixed(0)}% of holdings covered
+                </p>
+              )}
             </div>
           </>
         )}
@@ -406,11 +475,10 @@ export function Investments() {
             <tbody>
               {invAccounts.map((acct) => {
                 const acctHoldings = holdingsByAccount.get(acct.id) ?? [];
+                const acctStats = getCostBasisStats(acctHoldings);
                 const value = acctHoldings.reduce((s, h) => s + h.institution_value, 0);
-                const costBasis = acctHoldings.reduce((s, h) => s + (h.cost_basis ?? 0), 0);
-                const hasCB = acctHoldings.some((h) => h.cost_basis != null);
-                const gl = hasCB ? value - costBasis : null;
-                const ret = hasCB && costBasis > 0 ? ((value - costBasis) / costBasis) * 100 : null;
+                const gl = acctStats.unrealized;
+                const ret = acctStats.returnPct;
                 return (
                   <tr
                     key={acct.id}
@@ -421,7 +489,16 @@ export function Investments() {
                     <td className="px-3 py-2.5 text-muted">{acct.institution_name ?? '-'}</td>
                     <td className="px-3 py-2.5 text-muted">{ACCOUNT_TYPE_LABELS[acct.type] ?? acct.type}</td>
                     <td className="px-3 py-2.5 text-right font-mono text-text">{formatCurrency(value)}</td>
-                    <td className="px-3 py-2.5 text-right font-mono text-muted">{hasCB ? formatCurrency(costBasis) : '-'}</td>
+                    <td className="px-3 py-2.5 text-right">
+                      <p className="font-mono text-muted">
+                        {acctStats.knownCount > 0 ? formatCurrency(acctStats.knownCostBasis) : 'Missing'}
+                      </p>
+                      {acctStats.missingCount > 0 && (
+                        <p className="text-[10px] text-[#e2a53f]">
+                          {acctStats.missingCount} missing
+                        </p>
+                      )}
+                    </td>
                     <td className="px-3 py-2.5 text-right">
                       <PnlCell value={gl} pct={null} />
                     </td>
@@ -433,28 +510,29 @@ export function Investments() {
               })}
             </tbody>
             {invAccounts.length > 1 && (() => {
+              const totalStats = getCostBasisStats(allHoldings);
               const totalV = invAccounts.reduce((s, a) => {
                 const h = holdingsByAccount.get(a.id) ?? [];
                 return s + h.reduce((ss, hh) => ss + hh.institution_value, 0);
               }, 0);
-              const totalCB = invAccounts.reduce((s, a) => {
-                const h = holdingsByAccount.get(a.id) ?? [];
-                return s + h.reduce((ss, hh) => ss + (hh.cost_basis ?? 0), 0);
-              }, 0);
-              const totalHasCB = allHoldings.some((h) => h.cost_basis != null);
-              const totalGL = totalHasCB ? totalV - totalCB : null;
-              const totalRet = totalHasCB && totalCB > 0 ? ((totalV - totalCB) / totalCB) * 100 : null;
               return (
                 <tfoot>
                   <tr className="border-t-2 border-border">
                     <td className="px-3 py-2.5 text-text font-bold" colSpan={3}>TOTAL</td>
                     <td className="px-3 py-2.5 text-right font-mono font-bold text-text">{formatCurrency(totalV)}</td>
-                    <td className="px-3 py-2.5 text-right font-mono text-muted">{totalHasCB ? formatCurrency(totalCB) : '-'}</td>
-                    <td className="px-3 py-2.5 text-right font-bold">
-                      <PnlCell value={totalGL} pct={null} />
+                    <td className="px-3 py-2.5 text-right">
+                      <p className="font-mono text-muted">
+                        {totalStats.knownCount > 0 ? formatCurrency(totalStats.knownCostBasis) : 'Missing'}
+                      </p>
+                      {totalStats.missingCount > 0 && (
+                        <p className="text-[10px] text-[#e2a53f]">{totalStats.missingCount} missing</p>
+                      )}
                     </td>
-                    <td className="px-3 py-2.5 text-right font-mono font-bold" style={{ color: totalRet == null ? undefined : totalRet >= 0 ? '#32bfa3' : '#ef6f8a' }}>
-                      {totalRet == null ? '-' : formatPct(totalRet)}
+                    <td className="px-3 py-2.5 text-right font-bold">
+                      <PnlCell value={totalStats.unrealized} pct={null} />
+                    </td>
+                    <td className="px-3 py-2.5 text-right font-mono font-bold" style={{ color: totalStats.returnPct == null ? undefined : totalStats.returnPct >= 0 ? '#32bfa3' : '#ef6f8a' }}>
+                      {totalStats.returnPct == null ? '-' : formatPct(totalStats.returnPct)}
                     </td>
                   </tr>
                 </tfoot>
@@ -526,7 +604,13 @@ export function Investments() {
                         <td className="px-3 py-2.5 text-right font-mono text-xs">{h.quantity.toFixed(4)}</td>
                         <td className="px-3 py-2.5 text-right font-mono">{formatCurrency(h.institution_price)}</td>
                         <td className="px-3 py-2.5 text-right font-mono font-medium text-text">{formatCurrency(h.institution_value)}</td>
-                        <td className="px-3 py-2.5 text-right font-mono text-muted">{h.cost_basis != null ? formatCurrency(h.cost_basis) : '-'}</td>
+                        <td className="px-3 py-2.5 text-right font-mono">
+                          {h.cost_basis != null ? (
+                            <span className="text-muted">{formatCurrency(h.cost_basis)}</span>
+                          ) : (
+                            <span className="text-[#e2a53f]">Missing</span>
+                          )}
+                        </td>
                         <td className="px-3 py-2.5 text-right">
                           {isCash ? <span className="text-muted">-</span> : <PnlCell value={pnl} pct={null} />}
                         </td>
@@ -539,18 +623,26 @@ export function Investments() {
                 )}
                 {/* Footer total row */}
                 {!holdingsLoading && sortedHoldings.length > 0 && (() => {
+                  const visibleStats = getCostBasisStats(sortedHoldings);
                   const totalV = sortedHoldings.reduce((s, h) => s + h.institution_value, 0);
-                  const totalPnl = sortedHoldings.reduce((s, h) => h.cost_basis != null ? s + h.institution_value - h.cost_basis : s, 0);
-                  const hasCB2 = sortedHoldings.some((h) => h.cost_basis != null);
                   return (
                     <tr className="border-t-2 border-border">
                       <td className="px-3 py-2.5 font-bold text-text" colSpan={selectedAccountId ? 4 : 5}>TOTAL</td>
                       <td className="px-3 py-2.5 text-right font-mono font-bold text-text">{formatCurrency(totalV)}</td>
-                      <td />
-                      <td className="px-3 py-2.5 text-right font-bold">
-                        <PnlCell value={hasCB2 ? totalPnl : null} pct={null} />
+                      <td className="px-3 py-2.5 text-right">
+                        <p className="font-mono text-muted">
+                          {visibleStats.knownCount > 0 ? formatCurrency(visibleStats.knownCostBasis) : 'Missing'}
+                        </p>
+                        {visibleStats.missingCount > 0 && (
+                          <p className="text-[10px] text-[#e2a53f]">{visibleStats.missingCount} missing</p>
+                        )}
                       </td>
-                      <td />
+                      <td className="px-3 py-2.5 text-right font-bold">
+                        <PnlCell value={visibleStats.unrealized} pct={null} />
+                      </td>
+                      <td className="px-3 py-2.5 text-right font-mono font-bold" style={{ color: visibleStats.returnPct == null ? undefined : visibleStats.returnPct >= 0 ? '#32bfa3' : '#ef6f8a' }}>
+                        {visibleStats.returnPct == null ? '-' : formatPct(visibleStats.returnPct)}
+                      </td>
                     </tr>
                   );
                 })()}
