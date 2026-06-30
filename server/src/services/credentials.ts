@@ -58,12 +58,20 @@ function getDerivedKey(): Buffer {
   if (fs.existsSync(KEY_PATH)) {
     console.log('[credentials] Migrating encryption key to native keychain...');
     _key = fs.readFileSync(KEY_PATH);
+    const hexKey = _key.toString('hex');
     
     if (entry) {
       try {
-        entry.setPassword(_key.toString('hex'));
-        // Remove old file after successful migration
-        fs.unlinkSync(KEY_PATH);
+        entry.setPassword(hexKey);
+        
+        // Verify write before deleting the fallback
+        const readBack = entry.getPassword();
+        if (readBack === hexKey) {
+          fs.unlinkSync(KEY_PATH);
+          console.log('[credentials] Migration successful, removed legacy key file.');
+        } else {
+          console.warn('[credentials] Keychain verification failed. Legacy key file retained.');
+        }
         return _key;
       } catch (err) {
         console.error('[credentials] Failed to migrate key to keychain:', (err as Error).message);

@@ -882,9 +882,9 @@ function confirmCreateGoal(db: Database.Database, payload: Extract<AdvisorDraftP
   const now = new Date().toISOString();
   const id = uuidv4();
   db.prepare(`
-    INSERT INTO goals (id, name, type, target_amount, current_amount, account_id, created_at, updated_at)
-    VALUES (?, ?, ?, ?, 0, ?, ?, ?)
-  `).run(id, payload.name, payload.type, payload.target_amount, payload.account_id ?? null, now, now);
+    INSERT INTO goals (id, name, type, target_amount, current_amount, account_id, is_tax_envelope, created_at, updated_at)
+    VALUES (?, ?, ?, ?, 0, ?, ?, ?, ?)
+  `).run(id, payload.name, payload.type, payload.target_amount, payload.account_id ?? null, payload.is_tax_envelope ? 1 : 0, now, now);
 
   return { changed: 1, result: { goal_id: id } };
 }
