@@ -1,0 +1,124 @@
+import { format, subDays } from 'date-fns';
+import type Database from 'better-sqlite3';
+import type { DataQualityIssue, InsightSeverity } from '../../../shared/types';
+
+export interface PersonalFinanceInvariantIssue extends DataQualityIssue {
+  penalty: number;
+}
+
+interface AccountRow {
+  id: string;
+  account_name: string;
+}
+
+interface SnapshotRow {
+  id: string;
+  date: string;
+  breakdown: string;
+}
+
+interface CountRow {
+  count: number;
+}
+
+function issue(
+  id: string,
+  label: string,
+  message: string,
+  route: string,
+  severity: InsightSeverity,
+  penalty: number
+): PersonalFinanceInvariantIssue {
+  return { id, label, message, route, severity, penalty };
+}
+
+function count(db: Database.Database, sql: string, ...params: unknown[]): number {
+  const row = db.prepare(sql).get(...params) as CountRow | undefined;
+  return row?.count ?? 0;
+}
+
+function latestSnapshot(db: Database.Database): SnapshotRow | null {
+  return db.prepare(`
+    SELECT id, date, breakdown
+    FROM net_worth_snapshots
+    ORDER BY date DESC, created_at DESC
+    LIMIT 1
+  `).get() as SnapshotRow | undefined ?? null;
+}
+
+function hiddenAccounts(db: Database.Database): AccountRow[] {
+  return db.prepare(`
+    SELECT id, account_name
+    FROM accounts
+    WHERE is_hidden = 1
+  `).all() as AccountRow[];
+}
+
+function hiddenAccountSnapshotIssue(db: Database.Database): PersonalFinanceInvariantIssue | null {
+  const snapshot = latestSnapshot(db);
+  if (!snapshot) return null;
+
+  let breakdown: Record<string, unknown>;
+  try {
+    breakdown = JSON.parse(snapshot.breakdown) as Record<string, unknown>;
+  } catch {
+    return issue(
+      'net-worth-breakdown-invalid',
+      'Net worth evidence is unreadable',
+      `The latest net worth snapshot on ${snapshot.date} has an invalid account breakdown, so Mizān cannot explain that number reliably.`,
+      '/reports',
+      'critical',
+      35
+    );
+  }
+
+  const hiddenById = new Map(hiddenAccounts(db).map((account) => [account.id, account]));
+  const leakedAccounts = Object.keys(breakdown)
+    .map((accountId) => hiddenById.get(accountId))
+    .filter((account): account is AccountRow => Boolean(account));
+
+  if (leakedAccounts.length === 0) return null;
+
+  const names = leakedAccounts.map((account) => account.account_name).join(', ');
+  return issue(
+    'hidden-account-net-worth',
+    'Hidden account included in net worth',
+    `The latest net worth snapshot includes hidden ${leakedAccounts.length === 1 ? 'account' : 'accounts'}: ${names}. Refresh the snapshot after hiding accounts before trusting net worth.`,
+    '/accounts',
+    'critical',
+    35
+  );
+}
+
+function stalePendingTransactionsIssue(
+  db: Database.Database,
+  now: Date
+): PersonalFinanceInvariantIssue | null {
+  const cutoff = format(subDays(now, 7), 'yyyy-MM-dd');
+  const stalePending = count(
+    db,
+    'SELECT COUNT(*) AS count FROM transactions WHERE pending = 1 AND date < ?',
+    cutoff
+  );
+
+  if (stalePending === 0) return null;
+
+  return issue(
+    'stale-pending-transactions',
+    'Old pending transactions',
+    `${stalePending} pending ${stalePending === 1 ? 'transaction is' : 'transactions are'} older than 7 days. Pending transactions stay out of reports until they post or are corrected.`,
+    '/transactions?pending=true',
+    'warning',
+    Math.min(15, stalePending * 3)
+  );
+}
+
+export function getPersonalFinanceInvariantIssues(
+  db: Database.Database,
+  now = new Date()
+): PersonalFinanceInvariantIssue[] {
+  return [
+    hiddenAccountSnapshotIssue(db),
+    stalePendingTransactionsIssue(db, now),
+  ].filter((item): item is PersonalFinanceInvariantIssue => Boolean(item));
+}

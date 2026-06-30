@@ -14,12 +14,15 @@ import { buildRecurringForecast } from './recurringForecast';
 import { getReportSummary } from './reporting';
 import { getSyncHealth } from './syncHealth';
 import { getTransactionReviewSummary } from './transactionReview';
+import { getPersonalFinanceInvariantIssues } from './personalFinanceInvariants';
+import type { PersonalFinanceInvariantIssue } from './personalFinanceInvariants';
 
 interface DataQualityInputs {
   syncHealth: SyncHealth;
   reviewSummary: TransactionReviewSummary;
   forecast: RecurringForecast;
   reportSummary: ReportSummary;
+  invariantIssues?: PersonalFinanceInvariantIssue[];
 }
 
 interface ScoredIssue extends DataQualityIssue {
@@ -95,8 +98,9 @@ export function summarizeDataQuality({
   reviewSummary,
   forecast,
   reportSummary,
+  invariantIssues = [],
 }: DataQualityInputs): DataQualitySummary {
-  const issues: ScoredIssue[] = [];
+  const issues: ScoredIssue[] = [...invariantIssues];
 
   if (syncHealth.status === 'attention') {
     issues.push(issue(
@@ -130,12 +134,14 @@ export function summarizeDataQuality({
   if (reviewSummary.total_open > 0) {
     const uncategorized = reviewSummary.queues.find((queue) => queue.id === 'uncategorized')?.count ?? 0;
     const rules = reviewSummary.queues.find((queue) => queue.id === 'rule_suggestions')?.count ?? 0;
+    const pending = reviewSummary.queues.find((queue) => queue.id === 'pending')?.count ?? 0;
     const recurring = reviewSummary.queues.find((queue) => queue.id === 'recurring_candidates')?.count ?? 0;
     const duplicates = reviewSummary.queues.find((queue) => queue.id === 'duplicate_candidates')?.count ?? 0;
     const transfers = reviewSummary.queues.find((queue) => queue.id === 'transfer_candidates')?.count ?? 0;
     const reviewParts = [
       uncategorized > 0 ? plural(uncategorized, 'uncategorized transaction') : null,
       rules > 0 ? plural(rules, 'rule suggestion') : null,
+      pending > 0 ? plural(pending, 'pending transaction') : null,
       recurring > 0 ? plural(recurring, 'recurring candidate') : null,
       duplicates > 0 ? plural(duplicates, 'possible duplicate') : null,
       transfers > 0 ? plural(transfers, 'detected transfer') : null,
@@ -202,5 +208,6 @@ export function getDataQualitySummary(db: Database.Database): DataQualitySummary
     reviewSummary: getTransactionReviewSummary(db),
     forecast: buildRecurringForecast(db, 60),
     reportSummary: getReportSummary(db, { startDate, endDate }),
+    invariantIssues: getPersonalFinanceInvariantIssues(db, today),
   });
 }

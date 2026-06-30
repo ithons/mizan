@@ -221,6 +221,47 @@ test('data quality combines transaction and cash flow review penalties', () => {
   ]);
 });
 
+test('data quality names pending transaction backlog', () => {
+  const review = baseReviewSummary({
+    total_open: 2,
+    queues: baseReviewSummary().queues.map((queue) => (
+      queue.id === 'pending' ? { ...queue, count: 2 } : queue
+    )),
+  });
+
+  const summary = summarizeDataQuality({
+    syncHealth: baseSyncHealth(),
+    reviewSummary: review,
+    forecast: baseForecast(),
+    reportSummary: baseReportSummary(),
+  });
+
+  assert.equal(summary.status, 'healthy');
+  assert.equal(summary.score, 97);
+  assert.match(summary.issues[0].message, /2 pending transactions/);
+});
+
+test('data quality promotes invariant failures to attention', () => {
+  const summary = summarizeDataQuality({
+    syncHealth: baseSyncHealth(),
+    reviewSummary: baseReviewSummary(),
+    forecast: baseForecast(),
+    reportSummary: baseReportSummary(),
+    invariantIssues: [{
+      id: 'hidden-account-net-worth',
+      label: 'Hidden account included in net worth',
+      message: 'A hidden account is present in the latest net worth snapshot.',
+      route: '/accounts',
+      severity: 'critical',
+      penalty: 35,
+    }],
+  });
+
+  assert.equal(summary.status, 'attention');
+  assert.equal(summary.score, 65);
+  assert.equal(summary.issues[0].id, 'hidden-account-net-worth');
+});
+
 test('report exclusions are transparent without lowering the trust score', () => {
   const summary = summarizeDataQuality({
     syncHealth: baseSyncHealth(),
