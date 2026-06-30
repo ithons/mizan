@@ -11,6 +11,12 @@ import { invalidateFinancialData } from '../lib/queryInvalidation';
 import { parseDecimalInput } from '../lib/numberInput';
 import { advisorRouteState } from '../lib/advisorRouteState';
 import { buildBudgetAdvisorPrompt } from '../lib/advisorPrompts';
+import {
+  availableBudgetAmount,
+  budgetProjectedPercent,
+  budgetProjectedRemaining,
+  budgetProjectedSpend,
+} from '../lib/budgetMath';
 import { Modal } from '../components/Modal';
 import { CategoryBadge } from '../components/CategoryBadge';
 import { EmptyState } from '../components/EmptyState';
@@ -18,10 +24,6 @@ import { PageLoader } from '../components/LoadingSpinner';
 import type { Budget as BudgetModel, Category } from '@shared/types';
 
 // ─── Budget Progress Bar ─────────────────────────────────────────────────────
-
-function availableBudgetAmount(budget: BudgetModel): number {
-  return budget.amount + (budget.rollover ? budget.rollover_balance : 0);
-}
 
 function BudgetRow({
   budget,
@@ -39,13 +41,13 @@ function BudgetRow({
   const spent = budget.spent ?? 0;
   const rolloverBalance = budget.rollover ? budget.rollover_balance : 0;
   const availableAmount = availableBudgetAmount(budget);
-  const projectedSpend = budget.projected_spend ?? spent;
+  const projectedSpend = budgetProjectedSpend(budget);
   const expectedRecurring = budget.expected_recurring ?? 0;
-  const projectedPct = budget.projected_percent ?? (availableAmount > 0 ? (projectedSpend / availableAmount) * 100 : 0);
+  const projectedPct = budgetProjectedPercent(budget);
   const actualPct = availableAmount > 0 ? (spent / availableAmount) * 100 : 0;
   const barColor = projectedPct >= 100 ? '#ef6f8a' : projectedPct >= 80 ? '#e2a53f' : '#32bfa3';
   const remaining = availableAmount - spent;
-  const projectedRemaining = budget.projected_remaining ?? remaining;
+  const projectedRemaining = budgetProjectedRemaining(budget);
 
   const [editing, setEditing] = useState(false);
   const [editVal, setEditVal] = useState(String(budget.amount));
@@ -458,7 +460,7 @@ export function Budget() {
   const budgeted = budgets.reduce((sum, b) => sum + availableBudgetAmount(b), 0);
   const spent = budgets.reduce((sum, b) => sum + (b.spent ?? 0), 0);
   const expectedRecurring = budgets.reduce((sum, b) => sum + (b.expected_recurring ?? 0), 0);
-  const projectedSpend = budgets.reduce((sum, b) => sum + (b.projected_spend ?? b.spent ?? 0), 0);
+  const projectedSpend = budgets.reduce((sum, b) => sum + budgetProjectedSpend(b), 0);
   const remaining = budgeted - spent;
   const projectedRemaining = budgeted - projectedSpend;
 

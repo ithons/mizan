@@ -1,9 +1,6 @@
 import type { AdvisorRoutePrompt } from './advisorRouteState';
 import type { Account, Budget, Holding, Transaction } from '@shared/types';
-
-function availableBudgetAmount(budget: Budget): number {
-  return budget.amount + (budget.rollover ? budget.rollover_balance : 0);
-}
+import { availableBudgetAmount, budgetProjectedRemaining, budgetProjectedSpend } from './budgetMath';
 
 function formatMoneyValue(value: number): string {
   const amount = Math.abs(value).toFixed(2);
@@ -17,9 +14,9 @@ function formatCurrencyValue(value: number, currency: string): string {
 export function buildBudgetAdvisorPrompt(budget: Budget, month: string): AdvisorRoutePrompt {
   const spent = budget.spent ?? 0;
   const available = availableBudgetAmount(budget);
-  const projectedSpend = budget.projected_spend ?? spent;
+  const projectedSpend = budgetProjectedSpend(budget);
   const expectedRecurring = budget.expected_recurring ?? 0;
-  const projectedRemaining = budget.projected_remaining ?? available - projectedSpend;
+  const projectedRemaining = budgetProjectedRemaining(budget);
   const categoryName = budget.category_name ?? 'this category';
   const confidence = budget.forecast_confidence ?? 'none';
 

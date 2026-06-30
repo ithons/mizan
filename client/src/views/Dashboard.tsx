@@ -32,6 +32,7 @@ import { accountsApi, networthApi, reportsApi, recurringApi, budgetsApi, transac
 import { getDashboardMode, type DashboardMode } from '../lib/dashboardState';
 import { getOnboardingPlan, type OnboardingPlan } from '../lib/onboarding';
 import { advisorRouteState } from '../lib/advisorRouteState';
+import { availableBudgetAmount, budgetProjectedPercent, budgetProjectedSpend } from '../lib/budgetMath';
 import { formatCurrency, formatDate, formatDateShort, formatMonth, formatRelativeTime } from '../lib/formatters';
 import { AmountBadge } from '../components/AmountBadge';
 import { CategoryBadge } from '../components/CategoryBadge';
@@ -955,16 +956,16 @@ export function Dashboard() {
           {budgets && budgets.length > 0 ? (
             <div className="space-y-3">
               {budgets.slice(0, 6).map((budget) => {
-                const spent = budget.spent ?? 0;
-                const projected = budget.projected_spend ?? spent;
-                const pct = budget.amount > 0 ? (projected / budget.amount) * 100 : 0;
+                const available = availableBudgetAmount(budget);
+                const projected = budgetProjectedSpend(budget);
+                const pct = budgetProjectedPercent(budget);
                 const barColor = pct >= 100 ? '#ef6f8a' : pct >= 80 ? '#e2a53f' : '#32bfa3';
                 return (
                   <div key={budget.id}>
                     <div className="flex items-center justify-between text-xs mb-1">
                       <span className="text-text">{budget.category_name}</span>
                       <span className="font-mono text-muted">
-                        {formatCurrency(projected)} / {formatCurrency(budget.amount)}
+                        {formatCurrency(projected)} / {formatCurrency(available)}
                       </span>
                     </div>
                     <div className="h-1.5 bg-border rounded-full overflow-hidden">
