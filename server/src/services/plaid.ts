@@ -78,10 +78,12 @@ export function resetPlaidClient(): void {
   _client = null;
 }
 
-function shouldSendRedirectUri(redirectUri: string): boolean {
+function shouldSendRedirectUri(redirectUri?: string | null): redirectUri is string {
+  if (!redirectUri) return false;
+
   try {
     const url = new URL(redirectUri);
-    return url.protocol === 'https:' || url.hostname === 'localhost';
+    return url.protocol === 'https:';
   } catch (err) {
     console.warn('[plaid] Invalid redirect URI ignored:', redirectUri, err);
     return false;
@@ -114,7 +116,7 @@ function normalizePlaidTransactionAmount(amount: number): number {
   return -amount;
 }
 
-export async function createLinkToken(redirectUri: string = 'http://localhost:3001'): Promise<string> {
+export async function createLinkToken(redirectUri?: string | null): Promise<string> {
   const plaid = getPlaidClient();
   const creds = getCredentials();
 
@@ -666,7 +668,7 @@ export async function syncAllItems(): Promise<PlaidSyncSummary> {
   return summary;
 }
 
-export async function createUpdateToken(dbItemId: string, redirectUri: string = 'http://localhost:3001'): Promise<string> {
+export async function createUpdateToken(dbItemId: string, redirectUri?: string | null): Promise<string> {
   const db = getDb();
   const plaid = getPlaidClient();
   const creds = getCredentials();

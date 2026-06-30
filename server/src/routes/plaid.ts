@@ -12,6 +12,7 @@ import {
   createUpdateToken,
 } from '../services/plaid';
 import { removePlaidItemToken } from '../services/credentials';
+import { normalizePlaidRedirectUri } from '../services/plaidRedirect';
 import { takeSnapshot } from '../services/snapshot';
 import {
   finishSyncRun,
@@ -22,29 +23,10 @@ import { refreshTransactionIntegrity } from '../services/transactionIntegrity';
 
 const router = Router();
 
-function defaultRedirectUri() {
-  return `http://localhost:${process.env.PORT || '3001'}`;
-}
-
-function normalizeRedirectUri(uri?: string): string {
-  const base = uri || defaultRedirectUri();
-  try {
-    const url = new URL(base);
-    if (url.hostname === '127.0.0.1') {
-      url.hostname = 'localhost';
-      return url.toString().replace(/\/$/, '');
-    }
-    return base;
-  } catch {
-    return defaultRedirectUri();
-  }
-}
-
-
 // POST /link-token
 router.post('/link-token', async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
-    const redirectUri = normalizeRedirectUri((req.body as { redirectUri?: string }).redirectUri);
+    const redirectUri = normalizePlaidRedirectUri((req.body as { redirectUri?: string }).redirectUri);
     const linkToken = await createLinkToken(redirectUri);
     res.json({ data: { link_token: linkToken, redirect_uri: redirectUri } });
   } catch (err) {
@@ -228,7 +210,7 @@ router.delete('/items/:id', async (req: Request, res: Response, next: NextFuncti
 // POST /update-token/:id - get update mode link token
 router.post('/update-token/:id', async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
-    const redirectUri = normalizeRedirectUri((req.body as { redirectUri?: string }).redirectUri);
+    const redirectUri = normalizePlaidRedirectUri((req.body as { redirectUri?: string }).redirectUri);
     const linkToken = await createUpdateToken(req.params['id'] as string, redirectUri);
     res.json({ data: { link_token: linkToken, redirect_uri: redirectUri } });
   } catch (err) {

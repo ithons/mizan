@@ -435,7 +435,7 @@ export const syncApi = {
 
 export const plaidApi = {
   createLinkToken: () =>
-    apiFetch<{ link_token: string; redirect_uri: string }>('/api/plaid/link-token', {
+    apiFetch<{ link_token: string; redirect_uri: string | null }>('/api/plaid/link-token', {
       method: 'POST',
       body: JSON.stringify({ redirectUri: window.location.origin }),
     }),
@@ -456,7 +456,7 @@ export const plaidApi = {
   deleteItem: (itemId: string) =>
     apiFetch<void>(`/api/plaid/items/${itemId}`, { method: 'DELETE' }),
   createUpdateToken: (itemId: string) =>
-    apiFetch<{ link_token: string; redirect_uri: string }>(`/api/plaid/update-token/${itemId}`, {
+    apiFetch<{ link_token: string; redirect_uri: string | null }>(`/api/plaid/update-token/${itemId}`, {
       method: 'POST',
       body: JSON.stringify({ redirectUri: window.location.origin }),
     }),
