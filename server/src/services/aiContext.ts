@@ -1,6 +1,7 @@
 import { addDays, addMonths, differenceInCalendarDays, format, parseISO, startOfMonth, subMonths } from 'date-fns';
 import type Database from 'better-sqlite3';
 import { getDb } from '../db/index';
+import { suggestMerchantRules } from './rules';
 
 export const ADVISOR_SYSTEM_PROMPT = `You are a sharp, honest personal financial advisor with access to the user's complete financial picture. Their real balances, transactions, portfolio, goals, recurring bills, and cash-flow forecast are provided below.
 
@@ -474,6 +475,23 @@ export function buildFinancialContext(): string {
     );
     lines.push(`  Categorization rules: ${reviewQueue.merchant_rules}`);
     lines.push(`  Detected recurring patterns needing confirmation: ${reviewQueue.detected_recurring}`);
+  }
+
+  const ruleSuggestions = suggestMerchantRules(db);
+  if (ruleSuggestions.length > 0) {
+    const uncategorizedMatches = ruleSuggestions.reduce(
+      (sum, suggestion) => sum + suggestion.uncategorized_count,
+      0
+    );
+    lines.push('');
+    lines.push('### Rule Suggestions');
+    lines.push(`  Suggested merchant rules: ${ruleSuggestions.length}`);
+    lines.push(`  Uncategorized matches they could clean up: ${uncategorizedMatches}`);
+    for (const suggestion of ruleSuggestions.slice(0, 5)) {
+      lines.push(
+        `  ${suggestion.pattern}: ${suggestion.category_name} (${suggestion.categorized_count} categorized, ${suggestion.uncategorized_count} uncategorized, ${Math.round(suggestion.confidence * 100)}% confidence)`
+      );
+    }
   }
 
   // ── Investment Portfolio ─────────────────────────────────────────────────
