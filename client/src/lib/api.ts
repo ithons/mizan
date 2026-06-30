@@ -29,6 +29,8 @@ import type {
   ChatMessage,
   AiStreamEvent,
   AdvisorAnalysis,
+  AdvisorConfirmResponse,
+  AdvisorDraftAction,
   AdvisorContextResponse,
 } from '@shared/types';
 
@@ -511,6 +513,11 @@ export const aiApi = {
       method: 'POST',
       body: JSON.stringify({ question }),
       signal,
+    }),
+  confirmDraft: (draft: AdvisorDraftAction) =>
+    apiFetch<AdvisorConfirmResponse>('/api/ai/confirm', {
+      method: 'POST',
+      body: JSON.stringify({ draft, confirm: true }),
     }),
 
   streamChat: async (

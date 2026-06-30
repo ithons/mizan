@@ -1,11 +1,43 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import Database from 'better-sqlite3';
+import { confirmAdvisorDraft } from '../server/src/services/advisorDrafts';
 import { analyzeAdvisorQuestion, buildAdvisorReadTools } from '../server/src/services/advisorTools';
+
+const TEST_NOW = '2026-06-30T12:00:00.000Z';
+
+function insertTransaction(
+  db: Database.Database,
+  params: {
+    id: string;
+    date: string;
+    amount: number;
+    merchant: string;
+    categoryId: string | null;
+    reviewStatus?: 'open' | 'reviewed';
+  }
+): void {
+  db.prepare(`
+    INSERT INTO transactions (
+      id, account_id, date, amount, merchant_name, original_name, category_id, pending,
+      recurring_id, review_status, duplicate_status, transfer_status, created_at, updated_at
+    )
+    VALUES (?, 'acct_checking', ?, ?, ?, ?, ?, 0, NULL, ?, 'none', 'none', ?, ?)
+  `).run(
+    params.id,
+    params.date,
+    params.amount,
+    params.merchant,
+    params.merchant,
+    params.categoryId,
+    params.reviewStatus ?? 'reviewed',
+    TEST_NOW,
+    TEST_NOW
+  );
+}
 
 function setupAdvisorDb(): Database.Database {
   const db = new Database(':memory:');
-  const now = new Date().toISOString();
 
   db.exec(`
     CREATE TABLE categories (
@@ -134,7 +166,7 @@ function setupAdvisorDb(): Database.Database {
   db.prepare(`
     INSERT INTO plaid_items (id, institution_name, status, last_synced_at)
     VALUES ('item_1', 'Mizan Test Bank', 'active', ?)
-  `).run(now);
+  `).run(TEST_NOW);
 
   db.prepare(`
     INSERT INTO accounts (
@@ -143,29 +175,40 @@ function setupAdvisorDb(): Database.Database {
     VALUES ('acct_checking', 'item_1', 'plaid', 'Mizan Test Bank', 'Everyday Checking', 'checking', 2500, 0, 0)
   `).run();
 
-  const insertTransaction = db.prepare(`
-    INSERT INTO transactions (
-      id, account_id, date, amount, merchant_name, original_name, category_id, pending,
-      recurring_id, review_status, duplicate_status, transfer_status, created_at, updated_at
-    )
-    VALUES (?, 'acct_checking', ?, ?, ?, ?, ?, 0, NULL, ?, 'none', 'none', ?, ?)
-  `);
-
-  insertTransaction.run('paycheck', '2026-06-03', 1000, 'Employer', 'Employer', 'cat_income_paycheck', 'reviewed', now, now);
-  insertTransaction.run('restaurant', '2026-06-07', -100, 'Restaurant', 'Restaurant', 'cat_food_restaurants', 'reviewed', now, now);
-  insertTransaction.run('uncategorized', '2026-06-08', -25, 'Mystery', 'Mystery', null, 'open', now, now);
+  insertTransaction(db, {
+    id: 'paycheck',
+    date: '2026-06-03',
+    amount: 1000,
+    merchant: 'Employer',
+    categoryId: 'cat_income_paycheck',
+  });
+  insertTransaction(db, {
+    id: 'restaurant',
+    date: '2026-06-07',
+    amount: -100,
+    merchant: 'Restaurant',
+    categoryId: 'cat_food_restaurants',
+  });
+  insertTransaction(db, {
+    id: 'uncategorized',
+    date: '2026-06-08',
+    amount: -25,
+    merchant: 'Mystery',
+    categoryId: null,
+    reviewStatus: 'open',
+  });
 
   db.prepare(`
     INSERT INTO budgets (id, category_id, amount, period, rollover, rollover_balance, created_at, updated_at)
     VALUES ('budget_food', 'cat_food', 120, 'monthly', 0, 0, ?, ?)
-  `).run(now, now);
+  `).run(TEST_NOW, TEST_NOW);
 
   db.prepare(`
     INSERT INTO goals (
       id, name, type, target_amount, current_amount, starting_amount, account_id, target_date, color, is_archived, created_at, updated_at
     )
     VALUES ('goal_emergency', 'Emergency Fund', 'savings', 5000, 1500, NULL, NULL, '2026-12-31', '#4ecba3', 0, ?, ?)
-  `).run(now, now);
+  `).run(TEST_NOW, TEST_NOW);
 
   return db;
 }
@@ -212,4 +255,132 @@ test('advisor review analysis cites the Review Inbox queues', (t) => {
   assert.equal(analysis.intent, 'review');
   assert.match(analysis.answer, /1 open review item/);
   assert.ok(analysis.citations.some((citation) => citation.id === 'review:uncategorized'));
+});
+
+test('advisor drafts and confirms a transaction category change', (t) => {
+  const db = setupAdvisorDb();
+  t.after(() => db.close());
+
+  const analysis = analyzeAdvisorQuestion(
+    db,
+    'Categorize Mystery as Food',
+    new Date(TEST_NOW)
+  );
+  const draft = analysis.drafts.find((item) => item.kind === 'categorize_transaction');
+  assert.ok(draft);
+
+  confirmAdvisorDraft(db, draft, true);
+
+  const transaction = db.prepare('SELECT category_id, review_status FROM transactions WHERE id = ?').get('uncategorized') as {
+    category_id: string;
+    review_status: string;
+  };
+  assert.equal(transaction.category_id, 'cat_food');
+  assert.equal(transaction.review_status, 'reviewed');
+});
+
+test('advisor drafts and confirms budget and goal updates', (t) => {
+  const db = setupAdvisorDb();
+  t.after(() => db.close());
+
+  const budgetAnalysis = analyzeAdvisorQuestion(
+    db,
+    'Set Food budget to $200',
+    new Date(TEST_NOW)
+  );
+  const budgetDraft = budgetAnalysis.drafts.find((item) => item.kind === 'update_budget');
+  assert.ok(budgetDraft);
+  confirmAdvisorDraft(db, budgetDraft, true);
+
+  const budget = db.prepare('SELECT amount FROM budgets WHERE id = ?').get('budget_food') as { amount: number };
+  assert.equal(budget.amount, 200);
+
+  const goalAnalysis = analyzeAdvisorQuestion(
+    db,
+    'Set Emergency Fund goal target to $6000',
+    new Date(TEST_NOW)
+  );
+  const goalDraft = goalAnalysis.drafts.find((item) => item.kind === 'update_goal_target');
+  assert.ok(goalDraft);
+  confirmAdvisorDraft(db, goalDraft, true);
+
+  const goal = db.prepare('SELECT target_amount FROM goals WHERE id = ?').get('goal_emergency') as {
+    target_amount: number;
+  };
+  assert.equal(goal.target_amount, 6000);
+});
+
+test('advisor draft confirmation requires explicit confirmation', (t) => {
+  const db = setupAdvisorDb();
+  t.after(() => db.close());
+
+  db.prepare(`
+    INSERT INTO recurring_patterns (
+      id, merchant_name, category_id, average_amount, frequency, last_seen, next_expected,
+      is_active, is_confirmed, transaction_count, created_at, updated_at
+    )
+    VALUES ('rec_gym', 'Gym Club', 'cat_food', 40, 'monthly', '2026-06-01', '2026-07-01', 1, 0, 3, ?, ?)
+  `).run(TEST_NOW, TEST_NOW);
+
+  const analysis = analyzeAdvisorQuestion(
+    db,
+    'Confirm recurring Gym Club',
+    new Date(TEST_NOW)
+  );
+  const draft = analysis.drafts.find((item) => item.kind === 'confirm_recurring');
+  assert.ok(draft);
+  assert.throws(() => confirmAdvisorDraft(db, draft, false), /Explicit confirmation/);
+
+  confirmAdvisorDraft(db, draft, true);
+  const recurring = db.prepare('SELECT is_confirmed FROM recurring_patterns WHERE id = ?').get('rec_gym') as {
+    is_confirmed: number;
+  };
+  assert.equal(recurring.is_confirmed, 1);
+});
+
+test('advisor drafts and confirms a suggested merchant rule', (t) => {
+  const db = setupAdvisorDb();
+  t.after(() => db.close());
+
+  insertTransaction(db, {
+    id: 'coffee_1',
+    date: '2026-06-09',
+    amount: -6,
+    merchant: 'Coffee Shop',
+    categoryId: 'cat_food',
+  });
+  insertTransaction(db, {
+    id: 'coffee_2',
+    date: '2026-06-10',
+    amount: -7,
+    merchant: 'Coffee Shop',
+    categoryId: 'cat_food',
+  });
+  insertTransaction(db, {
+    id: 'coffee_3',
+    date: '2026-06-11',
+    amount: -8,
+    merchant: 'Coffee Shop',
+    categoryId: null,
+    reviewStatus: 'open',
+  });
+
+  const analysis = analyzeAdvisorQuestion(
+    db,
+    'Review rule suggestions',
+    new Date(TEST_NOW)
+  );
+  const draft = analysis.drafts.find((item) => item.kind === 'create_merchant_rule');
+  assert.ok(draft);
+
+  confirmAdvisorDraft(db, draft, true);
+
+  const rule = db.prepare('SELECT category_id FROM merchant_rules WHERE lower(pattern) = lower(?)').get('Coffee Shop') as {
+    category_id: string;
+  };
+  const updated = db.prepare('SELECT category_id FROM transactions WHERE id = ?').get('coffee_3') as {
+    category_id: string;
+  };
+  assert.equal(rule.category_id, 'cat_food');
+  assert.equal(updated.category_id, 'cat_food');
 });

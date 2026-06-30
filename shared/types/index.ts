@@ -515,6 +515,73 @@ export interface AdvisorToolStatus {
   route: string;
 }
 
+export type AdvisorDraftActionKind =
+  | 'create_merchant_rule'
+  | 'categorize_transaction'
+  | 'update_budget'
+  | 'update_goal_target'
+  | 'confirm_recurring';
+
+export interface AdvisorDraftChange {
+  field: string;
+  before: string | number | boolean | null;
+  after: string | number | boolean | null;
+}
+
+export type AdvisorDraftPayload =
+  | {
+      kind: 'create_merchant_rule';
+      pattern: string;
+      category_id: string;
+      apply_existing: boolean;
+    }
+  | {
+      kind: 'categorize_transaction';
+      transaction_id: string;
+      category_id: string;
+    }
+  | {
+      kind: 'update_budget';
+      category_id: string;
+      amount: number;
+      period: 'monthly';
+      rollover: boolean;
+    }
+  | {
+      kind: 'update_goal_target';
+      goal_id: string;
+      target_amount: number;
+    }
+  | {
+      kind: 'confirm_recurring';
+      recurring_id: string;
+    };
+
+export interface AdvisorDraftAction {
+  id: string;
+  kind: AdvisorDraftActionKind;
+  label: string;
+  summary: string;
+  route: string;
+  payload: AdvisorDraftPayload;
+  changes: AdvisorDraftChange[];
+  citations: AdvisorCitation[];
+  confirmation_required: true;
+}
+
+export interface AdvisorConfirmRequest {
+  draft: AdvisorDraftAction;
+  confirm: true;
+}
+
+export interface AdvisorConfirmResponse {
+  success: boolean;
+  message: string;
+  changed: number;
+  draft: AdvisorDraftAction;
+  result?: unknown;
+}
+
 export interface AdvisorAnalysis {
   question: string;
   intent: AdvisorIntent;
@@ -522,6 +589,7 @@ export interface AdvisorAnalysis {
   generated_at: string;
   tools: AdvisorToolStatus[];
   citations: AdvisorCitation[];
+  drafts: AdvisorDraftAction[];
 }
 
 export interface AdvisorContextResponse {

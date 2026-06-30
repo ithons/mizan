@@ -2,8 +2,9 @@ import { Router, Request, Response, NextFunction } from 'express';
 import Anthropic from '@anthropic-ai/sdk';
 import { getDb } from '../db/index';
 import { buildAdvisorContextSnapshot, ADVISOR_SYSTEM_PROMPT } from '../services/aiContext';
+import { confirmAdvisorDraft } from '../services/advisorDrafts';
 import { analyzeAdvisorQuestion } from '../services/advisorTools';
-import type { ChatMessage } from '../../../shared/types';
+import type { AdvisorConfirmRequest, ChatMessage } from '../../../shared/types';
 
 const router = Router();
 
@@ -38,6 +39,21 @@ router.post('/analyze', (req: Request, res: Response, next: NextFunction): void 
     }
 
     res.json({ data: analyzeAdvisorQuestion(getDb(), question) });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// POST /api/ai/confirm - apply a typed advisor draft after explicit confirmation
+router.post('/confirm', (req: Request, res: Response, next: NextFunction): void => {
+  try {
+    const body = req.body as Partial<AdvisorConfirmRequest>;
+    if (!body.draft || body.confirm !== true) {
+      res.status(400).json({ error: 'confirmed draft is required' });
+      return;
+    }
+
+    res.json({ data: confirmAdvisorDraft(getDb(), body.draft, body.confirm) });
   } catch (err) {
     next(err);
   }

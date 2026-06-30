@@ -7,6 +7,7 @@ import type {
   AdvisorToolStatus,
   GoalType,
 } from '../../../shared/types';
+import { buildAdvisorDrafts } from './advisorDrafts';
 import { calculateGoalProgress } from './goalProgress';
 import { getMonthlyBudgetsWithProjection } from './budgetProjection';
 import { getReportSummary } from './reporting';
@@ -386,5 +387,6 @@ export function analyzeAdvisorQuestion(
     generated_at: new Date().toISOString(),
     tools: buildAdvisorReadTools(db, now),
     citations: result.citations,
+    drafts: buildAdvisorDrafts(db, trimmedQuestion),
   };
 }

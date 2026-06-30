@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, useNavigate } from 'react-router-dom';
 import {
   ArrowRight,
@@ -11,10 +11,12 @@ import {
   BrainCircuit,
   RefreshCw,
   AlertTriangle,
+  Check,
 } from 'lucide-react';
 import type {
   AdvisorAction,
   AdvisorAnalysis,
+  AdvisorDraftAction,
   AdvisorToolStatus,
   DataQualitySummary,
   Insight,
@@ -269,6 +271,71 @@ function AdvisorQualityPanel({
 
 // ── Message Bubble ────────────────────────────────────────────────────────────
 
+function draftValue(value: string | number | boolean | null): string {
+  if (value === null) return 'None';
+  if (typeof value === 'boolean') return value ? 'Yes' : 'No';
+  if (typeof value === 'number') return Number.isInteger(value) ? String(value) : value.toFixed(2);
+  return value;
+}
+
+function DraftActionsList({ drafts }: { drafts?: AdvisorDraftAction[] }) {
+  const queryClient = useQueryClient();
+  const [appliedIds, setAppliedIds] = useState<Set<string>>(new Set());
+  const [error, setError] = useState<string | null>(null);
+  const mutation = useMutation({
+    mutationFn: aiApi.confirmDraft,
+    onSuccess: (response) => {
+      setAppliedIds((prev) => new Set(prev).add(response.draft.id));
+      setError(null);
+      void queryClient.invalidateQueries();
+    },
+    onError: (err) => {
+      setError(err instanceof Error ? err.message : 'Could not apply draft');
+    },
+  });
+
+  if (!drafts || drafts.length === 0) return null;
+
+  return (
+    <div className="mt-3 space-y-2">
+      {drafts.map((draft) => {
+        const applied = appliedIds.has(draft.id);
+        const pending = mutation.isPending && mutation.variables?.id === draft.id;
+
+        return (
+          <div key={draft.id} className="border border-border rounded bg-background/40 px-3 py-2.5">
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <p className="text-xs text-text font-medium">{draft.label}</p>
+                <p className="text-[11px] text-muted leading-relaxed mt-0.5">{draft.summary}</p>
+              </div>
+              <button
+                onClick={() => mutation.mutate(draft)}
+                disabled={applied || pending}
+                className="flex items-center gap-1.5 text-[11px] text-[#4ecba3] border border-[#4ecba3]/30 rounded px-2 py-1 hover:bg-[#4ecba3]/10 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {applied ? <Check size={12} /> : null}
+                {applied ? 'Applied' : pending ? 'Applying' : 'Apply'}
+              </button>
+            </div>
+            <div className="mt-2 grid grid-cols-1 gap-1">
+              {draft.changes.map((change) => (
+                <div key={`${draft.id}:${change.field}`} className="flex items-center justify-between gap-3 text-[11px]">
+                  <span className="text-muted">{change.field}</span>
+                  <span className="font-mono text-text text-right">
+                    {draftValue(change.before)} to {draftValue(change.after)}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+        );
+      })}
+      {error && <p className="text-[11px] text-[#e07070]">{error}</p>}
+    </div>
+  );
+}
+
 function CitationList({ analysis }: { analysis?: AdvisorAnalysis }) {
   const citations = analysis?.citations ?? [];
   if (citations.length === 0) return null;
@@ -338,6 +405,7 @@ function MessageBubble({
             {streaming && content && (
               <span className="inline-block w-1.5 h-3.5 bg-[#4ecba3] animate-pulse rounded-sm ml-0.5 align-middle" />
             )}
+            {!streaming && <DraftActionsList drafts={analysis?.drafts} />}
             {!streaming && <CitationList analysis={analysis} />}
           </div>
         )}
