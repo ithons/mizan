@@ -2,20 +2,32 @@ import { useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import {
+  AlertTriangle,
   Archive,
   Calendar,
   CheckCircle2,
+  CircleAlert,
   Landmark,
   Link2,
   Pencil,
   Plus,
   Sparkles,
   Target,
+  TrendingUp,
 } from 'lucide-react';
+import type { LucideIcon } from 'lucide-react';
+import { format as formatDateKey } from 'date-fns';
 import type { Account, Goal, GoalType } from '@shared/types';
-import { accountsApi, goalsApi } from '../lib/api';
+import { accountsApi, budgetsApi, goalsApi, recurringApi } from '../lib/api';
 import { advisorRouteState } from '../lib/advisorRouteState';
 import { buildGoalAdvisorPrompt } from '../lib/advisorPrompts';
+import { budgetProjectedRemaining } from '../lib/budgetMath';
+import {
+  buildGoalForecastSummary,
+  type GoalForecastInsight,
+  type GoalForecastSeverity,
+  type GoalForecastSummary,
+} from '../lib/goalForecast';
 import { invalidateFinancialData } from '../lib/queryInvalidation';
 import { formatCurrency, formatDate } from '../lib/formatters';
 import { parseDecimalInput } from '../lib/numberInput';
@@ -54,13 +66,113 @@ function goalIcon(type: GoalType) {
   return type === 'debt' ? Landmark : Target;
 }
 
+const forecastTone: Record<GoalForecastSeverity, { color: string; icon: LucideIcon; label: string }> = {
+  positive: { color: '#32bfa3', icon: CheckCircle2, label: 'On track' },
+  warning: { color: '#e2a53f', icon: AlertTriangle, label: 'At risk' },
+  attention: { color: '#ef6f8a', icon: CircleAlert, label: 'Blocked' },
+  info: { color: '#6487f0', icon: TrendingUp, label: 'Planning' },
+};
+
+function GoalForecastPanel({ summary }: { summary: GoalForecastSummary }) {
+  const availableTone = summary.monthly_available_for_goals >= 0 ? '#32bfa3' : '#ef6f8a';
+
+  return (
+    <div className="border border-border bg-surface rounded p-4">
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between mb-4">
+        <div>
+          <h2 className="text-sm font-medium text-text">Forecast Reality</h2>
+          <p className="text-xs text-muted mt-1">
+            Recurring cash flow minus projected budget overages.
+          </p>
+        </div>
+        <div className="flex flex-wrap items-center gap-2 text-xs">
+          {summary.at_risk_goal_count > 0 && (
+            <span className="rounded border border-amber/40 text-amber px-2 py-1">
+              {summary.at_risk_goal_count} at risk
+            </span>
+          )}
+          {summary.blocked_goal_count > 0 && (
+            <span className="rounded border border-rose/40 text-rose px-2 py-1">
+              {summary.blocked_goal_count} blocked
+            </span>
+          )}
+          {summary.on_track_goal_count > 0 && (
+            <span className="rounded border border-green/40 text-green px-2 py-1">
+              {summary.on_track_goal_count} on track
+            </span>
+          )}
+        </div>
+      </div>
+
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+        <div>
+          <p className="text-xs text-muted mb-1">Recurring surplus</p>
+          <p className="font-mono text-lg" style={{ color: summary.monthly_recurring_surplus >= 0 ? '#32bfa3' : '#ef6f8a' }}>
+            {formatCurrency(summary.monthly_recurring_surplus)}
+          </p>
+        </div>
+        <div>
+          <p className="text-xs text-muted mb-1">Budget pressure</p>
+          <p className="font-mono text-lg text-amber">{formatCurrency(summary.budget_overage)}</p>
+        </div>
+        <div>
+          <p className="text-xs text-muted mb-1">Available</p>
+          <p className="font-mono text-lg" style={{ color: availableTone }}>
+            {formatCurrency(summary.monthly_available_for_goals)}
+          </p>
+        </div>
+        <div>
+          <p className="text-xs text-muted mb-1">Expected progress</p>
+          <p className="font-mono text-lg text-text">{formatCurrency(summary.expected_monthly_goal_progress)}</p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function GoalForecastNote({ insight }: { insight?: GoalForecastInsight }) {
+  if (!insight || insight.status === 'complete') return null;
+
+  const tone = forecastTone[insight.severity];
+  const Icon = tone.icon;
+
+  return (
+    <div className="rounded border border-border bg-background/50 p-3">
+      <div className="flex items-start justify-between gap-3 mb-1">
+        <div className="flex items-center gap-2 min-w-0">
+          <Icon size={13} style={{ color: tone.color }} className="flex-shrink-0" />
+          <span className="text-xs font-medium truncate" style={{ color: tone.color }}>
+            {tone.label}
+          </span>
+        </div>
+        <span className="font-mono text-xs text-muted flex-shrink-0">
+          {formatCurrency(insight.expected_monthly_progress)}/mo
+        </span>
+      </div>
+      <p className="text-xs text-muted leading-relaxed">{insight.message}</p>
+      {insight.required_monthly_contribution != null && insight.required_monthly_contribution > 0 && (
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-muted mt-2">
+          <span>Needs {formatCurrency(insight.required_monthly_contribution)}/mo</span>
+          {insight.monthly_shortfall > 0 && (
+            <span style={{ color: tone.color }}>
+              Short {formatCurrency(insight.monthly_shortfall)}/mo
+            </span>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function GoalCard({
   goal,
+  forecastInsight,
   onEdit,
   onArchive,
   onAsk,
 }: {
   goal: Goal;
+  forecastInsight?: GoalForecastInsight;
   onEdit: () => void;
   onArchive: () => void;
   onAsk: () => void;
@@ -143,6 +255,8 @@ function GoalCard({
           </span>
         </div>
       </div>
+
+      <GoalForecastNote insight={forecastInsight} />
 
       <div className="flex items-center justify-between gap-3 text-xs text-muted border-t border-border pt-3">
         {goal.target_date ? (
@@ -371,6 +485,7 @@ export function Goals() {
   const { addToast } = useAppStore();
   const [open, setOpen] = useState(false);
   const [editingGoal, setEditingGoal] = useState<Goal | undefined>();
+  const currentMonth = formatDateKey(new Date(), 'yyyy-MM');
 
   const { data: goals = [], isLoading } = useQuery({
     queryKey: ['goals'],
@@ -382,6 +497,16 @@ export function Goals() {
     queryFn: accountsApi.list,
   });
 
+  const { data: forecast } = useQuery({
+    queryKey: ['recurring', 'forecast', 'goals', 30],
+    queryFn: () => recurringApi.forecast(30),
+  });
+
+  const { data: budgets = [] } = useQuery({
+    queryKey: ['budgets', 'month', 'goals', currentMonth],
+    queryFn: () => budgetsApi.getMonth(currentMonth),
+  });
+
   const totals = useMemo(() => {
     const target = goals.reduce((sum, goal) => sum + goal.target_amount, 0);
     const progress = goals.reduce((sum, goal) => sum + goal.progress_amount, 0);
@@ -391,6 +516,19 @@ export function Goals() {
       percent: target > 0 ? Math.min((progress / target) * 100, 100) : 0,
     };
   }, [goals]);
+
+  const budgetOverage = useMemo(() => budgets.reduce((sum, budget) => {
+    const remaining = budgetProjectedRemaining(budget);
+    return remaining < 0 ? sum + Math.abs(remaining) : sum;
+  }, 0), [budgets]);
+  const goalForecast = useMemo(() => buildGoalForecastSummary({
+    goals,
+    forecast,
+    budgetOverage,
+  }), [goals, forecast, budgetOverage]);
+  const forecastByGoalId = useMemo(() => new Map(
+    goalForecast.insights.map((insight) => [insight.goal_id, insight])
+  ), [goalForecast]);
 
   const createMutation = useMutation({
     mutationFn: (body: Partial<Goal>) => goalsApi.create(body),
@@ -467,18 +605,22 @@ export function Goals() {
       </div>
 
       {goals.length > 0 && (
-        <div className="border border-border bg-surface rounded p-4">
-          <div className="flex items-center justify-between gap-3 mb-3">
-            <div>
-              <p className="text-xs text-muted">Total Progress</p>
-              <p className="font-mono text-2xl text-text">{totals.percent.toFixed(1)}%</p>
+        <>
+          <GoalForecastPanel summary={goalForecast} />
+
+          <div className="border border-border bg-surface rounded p-4">
+            <div className="flex items-center justify-between gap-3 mb-3">
+              <div>
+                <p className="text-xs text-muted">Total Progress</p>
+                <p className="font-mono text-2xl text-text">{totals.percent.toFixed(1)}%</p>
+              </div>
+              <p className="text-xs text-muted">{goals.length} active</p>
             </div>
-            <p className="text-xs text-muted">{goals.length} active</p>
+            <div className="h-2 bg-background border border-border rounded overflow-hidden">
+              <div className="h-full bg-green" style={{ width: `${totals.percent}%` }} />
+            </div>
           </div>
-          <div className="h-2 bg-background border border-border rounded overflow-hidden">
-            <div className="h-full bg-green" style={{ width: `${totals.percent}%` }} />
-          </div>
-        </div>
+        </>
       )}
 
       {goals.length === 0 ? (
@@ -496,6 +638,7 @@ export function Goals() {
             <GoalCard
               key={goal.id}
               goal={goal}
+              forecastInsight={forecastByGoalId.get(goal.id)}
               onEdit={() => openEditGoal(goal)}
               onArchive={() => archiveMutation.mutate(goal.id)}
               onAsk={() => askAdvisorAboutGoal(goal)}
