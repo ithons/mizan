@@ -20,7 +20,7 @@ export function LoadingSpinner({ size = 24, className = '' }: LoadingSpinnerProp
           cx="12"
           cy="12"
           r="10"
-          stroke="#4ecba3"
+          stroke="#32bfa3"
           strokeWidth="2"
           strokeLinecap="round"
           strokeDasharray="31.416"

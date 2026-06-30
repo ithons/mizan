@@ -36,10 +36,10 @@ export const INVESTMENT_TX_TYPE_LABELS: Record<string, string> = {
 };
 
 export const CATEGORY_COLORS = [
-  '#4ecba3',
-  '#5b8dee',
-  '#e07070',
-  '#d4a44c',
+  '#32bfa3',
+  '#6487f0',
+  '#ef6f8a',
+  '#e2a53f',
   '#a78bfa',
   '#f472b6',
   '#34d399',

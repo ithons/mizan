@@ -66,16 +66,16 @@ function errorMessage(err: unknown, fallback: string) {
 
 const syncTone = {
   empty: { color: '#6b6b7a', icon: CreditCard },
-  healthy: { color: '#4ecba3', icon: CheckCircle2 },
-  stale: { color: '#d4a44c', icon: AlertTriangle },
-  attention: { color: '#e07070', icon: CircleAlert },
+  healthy: { color: '#32bfa3', icon: CheckCircle2 },
+  stale: { color: '#e2a53f', icon: AlertTriangle },
+  attention: { color: '#ef6f8a', icon: CircleAlert },
 } satisfies Record<SyncHealth['status'], { color: string; icon: LucideIcon }>;
 
 const connectionTone = {
-  fresh: '#4ecba3',
-  stale: '#d4a44c',
-  never: '#d4a44c',
-  attention: '#e07070',
+  fresh: '#32bfa3',
+  stale: '#e2a53f',
+  never: '#e2a53f',
+  attention: '#ef6f8a',
 } satisfies Record<SyncHealthConnection['freshness'], string>;
 
 function connectionActionLabel(action: SyncHealthConnection['recommended_action']): string | null {
@@ -130,7 +130,7 @@ function SyncTrustCenter({
           </div>
           {connections.length > 0 && (
             <button
-              className="flex items-center gap-1 text-xs text-muted hover:text-[#4ecba3] disabled:opacity-40 flex-shrink-0"
+              className="flex items-center gap-1 text-xs text-muted hover:text-[#32bfa3] disabled:opacity-40 flex-shrink-0"
               onClick={onSyncAll}
               disabled={isSyncingAll}
             >
@@ -149,17 +149,17 @@ function SyncTrustCenter({
               </div>
               <div>
                 <p className="text-muted">Fresh</p>
-                <p className="font-mono text-[#4ecba3]">{health?.fresh_count ?? 0}</p>
+                <p className="font-mono text-[#32bfa3]">{health?.fresh_count ?? 0}</p>
               </div>
               <div>
                 <p className="text-muted">Stale</p>
-                <p className="font-mono" style={{ color: (health?.stale_count ?? 0) > 0 ? '#d4a44c' : '#4ecba3' }}>
+                <p className="font-mono" style={{ color: (health?.stale_count ?? 0) > 0 ? '#e2a53f' : '#32bfa3' }}>
                   {health?.stale_count ?? 0}
                 </p>
               </div>
               <div>
                 <p className="text-muted">Issues</p>
-                <p className="font-mono" style={{ color: (health?.attention_count ?? 0) > 0 ? '#e07070' : '#4ecba3' }}>
+                <p className="font-mono" style={{ color: (health?.attention_count ?? 0) > 0 ? '#ef6f8a' : '#32bfa3' }}>
                   {health?.attention_count ?? 0}
                 </p>
               </div>
@@ -188,7 +188,7 @@ function SyncTrustCenter({
                       </span>
                       {actionLabel && (
                         <button
-                          className="text-muted hover:text-[#4ecba3] disabled:opacity-40"
+                          className="text-muted hover:text-[#32bfa3] disabled:opacity-40"
                           onClick={() => onConnectionAction(connection)}
                           disabled={busy}
                         >
@@ -204,7 +204,7 @@ function SyncTrustCenter({
         ) : (
           <div className="flex gap-2">
             <button
-              className="flex-1 flex items-center justify-center gap-1.5 text-xs bg-[#4ecba3] text-[#0f0f11] font-medium rounded px-2 py-1.5 hover:opacity-90"
+              className="flex-1 flex items-center justify-center gap-1.5 text-xs bg-[#32bfa3] text-[#273238] font-medium rounded px-2 py-1.5 hover:opacity-90"
               onClick={onConnectBank}
             >
               <Link size={11} /> Bank
@@ -276,7 +276,7 @@ function AccountRow({
         <div className="flex items-center gap-1.5">
           <p className="text-xs text-muted font-mono">{account.mask ? `••${account.mask}` : account.currency}</p>
           {isInvestment && unrealized != null && (
-            <span className="text-xs font-mono" style={{ color: unrealized >= 0 ? '#4ecba3' : '#e07070' }}>
+            <span className="text-xs font-mono" style={{ color: unrealized >= 0 ? '#32bfa3' : '#ef6f8a' }}>
               {unrealized >= 0 ? '+' : ''}{formatCurrency(unrealized)}
               {returnPct != null && ` (${returnPct >= 0 ? '+' : ''}${returnPct.toFixed(1)}%)`}
             </span>
@@ -284,7 +284,7 @@ function AccountRow({
           {isCredit && utilization != null && (
             <span
               className="text-xs font-mono"
-              style={{ color: utilization > 70 ? '#e07070' : utilization > 30 ? '#f0c040' : '#4ecba3' }}
+              style={{ color: utilization > 70 ? '#ef6f8a' : utilization > 30 ? '#e2a53f' : '#32bfa3' }}
             >
               {utilization.toFixed(0)}% used
             </span>
@@ -294,7 +294,7 @@ function AccountRow({
       <AccountTypeBadge type={account.type} />
       <span
         className="font-mono text-sm flex-shrink-0"
-        style={{ color: account.is_liability ? '#e07070' : '#4ecba3' }}
+        style={{ color: account.is_liability ? '#ef6f8a' : '#32bfa3' }}
       >
         {formatCurrency(account.current_balance)}
       </span>
@@ -329,7 +329,7 @@ function AccountRow({
               <>
                 <div className="border-t border-border my-1" />
                 <button
-                  className="flex items-center gap-2 w-full px-3 py-1.5 text-xs text-[#e07070] hover:bg-white/5"
+                  className="flex items-center gap-2 w-full px-3 py-1.5 text-xs text-[#ef6f8a] hover:bg-white/5"
                   onClick={() => { onDelete(); setMenuOpen(false); }}
                 >
                   <Trash2 size={12} />
@@ -407,12 +407,12 @@ function InstitutionGroup({
         >
           <span className="text-xs font-medium text-muted uppercase tracking-wider truncate">{label}</span>
           {needsReauth && (
-            <span title="Reconnect required"><AlertTriangle size={11} className="text-[#f0c040] flex-shrink-0" /></span>
+            <span title="Reconnect required"><AlertTriangle size={11} className="text-[#e2a53f] flex-shrink-0" /></span>
           )}
           {sublabel && <span className="text-xs text-muted/50 font-normal normal-case tracking-normal">{sublabel}</span>}
         </button>
         <div className="flex items-center gap-1.5 flex-shrink-0">
-          <span className="font-mono text-xs" style={{ color: total >= 0 ? '#4ecba3' : '#e07070' }}>
+          <span className="font-mono text-xs" style={{ color: total >= 0 ? '#32bfa3' : '#ef6f8a' }}>
             {formatCurrency(total)}
           </span>
           {(groupType === 'plaid' || groupType === 'coinbase') && (
@@ -435,7 +435,7 @@ function InstitutionGroup({
                       </button>
                       {needsReauth && (
                         <button
-                          className="flex items-center gap-2 w-full px-3 py-1.5 text-xs text-[#f0c040] hover:bg-white/5"
+                          className="flex items-center gap-2 w-full px-3 py-1.5 text-xs text-[#e2a53f] hover:bg-white/5"
                           onClick={() => { onReauthItem?.(); setMenuOpen(false); }}
                         >
                           <Unlink size={12} /> Reconnect
@@ -443,7 +443,7 @@ function InstitutionGroup({
                       )}
                       <div className="border-t border-border my-1" />
                       <button
-                        className="flex items-center gap-2 w-full px-3 py-1.5 text-xs text-[#e07070] hover:bg-white/5"
+                        className="flex items-center gap-2 w-full px-3 py-1.5 text-xs text-[#ef6f8a] hover:bg-white/5"
                         onClick={() => { onRemoveItem?.(); setMenuOpen(false); }}
                       >
                         <Trash2 size={12} /> Remove Institution
@@ -460,7 +460,7 @@ function InstitutionGroup({
                       </button>
                       <div className="border-t border-border my-1" />
                       <button
-                        className="flex items-center gap-2 w-full px-3 py-1.5 text-xs text-[#e07070] hover:bg-white/5"
+                        className="flex items-center gap-2 w-full px-3 py-1.5 text-xs text-[#ef6f8a] hover:bg-white/5"
                         onClick={() => { onDisconnectCoinbase?.(); setMenuOpen(false); }}
                       >
                         <Unlink size={12} /> Disconnect Coinbase
@@ -535,9 +535,9 @@ function AccountDetail({ account }: { account: Account }) {
     ? (account.current_balance / account.credit_limit) * 100
     : null;
   const utilizationColor = utilization == null ? '#6b6b7a'
-    : utilization > 70 ? '#e07070'
-    : utilization > 30 ? '#f0c040'
-    : '#4ecba3';
+    : utilization > 70 ? '#ef6f8a'
+    : utilization > 30 ? '#e2a53f'
+    : '#32bfa3';
 
   const typeLabel = {
     brokerage: 'Brokerage',
@@ -554,14 +554,14 @@ function AccountDetail({ account }: { account: Account }) {
           <h2 className="text-base font-semibold text-text">{account.account_name}</h2>
           <AccountTypeBadge type={account.type} />
           {(account.type === 'ira_traditional' || account.type === 'ira_roth') && (
-            <span className="text-xs bg-[#5b8dee]/20 text-[#5b8dee] px-2 py-0.5 rounded">Tax-Advantaged</span>
+            <span className="text-xs bg-[#6487f0]/20 text-[#6487f0] px-2 py-0.5 rounded">Tax-Advantaged</span>
           )}
         </div>
 
         {/* Cash/Checking/Savings: just balance */}
         {!isCredit && !isInvestment && !isCrypto && (
           <>
-            <p className="font-mono text-2xl" style={{ color: account.is_liability ? '#e07070' : '#4ecba3' }}>
+            <p className="font-mono text-2xl" style={{ color: account.is_liability ? '#ef6f8a' : '#32bfa3' }}>
               {formatCurrency(account.current_balance)}
             </p>
             <div className="flex items-center gap-2 mt-1 text-xs text-muted">
@@ -581,7 +581,7 @@ function AccountDetail({ account }: { account: Account }) {
             <div className="grid grid-cols-2 gap-3">
               <div className="bg-background border border-border rounded p-3">
                 <p className="text-xs text-muted mb-1">Balance Owed</p>
-                <p className="font-mono text-sm text-[#e07070]">{formatCurrency(account.current_balance)}</p>
+                <p className="font-mono text-sm text-[#ef6f8a]">{formatCurrency(account.current_balance)}</p>
               </div>
               <div className="bg-background border border-border rounded p-3">
                 <p className="text-xs text-muted mb-1">Credit Limit</p>
@@ -591,7 +591,7 @@ function AccountDetail({ account }: { account: Account }) {
               </div>
               <div className="bg-background border border-border rounded p-3">
                 <p className="text-xs text-muted mb-1">Available Credit</p>
-                <p className="font-mono text-sm text-[#4ecba3]">
+                <p className="font-mono text-sm text-[#32bfa3]">
                   {account.available_balance != null ? formatCurrency(account.available_balance) : '-'}
                 </p>
               </div>
@@ -626,7 +626,7 @@ function AccountDetail({ account }: { account: Account }) {
             <div className="grid grid-cols-2 gap-3">
               <div className="bg-background border border-border rounded p-3">
                 <p className="text-xs text-muted mb-1">Portfolio Value</p>
-                <p className="font-mono text-sm text-[#4ecba3]">{formatCurrency(account.current_balance)}</p>
+                <p className="font-mono text-sm text-[#32bfa3]">{formatCurrency(account.current_balance)}</p>
               </div>
               <div className="bg-background border border-border rounded p-3">
                 <p className="text-xs text-muted mb-1">Cost Basis</p>
@@ -636,13 +636,13 @@ function AccountDetail({ account }: { account: Account }) {
               </div>
               <div className="bg-background border border-border rounded p-3">
                 <p className="text-xs text-muted mb-1">Unrealized G/L</p>
-                <p className="font-mono text-sm" style={{ color: unrealized == null ? '#6b6b7a' : unrealized >= 0 ? '#4ecba3' : '#e07070' }}>
+                <p className="font-mono text-sm" style={{ color: unrealized == null ? '#6b6b7a' : unrealized >= 0 ? '#32bfa3' : '#ef6f8a' }}>
                   {unrealized != null ? `${unrealized >= 0 ? '+' : ''}${formatCurrency(unrealized)}` : '-'}
                 </p>
               </div>
               <div className="bg-background border border-border rounded p-3">
                 <p className="text-xs text-muted mb-1">Total Return</p>
-                <p className="font-mono text-sm" style={{ color: returnPct == null ? '#6b6b7a' : returnPct >= 0 ? '#4ecba3' : '#e07070' }}>
+                <p className="font-mono text-sm" style={{ color: returnPct == null ? '#6b6b7a' : returnPct >= 0 ? '#32bfa3' : '#ef6f8a' }}>
                   {returnPct != null ? `${returnPct >= 0 ? '+' : ''}${returnPct.toFixed(2)}%` : '-'}
                 </p>
               </div>
@@ -661,7 +661,7 @@ function AccountDetail({ account }: { account: Account }) {
             </div>
             <div>
               <p className="text-xs text-muted mb-1">USD Value</p>
-              <p className="font-mono text-lg text-[#4ecba3]">{formatCurrency(account.current_balance)}</p>
+              <p className="font-mono text-lg text-[#32bfa3]">{formatCurrency(account.current_balance)}</p>
             </div>
           </div>
         )}
@@ -674,7 +674,7 @@ function AccountDetail({ account }: { account: Account }) {
             <button
               key={t}
               onClick={() => setTab(t)}
-              className={`px-3 py-1 text-xs rounded transition-colors ${tab === t ? 'bg-[#4ecba3]/10 text-[#4ecba3]' : 'text-muted hover:text-text'}`}
+              className={`px-3 py-1 text-xs rounded transition-colors ${tab === t ? 'bg-[#32bfa3]/10 text-[#32bfa3]' : 'text-muted hover:text-text'}`}
             >
               {t === 'inv-transactions' ? 'Inv Transactions' : t.charAt(0).toUpperCase() + t.slice(1)}
             </button>
@@ -701,13 +701,13 @@ function AccountDetail({ account }: { account: Account }) {
                 const unr = h.cost_basis != null ? h.institution_value - h.cost_basis : null;
                 return (
                   <tr key={h.id} className="border-b border-border hover:bg-white/2">
-                    <td className="px-4 py-2.5 font-mono text-[#5b8dee] font-medium">{h.ticker ?? '-'}</td>
+                    <td className="px-4 py-2.5 font-mono text-[#6487f0] font-medium">{h.ticker ?? '-'}</td>
                     <td className="px-4 py-2.5 text-text truncate max-w-[160px]" title={h.security_name ?? ''}>{h.security_name}</td>
                     <td className="px-4 py-2.5 font-mono text-muted">{h.quantity.toFixed(4)}</td>
                     <td className="px-4 py-2.5 font-mono text-muted">{formatCurrency(h.institution_price)}</td>
                     <td className="px-4 py-2.5 font-mono text-text">{formatCurrency(h.institution_value)}</td>
                     <td className="px-4 py-2.5 font-mono text-muted">{h.cost_basis != null ? formatCurrency(h.cost_basis) : '-'}</td>
-                    <td className="px-4 py-2.5 font-mono" style={{ color: unr != null ? (unr >= 0 ? '#4ecba3' : '#e07070') : '#6b6b7a' }}>
+                    <td className="px-4 py-2.5 font-mono" style={{ color: unr != null ? (unr >= 0 ? '#32bfa3' : '#ef6f8a') : '#6b6b7a' }}>
                       {unr != null ? `${unr >= 0 ? '+' : ''}${formatCurrency(unr)}` : '-'}
                     </td>
                   </tr>
@@ -735,15 +735,15 @@ function AccountDetail({ account }: { account: Account }) {
                   <td className="px-4 py-2.5 font-mono text-muted">{formatDate(tx.date)}</td>
                   <td className="px-4 py-2.5">
                     <span className={`px-1.5 py-0.5 rounded text-xs ${
-                      tx.type === 'buy' ? 'bg-[#4ecba3]/10 text-[#4ecba3]' :
-                      tx.type === 'sell' ? 'bg-[#e07070]/10 text-[#e07070]' :
-                      tx.type === 'dividend' ? 'bg-[#5b8dee]/10 text-[#5b8dee]' :
+                      tx.type === 'buy' ? 'bg-[#32bfa3]/10 text-[#32bfa3]' :
+                      tx.type === 'sell' ? 'bg-[#ef6f8a]/10 text-[#ef6f8a]' :
+                      tx.type === 'dividend' ? 'bg-[#6487f0]/10 text-[#6487f0]' :
                       'bg-border/50 text-muted'
                     }`}>
                       {tx.type}
                     </span>
                   </td>
-                  <td className="px-4 py-2.5 font-mono text-[#5b8dee]">{tx.ticker ?? tx.security_name ?? tx.name}</td>
+                  <td className="px-4 py-2.5 font-mono text-[#6487f0]">{tx.ticker ?? tx.security_name ?? tx.name}</td>
                   <td className="px-4 py-2.5 font-mono text-muted">{tx.quantity?.toFixed(4) ?? '-'}</td>
                   <td className="px-4 py-2.5 font-mono text-muted">{tx.price != null ? formatCurrency(tx.price) : '-'}</td>
                   <td className="px-4 py-2.5"><AmountBadge amount={tx.amount} /></td>
@@ -867,7 +867,7 @@ function EditManualAccountModal({
         <div>
           <label className="block text-xs text-muted mb-1">Account Name</label>
           <input
-            className="w-full bg-background border border-border rounded px-3 py-2 text-sm text-text focus:outline-none focus:ring-1 focus:ring-[#4ecba3]/50"
+            className="w-full bg-background border border-border rounded px-3 py-2 text-sm text-text focus:outline-none focus:ring-1 focus:ring-[#32bfa3]/50"
             value={form.account_name}
             onChange={(e) => setForm({ ...form, account_name: e.target.value })}
           />
@@ -875,7 +875,7 @@ function EditManualAccountModal({
         <div>
           <label className="block text-xs text-muted mb-1">Institution</label>
           <input
-            className="w-full bg-background border border-border rounded px-3 py-2 text-sm text-text focus:outline-none focus:ring-1 focus:ring-[#4ecba3]/50"
+            className="w-full bg-background border border-border rounded px-3 py-2 text-sm text-text focus:outline-none focus:ring-1 focus:ring-[#32bfa3]/50"
             value={form.institution_name}
             onChange={(e) => setForm({ ...form, institution_name: e.target.value })}
             placeholder="Chase"
@@ -884,7 +884,7 @@ function EditManualAccountModal({
         <div>
           <label className="block text-xs text-muted mb-1">Account Type</label>
           <select
-            className="w-full bg-background border border-border rounded px-3 py-2 text-sm text-text focus:outline-none focus:ring-1 focus:ring-[#4ecba3]/50"
+            className="w-full bg-background border border-border rounded px-3 py-2 text-sm text-text focus:outline-none focus:ring-1 focus:ring-[#32bfa3]/50"
             value={form.type}
             onChange={(e) => setForm({ ...form, type: e.target.value })}
           >
@@ -897,7 +897,7 @@ function EditManualAccountModal({
           <label className="block text-xs text-muted mb-1">Current Balance</label>
           <input
             type="number"
-            className="w-full bg-background border border-border rounded px-3 py-2 text-sm text-text font-mono focus:outline-none focus:ring-1 focus:ring-[#4ecba3]/50"
+            className="w-full bg-background border border-border rounded px-3 py-2 text-sm text-text font-mono focus:outline-none focus:ring-1 focus:ring-[#32bfa3]/50"
             value={form.current_balance}
             onChange={(e) => setForm({ ...form, current_balance: e.target.value })}
           />
@@ -922,7 +922,7 @@ function EditManualAccountModal({
         </div>
         <div className="flex gap-3 pt-2">
           <button
-            className="flex-1 py-2 text-sm bg-[#4ecba3] text-[#0f0f11] font-medium rounded hover:opacity-90 disabled:opacity-40"
+            className="flex-1 py-2 text-sm bg-[#32bfa3] text-[#273238] font-medium rounded hover:opacity-90 disabled:opacity-40"
             onClick={() => mutation.mutate()}
             disabled={mutation.isPending}
           >
@@ -980,7 +980,7 @@ function AddManualAccountModal({ open, onClose }: { open: boolean; onClose: () =
         <div>
           <label className="block text-xs text-muted mb-1">Account Name</label>
           <input
-            className="w-full bg-background border border-border rounded px-3 py-2 text-sm text-text focus:outline-none focus:ring-1 focus:ring-[#4ecba3]/50"
+            className="w-full bg-background border border-border rounded px-3 py-2 text-sm text-text focus:outline-none focus:ring-1 focus:ring-[#32bfa3]/50"
             value={form.account_name}
             onChange={(e) => setForm({ ...form, account_name: e.target.value })}
             placeholder="My Savings"
@@ -989,7 +989,7 @@ function AddManualAccountModal({ open, onClose }: { open: boolean; onClose: () =
         <div>
           <label className="block text-xs text-muted mb-1">Institution (optional)</label>
           <input
-            className="w-full bg-background border border-border rounded px-3 py-2 text-sm text-text focus:outline-none focus:ring-1 focus:ring-[#4ecba3]/50"
+            className="w-full bg-background border border-border rounded px-3 py-2 text-sm text-text focus:outline-none focus:ring-1 focus:ring-[#32bfa3]/50"
             value={form.institution_name}
             onChange={(e) => setForm({ ...form, institution_name: e.target.value })}
             placeholder="Chase"
@@ -998,7 +998,7 @@ function AddManualAccountModal({ open, onClose }: { open: boolean; onClose: () =
         <div>
           <label className="block text-xs text-muted mb-1">Account Type</label>
           <select
-            className="w-full bg-background border border-border rounded px-3 py-2 text-sm text-text focus:outline-none focus:ring-1 focus:ring-[#4ecba3]/50"
+            className="w-full bg-background border border-border rounded px-3 py-2 text-sm text-text focus:outline-none focus:ring-1 focus:ring-[#32bfa3]/50"
             value={form.type}
             onChange={(e) => setForm({ ...form, type: e.target.value })}
           >
@@ -1011,7 +1011,7 @@ function AddManualAccountModal({ open, onClose }: { open: boolean; onClose: () =
           <label className="block text-xs text-muted mb-1">Current Balance</label>
           <input
             type="number"
-            className="w-full bg-background border border-border rounded px-3 py-2 text-sm text-text font-mono focus:outline-none focus:ring-1 focus:ring-[#4ecba3]/50"
+            className="w-full bg-background border border-border rounded px-3 py-2 text-sm text-text font-mono focus:outline-none focus:ring-1 focus:ring-[#32bfa3]/50"
             value={form.current_balance}
             onChange={(e) => setForm({ ...form, current_balance: e.target.value })}
             placeholder="0.00"
@@ -1019,7 +1019,7 @@ function AddManualAccountModal({ open, onClose }: { open: boolean; onClose: () =
         </div>
         <div className="flex gap-3 pt-2">
           <button
-            className="flex-1 py-2 text-sm bg-[#4ecba3] text-[#0f0f11] font-medium rounded hover:opacity-90 disabled:opacity-40"
+            className="flex-1 py-2 text-sm bg-[#32bfa3] text-[#273238] font-medium rounded hover:opacity-90 disabled:opacity-40"
             onClick={() => mutation.mutate()}
             disabled={mutation.isPending}
           >
@@ -1340,7 +1340,7 @@ export function Accounts() {
           </div>
           <div className="relative" ref={addMenuRef}>
             <button
-              className="flex items-center gap-1 text-xs text-[#4ecba3] hover:opacity-80"
+              className="flex items-center gap-1 text-xs text-[#32bfa3] hover:opacity-80"
               onClick={() => setAddMenuOpen((v) => !v)}
             >
               <Plus size={14} /> Add
@@ -1351,14 +1351,14 @@ export function Accounts() {
                   className="flex items-center gap-2 w-full px-3 py-2 text-xs text-text hover:bg-white/5"
                   onClick={connectPlaid}
                 >
-                  <Link size={12} className="text-[#4ecba3]" />
+                  <Link size={12} className="text-[#32bfa3]" />
                   Connect Bank or Card
                 </button>
                 <button
                   className="flex items-center gap-2 w-full px-3 py-2 text-xs text-text hover:bg-white/5"
                   onClick={connectCoinbase}
                 >
-                  <Link size={12} className="text-[#5b8dee]" />
+                  <Link size={12} className="text-[#6487f0]" />
                   Connect Coinbase
                 </button>
                 <button
@@ -1501,7 +1501,7 @@ export function Accounts() {
           {leftCollapsed && (
             <button
               onClick={toggleLeft}
-              className="absolute top-3 left-3 z-20 w-7 h-7 flex items-center justify-center rounded bg-surface border border-border text-muted hover:text-text hover:border-[#4ecba3]/50 transition-colors"
+              className="absolute top-3 left-3 z-20 w-7 h-7 flex items-center justify-center rounded bg-surface border border-border text-muted hover:text-text hover:border-[#32bfa3]/50 transition-colors"
               title="Show accounts panel"
             >
               <PanelLeftOpen size={14} />

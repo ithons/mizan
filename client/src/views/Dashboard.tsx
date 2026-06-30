@@ -37,11 +37,11 @@ import { SkeletonCard } from '../components/SkeletonLoader';
 import { SyncActivityPanel } from '../components/SyncActivityPanel';
 
 const CHART_COLORS = [
-  '#4ecba3', '#5b8dee', '#d4a44c', '#e07070', '#a78bfa',
+  '#32bfa3', '#6487f0', '#e2a53f', '#ef6f8a', '#a78bfa',
   '#f472b6', '#34d399', '#fb923c', '#60a5fa', '#f87171',
 ];
 
-const ASSET_COLORS = ['#4ecba3', '#5b8dee', '#d4a44c', '#9b8dee'];
+const ASSET_COLORS = ['#32bfa3', '#6487f0', '#e2a53f', '#9b8dee'];
 
 function StatCard({
   title,
@@ -59,7 +59,7 @@ function StatCard({
   onClick?: () => void;
 }) {
   const isGood = positive !== undefined ? positive : (delta ?? 0) >= 0;
-  const cls = `bg-surface border border-border rounded p-5 ${onClick ? 'cursor-pointer hover:bg-[#4ecba3]/5 transition-colors' : ''}`;
+  const cls = `bg-surface border border-border rounded p-5 ${onClick ? 'cursor-pointer hover:bg-[#32bfa3]/5 transition-colors' : ''}`;
   return (
     <div className={cls} onClick={onClick}>
       <p className="text-xs text-muted mb-1">{title}</p>
@@ -67,13 +67,13 @@ function StatCard({
       {delta !== undefined && (
         <div className="flex items-center gap-1">
           {isGood ? (
-            <TrendingUp size={12} className="text-[#4ecba3]" />
+            <TrendingUp size={12} className="text-[#32bfa3]" />
           ) : (
-            <TrendingDown size={12} className="text-[#e07070]" />
+            <TrendingDown size={12} className="text-[#ef6f8a]" />
           )}
           <span
             className="text-xs font-mono"
-            style={{ color: isGood ? '#4ecba3' : '#e07070' }}
+            style={{ color: isGood ? '#32bfa3' : '#ef6f8a' }}
           >
             {delta >= 0 ? '+' : ''}{formatCurrency(delta)} {deltaLabel}
           </span>
@@ -88,7 +88,7 @@ function CustomTooltip({ active, payload }: { active?: boolean; payload?: Array<
   return (
     <div className="bg-surface border border-border rounded px-3 py-2 text-sm">
       <p className="text-text">{payload[0].name}</p>
-      <p className="font-mono text-[#4ecba3]">{formatCurrency(payload[0].value)}</p>
+      <p className="font-mono text-[#32bfa3]">{formatCurrency(payload[0].value)}</p>
     </div>
   );
 }
@@ -98,10 +98,10 @@ const insightStyles: Record<Insight['severity'], {
   color: string;
   label: string;
 }> = {
-  critical: { icon: CircleAlert, color: '#e07070', label: 'Critical' },
-  warning: { icon: AlertTriangle, color: '#d4a44c', label: 'Warning' },
-  positive: { icon: CheckCircle2, color: '#4ecba3', label: 'Good' },
-  info: { icon: Info, color: '#5b8dee', label: 'Info' },
+  critical: { icon: CircleAlert, color: '#ef6f8a', label: 'Critical' },
+  warning: { icon: AlertTriangle, color: '#e2a53f', label: 'Warning' },
+  positive: { icon: CheckCircle2, color: '#32bfa3', label: 'Good' },
+  info: { icon: Info, color: '#6487f0', label: 'Info' },
 };
 
 const dataQualityTone: Record<DataQualitySummary['status'], {
@@ -109,10 +109,10 @@ const dataQualityTone: Record<DataQualitySummary['status'], {
   color: string;
   label: string;
 }> = {
-  healthy: { icon: ShieldCheck, color: '#4ecba3', label: 'Reliable' },
-  review: { icon: Info, color: '#5b8dee', label: 'Review' },
-  stale: { icon: AlertTriangle, color: '#d4a44c', label: 'Stale' },
-  attention: { icon: CircleAlert, color: '#e07070', label: 'Attention' },
+  healthy: { icon: ShieldCheck, color: '#32bfa3', label: 'Reliable' },
+  review: { icon: Info, color: '#6487f0', label: 'Review' },
+  stale: { icon: AlertTriangle, color: '#e2a53f', label: 'Stale' },
+  attention: { icon: CircleAlert, color: '#ef6f8a', label: 'Attention' },
 };
 
 function SignalsPanel({
@@ -128,12 +128,12 @@ function SignalsPanel({
     <div className="bg-surface border border-border rounded">
       <div className="px-4 py-3 border-b border-border flex items-center justify-between">
         <div className="flex items-center gap-2">
-          <Lightbulb size={15} className="text-[#d4a44c]" />
+          <Lightbulb size={15} className="text-[#e2a53f]" />
           <h2 className="text-sm font-medium text-text">Signals</h2>
         </div>
         <button
           onClick={() => onNavigate('/advisor')}
-          className="text-xs text-muted hover:text-[#4ecba3] flex items-center gap-1"
+          className="text-xs text-muted hover:text-[#32bfa3] flex items-center gap-1"
         >
           Ask advisor <ArrowRight size={11} />
         </button>
@@ -167,7 +167,7 @@ function SignalsPanel({
                 {actionRoute && actionLabel && (
                   <button
                     onClick={() => onNavigate(actionRoute)}
-                    className="text-xs text-muted hover:text-[#4ecba3] flex items-center gap-1 flex-shrink-0 pt-1"
+                    className="text-xs text-muted hover:text-[#32bfa3] flex items-center gap-1 flex-shrink-0 pt-1"
                   >
                     {actionLabel}
                     <ArrowRight size={11} />
@@ -188,7 +188,7 @@ function SignalsPanel({
 
 function GoalProgressRow({ goal }: { goal: Goal }) {
   const progress = Math.min(goal.progress_percent, 100);
-  const tone = goal.type === 'debt' ? '#d4a44c' : '#4ecba3';
+  const tone = goal.type === 'debt' ? '#e2a53f' : '#32bfa3';
 
   return (
     <div>
@@ -232,7 +232,7 @@ function DataQualityPanel({
           <Icon size={14} style={{ color: tone.color }} />
           <h2 className="text-sm font-medium text-text">Data Quality</h2>
         </div>
-        <button onClick={() => onNavigate(primaryRoute)} className="text-xs text-muted hover:text-[#4ecba3] flex items-center gap-1">
+        <button onClick={() => onNavigate(primaryRoute)} className="text-xs text-muted hover:text-[#32bfa3] flex items-center gap-1">
           Review <ArrowRight size={11} />
         </button>
       </div>
@@ -286,9 +286,9 @@ function DataQualityPanel({
 
 const syncHealthTone: Record<SyncHealth['status'], { label: string; color: string }> = {
   empty: { label: 'Not connected', color: '#6b6b7a' },
-  healthy: { label: 'Fresh', color: '#4ecba3' },
-  stale: { label: 'Stale', color: '#d4a44c' },
-  attention: { label: 'Needs attention', color: '#e07070' },
+  healthy: { label: 'Fresh', color: '#32bfa3' },
+  stale: { label: 'Stale', color: '#e2a53f' },
+  attention: { label: 'Needs attention', color: '#ef6f8a' },
 };
 
 function SyncHealthPanel({
@@ -308,7 +308,7 @@ function SyncHealthPanel({
           <RefreshCw size={14} style={{ color: tone.color }} />
           <h2 className="text-sm font-medium text-text">Sync Health</h2>
         </div>
-        <button onClick={() => onNavigate('/accounts')} className="text-xs text-muted hover:text-[#4ecba3] flex items-center gap-1">
+        <button onClick={() => onNavigate('/accounts')} className="text-xs text-muted hover:text-[#32bfa3] flex items-center gap-1">
           Accounts <ArrowRight size={11} />
         </button>
       </div>
@@ -335,13 +335,13 @@ function SyncHealthPanel({
             </div>
             <div>
               <p className="text-muted mb-0.5">Stale</p>
-              <p className="font-mono" style={{ color: health.stale_count > 0 ? '#d4a44c' : '#4ecba3' }}>
+              <p className="font-mono" style={{ color: health.stale_count > 0 ? '#e2a53f' : '#32bfa3' }}>
                 {health.stale_count}
               </p>
             </div>
             <div>
               <p className="text-muted mb-0.5">Attention</p>
-              <p className="font-mono" style={{ color: health.attention_count > 0 ? '#e07070' : '#4ecba3' }}>
+              <p className="font-mono" style={{ color: health.attention_count > 0 ? '#ef6f8a' : '#32bfa3' }}>
                 {health.attention_count}
               </p>
             </div>
@@ -350,10 +350,10 @@ function SyncHealthPanel({
           <div className="space-y-1.5">
             {topConnections.map((connection) => {
               const connectionTone = connection.needs_attention
-                ? '#e07070'
+                ? '#ef6f8a'
                 : connection.is_stale
-                  ? '#d4a44c'
-                  : '#4ecba3';
+                  ? '#e2a53f'
+                  : '#32bfa3';
               const detail = connection.recommended_action === 'none' && connection.last_synced_at
                 ? formatRelativeTime(connection.last_synced_at)
                 : connection.status_label;
@@ -374,7 +374,7 @@ function SyncHealthPanel({
                     {actionLabel && (
                       <button
                         onClick={() => onNavigate('/accounts')}
-                        className="text-muted hover:text-[#4ecba3]"
+                        className="text-muted hover:text-[#32bfa3]"
                       >
                         {actionLabel}
                       </button>
@@ -420,7 +420,7 @@ function DashboardFocusPanel({
         <div className="grid grid-cols-1 xl:grid-cols-[1fr_380px] gap-6">
           <div>
             <div className="flex items-center gap-2 mb-3">
-              <CreditCard size={16} className="text-[#4ecba3]" />
+              <CreditCard size={16} className="text-[#32bfa3]" />
               <h2 className="text-base font-medium text-text">Connect your first money source</h2>
             </div>
             <p className="text-sm text-muted max-w-2xl leading-relaxed mb-5">
@@ -429,7 +429,7 @@ function DashboardFocusPanel({
             <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-2">
               <button
                 onClick={() => onNavigate('/accounts?connect=bank')}
-                className="flex items-center justify-center gap-2 rounded border border-[#4ecba3]/35 bg-[#4ecba3]/15 text-[#4ecba3] px-3 py-2.5 text-sm hover:bg-[#4ecba3]/20"
+                className="flex items-center justify-center gap-2 rounded border border-[#32bfa3]/35 bg-[#32bfa3]/15 text-[#32bfa3] px-3 py-2.5 text-sm hover:bg-[#32bfa3]/20"
               >
                 <CreditCard size={15} /> Bank or card
               </button>
@@ -460,7 +460,7 @@ function DashboardFocusPanel({
                 <div key={step.label} className="min-w-0">
                   <div
                     className="h-1.5 rounded-full mb-2"
-                    style={{ backgroundColor: step.active ? '#4ecba3' : '#2a2a2f' }}
+                    style={{ backgroundColor: step.active ? '#32bfa3' : '#dbe7e2' }}
                   />
                   <p className="text-[11px] text-text truncate">{index + 1}. {step.label}</p>
                 </div>
@@ -478,7 +478,7 @@ function DashboardFocusPanel({
   const config = {
     sync_repair: {
       icon: AlertTriangle,
-      color: '#d4a44c',
+      color: '#e2a53f',
       title: 'Sync needs attention',
       detail: syncHealth?.status_detail ?? 'A connected source needs sync review.',
       action: 'Open Accounts',
@@ -486,7 +486,7 @@ function DashboardFocusPanel({
     },
     review_backlog: {
       icon: CircleAlert,
-      color: '#5b8dee',
+      color: '#6487f0',
       title: 'Review Inbox is open',
       detail: `${reviewSummary?.total_open ?? 0} item${(reviewSummary?.total_open ?? 0) === 1 ? '' : 's'} need confirmation before the dashboard is fully trusted.`,
       action: 'Open Review',
@@ -494,7 +494,7 @@ function DashboardFocusPanel({
     },
     forecast_warning: {
       icon: TrendingDown,
-      color: '#e07070',
+      color: '#ef6f8a',
       title: 'Upcoming cash flow is negative',
       detail: `The next 30 days project ${formatCurrency(forecast?.net ?? 0)} after expected income and bills.`,
       action: 'Open Bills',
@@ -502,7 +502,7 @@ function DashboardFocusPanel({
     },
     clean_overview: {
       icon: CheckCircle2,
-      color: '#4ecba3',
+      color: '#32bfa3',
       title: 'Review complete',
       detail: 'No open review blockers are affecting the dashboard right now.',
       action: 'Open Reports',
@@ -536,7 +536,7 @@ function DashboardFocusPanel({
       </div>
       <button
         onClick={() => onNavigate(item.route)}
-        className="flex items-center gap-1.5 text-xs text-muted hover:text-[#4ecba3] flex-shrink-0"
+        className="flex items-center gap-1.5 text-xs text-muted hover:text-[#32bfa3] flex-shrink-0"
       >
         {item.action} <ArrowRight size={11} />
       </button>
@@ -748,14 +748,14 @@ export function Dashboard() {
           onClick={() => navigate('/transactions')}
         />
         <div
-          className="bg-surface border border-border rounded p-5 cursor-pointer hover:bg-[#4ecba3]/5 transition-colors"
+          className="bg-surface border border-border rounded p-5 cursor-pointer hover:bg-[#32bfa3]/5 transition-colors"
           onClick={() => navigate('/reports')}
         >
           <p className="text-xs text-muted mb-1">Top Category</p>
           {topCategory ? (
             <>
               <p className="text-sm font-medium text-text mb-1">{topCategory.category_name}</p>
-              <p className="font-mono text-2xl font-medium text-[#e07070]">{formatCurrency(topCategory.amount)}</p>
+              <p className="font-mono text-2xl font-medium text-[#ef6f8a]">{formatCurrency(topCategory.amount)}</p>
             </>
           ) : (
             <p className="text-sm text-muted">No data</p>
@@ -868,7 +868,7 @@ export function Dashboard() {
         <div className="col-span-2 bg-surface border border-border rounded p-4">
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-sm font-medium text-text">Next 30 Days</h2>
-            <button onClick={() => navigate('/bills')} className="text-xs text-muted hover:text-[#4ecba3] flex items-center gap-1">
+            <button onClick={() => navigate('/bills')} className="text-xs text-muted hover:text-[#32bfa3] flex items-center gap-1">
               View all <ArrowRight size={11} />
             </button>
           </div>
@@ -877,15 +877,15 @@ export function Dashboard() {
               <div className="grid grid-cols-3 gap-2 text-xs">
                 <div>
                   <p className="text-muted mb-0.5">Income</p>
-                  <p className="font-mono text-[#4ecba3]">{formatCurrency(forecast.income)}</p>
+                  <p className="font-mono text-[#32bfa3]">{formatCurrency(forecast.income)}</p>
                 </div>
                 <div>
                   <p className="text-muted mb-0.5">Bills</p>
-                  <p className="font-mono text-[#e07070]">{formatCurrency(-forecast.bills)}</p>
+                  <p className="font-mono text-[#ef6f8a]">{formatCurrency(-forecast.bills)}</p>
                 </div>
                 <div>
                   <p className="text-muted mb-0.5">Net</p>
-                  <p className="font-mono" style={{ color: forecast.net >= 0 ? '#4ecba3' : '#e07070' }}>
+                  <p className="font-mono" style={{ color: forecast.net >= 0 ? '#32bfa3' : '#ef6f8a' }}>
                     {formatCurrency(forecast.net)}
                   </p>
                 </div>
@@ -899,7 +899,7 @@ export function Dashboard() {
                     </div>
                     <span
                       className="font-mono text-sm ml-2"
-                      style={{ color: item.amount >= 0 ? '#4ecba3' : '#e07070' }}
+                      style={{ color: item.amount >= 0 ? '#32bfa3' : '#ef6f8a' }}
                     >
                       {formatCurrency(item.amount)}
                     </span>
@@ -921,7 +921,7 @@ export function Dashboard() {
         <div className="bg-surface border border-border rounded p-4">
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-sm font-medium text-text">Budget Progress</h2>
-            <button onClick={() => navigate('/budget')} className="text-xs text-muted hover:text-[#4ecba3] flex items-center gap-1">
+            <button onClick={() => navigate('/budget')} className="text-xs text-muted hover:text-[#32bfa3] flex items-center gap-1">
               View all <ArrowRight size={11} />
             </button>
           </div>
@@ -931,7 +931,7 @@ export function Dashboard() {
                 const spent = budget.spent ?? 0;
                 const projected = budget.projected_spend ?? spent;
                 const pct = budget.amount > 0 ? (projected / budget.amount) * 100 : 0;
-                const barColor = pct >= 100 ? '#e07070' : pct >= 80 ? '#d4a44c' : '#4ecba3';
+                const barColor = pct >= 100 ? '#ef6f8a' : pct >= 80 ? '#e2a53f' : '#32bfa3';
                 return (
                   <div key={budget.id}>
                     <div className="flex items-center justify-between text-xs mb-1">
@@ -964,10 +964,10 @@ export function Dashboard() {
         <div className="bg-surface border border-border rounded p-4">
           <div className="flex items-center justify-between mb-4">
             <div className="flex items-center gap-2">
-              <Target size={14} className="text-[#d4a44c]" />
+              <Target size={14} className="text-[#e2a53f]" />
               <h2 className="text-sm font-medium text-text">Goals</h2>
             </div>
-            <button onClick={() => navigate('/goals')} className="text-xs text-muted hover:text-[#4ecba3] flex items-center gap-1">
+            <button onClick={() => navigate('/goals')} className="text-xs text-muted hover:text-[#32bfa3] flex items-center gap-1">
               View all <ArrowRight size={11} />
             </button>
           </div>
@@ -988,26 +988,26 @@ export function Dashboard() {
         <div className="bg-surface border border-border rounded p-4">
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-sm font-medium text-text">Investments</h2>
-            <button onClick={() => navigate('/investments')} className="text-xs text-muted hover:text-[#4ecba3] flex items-center gap-1">
+            <button onClick={() => navigate('/investments')} className="text-xs text-muted hover:text-[#32bfa3] flex items-center gap-1">
               View all <ArrowRight size={11} />
             </button>
           </div>
           {holdings && holdings.length > 0 ? (
             <>
-              <p className="font-mono text-2xl text-[#5b8dee] mb-4">{formatCurrency(investmentTotal)}</p>
+              <p className="font-mono text-2xl text-[#6487f0] mb-4">{formatCurrency(investmentTotal)}</p>
               <div className="space-y-2">
                 {holdings.slice(0, 5).map((h) => {
                   const unrealized = h.cost_basis != null ? h.institution_value - h.cost_basis : null;
                   return (
                     <div key={h.id} className="flex items-center justify-between text-xs">
                       <div className="flex items-center gap-2">
-                        <span className="font-mono text-[#5b8dee] font-medium">{h.ticker ?? '-'}</span>
+                        <span className="font-mono text-[#6487f0] font-medium">{h.ticker ?? '-'}</span>
                         <span className="text-muted truncate max-w-[120px]">{h.security_name}</span>
                       </div>
                       <div className="text-right">
                         <p className="font-mono text-text">{formatCurrency(h.institution_value)}</p>
                         {unrealized != null && (
-                          <p className="font-mono" style={{ color: unrealized >= 0 ? '#4ecba3' : '#e07070' }}>
+                          <p className="font-mono" style={{ color: unrealized >= 0 ? '#32bfa3' : '#ef6f8a' }}>
                             {unrealized >= 0 ? '+' : ''}{formatCurrency(unrealized)}
                           </p>
                         )}
@@ -1029,7 +1029,7 @@ export function Dashboard() {
       <div className="bg-surface border border-border rounded">
         <div className="px-4 py-3 border-b border-border flex items-center justify-between">
           <h2 className="text-sm font-medium text-text">Recent Transactions</h2>
-          <button onClick={() => navigate('/transactions')} className="text-xs text-muted hover:text-[#4ecba3] flex items-center gap-1">
+          <button onClick={() => navigate('/transactions')} className="text-xs text-muted hover:text-[#32bfa3] flex items-center gap-1">
             View all <ArrowRight size={11} />
           </button>
         </div>

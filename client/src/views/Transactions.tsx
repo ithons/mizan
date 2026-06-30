@@ -95,7 +95,7 @@ function AddTransactionModal({
             <label className="block text-xs text-muted mb-1">Date</label>
             <input
               type="date"
-              className="w-full bg-background border border-border rounded px-3 py-2 text-sm text-text font-mono focus:outline-none focus:ring-1 focus:ring-[#4ecba3]/50"
+              className="w-full bg-background border border-border rounded px-3 py-2 text-sm text-text font-mono focus:outline-none focus:ring-1 focus:ring-[#32bfa3]/50"
               value={form.date}
               onChange={(e) => setForm({ ...form, date: e.target.value })}
             />
@@ -105,7 +105,7 @@ function AddTransactionModal({
             <input
               type="number"
               step="0.01"
-              className="w-full bg-background border border-border rounded px-3 py-2 text-sm text-text font-mono focus:outline-none focus:ring-1 focus:ring-[#4ecba3]/50"
+              className="w-full bg-background border border-border rounded px-3 py-2 text-sm text-text font-mono focus:outline-none focus:ring-1 focus:ring-[#32bfa3]/50"
               value={form.amount}
               onChange={(e) => setForm({ ...form, amount: e.target.value })}
               placeholder="0.00"
@@ -115,7 +115,7 @@ function AddTransactionModal({
         <div>
           <label className="block text-xs text-muted mb-1">Merchant</label>
           <input
-            className="w-full bg-background border border-border rounded px-3 py-2 text-sm text-text focus:outline-none focus:ring-1 focus:ring-[#4ecba3]/50"
+            className="w-full bg-background border border-border rounded px-3 py-2 text-sm text-text focus:outline-none focus:ring-1 focus:ring-[#32bfa3]/50"
             value={form.merchant_name}
             onChange={(e) => setForm({ ...form, merchant_name: e.target.value })}
             placeholder="Amazon"
@@ -124,7 +124,7 @@ function AddTransactionModal({
         <div>
           <label className="block text-xs text-muted mb-1">Account</label>
           <select
-            className="w-full bg-background border border-border rounded px-3 py-2 text-sm text-text focus:outline-none focus:ring-1 focus:ring-[#4ecba3]/50"
+            className="w-full bg-background border border-border rounded px-3 py-2 text-sm text-text focus:outline-none focus:ring-1 focus:ring-[#32bfa3]/50"
             value={form.account_id}
             onChange={(e) => setForm({ ...form, account_id: e.target.value })}
           >
@@ -136,7 +136,7 @@ function AddTransactionModal({
         <div>
           <label className="block text-xs text-muted mb-1">Category</label>
           <select
-            className="w-full bg-background border border-border rounded px-3 py-2 text-sm text-text focus:outline-none focus:ring-1 focus:ring-[#4ecba3]/50"
+            className="w-full bg-background border border-border rounded px-3 py-2 text-sm text-text focus:outline-none focus:ring-1 focus:ring-[#32bfa3]/50"
             value={form.category_id}
             onChange={(e) => setForm({ ...form, category_id: e.target.value })}
           >
@@ -149,7 +149,7 @@ function AddTransactionModal({
         <div>
           <label className="block text-xs text-muted mb-1">Notes</label>
           <input
-            className="w-full bg-background border border-border rounded px-3 py-2 text-sm text-text focus:outline-none focus:ring-1 focus:ring-[#4ecba3]/50"
+            className="w-full bg-background border border-border rounded px-3 py-2 text-sm text-text focus:outline-none focus:ring-1 focus:ring-[#32bfa3]/50"
             value={form.notes}
             onChange={(e) => setForm({ ...form, notes: e.target.value })}
             placeholder="Optional"
@@ -157,7 +157,7 @@ function AddTransactionModal({
         </div>
         <div className="flex gap-3 pt-1">
           <button
-            className="flex-1 py-2 text-sm bg-[#4ecba3] text-[#0f0f11] font-medium rounded hover:opacity-90"
+            className="flex-1 py-2 text-sm bg-[#32bfa3] text-[#273238] font-medium rounded hover:opacity-90"
             onClick={() => mutation.mutate()}
             disabled={mutation.isPending}
           >
@@ -438,7 +438,7 @@ export function Transactions() {
         <button
           className={`flex items-center gap-1.5 text-xs border rounded px-3 py-1.5 transition-colors ${
             showFilters
-              ? 'bg-[#4ecba3]/10 text-[#4ecba3] border-[#4ecba3]/40'
+              ? 'bg-[#32bfa3]/10 text-[#32bfa3] border-[#32bfa3]/40'
               : 'text-muted border-border hover:text-text'
           }`}
           onClick={() => setShowFilters((v) => !v)}
@@ -456,7 +456,7 @@ export function Transactions() {
           <Download size={13} /> Export
         </button>
         <button
-          className="flex items-center gap-1.5 text-xs bg-[#4ecba3] text-[#0f0f11] font-medium rounded px-3 py-1.5 hover:opacity-90"
+          className="flex items-center gap-1.5 text-xs bg-[#32bfa3] text-[#273238] font-medium rounded px-3 py-1.5 hover:opacity-90"
           onClick={() => setShowAddModal(true)}
         >
           <Plus size={13} /> Add Transaction
@@ -468,26 +468,26 @@ export function Transactions() {
         <div className="flex flex-wrap gap-2 mb-4 p-3 bg-surface border border-border rounded">
           <input
             type="date"
-            className="bg-background border border-border rounded px-2 py-1 text-xs text-text font-mono focus:outline-none focus:ring-1 focus:ring-[#4ecba3]/50"
+            className="bg-background border border-border rounded px-2 py-1 text-xs text-text font-mono focus:outline-none focus:ring-1 focus:ring-[#32bfa3]/50"
             value={filters.startDate ?? ''}
             onChange={(e) => { setFilters({ ...filters, startDate: e.target.value }); setPage(1); }}
           />
           <span className="text-muted text-xs self-center">to</span>
           <input
             type="date"
-            className="bg-background border border-border rounded px-2 py-1 text-xs text-text font-mono focus:outline-none focus:ring-1 focus:ring-[#4ecba3]/50"
+            className="bg-background border border-border rounded px-2 py-1 text-xs text-text font-mono focus:outline-none focus:ring-1 focus:ring-[#32bfa3]/50"
             value={filters.endDate ?? ''}
             onChange={(e) => { setFilters({ ...filters, endDate: e.target.value }); setPage(1); }}
           />
           <input
             type="text"
             placeholder="Search..."
-            className="bg-background border border-border rounded px-2 py-1 text-xs text-text focus:outline-none focus:ring-1 focus:ring-[#4ecba3]/50 flex-1 min-w-[160px]"
+            className="bg-background border border-border rounded px-2 py-1 text-xs text-text focus:outline-none focus:ring-1 focus:ring-[#32bfa3]/50 flex-1 min-w-[160px]"
             value={filters.search ?? ''}
             onChange={(e) => { setFilters({ ...filters, search: e.target.value }); setPage(1); }}
           />
           <select
-            className="bg-background border border-border rounded px-2 py-1 text-xs text-text focus:outline-none focus:ring-1 focus:ring-[#4ecba3]/50"
+            className="bg-background border border-border rounded px-2 py-1 text-xs text-text focus:outline-none focus:ring-1 focus:ring-[#32bfa3]/50"
             value={filters.type ?? ''}
             onChange={(e) => { setFilters({ ...filters, type: e.target.value }); setPage(1); }}
           >
@@ -496,7 +496,7 @@ export function Transactions() {
             <option value="expense">Expense</option>
           </select>
           <select
-            className="bg-background border border-border rounded px-2 py-1 text-xs text-text focus:outline-none focus:ring-1 focus:ring-[#4ecba3]/50"
+            className="bg-background border border-border rounded px-2 py-1 text-xs text-text focus:outline-none focus:ring-1 focus:ring-[#32bfa3]/50"
             value={filters.pending === undefined ? '' : String(filters.pending)}
             onChange={(e) => {
               const v = e.target.value;
@@ -509,7 +509,7 @@ export function Transactions() {
             <option value="false">Posted</option>
           </select>
           <select
-            className="bg-background border border-border rounded px-2 py-1 text-xs text-text focus:outline-none focus:ring-1 focus:ring-[#4ecba3]/50"
+            className="bg-background border border-border rounded px-2 py-1 text-xs text-text focus:outline-none focus:ring-1 focus:ring-[#32bfa3]/50"
             value={filters.recurring === undefined ? '' : String(filters.recurring)}
             onChange={(e) => {
               const v = e.target.value;
@@ -522,7 +522,7 @@ export function Transactions() {
             <option value="false">One-time</option>
           </select>
           <select
-            className="bg-background border border-border rounded px-2 py-1 text-xs text-text focus:outline-none focus:ring-1 focus:ring-[#4ecba3]/50"
+            className="bg-background border border-border rounded px-2 py-1 text-xs text-text focus:outline-none focus:ring-1 focus:ring-[#32bfa3]/50"
             value={filters.uncategorized === undefined ? '' : String(filters.uncategorized)}
             onChange={(e) => {
               const v = e.target.value;
@@ -554,14 +554,14 @@ export function Transactions() {
 
       {/* Bulk Action Bar */}
       {selectedIds.size > 0 && (
-        <div className="flex items-center gap-3 mb-3 px-3 py-2 bg-[#4ecba3]/10 border border-[#4ecba3]/30 rounded sticky top-0 z-10">
+        <div className="flex items-center gap-3 mb-3 px-3 py-2 bg-[#32bfa3]/10 border border-[#32bfa3]/30 rounded sticky top-0 z-10">
           <input
             type="checkbox"
-            className="accent-[#4ecba3]"
+            className="accent-[#32bfa3]"
             checked={selectedIds.size === txs.length && txs.length > 0}
             onChange={selectAll}
           />
-          <span className="text-xs text-[#4ecba3] font-medium">{selectedIds.size} selected</span>
+          <span className="text-xs text-[#32bfa3] font-medium">{selectedIds.size} selected</span>
           <div className="ml-auto flex gap-2 items-center">
             <BulkCategoryDropdown
               categories={categories}
@@ -586,7 +586,7 @@ export function Transactions() {
                 <th className="w-8 px-3 py-2.5">
                   <input
                     type="checkbox"
-                    className="accent-[#4ecba3]"
+                    className="accent-[#32bfa3]"
                     checked={selectedIds.size === txs.length && txs.length > 0}
                     onChange={selectAll}
                   />
@@ -611,11 +611,11 @@ export function Transactions() {
                 </tr>
               ) : (
                 txs.map((tx) => (
-                  <tr key={tx.id} className={`border-b border-border hover:bg-white/2 group ${selectedIds.has(tx.id) ? 'bg-[#4ecba3]/5' : ''}`}>
+                  <tr key={tx.id} className={`border-b border-border hover:bg-white/2 group ${selectedIds.has(tx.id) ? 'bg-[#32bfa3]/5' : ''}`}>
                     <td className="px-3 py-2.5">
                       <input
                         type="checkbox"
-                        className="accent-[#4ecba3]"
+                        className="accent-[#32bfa3]"
                         checked={selectedIds.has(tx.id)}
                         onChange={() => toggleSelect(tx.id)}
                       />
@@ -627,7 +627,7 @@ export function Transactions() {
                     <td className="px-3 py-2.5 text-text max-w-[180px]">
                       <div className="flex items-center gap-1.5">
                         {tx.pending && (
-                          <span className="w-1.5 h-1.5 rounded-full bg-[#f0c040] flex-shrink-0" title="Pending" />
+                          <span className="w-1.5 h-1.5 rounded-full bg-[#e2a53f] flex-shrink-0" title="Pending" />
                         )}
                         {tx.recurring_id && <RefreshCw size={10} className="text-muted flex-shrink-0" />}
                         <InlineEdit
@@ -647,7 +647,7 @@ export function Transactions() {
                         />
                         {tx.category_id && (tx.merchant_name || tx.original_name) && (
                           <button
-                            className="text-muted hover:text-[#d4a44c] opacity-0 group-hover:opacity-100 transition-colors disabled:opacity-30"
+                            className="text-muted hover:text-[#e2a53f] opacity-0 group-hover:opacity-100 transition-colors disabled:opacity-30"
                             onClick={() => createRuleFromTransaction(tx.merchant_name || tx.original_name, tx.category_id)}
                             disabled={createRuleMutation.isPending}
                             title="Create merchant rule"
@@ -672,7 +672,7 @@ export function Transactions() {
                     <td className="px-2 py-2.5">
                       {tx.is_manual && (
                         <button
-                          className="text-muted hover:text-[#e07070] transition-colors opacity-0 group-hover:opacity-100"
+                          className="text-muted hover:text-[#ef6f8a] transition-colors opacity-0 group-hover:opacity-100"
                           onClick={() => deleteMutation.mutate(tx.id)}
                         >
                           <Trash2 size={12} />

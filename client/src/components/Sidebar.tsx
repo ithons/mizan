@@ -86,19 +86,24 @@ export function Sidebar({ collapsed = false, onToggle }: SidebarProps) {
   const totalLiabilities = netWorthData?.total_liabilities ?? 0;
 
   return (
-    <aside className="flex flex-col bg-surface border-r border-border h-full w-full overflow-hidden">
+    <aside className="flex flex-col bg-surface border-r border-border h-full w-full overflow-hidden shadow-[4px_0_24px_rgba(39,50,56,0.04)]">
       {/* Logo + collapse toggle */}
       <div className="px-4 py-4 border-b border-border flex items-center justify-between gap-2 flex-shrink-0">
-        <span
-          className="text-xl font-semibold text-text tracking-wide truncate"
-          style={{ fontFamily: 'serif' }}
-        >
-          Mizān
-        </span>
+        <div className="flex items-center gap-2 min-w-0">
+          <span className="w-7 h-7 rounded bg-[#32bfa3]/10 border border-[#32bfa3]/25 flex items-center justify-center text-[#229f86] font-semibold flex-shrink-0">
+            م
+          </span>
+          <span
+            className="text-xl font-semibold text-text tracking-wide truncate"
+            style={{ fontFamily: 'serif' }}
+          >
+            Mizān
+          </span>
+        </div>
         {onToggle && (
           <button
             onClick={onToggle}
-            className="flex-shrink-0 w-6 h-6 flex items-center justify-center rounded text-muted hover:text-text hover:bg-white/10 transition-colors"
+            className="flex-shrink-0 w-6 h-6 flex items-center justify-center rounded text-muted hover:text-text hover:bg-[#6487f0]/10 transition-colors"
             title="Hide sidebar (drag handle to resize)"
           >
             <PanelLeftClose size={14} />
@@ -117,14 +122,14 @@ export function Sidebar({ collapsed = false, onToggle }: SidebarProps) {
               className={({ isActive }) =>
                 `flex items-center gap-3 px-4 py-2.5 text-sm transition-colors relative group ${
                   isActive
-                    ? 'text-text bg-[#1e1e22] border-l-2 border-l-[#4ecba3] pl-[14px]'
-                    : 'text-muted hover:text-text hover:bg-white/5 border-l-2 border-l-transparent'
+                    ? 'text-[#1f7f6e] bg-[#32bfa3]/10 border-l-2 border-l-[#32bfa3] pl-[14px]'
+                    : 'text-muted hover:text-text hover:bg-[#6487f0]/10 border-l-2 border-l-transparent'
                 }`
               }
             >
               {({ isActive }) => (
                 <>
-                  <item.icon size={16} className={isActive ? 'text-[#4ecba3]' : ''} />
+                  <item.icon size={16} className={isActive ? 'text-[#229f86]' : ''} />
                   <span className="flex-1 truncate">{item.label}</span>
                   {item.shortcut && (
                     <span className="text-xs text-muted/50 font-mono hidden group-hover:block flex-shrink-0">
@@ -145,7 +150,7 @@ export function Sidebar({ collapsed = false, onToggle }: SidebarProps) {
           <p className="text-xs text-muted mb-0.5">Net Worth</p>
           <p
             className="font-mono text-sm font-medium truncate"
-            style={{ color: netWorth >= 0 ? '#4ecba3' : '#e07070' }}
+            style={{ color: netWorth >= 0 ? '#32bfa3' : '#ef6f8a' }}
           >
             {formatCurrency(netWorth)}
           </p>
@@ -161,14 +166,14 @@ export function Sidebar({ collapsed = false, onToggle }: SidebarProps) {
         <div className="flex items-center gap-2">
           {syncStatus === 'syncing' && (
             <>
-              <Loader2 size={12} className="text-[#4ecba3] animate-spin flex-shrink-0" />
+              <Loader2 size={12} className="text-[#32bfa3] animate-spin flex-shrink-0" />
               <span className="text-xs text-muted truncate">Syncing...</span>
             </>
           )}
           {syncStatus === 'error' && (
             <>
-              <AlertTriangle size={12} className="text-[#e07070] flex-shrink-0" />
-              <span className="text-xs text-[#e07070] truncate">Sync error</span>
+              <AlertTriangle size={12} className="text-[#ef6f8a] flex-shrink-0" />
+              <span className="text-xs text-[#ef6f8a] truncate">Sync error</span>
             </>
           )}
           {syncStatus === 'idle' && (

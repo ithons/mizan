@@ -41,7 +41,7 @@ import { PageLoader } from '../components/LoadingSpinner';
 import type { Category, MerchantRule, MerchantRuleSuggestion, SyncRun } from '@shared/types';
 
 const CATEGORY_PRESET_COLORS = [
-  '#4ecba3', '#5b8dee', '#e07070', '#f0c040', '#9b8dee',
+  '#32bfa3', '#6487f0', '#ef6f8a', '#e2a53f', '#9b8dee',
   '#ee8d5b', '#70c4e0', '#e070b8', '#70e07a', '#a0a0b8',
   '#c4a86e', '#6e8ec4',
 ];
@@ -120,8 +120,8 @@ function PlaidSection() {
             <span
               className={`text-xs px-2 py-0.5 rounded border font-mono ${
                 credStatus.plaidEnvironment === 'sandbox'
-                  ? 'text-[#f0c040] border-[#f0c040]/40 bg-[#f0c040]/10'
-                  : 'text-[#e07070] border-[#e07070]/40 bg-[#e07070]/10'
+                  ? 'text-[#e2a53f] border-[#e2a53f]/40 bg-[#e2a53f]/10'
+                  : 'text-[#ef6f8a] border-[#ef6f8a]/40 bg-[#ef6f8a]/10'
               }`}
             >
               {credStatus.plaidEnvironment}
@@ -129,8 +129,8 @@ function PlaidSection() {
           )}
         </div>
         {credStatus?.plaidFromEnv ? (
-          <div className="flex items-start gap-2 p-3 bg-[#4ecba3]/10 border border-[#4ecba3]/30 rounded max-w-md">
-            <Info size={13} className="text-[#4ecba3] mt-0.5 flex-shrink-0" />
+          <div className="flex items-start gap-2 p-3 bg-[#32bfa3]/10 border border-[#32bfa3]/30 rounded max-w-md">
+            <Info size={13} className="text-[#32bfa3] mt-0.5 flex-shrink-0" />
             <p className="text-xs text-muted">
               Credentials loaded from <span className="font-mono text-text">.env</span>. To change them, edit that file and restart the server.
             </p>
@@ -140,7 +140,7 @@ function PlaidSection() {
             <div>
               <label className="block text-xs text-muted mb-1">Client ID</label>
               <input
-                className="w-full bg-background border border-border rounded px-3 py-2 text-sm text-text font-mono focus:outline-none focus:ring-1 focus:ring-[#4ecba3]/50"
+                className="w-full bg-background border border-border rounded px-3 py-2 text-sm text-text font-mono focus:outline-none focus:ring-1 focus:ring-[#32bfa3]/50"
                 value={form.clientId}
                 onChange={(e) => setForm({ ...form, clientId: e.target.value })}
                 placeholder="Plaid client ID"
@@ -151,7 +151,7 @@ function PlaidSection() {
               <div className="relative">
                 <input
                   type={showSecret ? 'text' : 'password'}
-                  className="w-full bg-background border border-border rounded px-3 py-2 text-sm text-text font-mono pr-10 focus:outline-none focus:ring-1 focus:ring-[#4ecba3]/50"
+                  className="w-full bg-background border border-border rounded px-3 py-2 text-sm text-text font-mono pr-10 focus:outline-none focus:ring-1 focus:ring-[#32bfa3]/50"
                   value={form.secret}
                   onChange={(e) => setForm({ ...form, secret: e.target.value })}
                   placeholder="Plaid secret"
@@ -174,7 +174,7 @@ function PlaidSection() {
                     onClick={() => setForm({ ...form, environment: env })}
                     className={`px-3 py-1.5 text-xs rounded border transition-all ${
                       form.environment === env
-                        ? 'bg-[#4ecba3]/10 text-[#4ecba3] border-[#4ecba3]/40'
+                        ? 'bg-[#32bfa3]/10 text-[#32bfa3] border-[#32bfa3]/40'
                         : 'text-muted border-border hover:text-text'
                     }`}
                   >
@@ -183,10 +183,10 @@ function PlaidSection() {
                 ))}
               </div>
             </div>
-            <div className="flex items-start gap-2 p-3 bg-[#f0c040]/8 border border-[#f0c040]/30 rounded">
-              <AlertTriangle size={13} className="text-[#f0c040] mt-0.5 flex-shrink-0" />
+            <div className="flex items-start gap-2 p-3 bg-[#e2a53f]/10 border border-[#e2a53f]/30 rounded">
+              <AlertTriangle size={13} className="text-[#e2a53f] mt-0.5 flex-shrink-0" />
               <div className="text-xs text-muted space-y-1">
-                <p className="text-[#f0c040]/90 font-medium">Required for OAuth banks (Chase, Wells Fargo, etc.)</p>
+                <p className="text-[#e2a53f]/90 font-medium">Required for OAuth banks (Chase, Wells Fargo, etc.)</p>
                 <p>
                   In your Plaid Dashboard go to{' '}
                   <span className="font-mono text-text">Settings → API → Allowed redirect URIs</span>{' '}
@@ -199,7 +199,7 @@ function PlaidSection() {
             </div>
             <div className="flex gap-2 pt-1">
               <button
-                className="px-4 py-2 text-sm bg-[#4ecba3] text-[#0f0f11] font-medium rounded hover:opacity-90"
+                className="px-4 py-2 text-sm bg-[#32bfa3] text-[#273238] font-medium rounded hover:opacity-90"
                 onClick={() => saveMutation.mutate()}
                 disabled={saveMutation.isPending}
               >
@@ -231,7 +231,7 @@ function PlaidSection() {
                   <p className="text-xs text-muted font-mono">
                     {item.last_synced_at ? `Synced ${formatRelativeTime(item.last_synced_at)}` : 'Never synced'}
                     {' · '}
-                    <span style={{ color: item.status === 'active' ? '#4ecba3' : '#e07070' }}>
+                    <span style={{ color: item.status === 'active' ? '#32bfa3' : '#ef6f8a' }}>
                       {item.status}
                     </span>
                   </p>
@@ -245,7 +245,7 @@ function PlaidSection() {
                     <RefreshCw size={11} /> Sync
                   </button>
                   <button
-                    className="text-xs text-[#e07070] border border-[#e07070]/30 rounded px-2 py-1 hover:bg-[#e07070]/10 flex items-center gap-1"
+                    className="text-xs text-[#ef6f8a] border border-[#ef6f8a]/30 rounded px-2 py-1 hover:bg-[#ef6f8a]/10 flex items-center gap-1"
                     onClick={() => setUnlinkTarget({ id: item.id, name: item.institution_name })}
                   >
                     <Unlink size={11} /> Remove
@@ -326,15 +326,15 @@ function CoinbaseSection() {
   return (
     <div className="space-y-4 max-w-md">
       {credStatus?.coinbaseFromEnv ? (
-        <div className="flex items-start gap-2 p-3 bg-[#4ecba3]/10 border border-[#4ecba3]/30 rounded">
-          <Info size={13} className="text-[#4ecba3] mt-0.5 flex-shrink-0" />
+        <div className="flex items-start gap-2 p-3 bg-[#32bfa3]/10 border border-[#32bfa3]/30 rounded">
+          <Info size={13} className="text-[#32bfa3] mt-0.5 flex-shrink-0" />
           <p className="text-xs text-muted">
             Credentials loaded from <span className="font-mono text-text">.env</span>. To change them, edit that file and restart the server.
           </p>
         </div>
       ) : connected ? (
-        <div className="flex items-center gap-3 p-3 bg-[#4ecba3]/10 border border-[#4ecba3]/30 rounded">
-          <CheckCircle size={16} className="text-[#4ecba3] flex-shrink-0" />
+        <div className="flex items-center gap-3 p-3 bg-[#32bfa3]/10 border border-[#32bfa3]/30 rounded">
+          <CheckCircle size={16} className="text-[#32bfa3] flex-shrink-0" />
           <div>
             <p className="text-sm text-text">Coinbase connected</p>
             <p className="text-xs text-muted">API key stored in local credentials</p>
@@ -342,11 +342,11 @@ function CoinbaseSection() {
         </div>
       ) : (
         <>
-          <div className="flex items-start gap-2 p-3 bg-[#5b8dee]/10 border border-[#5b8dee]/30 rounded">
-            <Info size={14} className="text-[#5b8dee] mt-0.5 flex-shrink-0" />
+          <div className="flex items-start gap-2 p-3 bg-[#6487f0]/10 border border-[#6487f0]/30 rounded">
+            <Info size={14} className="text-[#6487f0] mt-0.5 flex-shrink-0" />
             <p className="text-xs text-muted">
               Create an API key at{' '}
-              <a href="https://portal.cdp.coinbase.com" target="_blank" rel="noopener noreferrer" className="text-[#5b8dee] hover:underline">
+              <a href="https://portal.cdp.coinbase.com" target="_blank" rel="noopener noreferrer" className="text-[#6487f0] hover:underline">
                 portal.cdp.coinbase.com
               </a>{' '}
               → Advanced Trade API with read-only permissions.
@@ -355,7 +355,7 @@ function CoinbaseSection() {
           <div>
             <label className="block text-xs text-muted mb-1">Key Name</label>
             <input
-              className="w-full bg-background border border-border rounded px-3 py-2 text-sm text-text font-mono focus:outline-none focus:ring-1 focus:ring-[#4ecba3]/50"
+              className="w-full bg-background border border-border rounded px-3 py-2 text-sm text-text font-mono focus:outline-none focus:ring-1 focus:ring-[#32bfa3]/50"
               value={form.keyName}
               onChange={(e) => setForm({ ...form, keyName: e.target.value })}
               placeholder="organizations/xxx/apiKeys/yyy"
@@ -365,7 +365,7 @@ function CoinbaseSection() {
             <label className="block text-xs text-muted mb-1">Private Key</label>
             <div className="relative">
               <textarea
-                className="w-full bg-background border border-border rounded px-3 py-2 text-sm text-text font-mono resize-none focus:outline-none focus:ring-1 focus:ring-[#4ecba3]/50"
+                className="w-full bg-background border border-border rounded px-3 py-2 text-sm text-text font-mono resize-none focus:outline-none focus:ring-1 focus:ring-[#32bfa3]/50"
                 rows={4}
                 value={form.privateKey}
                 onChange={(e) => setForm({ ...form, privateKey: e.target.value })}
@@ -394,7 +394,7 @@ function CoinbaseSection() {
           </button>
           {!credStatus?.coinbaseFromEnv && (
             <button
-              className="px-4 py-2 text-sm border border-[#e07070]/30 rounded text-[#e07070] hover:bg-[#e07070]/10 flex items-center gap-1.5"
+              className="px-4 py-2 text-sm border border-[#ef6f8a]/30 rounded text-[#ef6f8a] hover:bg-[#ef6f8a]/10 flex items-center gap-1.5"
               onClick={() => setShowDisconnectConfirm(true)}
               disabled={disconnectMutation.isPending}
             >
@@ -404,7 +404,7 @@ function CoinbaseSection() {
         </div>
       ) : (
         <button
-          className="px-4 py-2 text-sm bg-[#4ecba3] text-[#0f0f11] font-medium rounded hover:opacity-90"
+          className="px-4 py-2 text-sm bg-[#32bfa3] text-[#273238] font-medium rounded hover:opacity-90"
           onClick={() => connectMutation.mutate()}
           disabled={connectMutation.isPending || !form.keyName || !form.privateKey}
         >
@@ -463,7 +463,7 @@ function CategoryRow({
             <div className="flex items-center gap-1">
               <input
                 autoFocus
-                className="bg-background border border-border rounded px-2 py-0.5 text-xs text-text flex-1 focus:outline-none focus:ring-1 focus:ring-[#4ecba3]/50"
+                className="bg-background border border-border rounded px-2 py-0.5 text-xs text-text flex-1 focus:outline-none focus:ring-1 focus:ring-[#32bfa3]/50"
                 value={editName}
                 onChange={(e) => setEditName(e.target.value)}
                 onKeyDown={(e) => {
@@ -472,7 +472,7 @@ function CategoryRow({
                 }}
               />
               <input
-                className="w-8 bg-background border border-border rounded px-1 py-0.5 text-xs text-center text-text focus:outline-none focus:ring-1 focus:ring-[#4ecba3]/50"
+                className="w-8 bg-background border border-border rounded px-1 py-0.5 text-xs text-center text-text focus:outline-none focus:ring-1 focus:ring-[#32bfa3]/50"
                 value={editIcon}
                 onChange={(e) => setEditIcon(e.target.value)}
                 maxLength={2}
@@ -480,7 +480,7 @@ function CategoryRow({
                 title="Category icon (emoji)"
               />
               <button onClick={handleSave}>
-                <Check size={12} className="text-[#4ecba3]" />
+                <Check size={12} className="text-[#32bfa3]" />
               </button>
               <button onClick={() => setEditing(false)}>
                 <X size={12} className="text-muted" />
@@ -505,7 +505,7 @@ function CategoryRow({
         ) : (
           <>
             <span className="text-sm text-text flex-1">{category.name}</span>
-            {category.is_income && <span className="text-xs text-[#4ecba3] bg-[#4ecba3]/10 px-1.5 py-0.5 rounded">income</span>}
+            {category.is_income && <span className="text-xs text-[#32bfa3] bg-[#32bfa3]/10 px-1.5 py-0.5 rounded">income</span>}
             {category.is_system && <span className="text-xs text-muted bg-border/50 px-1.5 py-0.5 rounded">system</span>}
           </>
         )}
@@ -513,7 +513,7 @@ function CategoryRow({
           <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
             {depth === 0 && (
               <button
-                className="p-1 text-muted hover:text-[#4ecba3]"
+                className="p-1 text-muted hover:text-[#32bfa3]"
                 title="Add subcategory"
                 onClick={() => onAddChild(category.id)}
               >
@@ -533,7 +533,7 @@ function CategoryRow({
                 >
                   <Edit2 size={12} />
                 </button>
-                <button className="p-1 text-muted hover:text-[#e07070]" onClick={() => onDelete(category.id)}>
+                <button className="p-1 text-muted hover:text-[#ef6f8a]" onClick={() => onDelete(category.id)}>
                   <Trash2 size={12} />
                 </button>
               </>
@@ -613,7 +613,7 @@ function CategoriesSection() {
       <div className="flex items-center justify-between">
         <h3 className="text-sm font-medium text-text">Categories</h3>
         <button
-          className="flex items-center gap-1 text-xs text-[#4ecba3] hover:opacity-80"
+          className="flex items-center gap-1 text-xs text-[#32bfa3] hover:opacity-80"
           onClick={() => { setAddParentId(null); setShowAddModal(true); }}
         >
           <Plus size={13} /> Add Category
@@ -646,14 +646,14 @@ function CategoriesSection() {
             <div className="flex gap-2">
               <input
                 autoFocus
-                className="flex-1 bg-background border border-border rounded px-3 py-2 text-sm text-text focus:outline-none focus:ring-1 focus:ring-[#4ecba3]/50"
+                className="flex-1 bg-background border border-border rounded px-3 py-2 text-sm text-text focus:outline-none focus:ring-1 focus:ring-[#32bfa3]/50"
                 value={addName}
                 onChange={(e) => setAddName(e.target.value)}
                 onKeyDown={(e) => e.key === 'Enter' && addMutation.mutate()}
                 placeholder="Category name"
               />
               <input
-                className="w-10 bg-background border border-border rounded px-2 py-2 text-sm text-center text-text focus:outline-none focus:ring-1 focus:ring-[#4ecba3]/50"
+                className="w-10 bg-background border border-border rounded px-2 py-2 text-sm text-center text-text focus:outline-none focus:ring-1 focus:ring-[#32bfa3]/50"
                 value={addIcon}
                 onChange={(e) => setAddIcon(e.target.value)}
                 maxLength={2}
@@ -682,7 +682,7 @@ function CategoriesSection() {
           </div>
           <div className="flex gap-3">
             <button
-              className="flex-1 py-2 text-sm bg-[#4ecba3] text-[#0f0f11] font-medium rounded hover:opacity-90"
+              className="flex-1 py-2 text-sm bg-[#32bfa3] text-[#273238] font-medium rounded hover:opacity-90"
               onClick={() => addMutation.mutate()}
               disabled={addMutation.isPending || !addName}
             >
@@ -806,14 +806,14 @@ function RulesSection() {
     <div className="space-y-5">
       <div className="grid grid-cols-1 sm:grid-cols-[1fr_180px_auto] gap-2">
         <input
-          className="bg-background border border-border rounded px-3 py-2 text-sm text-text focus:outline-none focus:ring-1 focus:ring-[#4ecba3]/50"
+          className="bg-background border border-border rounded px-3 py-2 text-sm text-text focus:outline-none focus:ring-1 focus:ring-[#32bfa3]/50"
           value={pattern}
           onChange={(e) => setPattern(e.target.value)}
           onKeyDown={(e) => e.key === 'Enter' && saveRule()}
           placeholder="Merchant contains..."
         />
         <select
-          className="bg-background border border-border rounded px-3 py-2 text-sm text-text focus:outline-none focus:ring-1 focus:ring-[#4ecba3]/50"
+          className="bg-background border border-border rounded px-3 py-2 text-sm text-text focus:outline-none focus:ring-1 focus:ring-[#32bfa3]/50"
           value={categoryId}
           onChange={(e) => setCategoryId(e.target.value)}
         >
@@ -823,7 +823,7 @@ function RulesSection() {
           ))}
         </select>
         <button
-          className="flex items-center gap-1.5 px-3 py-2 text-xs bg-[#4ecba3] text-[#0f0f11] font-medium rounded hover:opacity-90 disabled:opacity-40"
+          className="flex items-center gap-1.5 px-3 py-2 text-xs bg-[#32bfa3] text-[#273238] font-medium rounded hover:opacity-90 disabled:opacity-40"
           onClick={saveRule}
           disabled={createMutation.isPending}
         >
@@ -839,12 +839,12 @@ function RulesSection() {
       )}
 
       {suggestions.length > 0 && (
-        <div className="border border-[#d4a44c]/30 bg-[#d4a44c]/10 rounded">
-          <div className="flex items-center gap-2 px-3 py-2 border-b border-[#d4a44c]/20">
-            <Sparkles size={13} className="text-[#d4a44c]" />
+        <div className="border border-[#e2a53f]/30 bg-[#e2a53f]/10 rounded">
+          <div className="flex items-center gap-2 px-3 py-2 border-b border-[#e2a53f]/20">
+            <Sparkles size={13} className="text-[#e2a53f]" />
             <p className="text-xs font-medium text-text">Suggested rules</p>
           </div>
-          <div className="divide-y divide-[#d4a44c]/15">
+          <div className="divide-y divide-[#e2a53f]/15">
             {suggestions.map((suggestion) => (
               <div key={`${suggestion.pattern}:${suggestion.category_id}`} className="flex items-center gap-3 px-3 py-3">
                 <div
@@ -862,7 +862,7 @@ function RulesSection() {
                   </p>
                 </div>
                 <button
-                  className="flex items-center gap-1.5 text-xs text-[#0f0f11] bg-[#d4a44c] rounded px-2.5 py-1.5 hover:opacity-90 disabled:opacity-40"
+                  className="flex items-center gap-1.5 text-xs text-[#273238] bg-[#e2a53f] rounded px-2.5 py-1.5 hover:opacity-90 disabled:opacity-40"
                   onClick={() => suggestionMutation.mutate(suggestion)}
                   disabled={suggestionMutation.isPending}
                 >
@@ -902,7 +902,7 @@ function RulesSection() {
               </p>
             </div>
             <button
-              className="p-1 text-muted hover:text-[#e07070]"
+              className="p-1 text-muted hover:text-[#ef6f8a]"
               onClick={() => deleteMutation.mutate(rule.id)}
               title="Delete rule"
             >
@@ -966,10 +966,10 @@ function DataSection() {
 
       <SyncActivityPanel runs={syncRuns} showDetail />
 
-      <div className="border border-[#e07070]/30 rounded p-4 space-y-3">
+      <div className="border border-[#ef6f8a]/30 rounded p-4 space-y-3">
         <div className="flex items-center gap-2 mb-2">
-          <AlertTriangle size={14} className="text-[#e07070]" />
-          <h3 className="text-sm font-medium text-[#e07070]">Danger Zone</h3>
+          <AlertTriangle size={14} className="text-[#ef6f8a]" />
+          <h3 className="text-sm font-medium text-[#ef6f8a]">Danger Zone</h3>
         </div>
         <div className="flex items-center justify-between py-2 border-b border-border">
           <div>
@@ -977,7 +977,7 @@ function DataSection() {
             <p className="text-xs text-muted">Permanently delete accounts, transactions, budgets, goals, rules, snapshots, and sync history. Encrypted credentials stay on disk.</p>
           </div>
           <button
-            className="px-3 py-1.5 text-xs border border-[#e07070]/40 text-[#e07070] rounded hover:bg-[#e07070]/10"
+            className="px-3 py-1.5 text-xs border border-[#ef6f8a]/40 text-[#ef6f8a] rounded hover:bg-[#ef6f8a]/10"
             onClick={() => setShowDangerModal(true)}
           >
             Delete All Data
@@ -989,7 +989,7 @@ function DataSection() {
             <p className="text-xs text-muted">Remove all connected bank accounts.</p>
           </div>
           <button
-            className="px-3 py-1.5 text-xs border border-[#e07070]/40 text-[#e07070] rounded hover:bg-[#e07070]/10"
+            className="px-3 py-1.5 text-xs border border-[#ef6f8a]/40 text-[#ef6f8a] rounded hover:bg-[#ef6f8a]/10"
             onClick={async () => {
               try {
                 const items = await plaidApi.listItems();
@@ -1012,18 +1012,18 @@ function DataSection() {
         title="Delete All Data"
       >
         <div className="space-y-4">
-          <div className="flex items-start gap-2 p-3 bg-[#e07070]/10 border border-[#e07070]/30 rounded">
-            <AlertTriangle size={14} className="text-[#e07070] mt-0.5 flex-shrink-0" />
+          <div className="flex items-start gap-2 p-3 bg-[#ef6f8a]/10 border border-[#ef6f8a]/30 rounded">
+            <AlertTriangle size={14} className="text-[#ef6f8a] mt-0.5 flex-shrink-0" />
             <p className="text-xs text-muted">
               This permanently deletes local finance data from the database. Encrypted provider credentials are not deleted, so disconnect providers separately if needed.
             </p>
           </div>
           <div>
             <label className="block text-xs text-muted mb-1">
-              Type <span className="font-mono text-[#e07070]">delete</span> to confirm
+              Type <span className="font-mono text-[#ef6f8a]">delete</span> to confirm
             </label>
             <input
-              className="w-full bg-background border border-border rounded px-3 py-2 text-sm text-text font-mono focus:outline-none focus:ring-1 focus:ring-[#e07070]/50"
+              className="w-full bg-background border border-border rounded px-3 py-2 text-sm text-text font-mono focus:outline-none focus:ring-1 focus:ring-[#ef6f8a]/50"
               value={deleteConfirm}
               onChange={(e) => setDeleteConfirm(e.target.value)}
               placeholder="delete"
@@ -1031,7 +1031,7 @@ function DataSection() {
           </div>
           <div className="flex gap-3">
             <button
-              className="flex-1 py-2 text-sm bg-[#e07070] text-white font-medium rounded hover:opacity-90 disabled:opacity-40"
+              className="flex-1 py-2 text-sm bg-[#ef6f8a] text-white font-medium rounded hover:opacity-90 disabled:opacity-40"
               disabled={deleteConfirm !== 'delete' || deleteAllMutation.isPending}
               onClick={() => deleteAllMutation.mutate()}
             >
@@ -1121,11 +1121,11 @@ export function Settings() {
                 onClick={() => selectSection(s.key)}
                 className={`w-full text-left px-3 py-2 text-sm rounded transition-colors flex items-center gap-2.5 ${
                   active
-                    ? 'bg-[#1e1e22] text-text'
+                    ? 'bg-[#eaf7f3] text-text'
                     : 'text-muted hover:text-text'
                 }`}
               >
-                <Icon size={14} className={active ? 'text-[#4ecba3]' : 'text-muted'} />
+                <Icon size={14} className={active ? 'text-[#32bfa3]' : 'text-muted'} />
                 {s.label}
               </button>
             );

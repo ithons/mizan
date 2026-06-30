@@ -27,10 +27,10 @@ type ActiveTab = 'holdings' | 'transactions';
 const INV_ACCOUNT_TYPES = ['brokerage', 'ira_traditional', 'ira_roth', 'crypto_wallet'];
 
 const TX_TYPE_COLORS: Record<string, string> = {
-  buy: 'bg-[#4ecba3]/10 text-[#4ecba3]',
-  sell: 'bg-[#e07070]/10 text-[#e07070]',
-  dividend: 'bg-[#5b8dee]/10 text-[#5b8dee]',
-  transfer: 'bg-[#f0c040]/10 text-[#f0c040]',
+  buy: 'bg-[#32bfa3]/10 text-[#32bfa3]',
+  sell: 'bg-[#ef6f8a]/10 text-[#ef6f8a]',
+  dividend: 'bg-[#6487f0]/10 text-[#6487f0]',
+  transfer: 'bg-[#e2a53f]/10 text-[#e2a53f]',
   fee: 'bg-border text-muted',
   other: 'bg-border text-muted',
 };
@@ -49,7 +49,7 @@ function formatPct(n: number | null): string {
 
 function PnlCell({ value, pct }: { value: number | null; pct: number | null }) {
   if (value == null) return <span className="text-muted">-</span>;
-  const color = value >= 0 ? 'text-[#4ecba3]' : 'text-[#e07070]';
+  const color = value >= 0 ? 'text-[#32bfa3]' : 'text-[#ef6f8a]';
   return (
     <span className={`font-mono ${color}`}>
       {value >= 0 ? '+' : ''}{formatCurrency(value)}
@@ -100,7 +100,7 @@ function ChartTooltip({ active, payload, label }: { active?: boolean; payload?: 
   return (
     <div className="bg-surface border border-border rounded px-3 py-2 text-xs">
       <p className="text-muted">{label}</p>
-      <p className="font-mono text-[#5b8dee] font-medium">{formatCurrency(payload[0].value)}</p>
+      <p className="font-mono text-[#6487f0] font-medium">{formatCurrency(payload[0].value)}</p>
     </div>
   );
 }
@@ -281,7 +281,7 @@ export function Investments() {
               <p className="text-xs text-muted mb-1">Unrealized P&L</p>
               <p
                 className="font-mono text-2xl font-medium"
-                style={{ color: unrealized == null ? undefined : unrealized >= 0 ? '#4ecba3' : '#e07070' }}
+                style={{ color: unrealized == null ? undefined : unrealized >= 0 ? '#32bfa3' : '#ef6f8a' }}
                 title={unrealized == null ? 'Cost basis not available' : undefined}
               >
                 {unrealized == null ? '-' : `${unrealized >= 0 ? '+' : ''}${formatCurrency(unrealized)}`}
@@ -291,7 +291,7 @@ export function Investments() {
               <p className="text-xs text-muted mb-1">Total Return</p>
               <p
                 className="font-mono text-2xl font-medium"
-                style={{ color: totalReturn == null ? undefined : totalReturn >= 0 ? '#4ecba3' : '#e07070' }}
+                style={{ color: totalReturn == null ? undefined : totalReturn >= 0 ? '#32bfa3' : '#ef6f8a' }}
                 title={totalReturn == null ? 'Cost basis not available' : undefined}
               >
                 {totalReturn == null ? '-' : formatPct(totalReturn)}
@@ -311,7 +311,7 @@ export function Investments() {
             onClick={() => setSelectedAccountId(null)}
             className={`flex items-center justify-between px-3 py-2 text-xs rounded-full border transition-all ${
               selectedAccountId === null
-                ? 'bg-[#4ecba3]/10 text-[#4ecba3] border-[#4ecba3]/40'
+                ? 'bg-[#32bfa3]/10 text-[#32bfa3] border-[#32bfa3]/40'
                 : 'text-muted border-border hover:text-text'
             }`}
           >
@@ -328,7 +328,7 @@ export function Investments() {
                 onClick={() => setSelectedAccountId(acct.id === selectedAccountId ? null : acct.id)}
                 className={`flex items-center justify-between px-3 py-2 text-xs rounded-full border transition-all ${
                   selectedAccountId === acct.id
-                    ? 'bg-[#4ecba3]/10 text-[#4ecba3] border-[#4ecba3]/40'
+                    ? 'bg-[#32bfa3]/10 text-[#32bfa3] border-[#32bfa3]/40'
                     : 'text-muted border-border hover:text-text'
                 }`}
               >
@@ -352,8 +352,8 @@ export function Investments() {
               <AreaChart data={chartData} margin={{ top: 4, right: 4, left: 0, bottom: 0 }}>
                 <defs>
                   <linearGradient id="invGrad" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#5b8dee" stopOpacity={0.25} />
-                    <stop offset="95%" stopColor="#5b8dee" stopOpacity={0} />
+                    <stop offset="5%" stopColor="#6487f0" stopOpacity={0.25} />
+                    <stop offset="95%" stopColor="#6487f0" stopOpacity={0} />
                   </linearGradient>
                 </defs>
                 <XAxis dataKey="date" tick={{ fontSize: 10, fill: '#6b6b7a' }} tickLine={false} axisLine={false} />
@@ -365,7 +365,7 @@ export function Investments() {
                   width={48}
                 />
                 <Tooltip content={<ChartTooltip />} />
-                <Area type="monotone" dataKey="value" stroke="#5b8dee" strokeWidth={2} fill="url(#invGrad)" />
+                <Area type="monotone" dataKey="value" stroke="#6487f0" strokeWidth={2} fill="url(#invGrad)" />
               </AreaChart>
             </ResponsiveContainer>
           ) : (
@@ -382,7 +382,7 @@ export function Investments() {
           {allocation.map((a) => (
             <div key={a.security_type} className="flex flex-col gap-1.5 p-3 bg-surface border border-border rounded min-w-[130px]">
               <p className="text-xs text-text font-medium capitalize">{a.security_type}</p>
-              <div className="h-1 rounded bg-[#5b8dee]" style={{ width: `${Math.max(a.pct, 4)}%`, maxWidth: '100%' }} />
+              <div className="h-1 rounded bg-[#6487f0]" style={{ width: `${Math.max(a.pct, 4)}%`, maxWidth: '100%' }} />
               <div className="flex items-center justify-between gap-2 text-xs">
                 <span className="font-mono text-muted">{a.pct.toFixed(0)}%</span>
                 <span className="font-mono text-text">{formatCurrency(a.total_value)}</span>
@@ -414,7 +414,7 @@ export function Investments() {
                 return (
                   <tr
                     key={acct.id}
-                    className={`border-b border-border hover:bg-white/2 cursor-pointer ${selectedAccountId === acct.id ? 'bg-[#4ecba3]/5' : ''}`}
+                    className={`border-b border-border hover:bg-white/2 cursor-pointer ${selectedAccountId === acct.id ? 'bg-[#32bfa3]/5' : ''}`}
                     onClick={() => setSelectedAccountId(acct.id === selectedAccountId ? null : acct.id)}
                   >
                     <td className="px-3 py-2.5 text-text font-medium">{acct.account_name}</td>
@@ -425,7 +425,7 @@ export function Investments() {
                     <td className="px-3 py-2.5 text-right">
                       <PnlCell value={gl} pct={null} />
                     </td>
-                    <td className="px-3 py-2.5 text-right font-mono" style={{ color: ret == null ? undefined : ret >= 0 ? '#4ecba3' : '#e07070' }}>
+                    <td className="px-3 py-2.5 text-right font-mono" style={{ color: ret == null ? undefined : ret >= 0 ? '#32bfa3' : '#ef6f8a' }}>
                       {ret == null ? '-' : formatPct(ret)}
                     </td>
                   </tr>
@@ -453,7 +453,7 @@ export function Investments() {
                     <td className="px-3 py-2.5 text-right font-bold">
                       <PnlCell value={totalGL} pct={null} />
                     </td>
-                    <td className="px-3 py-2.5 text-right font-mono font-bold" style={{ color: totalRet == null ? undefined : totalRet >= 0 ? '#4ecba3' : '#e07070' }}>
+                    <td className="px-3 py-2.5 text-right font-mono font-bold" style={{ color: totalRet == null ? undefined : totalRet >= 0 ? '#32bfa3' : '#ef6f8a' }}>
                       {totalRet == null ? '-' : formatPct(totalRet)}
                     </td>
                   </tr>
@@ -470,7 +470,7 @@ export function Investments() {
           <button
             onClick={() => setActiveTab('holdings')}
             className={`px-4 py-2 text-sm rounded transition-colors ${
-              activeTab === 'holdings' ? 'bg-[#1e1e22] text-text' : 'text-muted hover:text-text'
+              activeTab === 'holdings' ? 'bg-[#eaf7f3] text-text' : 'text-muted hover:text-text'
             }`}
           >
             Holdings {filteredHoldings.length > 0 && `(${filteredHoldings.length})`}
@@ -478,7 +478,7 @@ export function Investments() {
           <button
             onClick={() => setActiveTab('transactions')}
             className={`px-4 py-2 text-sm rounded transition-colors ${
-              activeTab === 'transactions' ? 'bg-[#1e1e22] text-text' : 'text-muted hover:text-text'
+              activeTab === 'transactions' ? 'bg-[#eaf7f3] text-text' : 'text-muted hover:text-text'
             }`}
           >
             Transactions
@@ -530,7 +530,7 @@ export function Investments() {
                         <td className="px-3 py-2.5 text-right">
                           {isCash ? <span className="text-muted">-</span> : <PnlCell value={pnl} pct={null} />}
                         </td>
-                        <td className="px-3 py-2.5 text-right font-mono" style={{ color: pct == null ? undefined : pct >= 0 ? '#4ecba3' : '#e07070' }}>
+                        <td className="px-3 py-2.5 text-right font-mono" style={{ color: pct == null ? undefined : pct >= 0 ? '#32bfa3' : '#ef6f8a' }}>
                           {isCash ? '-' : pct == null ? '-' : formatPct(pct)}
                         </td>
                       </tr>
@@ -575,7 +575,7 @@ export function Investments() {
             {/* Transaction filters */}
             <div className="flex items-center gap-2 mb-3">
               <select
-                className="bg-background border border-border rounded px-2 py-1 text-xs text-text focus:outline-none focus:ring-1 focus:ring-[#4ecba3]/50"
+                className="bg-background border border-border rounded px-2 py-1 text-xs text-text focus:outline-none focus:ring-1 focus:ring-[#32bfa3]/50"
                 value={txTypeFilter}
                 onChange={(e) => setTxTypeFilter(e.target.value)}
               >

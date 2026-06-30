@@ -143,13 +143,13 @@ export function CashFlow() {
         <h2 className="text-sm font-medium text-text mb-4">Income vs Expenses - Trailing 12 Months</h2>
         <ResponsiveContainer width="100%" height={220}>
           <BarChart data={chartData} barCategoryGap="30%">
-            <CartesianGrid vertical={false} stroke="#2a2a2f" />
+            <CartesianGrid vertical={false} stroke="#dbe7e2" />
             <XAxis dataKey="month" tick={{ fill: '#6b6b7a', fontSize: 11, fontFamily: 'JetBrains Mono' }} axisLine={false} tickLine={false} />
             <YAxis tick={{ fill: '#6b6b7a', fontSize: 11, fontFamily: 'JetBrains Mono' }} axisLine={false} tickLine={false} tickFormatter={(v) => `$${(v / 1000).toFixed(0)}k`} />
             <Tooltip content={<CustomTooltip />} />
             <Legend wrapperStyle={{ fontSize: 11, color: '#6b6b7a' }} />
-            <Bar dataKey="income" name="Income" fill="#4ecba3" radius={[2, 2, 0, 0]} />
-            <Bar dataKey="expenses" name="Expenses" fill="#e07070" radius={[2, 2, 0, 0]} />
+            <Bar dataKey="income" name="Income" fill="#32bfa3" radius={[2, 2, 0, 0]} />
+            <Bar dataKey="expenses" name="Expenses" fill="#ef6f8a" radius={[2, 2, 0, 0]} />
           </BarChart>
         </ResponsiveContainer>
       </div>
@@ -159,7 +159,7 @@ export function CashFlow() {
         <h2 className="text-sm font-medium text-text mb-4">Net Cash Flow - Trailing 12 Months</h2>
         <ResponsiveContainer width="100%" height={180}>
           <LineChart data={chartData}>
-            <CartesianGrid vertical={false} stroke="#2a2a2f" />
+            <CartesianGrid vertical={false} stroke="#dbe7e2" />
             <XAxis dataKey="month" tick={{ fill: '#6b6b7a', fontSize: 11, fontFamily: 'JetBrains Mono' }} axisLine={false} tickLine={false} />
             <YAxis tick={{ fill: '#6b6b7a', fontSize: 11, fontFamily: 'JetBrains Mono' }} axisLine={false} tickLine={false} tickFormatter={(v) => `$${(v / 1000).toFixed(0)}k`} />
             <Tooltip content={<CustomTooltip />} />
@@ -167,10 +167,10 @@ export function CashFlow() {
               type="monotone"
               dataKey="net"
               name="Net"
-              stroke="#4ecba3"
+              stroke="#32bfa3"
               strokeWidth={2}
               dot={false}
-              activeDot={{ r: 4, fill: '#4ecba3' }}
+              activeDot={{ r: 4, fill: '#32bfa3' }}
             />
           </LineChart>
         </ResponsiveContainer>
@@ -180,24 +180,24 @@ export function CashFlow() {
       {selectedMonthData && (
         <div className="grid grid-cols-3 gap-4">
           <div
-            className="bg-surface border border-border rounded p-4 cursor-pointer hover:bg-[#4ecba3]/5 transition-colors"
+            className="bg-surface border border-border rounded p-4 cursor-pointer hover:bg-[#32bfa3]/5 transition-colors"
             onClick={() => navigate('/transactions')}
           >
             <p className="text-xs text-muted mb-1">Income</p>
-            <p className="font-mono text-xl text-[#4ecba3]">{formatCurrency(selectedMonthData.income)}</p>
+            <p className="font-mono text-xl text-[#32bfa3]">{formatCurrency(selectedMonthData.income)}</p>
           </div>
           <div
-            className="bg-surface border border-border rounded p-4 cursor-pointer hover:bg-[#4ecba3]/5 transition-colors"
+            className="bg-surface border border-border rounded p-4 cursor-pointer hover:bg-[#32bfa3]/5 transition-colors"
             onClick={() => navigate('/transactions')}
           >
             <p className="text-xs text-muted mb-1">Expenses</p>
-            <p className="font-mono text-xl text-[#e07070]">{formatCurrency(Math.abs(selectedMonthData.expenses))}</p>
+            <p className="font-mono text-xl text-[#ef6f8a]">{formatCurrency(Math.abs(selectedMonthData.expenses))}</p>
           </div>
           <div className="bg-surface border border-border rounded p-4">
             <p className="text-xs text-muted mb-1">Net</p>
             <p
               className="font-mono text-xl"
-              style={{ color: selectedMonthData.net >= 0 ? '#4ecba3' : '#e07070' }}
+              style={{ color: selectedMonthData.net >= 0 ? '#32bfa3' : '#ef6f8a' }}
             >
               {formatCurrency(selectedMonthData.net)}
             </p>
@@ -260,7 +260,7 @@ export function CashFlow() {
                 <div className="flex items-center justify-between px-4 py-3 border-t border-border">
                   <span className="text-xs text-muted">Showing 50 of {txs.length}</span>
                   <button
-                    className="text-xs text-[#4ecba3] hover:opacity-80 flex items-center gap-1"
+                    className="text-xs text-[#32bfa3] hover:opacity-80 flex items-center gap-1"
                     onClick={() => navigate('/transactions')}
                   >
                     View all <ArrowRight size={11} />

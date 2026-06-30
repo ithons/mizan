@@ -14,10 +14,10 @@ import { syncApi } from '../lib/api';
 import { formatRelativeTime } from '../lib/formatters';
 
 const statusTone = {
-  running: { color: '#5b8dee', icon: RefreshCw, label: 'Running' },
-  succeeded: { color: '#4ecba3', icon: CheckCircle2, label: 'Succeeded' },
-  partial: { color: '#d4a44c', icon: AlertTriangle, label: 'Partial' },
-  failed: { color: '#e07070', icon: CircleAlert, label: 'Failed' },
+  running: { color: '#6487f0', icon: RefreshCw, label: 'Running' },
+  succeeded: { color: '#32bfa3', icon: CheckCircle2, label: 'Succeeded' },
+  partial: { color: '#e2a53f', icon: AlertTriangle, label: 'Partial' },
+  failed: { color: '#ef6f8a', icon: CircleAlert, label: 'Failed' },
 } satisfies Record<SyncRunStatus, { color: string; icon: LucideIcon; label: string }>;
 
 const scopeLabel: Record<SyncRun['scope'], string> = {
@@ -100,7 +100,7 @@ export function SyncActivityPanel({
     <div className="bg-surface border border-border rounded">
       <div className="px-4 py-3 border-b border-border flex items-center justify-between">
         <div className="flex items-center gap-2">
-          <Clock3 size={14} className="text-[#5b8dee]" />
+          <Clock3 size={14} className="text-[#6487f0]" />
           <h2 className="text-sm font-medium text-text">{title}</h2>
         </div>
         {selectedRun && (
@@ -138,15 +138,15 @@ export function SyncActivityPanel({
                     </div>
                     <div>
                       <p className="text-muted mb-0.5">Added</p>
-                      <p className="font-mono text-[#4ecba3]">{detail.transactions_added}</p>
+                      <p className="font-mono text-[#32bfa3]">{detail.transactions_added}</p>
                     </div>
                     <div>
                       <p className="text-muted mb-0.5">Updated</p>
-                      <p className="font-mono text-[#5b8dee]">{detail.transactions_modified}</p>
+                      <p className="font-mono text-[#6487f0]">{detail.transactions_modified}</p>
                     </div>
                     <div>
                       <p className="text-muted mb-0.5">Removed</p>
-                      <p className="font-mono text-[#e07070]">{detail.transactions_removed}</p>
+                      <p className="font-mono text-[#ef6f8a]">{detail.transactions_removed}</p>
                     </div>
                   </div>
 
@@ -154,18 +154,18 @@ export function SyncActivityPanel({
                     <div className="grid grid-cols-2 gap-3 text-xs">
                       <div className="bg-background border border-border rounded p-3">
                         <p className="text-muted mb-1">Duplicate groups</p>
-                        <p className="font-mono text-[#d4a44c]">{detail.duplicate_candidates}</p>
+                        <p className="font-mono text-[#e2a53f]">{detail.duplicate_candidates}</p>
                       </div>
                       <div className="bg-background border border-border rounded p-3">
                         <p className="text-muted mb-1">Transfer pairs</p>
-                        <p className="font-mono text-[#5b8dee]">{detail.transfer_candidates}</p>
+                        <p className="font-mono text-[#6487f0]">{detail.transfer_candidates}</p>
                       </div>
                     </div>
                   )}
 
                   {detail.error_message && (
-                    <div className="bg-[#e07070]/10 border border-[#e07070]/30 rounded p-3">
-                      <p className="text-xs text-[#e07070] font-medium mb-1">Issue</p>
+                    <div className="bg-[#ef6f8a]/10 border border-[#ef6f8a]/30 rounded p-3">
+                      <p className="text-xs text-[#ef6f8a] font-medium mb-1">Issue</p>
                       <p className="text-xs text-muted leading-relaxed">{detail.error_message}</p>
                       {detail.recovery_action && (
                         <p className="text-xs text-muted leading-relaxed mt-1">{detail.recovery_action}</p>
@@ -177,12 +177,12 @@ export function SyncActivityPanel({
                     <p className="text-xs font-medium text-text">Providers</p>
                     {detail.items.map((item) => {
                       const tone = item.status === 'succeeded'
-                        ? '#4ecba3'
+                        ? '#32bfa3'
                         : item.status === 'reauth_required'
-                          ? '#d4a44c'
+                          ? '#e2a53f'
                           : item.status === 'failed'
-                            ? '#e07070'
-                            : '#5b8dee';
+                            ? '#ef6f8a'
+                            : '#6487f0';
                       return (
                         <div key={item.id} className="bg-background border border-border rounded p-3">
                           <div className="flex items-center justify-between gap-3">
@@ -217,7 +217,7 @@ export function SyncActivityPanel({
                       <p className="text-xs font-medium text-text">Detected changes</p>
                       {detail.changes.map((change) => (
                         <div key={change.id} className="text-xs text-muted flex items-start gap-2">
-                          <span className="w-1.5 h-1.5 rounded-full bg-[#5b8dee] mt-1.5 flex-shrink-0" />
+                          <span className="w-1.5 h-1.5 rounded-full bg-[#6487f0] mt-1.5 flex-shrink-0" />
                           <span>{change.description}</span>
                         </div>
                       ))}

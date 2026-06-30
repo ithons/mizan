@@ -36,7 +36,7 @@ function BudgetRow({
   const expectedRecurring = budget.expected_recurring ?? 0;
   const projectedPct = budget.projected_percent ?? (availableAmount > 0 ? (projectedSpend / availableAmount) * 100 : 0);
   const actualPct = availableAmount > 0 ? (spent / availableAmount) * 100 : 0;
-  const barColor = projectedPct >= 100 ? '#e07070' : projectedPct >= 80 ? '#d4a44c' : '#4ecba3';
+  const barColor = projectedPct >= 100 ? '#ef6f8a' : projectedPct >= 80 ? '#e2a53f' : '#32bfa3';
   const remaining = availableAmount - spent;
   const projectedRemaining = budget.projected_remaining ?? remaining;
 
@@ -81,7 +81,7 @@ function BudgetRow({
                 }}
               />
               <button onClick={commitEdit}>
-                <Check size={12} className="text-[#4ecba3]" />
+                <Check size={12} className="text-[#32bfa3]" />
               </button>
               <button onClick={() => setEditing(false)}>
                 <X size={12} className="text-muted" />
@@ -96,7 +96,7 @@ function BudgetRow({
             </button>
           )}
           <button
-            className="text-muted hover:text-[#e07070] transition-colors"
+            className="text-muted hover:text-[#ef6f8a] transition-colors"
             onClick={() => onDelete(budget.id)}
           >
             <Trash2 size={12} />
@@ -120,16 +120,16 @@ function BudgetRow({
       <div className="flex justify-between mt-1 gap-3">
         <span className="text-xs text-muted">
           {remaining >= 0 ? (
-            <span className="text-[#4ecba3]">{formatCurrency(remaining)} remaining</span>
+            <span className="text-[#32bfa3]">{formatCurrency(remaining)} remaining</span>
           ) : (
-            <span className="text-[#e07070]">{formatCurrency(Math.abs(remaining))} over budget</span>
+            <span className="text-[#ef6f8a]">{formatCurrency(Math.abs(remaining))} over budget</span>
           )}
         </span>
         <span className="text-xs text-muted text-right">
           {expectedRecurring > 0 ? (
             <>
               {formatCurrency(expectedRecurring)} expected,{' '}
-              <span style={{ color: projectedRemaining >= 0 ? '#4ecba3' : '#e07070' }}>
+              <span style={{ color: projectedRemaining >= 0 ? '#32bfa3' : '#ef6f8a' }}>
                 {projectedRemaining >= 0
                   ? `${formatCurrency(projectedRemaining)} projected left`
                   : `${formatCurrency(Math.abs(projectedRemaining))} projected over`}
@@ -199,7 +199,7 @@ function AddBudgetModal({
         <div>
           <label className="block text-xs text-muted mb-1">Category</label>
           <select
-            className="w-full bg-background border border-border rounded px-3 py-2 text-sm text-text focus:outline-none focus:ring-1 focus:ring-[#4ecba3]/50"
+            className="w-full bg-background border border-border rounded px-3 py-2 text-sm text-text focus:outline-none focus:ring-1 focus:ring-[#32bfa3]/50"
             value={form.category_id}
             onChange={(e) => setForm({ ...form, category_id: e.target.value })}
           >
@@ -212,7 +212,7 @@ function AddBudgetModal({
           <label className="block text-xs text-muted mb-1">Budget Amount</label>
           <input
             type="number"
-            className="w-full bg-background border border-border rounded px-3 py-2 text-sm text-text font-mono focus:outline-none focus:ring-1 focus:ring-[#4ecba3]/50"
+            className="w-full bg-background border border-border rounded px-3 py-2 text-sm text-text font-mono focus:outline-none focus:ring-1 focus:ring-[#32bfa3]/50"
             value={form.amount}
             onChange={(e) => setForm({ ...form, amount: e.target.value })}
             placeholder="0.00"
@@ -222,7 +222,7 @@ function AddBudgetModal({
           <input
             type="checkbox"
             id="rollover"
-            className="accent-[#4ecba3]"
+            className="accent-[#32bfa3]"
             checked={form.rollover}
             onChange={(e) => setForm({ ...form, rollover: e.target.checked })}
           />
@@ -230,7 +230,7 @@ function AddBudgetModal({
         </div>
         <div className="flex gap-3 pt-1">
           <button
-            className="flex-1 py-2 text-sm bg-[#4ecba3] text-[#0f0f11] font-medium rounded hover:opacity-90"
+            className="flex-1 py-2 text-sm bg-[#32bfa3] text-[#273238] font-medium rounded hover:opacity-90"
             onClick={() => mutation.mutate()}
             disabled={mutation.isPending}
           >
@@ -297,7 +297,7 @@ function RecurringTab() {
       {/* Annual total */}
       <div className="bg-surface border border-border rounded p-4 flex items-center justify-between">
         <span className="text-sm text-muted">Total Confirmed Annual Spend</span>
-        <span className="font-mono text-xl text-[#e07070]">{formatCurrency(annualTotal)}</span>
+        <span className="font-mono text-xl text-[#ef6f8a]">{formatCurrency(annualTotal)}</span>
       </div>
 
       {/* Recurring table */}
@@ -337,13 +337,13 @@ function RecurringTab() {
                   <td className="px-4 py-2 text-muted">{FREQUENCY_LABELS[r.frequency]}</td>
                   <td className="px-4 py-2 font-mono text-text">{formatCurrency(r.average_amount)}</td>
                   <td className="px-4 py-2 font-mono text-muted">{formatDate(r.next_expected)}</td>
-                  <td className="px-4 py-2 font-mono text-[#e07070]">{formatCurrency(annual)}</td>
+                  <td className="px-4 py-2 font-mono text-[#ef6f8a]">{formatCurrency(annual)}</td>
                   <td className="px-4 py-2">
                     <span
                       className="text-xs px-2 py-0.5 rounded-full"
                       style={{
                         backgroundColor: status === 'confirmed' ? 'rgba(78,203,163,0.15)' : status === 'dismissed' ? 'rgba(107,107,122,0.15)' : 'rgba(212,164,76,0.15)',
-                        color: status === 'confirmed' ? '#4ecba3' : status === 'dismissed' ? '#6b6b7a' : '#d4a44c',
+                        color: status === 'confirmed' ? '#32bfa3' : status === 'dismissed' ? '#6b6b7a' : '#e2a53f',
                       }}
                     >
                       {status}
@@ -353,7 +353,7 @@ function RecurringTab() {
                     <div className="flex gap-1">
                       {!r.is_confirmed && r.is_active && (
                         <button
-                          className="text-xs text-[#4ecba3] hover:opacity-80"
+                          className="text-xs text-[#32bfa3] hover:opacity-80"
                           onClick={() => confirmMutation.mutate(r.id)}
                         >
                           Confirm
@@ -361,7 +361,7 @@ function RecurringTab() {
                       )}
                       {r.is_active && (
                         <button
-                          className="text-xs text-muted hover:text-[#e07070]"
+                          className="text-xs text-muted hover:text-[#ef6f8a]"
                           onClick={() => dismissMutation.mutate(r.id)}
                         >
                           Dismiss
@@ -391,7 +391,7 @@ function RecurringTab() {
                 <p className="text-sm text-text">{r.merchant_name}</p>
                 <p className="text-xs text-muted font-mono">{formatDate(r.next_expected)}</p>
               </div>
-              <span className="font-mono text-sm text-[#e07070]">{formatCurrency(r.average_amount)}</span>
+              <span className="font-mono text-sm text-[#ef6f8a]">{formatCurrency(r.average_amount)}</span>
             </div>
           ))}
           {upcoming.length === 0 && (
@@ -457,13 +457,13 @@ export function Budget() {
         <h1 className="text-xl font-semibold text-text">Budget</h1>
         <div className="flex gap-1 bg-surface border border-border rounded p-0.5">
           <button
-            className={`px-3 py-1.5 text-xs rounded ${tab === 'monthly' ? 'bg-[#4ecba3]/10 text-[#4ecba3]' : 'text-muted hover:text-text'}`}
+            className={`px-3 py-1.5 text-xs rounded ${tab === 'monthly' ? 'bg-[#32bfa3]/10 text-[#32bfa3]' : 'text-muted hover:text-text'}`}
             onClick={() => setTab('monthly')}
           >
             Monthly
           </button>
           <button
-            className={`px-3 py-1.5 text-xs rounded ${tab === 'recurring' ? 'bg-[#4ecba3]/10 text-[#4ecba3]' : 'text-muted hover:text-text'}`}
+            className={`px-3 py-1.5 text-xs rounded ${tab === 'recurring' ? 'bg-[#32bfa3]/10 text-[#32bfa3]' : 'text-muted hover:text-text'}`}
             onClick={() => setTab('recurring')}
           >
             Recurring
@@ -500,13 +500,13 @@ export function Budget() {
             </div>
             <div className="bg-surface border border-border rounded p-4">
               <p className="text-xs text-muted mb-1">Spent</p>
-              <p className="font-mono text-lg text-[#e07070]">{formatCurrency(spent)}</p>
+              <p className="font-mono text-lg text-[#ef6f8a]">{formatCurrency(spent)}</p>
             </div>
             <div className="bg-surface border border-border rounded p-4">
               <p className="text-xs text-muted mb-1">Remaining</p>
               <p
                 className="font-mono text-lg"
-                style={{ color: remaining >= 0 ? '#4ecba3' : '#e07070' }}
+                style={{ color: remaining >= 0 ? '#32bfa3' : '#ef6f8a' }}
               >
                 {formatCurrency(remaining)}
               </p>
@@ -515,7 +515,7 @@ export function Budget() {
               <p className="text-xs text-muted mb-1">Projected</p>
               <p
                 className="font-mono text-lg"
-                style={{ color: projectedRemaining >= 0 ? '#4ecba3' : '#e07070' }}
+                style={{ color: projectedRemaining >= 0 ? '#32bfa3' : '#ef6f8a' }}
               >
                 {formatCurrency(projectedSpend)}
               </p>
@@ -532,7 +532,7 @@ export function Budget() {
             <div className="flex items-center justify-between mb-2">
               <h2 className="text-sm font-medium text-text">Budgets</h2>
               <button
-                className="flex items-center gap-1 text-xs text-[#4ecba3] hover:opacity-80"
+                className="flex items-center gap-1 text-xs text-[#32bfa3] hover:opacity-80"
                 onClick={() => setShowAddModal(true)}
               >
                 <Plus size={13} /> Add Budget

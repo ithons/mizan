@@ -29,11 +29,11 @@ function errorMessage(err: unknown, fallback: string) {
 function ViewFallback() {
   return (
     <div className="p-6 space-y-4">
-      <div className="h-8 w-48 rounded bg-white/5 animate-pulse" />
+      <div className="h-8 w-48 rounded bg-border/60 animate-pulse" />
       <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-        <div className="h-28 rounded border border-border bg-white/[0.02] animate-pulse" />
-        <div className="h-28 rounded border border-border bg-white/[0.02] animate-pulse" />
-        <div className="h-28 rounded border border-border bg-white/[0.02] animate-pulse" />
+        <div className="h-28 rounded border border-border bg-surface animate-pulse" />
+        <div className="h-28 rounded border border-border bg-surface animate-pulse" />
+        <div className="h-28 rounded border border-border bg-surface animate-pulse" />
       </div>
     </div>
   );
