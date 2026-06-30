@@ -1,4 +1,4 @@
-import React from 'react';
+import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import {
@@ -11,14 +11,23 @@ import {
 import {
   AlertTriangle,
   ArrowRight,
+  ChevronDown,
+  ChevronUp,
   CheckCircle2,
   CircleAlert,
   CreditCard,
+  Eye,
+  EyeOff,
   FileInput,
+  GripVertical,
   Info,
   Lightbulb,
+  Pin,
+  PinOff,
   Plus,
   RefreshCw,
+  RotateCcw,
+  Settings2,
   ShieldCheck,
   Sparkles,
   Wallet,
@@ -33,6 +42,20 @@ import { accountsApi, networthApi, reportsApi, recurringApi, budgetsApi, transac
 import { getDashboardMode, type DashboardMode } from '../lib/dashboardState';
 import { getOnboardingPlan, type OnboardingPlan } from '../lib/onboarding';
 import { advisorRouteState } from '../lib/advisorRouteState';
+import {
+  DASHBOARD_CARD_DEFINITIONS,
+  DASHBOARD_LAYOUT_STORAGE_KEY,
+  DEFAULT_DASHBOARD_LAYOUT,
+  moveDashboardCard,
+  normalizeDashboardLayout,
+  parseDashboardLayout,
+  serializeDashboardLayout,
+  setDashboardCardHidden,
+  setDashboardCardPinned,
+  visibleDashboardCardIds,
+  type DashboardCardId,
+  type DashboardLayoutItem,
+} from '../lib/dashboardLayout';
 import {
   buildDashboardCardAdvisorPrompt,
   type DashboardCardAdvisorPromptContext,
@@ -423,6 +446,105 @@ function SyncHealthPanel({
   );
 }
 
+function dashboardCardDefinition(cardId: DashboardCardId) {
+  const definition = DASHBOARD_CARD_DEFINITIONS.find((card) => card.id === cardId);
+  if (!definition) {
+    throw new Error(`Unknown dashboard card: ${cardId}`);
+  }
+  return definition;
+}
+
+function DashboardLayoutPanel({
+  layout,
+  onMove,
+  onSetHidden,
+  onSetPinned,
+  onReset,
+}: {
+  layout: DashboardLayoutItem[];
+  onMove: (cardId: DashboardCardId, direction: 'up' | 'down') => void;
+  onSetHidden: (cardId: DashboardCardId, hidden: boolean) => void;
+  onSetPinned: (cardId: DashboardCardId, pinned: boolean) => void;
+  onReset: () => void;
+}) {
+  return (
+    <div className="bg-surface shadow-sm border border-border rounded p-3">
+      <div className="flex items-center justify-between gap-3 mb-3">
+        <div>
+          <h2 className="text-sm font-medium text-text">Dashboard cards</h2>
+          <p className="text-xs text-muted font-mono">{layout.filter((item) => !item.hidden).length} visible</p>
+        </div>
+        <button
+          type="button"
+          onClick={onReset}
+          className="flex items-center gap-1.5 rounded border border-border px-2.5 py-1.5 text-xs text-muted hover:text-green hover:bg-green/5"
+        >
+          <RotateCcw size={13} />
+          Reset
+        </button>
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 2xl:grid-cols-3 gap-2">
+        {layout.map((item, index) => {
+          const definition = dashboardCardDefinition(item.id);
+          return (
+            <div
+              key={item.id}
+              className={`flex items-center gap-2 rounded border border-border bg-background/40 px-2 py-2 ${item.hidden ? 'opacity-70' : ''}`}
+            >
+              <GripVertical size={14} className="text-muted flex-shrink-0" />
+              <div className="flex flex-col gap-1">
+                <button
+                  type="button"
+                  disabled={index === 0}
+                  onClick={() => onMove(item.id, 'up')}
+                  className="rounded p-1 text-muted hover:text-green hover:bg-green/5 disabled:opacity-30 disabled:hover:text-muted disabled:hover:bg-transparent"
+                  title={`Move ${definition.label} up`}
+                  aria-label={`Move ${definition.label} up`}
+                >
+                  <ChevronUp size={13} />
+                </button>
+                <button
+                  type="button"
+                  disabled={index === layout.length - 1}
+                  onClick={() => onMove(item.id, 'down')}
+                  className="rounded p-1 text-muted hover:text-green hover:bg-green/5 disabled:opacity-30 disabled:hover:text-muted disabled:hover:bg-transparent"
+                  title={`Move ${definition.label} down`}
+                  aria-label={`Move ${definition.label} down`}
+                >
+                  <ChevronDown size={13} />
+                </button>
+              </div>
+              <div className="min-w-0 flex-1">
+                <p className="text-sm font-medium text-text truncate">{definition.label}</p>
+                <p className="text-xs text-muted truncate">{definition.detail}</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => onSetPinned(item.id, !item.pinned)}
+                className={`rounded p-1.5 transition-colors ${item.pinned ? 'text-green bg-green/10' : 'text-muted hover:text-green hover:bg-green/5'}`}
+                title={item.pinned ? `Unpin ${definition.label}` : `Pin ${definition.label}`}
+                aria-label={item.pinned ? `Unpin ${definition.label}` : `Pin ${definition.label}`}
+              >
+                {item.pinned ? <PinOff size={14} /> : <Pin size={14} />}
+              </button>
+              <button
+                type="button"
+                onClick={() => onSetHidden(item.id, !item.hidden)}
+                className={`rounded p-1.5 transition-colors ${item.hidden ? 'text-rose bg-rose/10' : 'text-muted hover:text-green hover:bg-green/5'}`}
+                title={item.hidden ? `Show ${definition.label}` : `Hide ${definition.label}`}
+                aria-label={item.hidden ? `Show ${definition.label}` : `Hide ${definition.label}`}
+              >
+                {item.hidden ? <EyeOff size={14} /> : <Eye size={14} />}
+              </button>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 function DashboardFocusPanel({
   mode,
   onboardingPlan,
@@ -579,6 +701,16 @@ export function Dashboard() {
   const currentMonth = format(now, 'yyyy-MM');
   const startDate = format(startOfMonth(now), 'yyyy-MM-dd');
   const endDate = format(endOfMonth(now), 'yyyy-MM-dd');
+  const [isCustomizingDashboard, setIsCustomizingDashboard] = useState(false);
+  const [dashboardLayout, setDashboardLayout] = useState<DashboardLayoutItem[]>(() => {
+    if (typeof window === 'undefined') return DEFAULT_DASHBOARD_LAYOUT;
+    try {
+      return parseDashboardLayout(window.localStorage.getItem(DASHBOARD_LAYOUT_STORAGE_KEY));
+    } catch (error) {
+      console.warn('Unable to load dashboard layout', error);
+      return DEFAULT_DASHBOARD_LAYOUT;
+    }
+  });
 
   const { data: networthHistory, isLoading: nwLoading } = useQuery({
     queryKey: ['networth', 'history'],
@@ -741,6 +873,35 @@ export function Dashboard() {
       state: advisorRouteState(buildDashboardCardAdvisorPrompt(context)),
     });
   };
+  const persistDashboardLayout = (layout: DashboardLayoutItem[]) => {
+    const normalized = normalizeDashboardLayout(layout);
+    setDashboardLayout(normalized);
+    if (typeof window !== 'undefined') {
+      try {
+        window.localStorage.setItem(DASHBOARD_LAYOUT_STORAGE_KEY, serializeDashboardLayout(normalized));
+      } catch (error) {
+        console.warn('Unable to save dashboard layout', error);
+      }
+    }
+  };
+  const moveDashboardSection = (cardId: DashboardCardId, direction: 'up' | 'down') => {
+    persistDashboardLayout(moveDashboardCard(dashboardLayout, cardId, direction));
+  };
+  const setDashboardSectionHidden = (cardId: DashboardCardId, hidden: boolean) => {
+    persistDashboardLayout(setDashboardCardHidden(dashboardLayout, cardId, hidden));
+  };
+  const setDashboardSectionPinned = (cardId: DashboardCardId, pinned: boolean) => {
+    persistDashboardLayout(setDashboardCardPinned(dashboardLayout, cardId, pinned));
+  };
+  const resetDashboardLayout = () => {
+    persistDashboardLayout(DEFAULT_DASHBOARD_LAYOUT);
+  };
+  const visibleDashboardCards = visibleDashboardCardIds(dashboardLayout);
+  const visibleDashboardCardSet = new Set<DashboardCardId>(visibleDashboardCards);
+  const dashboardCardOrder = (cardId: DashboardCardId) => {
+    const index = visibleDashboardCards.indexOf(cardId);
+    return index < 0 ? 0 : index;
+  };
 
   if (dashboardMode === 'first_run') {
     return (
@@ -764,10 +925,35 @@ export function Dashboard() {
 
   return (
     <div className="p-6 space-y-6">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <h1 className="text-xl font-semibold text-text">Dashboard</h1>
-        <span className="text-sm text-muted font-mono">{formatMonth(currentMonth)}</span>
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-sm text-muted font-mono">{formatMonth(currentMonth)}</span>
+          <button
+            type="button"
+            onClick={() => setIsCustomizingDashboard((current) => !current)}
+            className={`flex items-center gap-1.5 rounded border px-2.5 py-1.5 text-xs transition-colors ${
+              isCustomizingDashboard
+                ? 'border-green/35 bg-green/10 text-green'
+                : 'border-border text-muted hover:text-green hover:bg-green/5'
+            }`}
+            aria-expanded={isCustomizingDashboard}
+          >
+            <Settings2 size={13} />
+            Customize
+          </button>
+        </div>
       </div>
+
+      {isCustomizingDashboard && (
+        <DashboardLayoutPanel
+          layout={dashboardLayout}
+          onMove={moveDashboardSection}
+          onSetHidden={setDashboardSectionHidden}
+          onSetPinned={setDashboardSectionPinned}
+          onReset={resetDashboardLayout}
+        />
+      )}
 
       <DashboardFocusPanel
         mode={dashboardMode}
@@ -778,390 +964,416 @@ export function Dashboard() {
         onNavigate={navigate}
       />
 
-      {/* Row 1: Stat cards */}
-      <div className="grid grid-cols-4 gap-4">
-        <StatCard
-          title="Net Worth"
-          value={formatCurrency(latestNW?.net_worth ?? 0)}
-          delta={nwDelta}
-          deltaLabel="vs last month"
-          positive={nwDelta !== undefined ? nwDelta >= 0 : undefined}
-          onClick={() => navigate('/reports')}
-          onAsk={() => askAdvisorAboutDashboardCard({
-            card: 'net_worth',
-            title: 'Net Worth',
-            period: currentMonth,
-            value: latestNW?.net_worth ?? 0,
-            delta: nwDelta ?? null,
-            deltaLabel: 'vs last month',
-          })}
-        />
-        <StatCard
-          title="Monthly Spend"
-          value={formatCurrency(monthlySpend)}
-          delta={spendDelta}
-          deltaLabel="vs last month"
-          positive={spendDelta !== undefined ? spendDelta <= 0 : undefined}
-          onClick={() => navigate('/transactions')}
-          onAsk={() => askAdvisorAboutDashboardCard({
-            card: 'monthly_spend',
-            title: 'Monthly Spend',
-            period: currentMonth,
-            value: monthlySpend,
-            delta: spendDelta ?? null,
-            deltaLabel: 'vs last month',
-            extraContext: 'Transfers, investments, crypto, and pending transactions are excluded from reportable spending.',
-          })}
-        />
-        <StatCard
-          title="Monthly Income"
-          value={formatCurrency(monthlyIncome)}
-          delta={incomeDelta}
-          deltaLabel="vs last month"
-          positive={incomeDelta !== undefined ? incomeDelta >= 0 : undefined}
-          onClick={() => navigate('/transactions')}
-          onAsk={() => askAdvisorAboutDashboardCard({
-            card: 'monthly_income',
-            title: 'Monthly Income',
-            period: currentMonth,
-            value: monthlyIncome,
-            delta: incomeDelta ?? null,
-            deltaLabel: 'vs last month',
-            extraContext: 'Only reportable income is included. Transfers and investment flows are excluded.',
-          })}
-        />
-        <div
-          className="bg-surface shadow-sm border border-border rounded p-5 cursor-pointer hover:bg-green/5 transition-colors"
-          onClick={() => navigate('/reports')}
-        >
-          <div className="flex items-start justify-between gap-2 mb-1">
-            <p className="text-xs text-muted">Top Category</p>
-            <button
-              type="button"
-              className="text-[11px] text-muted hover:text-green transition-colors flex items-center gap-1"
-              title="Why did this top category change?"
-              aria-label="Why did this top category change?"
-              onClick={(event) => {
-                event.stopPropagation();
-                askAdvisorAboutDashboardCard({
-                  card: 'top_category',
-                  title: 'Top Category',
-                  period: currentMonth,
-                  value: topCategory?.amount ?? 0,
-                  extraContext: topCategory
-                    ? `Top spending category is ${topCategory.category_name}.`
-                    : 'No categorized spending is available for this period.',
-                });
-              }}
-            >
-              <Sparkles size={12} />
-              Why changed?
-            </button>
-          </div>
-          {topCategory ? (
-            <>
-              <p className="text-sm font-medium text-text mb-1">{topCategory.category_name}</p>
-              <p className="font-mono text-2xl font-medium text-rose">{formatCurrency(topCategory.amount)}</p>
-            </>
-          ) : (
-            <p className="text-sm text-muted">No data</p>
-          )}
-        </div>
-      </div>
-
-      <div className="grid grid-cols-1 xl:grid-cols-4 gap-4">
-        <div className="xl:col-span-2">
-        <SignalsPanel insights={insights} onNavigate={navigate} onAskAdvisor={askAdvisor} />
-        </div>
-        <DataQualityPanel quality={dataQuality} onNavigate={navigate} />
-        <SyncHealthPanel health={syncHealth} onNavigate={navigate} />
-      </div>
-
-      <SyncActivityPanel runs={syncRuns} />
-
-      {/* Row 2: Asset Breakdown */}
-      <div className="bg-surface shadow-sm border border-border rounded p-4">
-        <h2 className="text-sm font-medium text-text mb-4">Asset Breakdown</h2>
-        {assetDonutData.length > 0 ? (
-          <div className="flex items-center gap-8">
-            <div className="relative flex-shrink-0">
-              <ResponsiveContainer width={160} height={160}>
-                <PieChart>
-                  <Pie
-                    data={assetDonutData}
-                    cx="50%"
-                    cy="50%"
-                    innerRadius={48}
-                    outerRadius={72}
-                    dataKey="value"
-                    paddingAngle={2}
-                  >
-                    {assetDonutData.map((_entry, index) => (
-                      <Cell key={index} fill={ASSET_COLORS[index % ASSET_COLORS.length]} />
-                    ))}
-                  </Pie>
-                  <Tooltip content={<CustomTooltip />} />
-                </PieChart>
-              </ResponsiveContainer>
-              <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
-                <p className="text-xs text-muted">Net Worth</p>
-                <p className="font-mono text-sm font-medium text-text">{formatCurrency(latestNW?.net_worth ?? 0)}</p>
-              </div>
-            </div>
-            <div className="flex flex-wrap gap-x-6 gap-y-2">
-              {assetDonutData.map((entry, i) => (
-                <div key={i} className="flex items-center gap-2">
-                  <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: ASSET_COLORS[i % ASSET_COLORS.length] }} />
-                  <div>
-                    <p className="text-xs text-muted">{entry.name}</p>
-                    <p className="font-mono text-sm text-text">{formatCurrency(entry.value)}</p>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        ) : (
-          <div className="h-24 flex items-center justify-center text-muted text-sm">
-            No asset data available
-          </div>
-        )}
-      </div>
-
-      {/* Row 3: Donut + Upcoming bills */}
-      <div className="grid grid-cols-5 gap-4">
-        {/* Spending Donut */}
-        <div className="col-span-3 bg-surface shadow-sm border border-border rounded p-4">
-          <h2 className="text-sm font-medium text-text mb-4">Spending by Category</h2>
-          {donutData.length > 0 ? (
-            <>
-              <ResponsiveContainer width="100%" height={200}>
-                <PieChart>
-                  <Pie
-                    data={donutData}
-                    cx="50%"
-                    cy="50%"
-                    innerRadius={55}
-                    outerRadius={85}
-                    dataKey="value"
-                    paddingAngle={2}
-                  >
-                    {donutData.map((entry, index) => (
-                      <Cell key={index} fill={entry.color} />
-                    ))}
-                  </Pie>
-                  <Tooltip content={<CustomTooltip />} />
-                </PieChart>
-              </ResponsiveContainer>
-              {/* Custom legend */}
-              <div className="flex flex-wrap gap-x-4 gap-y-1.5 mt-3">
-                {donutData.map((entry, i) => (
-                  <div key={i} className="flex items-center gap-1.5 text-xs text-muted">
-                    <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: entry.color }} />
-                    <span className="text-text">{entry.name}</span>
-                    <span className="font-mono">{formatCurrency(entry.value)}</span>
-                  </div>
-                ))}
-              </div>
-            </>
-          ) : (
-            <div className="h-48 flex items-center justify-center text-muted text-sm">
-              No spending data for this month
-            </div>
-          )}
-        </div>
-
-        {/* Upcoming Bills */}
-        <div className="col-span-2 bg-surface shadow-sm border border-border rounded p-4">
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="text-sm font-medium text-text">Next 30 Days</h2>
-            <button onClick={() => navigate('/bills')} className="text-xs text-muted hover:text-green flex items-center gap-1">
-              View all <ArrowRight size={11} />
-            </button>
-          </div>
-          {forecast && forecast.occurrences.length > 0 ? (
-            <div className="space-y-3">
-              <div className="grid grid-cols-3 gap-2 text-xs">
-                <div>
-                  <p className="text-muted mb-0.5">Income</p>
-                  <p className="font-mono text-green">{formatCurrency(forecast.income)}</p>
-                </div>
-                <div>
-                  <p className="text-muted mb-0.5">Bills</p>
-                  <p className="font-mono text-rose">{formatCurrency(-forecast.bills)}</p>
-                </div>
-                <div>
-                  <p className="text-muted mb-0.5">Net</p>
-                  <p className="font-mono" style={{ color: forecast.net >= 0 ? '#32bfa3' : '#ef6f8a' }}>
-                    {formatCurrency(forecast.net)}
-                  </p>
-                </div>
-              </div>
-              <div className="space-y-2">
-                {forecast.occurrences.slice(0, 5).map((item) => (
-                  <div key={item.id} className="flex items-center justify-between py-1.5 border-b border-border last:border-0">
-                    <div className="min-w-0">
-                      <p className="text-sm text-text truncate">{item.merchant_name}</p>
-                      <p className="text-xs text-muted font-mono">{formatDateShort(item.expected_date)}</p>
-                    </div>
-                    <span
-                      className="font-mono text-sm ml-2"
-                      style={{ color: item.amount >= 0 ? '#32bfa3' : '#ef6f8a' }}
-                    >
-                      {formatCurrency(item.amount)}
-                    </span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          ) : (
-            <div className="h-32 flex items-center justify-center text-muted text-sm">
-              No recurring activity scheduled
-            </div>
-          )}
-        </div>
-      </div>
-
-      {/* Row 4: Budget + Goals + Investments */}
-      <div className="grid grid-cols-3 gap-4">
-        {/* Budget progress */}
-        <div className="bg-surface shadow-sm border border-border rounded p-4">
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="text-sm font-medium text-text">Budget Progress</h2>
-            <button onClick={() => navigate('/budget')} className="text-xs text-muted hover:text-green flex items-center gap-1">
-              View all <ArrowRight size={11} />
-            </button>
-          </div>
-          {budgets && budgets.length > 0 ? (
-            <div className="space-y-3">
-              {budgets.slice(0, 6).map((budget) => {
-                const available = availableBudgetAmount(budget);
-                const projected = budgetProjectedSpend(budget);
-                const pct = budgetProjectedPercent(budget);
-                const barColor = pct >= 100 ? '#ef6f8a' : pct >= 80 ? '#e2a53f' : '#32bfa3';
-                return (
-                  <div key={budget.id}>
-                    <div className="flex items-center justify-between text-xs mb-1">
-                      <span className="text-text">{budget.category_name}</span>
-                      <span className="font-mono text-muted">
-                        {formatCurrency(projected)} / {formatCurrency(available)}
-                      </span>
-                    </div>
-                    <div className="h-1.5 bg-border rounded-full overflow-hidden">
-                      <div
-                        className="h-full rounded-full transition-all"
-                        style={{
-                          width: `${Math.min(pct, 100)}%`,
-                          backgroundColor: barColor,
-                        }}
-                      />
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          ) : (
-            <div className="h-32 flex items-center justify-center text-muted text-sm">
-              No budgets set
-            </div>
-          )}
-        </div>
-
-        {/* Goal progress */}
-        <div className="bg-surface shadow-sm border border-border rounded p-4">
-          <div className="flex items-center justify-between mb-4">
-            <div className="flex items-center gap-2">
-              <Target size={14} className="text-amber" />
-              <h2 className="text-sm font-medium text-text">Goals</h2>
-            </div>
-            <button onClick={() => navigate('/goals')} className="text-xs text-muted hover:text-green flex items-center gap-1">
-              View all <ArrowRight size={11} />
-            </button>
-          </div>
-          {goals && goals.length > 0 ? (
-            <div className="space-y-3">
-              {goals.slice(0, 4).map((goal) => (
-                <GoalProgressRow key={goal.id} goal={goal} />
-              ))}
-            </div>
-          ) : (
-            <div className="h-32 flex items-center justify-center text-muted text-sm">
-              No goals set
-            </div>
-          )}
-        </div>
-
-        {/* Investment Snapshot */}
-        <div className="bg-surface shadow-sm border border-border rounded p-4">
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="text-sm font-medium text-text">Investments</h2>
-            <button onClick={() => navigate('/investments')} className="text-xs text-muted hover:text-green flex items-center gap-1">
-              View all <ArrowRight size={11} />
-            </button>
-          </div>
-          {holdings && holdings.length > 0 ? (
-            <>
-              <p className="font-mono text-2xl text-blue mb-4">{formatCurrency(investmentTotal)}</p>
-              <div className="space-y-2">
-                {holdings.slice(0, 5).map((h) => {
-                  const unrealized = h.cost_basis != null ? h.institution_value - h.cost_basis : null;
-                  return (
-                    <div key={h.id} className="flex items-center justify-between text-xs">
-                      <div className="flex items-center gap-2">
-                        <span className="font-mono text-blue font-medium">{h.ticker ?? '-'}</span>
-                        <span className="text-muted truncate max-w-[120px]">{h.security_name}</span>
-                      </div>
-                      <div className="text-right">
-                        <p className="font-mono text-text">{formatCurrency(h.institution_value)}</p>
-                        {unrealized != null && (
-                          <p className="font-mono" style={{ color: unrealized >= 0 ? '#32bfa3' : '#ef6f8a' }}>
-                            {unrealized >= 0 ? '+' : ''}{formatCurrency(unrealized)}
-                          </p>
-                        )}
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            </>
-          ) : (
-            <div className="h-32 flex items-center justify-center text-muted text-sm">
-              No investment accounts
-            </div>
-          )}
-        </div>
-      </div>
-
-      {/* Row 5: Recent Transactions */}
-      <div className="bg-surface shadow-sm border border-border rounded">
-        <div className="px-4 py-3 border-b border-border flex items-center justify-between">
-          <h2 className="text-sm font-medium text-text">Recent Transactions</h2>
-          <button onClick={() => navigate('/transactions')} className="text-xs text-muted hover:text-green flex items-center gap-1">
-            View all <ArrowRight size={11} />
+      {visibleDashboardCards.length === 0 ? (
+        <div className="bg-surface shadow-sm border border-border rounded p-6 text-center">
+          <p className="text-sm font-medium text-text mb-1">All dashboard cards are hidden</p>
+          <p className="text-xs text-muted mb-4">Reset the layout to restore the default overview.</p>
+          <button
+            type="button"
+            onClick={resetDashboardLayout}
+            className="inline-flex items-center gap-1.5 rounded border border-border px-3 py-2 text-xs text-muted hover:text-green hover:bg-green/5"
+          >
+            <RotateCcw size={13} />
+            Reset layout
           </button>
         </div>
-        {recentTxs && recentTxs.data.length > 0 ? (
-          <div className="divide-y divide-border">
-            {recentTxs.data.map((tx) => (
-              <div key={tx.id} className="flex items-center px-4 py-2.5 gap-4 hover:bg-black/5 cursor-pointer" onClick={() => navigate('/transactions')}>
-                <span className="font-mono text-xs text-muted w-20 flex-shrink-0">{formatDate(tx.date)}</span>
-                <span className="text-sm text-text flex-1 truncate">{tx.merchant_name || tx.original_name}</span>
-                <span className="text-xs text-muted flex-shrink-0">
-                  {tx.category_name ? (
-                    <CategoryBadge name={tx.category_name} color={tx.category_color} icon={tx.category_icon} />
-                  ) : (
-                    <span className="text-muted">Uncategorized</span>
-                  )}
-                </span>
-                <AmountBadge amount={tx.amount} className="flex-shrink-0 w-24 text-right" />
+      ) : (
+        <div className="flex flex-col gap-6">
+          {visibleDashboardCardSet.has('overview') && (
+            <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4" style={{ order: dashboardCardOrder('overview') }}>
+              <StatCard
+                title="Net Worth"
+                value={formatCurrency(latestNW?.net_worth ?? 0)}
+                delta={nwDelta}
+                deltaLabel="vs last month"
+                positive={nwDelta !== undefined ? nwDelta >= 0 : undefined}
+                onClick={() => navigate('/reports')}
+                onAsk={() => askAdvisorAboutDashboardCard({
+                  card: 'net_worth',
+                  title: 'Net Worth',
+                  period: currentMonth,
+                  value: latestNW?.net_worth ?? 0,
+                  delta: nwDelta ?? null,
+                  deltaLabel: 'vs last month',
+                })}
+              />
+              <StatCard
+                title="Monthly Spend"
+                value={formatCurrency(monthlySpend)}
+                delta={spendDelta}
+                deltaLabel="vs last month"
+                positive={spendDelta !== undefined ? spendDelta <= 0 : undefined}
+                onClick={() => navigate('/transactions')}
+                onAsk={() => askAdvisorAboutDashboardCard({
+                  card: 'monthly_spend',
+                  title: 'Monthly Spend',
+                  period: currentMonth,
+                  value: monthlySpend,
+                  delta: spendDelta ?? null,
+                  deltaLabel: 'vs last month',
+                  extraContext: 'Transfers, investments, crypto, and pending transactions are excluded from reportable spending.',
+                })}
+              />
+              <StatCard
+                title="Monthly Income"
+                value={formatCurrency(monthlyIncome)}
+                delta={incomeDelta}
+                deltaLabel="vs last month"
+                positive={incomeDelta !== undefined ? incomeDelta >= 0 : undefined}
+                onClick={() => navigate('/transactions')}
+                onAsk={() => askAdvisorAboutDashboardCard({
+                  card: 'monthly_income',
+                  title: 'Monthly Income',
+                  period: currentMonth,
+                  value: monthlyIncome,
+                  delta: incomeDelta ?? null,
+                  deltaLabel: 'vs last month',
+                  extraContext: 'Only reportable income is included. Transfers and investment flows are excluded.',
+                })}
+              />
+              <div
+                className="bg-surface shadow-sm border border-border rounded p-5 cursor-pointer hover:bg-green/5 transition-colors"
+                onClick={() => navigate('/reports')}
+              >
+                <div className="flex items-start justify-between gap-2 mb-1">
+                  <p className="text-xs text-muted">Top Category</p>
+                  <button
+                    type="button"
+                    className="text-[11px] text-muted hover:text-green transition-colors flex items-center gap-1"
+                    title="Why did this top category change?"
+                    aria-label="Why did this top category change?"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      askAdvisorAboutDashboardCard({
+                        card: 'top_category',
+                        title: 'Top Category',
+                        period: currentMonth,
+                        value: topCategory?.amount ?? 0,
+                        extraContext: topCategory
+                          ? `Top spending category is ${topCategory.category_name}.`
+                          : 'No categorized spending is available for this period.',
+                      });
+                    }}
+                  >
+                    <Sparkles size={12} />
+                    Why changed?
+                  </button>
+                </div>
+                {topCategory ? (
+                  <>
+                    <p className="text-sm font-medium text-text mb-1">{topCategory.category_name}</p>
+                    <p className="font-mono text-2xl font-medium text-rose">{formatCurrency(topCategory.amount)}</p>
+                  </>
+                ) : (
+                  <p className="text-sm text-muted">No data</p>
+                )}
               </div>
-            ))}
-          </div>
-        ) : (
-          <div className="py-12 flex items-center justify-center text-muted text-sm">
-            No transactions this month
-          </div>
-        )}
-      </div>
+            </div>
+          )}
+
+          {visibleDashboardCardSet.has('signals') && (
+            <div className="grid grid-cols-1 xl:grid-cols-4 gap-4" style={{ order: dashboardCardOrder('signals') }}>
+              <div className="xl:col-span-2">
+                <SignalsPanel insights={insights} onNavigate={navigate} onAskAdvisor={askAdvisor} />
+              </div>
+              <DataQualityPanel quality={dataQuality} onNavigate={navigate} />
+              <SyncHealthPanel health={syncHealth} onNavigate={navigate} />
+            </div>
+          )}
+
+          {visibleDashboardCardSet.has('sync_activity') && (
+            <div style={{ order: dashboardCardOrder('sync_activity') }}>
+              <SyncActivityPanel runs={syncRuns} />
+            </div>
+          )}
+
+          {visibleDashboardCardSet.has('asset_breakdown') && (
+            <div className="bg-surface shadow-sm border border-border rounded p-4" style={{ order: dashboardCardOrder('asset_breakdown') }}>
+              <h2 className="text-sm font-medium text-text mb-4">Asset Breakdown</h2>
+              {assetDonutData.length > 0 ? (
+                <div className="flex flex-col md:flex-row md:items-center gap-8">
+                  <div className="relative flex-shrink-0">
+                    <ResponsiveContainer width={160} height={160}>
+                      <PieChart>
+                        <Pie
+                          data={assetDonutData}
+                          cx="50%"
+                          cy="50%"
+                          innerRadius={48}
+                          outerRadius={72}
+                          dataKey="value"
+                          paddingAngle={2}
+                        >
+                          {assetDonutData.map((_entry, index) => (
+                            <Cell key={index} fill={ASSET_COLORS[index % ASSET_COLORS.length]} />
+                          ))}
+                        </Pie>
+                        <Tooltip content={<CustomTooltip />} />
+                      </PieChart>
+                    </ResponsiveContainer>
+                    <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
+                      <p className="text-xs text-muted">Net Worth</p>
+                      <p className="font-mono text-sm font-medium text-text">{formatCurrency(latestNW?.net_worth ?? 0)}</p>
+                    </div>
+                  </div>
+                  <div className="flex flex-wrap gap-x-6 gap-y-2">
+                    {assetDonutData.map((entry, i) => (
+                      <div key={i} className="flex items-center gap-2">
+                        <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: ASSET_COLORS[i % ASSET_COLORS.length] }} />
+                        <div>
+                          <p className="text-xs text-muted">{entry.name}</p>
+                          <p className="font-mono text-sm text-text">{formatCurrency(entry.value)}</p>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ) : (
+                <div className="h-24 flex items-center justify-center text-muted text-sm">
+                  No asset data available
+                </div>
+              )}
+            </div>
+          )}
+
+          {visibleDashboardCardSet.has('spending_bills') && (
+            <div className="grid grid-cols-1 xl:grid-cols-5 gap-4" style={{ order: dashboardCardOrder('spending_bills') }}>
+              <div className="xl:col-span-3 bg-surface shadow-sm border border-border rounded p-4">
+                <h2 className="text-sm font-medium text-text mb-4">Spending by Category</h2>
+                {donutData.length > 0 ? (
+                  <>
+                    <ResponsiveContainer width="100%" height={200}>
+                      <PieChart>
+                        <Pie
+                          data={donutData}
+                          cx="50%"
+                          cy="50%"
+                          innerRadius={55}
+                          outerRadius={85}
+                          dataKey="value"
+                          paddingAngle={2}
+                        >
+                          {donutData.map((entry, index) => (
+                            <Cell key={index} fill={entry.color} />
+                          ))}
+                        </Pie>
+                        <Tooltip content={<CustomTooltip />} />
+                      </PieChart>
+                    </ResponsiveContainer>
+                    <div className="flex flex-wrap gap-x-4 gap-y-1.5 mt-3">
+                      {donutData.map((entry, i) => (
+                        <div key={i} className="flex items-center gap-1.5 text-xs text-muted">
+                          <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: entry.color }} />
+                          <span className="text-text">{entry.name}</span>
+                          <span className="font-mono">{formatCurrency(entry.value)}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </>
+                ) : (
+                  <div className="h-48 flex items-center justify-center text-muted text-sm">
+                    No spending data for this month
+                  </div>
+                )}
+              </div>
+
+              <div className="xl:col-span-2 bg-surface shadow-sm border border-border rounded p-4">
+                <div className="flex items-center justify-between mb-4">
+                  <h2 className="text-sm font-medium text-text">Next 30 Days</h2>
+                  <button onClick={() => navigate('/bills')} className="text-xs text-muted hover:text-green flex items-center gap-1">
+                    View all <ArrowRight size={11} />
+                  </button>
+                </div>
+                {forecast && forecast.occurrences.length > 0 ? (
+                  <div className="space-y-3">
+                    <div className="grid grid-cols-3 gap-2 text-xs">
+                      <div>
+                        <p className="text-muted mb-0.5">Income</p>
+                        <p className="font-mono text-green">{formatCurrency(forecast.income)}</p>
+                      </div>
+                      <div>
+                        <p className="text-muted mb-0.5">Bills</p>
+                        <p className="font-mono text-rose">{formatCurrency(-forecast.bills)}</p>
+                      </div>
+                      <div>
+                        <p className="text-muted mb-0.5">Net</p>
+                        <p className="font-mono" style={{ color: forecast.net >= 0 ? '#32bfa3' : '#ef6f8a' }}>
+                          {formatCurrency(forecast.net)}
+                        </p>
+                      </div>
+                    </div>
+                    <div className="space-y-2">
+                      {forecast.occurrences.slice(0, 5).map((item) => (
+                        <div key={item.id} className="flex items-center justify-between py-1.5 border-b border-border last:border-0">
+                          <div className="min-w-0">
+                            <p className="text-sm text-text truncate">{item.merchant_name}</p>
+                            <p className="text-xs text-muted font-mono">{formatDateShort(item.expected_date)}</p>
+                          </div>
+                          <span
+                            className="font-mono text-sm ml-2"
+                            style={{ color: item.amount >= 0 ? '#32bfa3' : '#ef6f8a' }}
+                          >
+                            {formatCurrency(item.amount)}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ) : (
+                  <div className="h-32 flex items-center justify-center text-muted text-sm">
+                    No recurring activity scheduled
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {visibleDashboardCardSet.has('planning') && (
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-4" style={{ order: dashboardCardOrder('planning') }}>
+              <div className="bg-surface shadow-sm border border-border rounded p-4">
+                <div className="flex items-center justify-between mb-4">
+                  <h2 className="text-sm font-medium text-text">Budget Progress</h2>
+                  <button onClick={() => navigate('/budget')} className="text-xs text-muted hover:text-green flex items-center gap-1">
+                    View all <ArrowRight size={11} />
+                  </button>
+                </div>
+                {budgets && budgets.length > 0 ? (
+                  <div className="space-y-3">
+                    {budgets.slice(0, 6).map((budget) => {
+                      const available = availableBudgetAmount(budget);
+                      const projected = budgetProjectedSpend(budget);
+                      const pct = budgetProjectedPercent(budget);
+                      const barColor = pct >= 100 ? '#ef6f8a' : pct >= 80 ? '#e2a53f' : '#32bfa3';
+                      return (
+                        <div key={budget.id}>
+                          <div className="flex items-center justify-between text-xs mb-1">
+                            <span className="text-text">{budget.category_name}</span>
+                            <span className="font-mono text-muted">
+                              {formatCurrency(projected)} / {formatCurrency(available)}
+                            </span>
+                          </div>
+                          <div className="h-1.5 bg-border rounded-full overflow-hidden">
+                            <div
+                              className="h-full rounded-full transition-all"
+                              style={{
+                                width: `${Math.min(pct, 100)}%`,
+                                backgroundColor: barColor,
+                              }}
+                            />
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <div className="h-32 flex items-center justify-center text-muted text-sm">
+                    No budgets set
+                  </div>
+                )}
+              </div>
+
+              <div className="bg-surface shadow-sm border border-border rounded p-4">
+                <div className="flex items-center justify-between mb-4">
+                  <div className="flex items-center gap-2">
+                    <Target size={14} className="text-amber" />
+                    <h2 className="text-sm font-medium text-text">Goals</h2>
+                  </div>
+                  <button onClick={() => navigate('/goals')} className="text-xs text-muted hover:text-green flex items-center gap-1">
+                    View all <ArrowRight size={11} />
+                  </button>
+                </div>
+                {goals && goals.length > 0 ? (
+                  <div className="space-y-3">
+                    {goals.slice(0, 4).map((goal) => (
+                      <GoalProgressRow key={goal.id} goal={goal} />
+                    ))}
+                  </div>
+                ) : (
+                  <div className="h-32 flex items-center justify-center text-muted text-sm">
+                    No goals set
+                  </div>
+                )}
+              </div>
+
+              <div className="bg-surface shadow-sm border border-border rounded p-4">
+                <div className="flex items-center justify-between mb-4">
+                  <h2 className="text-sm font-medium text-text">Investments</h2>
+                  <button onClick={() => navigate('/investments')} className="text-xs text-muted hover:text-green flex items-center gap-1">
+                    View all <ArrowRight size={11} />
+                  </button>
+                </div>
+                {holdings && holdings.length > 0 ? (
+                  <>
+                    <p className="font-mono text-2xl text-blue mb-4">{formatCurrency(investmentTotal)}</p>
+                    <div className="space-y-2">
+                      {holdings.slice(0, 5).map((h) => {
+                        const unrealized = h.cost_basis != null ? h.institution_value - h.cost_basis : null;
+                        return (
+                          <div key={h.id} className="flex items-center justify-between text-xs">
+                            <div className="flex items-center gap-2">
+                              <span className="font-mono text-blue font-medium">{h.ticker ?? '-'}</span>
+                              <span className="text-muted truncate max-w-[120px]">{h.security_name}</span>
+                            </div>
+                            <div className="text-right">
+                              <p className="font-mono text-text">{formatCurrency(h.institution_value)}</p>
+                              {unrealized != null && (
+                                <p className="font-mono" style={{ color: unrealized >= 0 ? '#32bfa3' : '#ef6f8a' }}>
+                                  {unrealized >= 0 ? '+' : ''}{formatCurrency(unrealized)}
+                                </p>
+                              )}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </>
+                ) : (
+                  <div className="h-32 flex items-center justify-center text-muted text-sm">
+                    No investment accounts
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {visibleDashboardCardSet.has('recent_transactions') && (
+            <div className="bg-surface shadow-sm border border-border rounded" style={{ order: dashboardCardOrder('recent_transactions') }}>
+              <div className="px-4 py-3 border-b border-border flex items-center justify-between">
+                <h2 className="text-sm font-medium text-text">Recent Transactions</h2>
+                <button onClick={() => navigate('/transactions')} className="text-xs text-muted hover:text-green flex items-center gap-1">
+                  View all <ArrowRight size={11} />
+                </button>
+              </div>
+              {recentTxs && recentTxs.data.length > 0 ? (
+                <div className="divide-y divide-border">
+                  {recentTxs.data.map((tx) => (
+                    <div
+                      key={tx.id}
+                      className="flex flex-col gap-2 px-4 py-2.5 hover:bg-black/5 cursor-pointer sm:flex-row sm:items-center sm:gap-4"
+                      onClick={() => navigate('/transactions')}
+                    >
+                      <span className="font-mono text-xs text-muted sm:w-20 sm:flex-shrink-0">{formatDate(tx.date)}</span>
+                      <span className="text-sm text-text flex-1 truncate">{tx.merchant_name || tx.original_name}</span>
+                      <span className="text-xs text-muted sm:flex-shrink-0">
+                        {tx.category_name ? (
+                          <CategoryBadge name={tx.category_name} color={tx.category_color} icon={tx.category_icon} />
+                        ) : (
+                          <span className="text-muted">Uncategorized</span>
+                        )}
+                      </span>
+                      <AmountBadge amount={tx.amount} className="sm:flex-shrink-0 sm:w-24 sm:text-right" />
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="py-12 flex items-center justify-center text-muted text-sm">
+                  No transactions this month
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }
