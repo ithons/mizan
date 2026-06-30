@@ -3,9 +3,10 @@ import assert from 'node:assert/strict';
 import {
   buildAccountAdvisorPrompt,
   buildBudgetAdvisorPrompt,
+  buildHoldingAdvisorPrompt,
   buildTransactionAdvisorPrompt,
 } from '../client/src/lib/advisorPrompts';
-import type { Account, Budget, Transaction } from '../shared/types';
+import type { Account, Budget, Holding, Transaction } from '../shared/types';
 
 function budget(overrides: Partial<Budget> = {}): Budget {
   return {
@@ -86,6 +87,23 @@ function account(overrides: Partial<Account> = {}): Account {
   };
 }
 
+function holding(overrides: Partial<Holding> = {}): Holding {
+  return {
+    id: overrides.id ?? 'holding_1',
+    account_id: overrides.account_id ?? 'acct_checking',
+    security_id: overrides.security_id ?? 'sec_1',
+    quantity: overrides.quantity ?? 10,
+    institution_value: overrides.institution_value ?? 1250,
+    institution_price: overrides.institution_price ?? 125,
+    cost_basis: overrides.cost_basis ?? 1000,
+    currency: overrides.currency ?? 'USD',
+    updated_at: overrides.updated_at ?? '2026-06-30T12:00:00.000Z',
+    ticker: overrides.ticker ?? 'VTI',
+    security_name: overrides.security_name ?? 'Vanguard Total Stock Market ETF',
+    security_type: overrides.security_type ?? 'etf',
+  };
+}
+
 test('budget advisor prompt captures row context and projection math', () => {
   const prompt = buildBudgetAdvisorPrompt(budget(), '2026-06');
 
@@ -157,4 +175,24 @@ test('account advisor prompt captures balance context and data freshness', () =>
   assert.match(prompt.prompt, /hidden credit liability connected by plaid/);
   assert.match(prompt.prompt, /current balance is \$420\.50/);
   assert.match(prompt.prompt, /last updated at 2026-06-30T12:00:00.000Z/);
+});
+
+test('holding advisor prompt captures account context and return quality', () => {
+  const prompt = buildHoldingAdvisorPrompt(holding(), account({
+    account_name: 'Brokerage',
+    institution_name: 'InvestCo',
+  }));
+
+  assert.equal(prompt.source, 'investment');
+  assert.equal(prompt.recordKind, 'holding');
+  assert.equal(prompt.recordId, 'holding_1');
+  assert.equal(prompt.params?.ticker, 'VTI');
+  assert.equal(prompt.params?.value, 1250);
+  assert.equal(prompt.params?.costBasis, 1000);
+  assert.equal(prompt.params?.unrealizedGain, 250);
+  assert.equal(prompt.params?.returnPct, 25);
+  assert.match(prompt.prompt, /Vanguard Total Stock Market ETF holding \(VTI\)/);
+  assert.match(prompt.prompt, /held in Brokerage at InvestCo/);
+  assert.match(prompt.prompt, /unrealized gain or loss is \$250\.00/);
+  assert.match(prompt.prompt, /return is 25\.0%/);
 });

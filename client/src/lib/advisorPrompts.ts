@@ -1,5 +1,5 @@
 import type { AdvisorRoutePrompt } from './advisorRouteState';
-import type { Account, Budget, Transaction } from '@shared/types';
+import type { Account, Budget, Holding, Transaction } from '@shared/types';
 
 function availableBudgetAmount(budget: Budget): number {
   return budget.amount + (budget.rollover ? budget.rollover_balance : 0);
@@ -117,6 +117,49 @@ export function buildAccountAdvisorPrompt(account: Account): AdvisorRoutePrompt 
       creditLimit != null ? `The credit limit is ${formatCurrencyValue(creditLimit, account.currency)}.` : 'There is no credit limit reported.',
       `The account was last updated at ${account.updated_at}.`,
       'Explain what this balance means for cash flow, debt, net worth, and any sync or data-quality concerns I should review.',
+    ].join(' '),
+  };
+}
+
+export function buildHoldingAdvisorPrompt(
+  holding: Holding,
+  account: Account | null = null
+): AdvisorRoutePrompt {
+  const securityName = holding.security_name ?? holding.ticker ?? 'this holding';
+  const accountName = account?.account_name ?? 'unknown account';
+  const institutionName = account?.institution_name ?? 'unknown institution';
+  const unrealizedGain = holding.cost_basis != null ? holding.institution_value - holding.cost_basis : null;
+  const returnPct = unrealizedGain != null && holding.cost_basis != null && holding.cost_basis > 0
+    ? (unrealizedGain / holding.cost_basis) * 100
+    : null;
+
+  return {
+    source: 'investment',
+    recordKind: 'holding',
+    recordId: holding.id,
+    params: {
+      holdingId: holding.id,
+      accountId: holding.account_id,
+      accountName,
+      institutionName,
+      ticker: holding.ticker ?? null,
+      securityName,
+      securityType: holding.security_type ?? null,
+      quantity: holding.quantity,
+      price: holding.institution_price,
+      value: holding.institution_value,
+      costBasis: holding.cost_basis ?? null,
+      unrealizedGain,
+      returnPct,
+    },
+    prompt: [
+      `Analyze my ${securityName} holding${holding.ticker ? ` (${holding.ticker})` : ''}.`,
+      `It is held in ${accountName} at ${institutionName}.`,
+      `Quantity is ${holding.quantity.toFixed(4)}, current price is ${formatMoneyValue(holding.institution_price)}, and market value is ${formatMoneyValue(holding.institution_value)}.`,
+      holding.cost_basis != null
+        ? `Cost basis is ${formatMoneyValue(holding.cost_basis)}, unrealized gain or loss is ${formatMoneyValue(unrealizedGain ?? 0)}, and return is ${returnPct == null ? 'not available' : `${returnPct.toFixed(1)}%`}.`
+        : 'Cost basis is missing, so unrealized return quality is limited.',
+      'Explain concentration, cost basis quality, return quality, and what I should review before making decisions about this position.',
     ].join(' '),
   };
 }

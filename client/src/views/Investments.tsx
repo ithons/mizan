@@ -9,10 +9,12 @@ import {
   Tooltip,
   ResponsiveContainer,
 } from 'recharts';
-import { ChevronUp, ChevronDown } from 'lucide-react';
+import { ChevronUp, ChevronDown, Sparkles } from 'lucide-react';
 import { format, subMonths } from 'date-fns';
 import { investmentsApi, reportsApi, accountsApi } from '../lib/api';
 import { formatCurrency, formatDate } from '../lib/formatters';
+import { advisorRouteState } from '../lib/advisorRouteState';
+import { buildHoldingAdvisorPrompt } from '../lib/advisorPrompts';
 import {
   ALLOCATION_LENSES,
   costBasisTone,
@@ -177,6 +179,14 @@ export function Investments() {
     () => new Map(accounts.map((account) => [account.id, account])),
     [accounts]
   );
+  const askAdvisorAboutHolding = (holding: Holding) => {
+    navigate('/advisor', {
+      state: advisorRouteState(buildHoldingAdvisorPrompt(
+        holding,
+        accountById.get(holding.account_id) ?? null
+      )),
+    });
+  };
 
   const invAccounts = useMemo(
     () => accounts.filter((a) => INV_ACCOUNT_TYPES.includes(a.type)),
@@ -744,11 +754,12 @@ export function Investments() {
                   <th className="text-right px-3 py-2.5 text-xs text-muted font-medium uppercase tracking-wider">Cost Basis</th>
                   <SortableHeader label="Unrealized" col="pnl" sortBy={sortBy} sortDir={sortDir} onSort={handleSort} align="right" />
                   <SortableHeader label="Return%" col="pnl_pct" sortBy={sortBy} sortDir={sortDir} onSort={handleSort} align="right" />
+                  <th className="w-8" />
                 </tr>
               </thead>
               <tbody>
                 {holdingsLoading ? (
-                  <SkeletonList rows={8} cols={selectedAccountId ? 8 : 9} />
+                  <SkeletonList rows={8} cols={selectedAccountId ? 9 : 10} />
                 ) : sortedHoldings.length === 0 ? null : (
                   sortedHoldings.map((h) => {
                     const pnl = h.cost_basis != null ? h.institution_value - h.cost_basis : null;
@@ -756,7 +767,7 @@ export function Investments() {
                     const acct = accounts.find((a) => a.id === h.account_id);
                     const isCash = h.security_type === 'cash';
                     return (
-                      <tr key={h.id} className={`border-b border-border hover:bg-white/2 ${isCash ? 'opacity-60' : ''}`}>
+                      <tr key={h.id} className={`border-b border-border hover:bg-white/2 group ${isCash ? 'opacity-60' : ''}`}>
                         <td className="px-3 py-2.5 font-mono font-bold text-text">{h.ticker ?? '-'}</td>
                         <td className="px-3 py-2.5 text-muted max-w-[140px]">
                           <span className="truncate block" title={h.security_name ?? undefined}>{h.security_name}</span>
@@ -781,6 +792,15 @@ export function Investments() {
                         </td>
                         <td className="px-3 py-2.5 text-right font-mono" style={{ color: pct == null ? undefined : pct >= 0 ? '#32bfa3' : '#ef6f8a' }}>
                           {isCash ? '-' : pct == null ? '-' : formatPct(pct)}
+                        </td>
+                        <td className="px-2 py-2.5 text-right">
+                          <button
+                            className="text-muted hover:text-blue opacity-0 group-hover:opacity-100 transition-colors"
+                            onClick={() => askAdvisorAboutHolding(h)}
+                            title="Ask advisor"
+                          >
+                            <Sparkles size={12} />
+                          </button>
                         </td>
                       </tr>
                     );
@@ -808,6 +828,7 @@ export function Investments() {
                       <td className="px-3 py-2.5 text-right font-mono font-bold" style={{ color: visibleStats.returnPct == null ? undefined : visibleStats.returnPct >= 0 ? '#32bfa3' : '#ef6f8a' }}>
                         {visibleStats.returnPct == null ? '-' : formatPct(visibleStats.returnPct)}
                       </td>
+                      <td className="px-2 py-2.5" />
                     </tr>
                   );
                 })()}
