@@ -18,6 +18,7 @@ import {
   Tag,
   Database,
   CheckCircle,
+  Sparkles,
   type LucideIcon,
 } from 'lucide-react';
 import {
@@ -34,7 +35,7 @@ import { invalidateFinancialData } from '../lib/queryInvalidation';
 import { Modal } from '../components/Modal';
 import { ConfirmRemoveModal } from '../components/ConfirmRemoveModal';
 import { PageLoader } from '../components/LoadingSpinner';
-import type { Category, MerchantRule } from '@shared/types';
+import type { Category, MerchantRule, MerchantRuleSuggestion } from '@shared/types';
 
 const CATEGORY_PRESET_COLORS = [
   '#4ecba3', '#5b8dee', '#e07070', '#f0c040', '#9b8dee',
@@ -710,6 +711,11 @@ function RulesSection() {
     queryFn: rulesApi.list,
   });
 
+  const { data: suggestions = [] } = useQuery({
+    queryKey: ['rules', 'suggestions'],
+    queryFn: rulesApi.suggestions,
+  });
+
   const { data: categoriesTree = [] } = useQuery({
     queryKey: ['categories'],
     queryFn: categoriesApi.list,
@@ -728,6 +734,24 @@ function RulesSection() {
       invalidateFinancialData(qc);
       setPattern('');
       setCategoryId('');
+      addToast({
+        type: 'success',
+        message: result.applied > 0
+          ? `Rule saved and applied to ${result.applied} transactions`
+          : 'Rule saved',
+      });
+    },
+    onError: (err: Error) => addToast({ type: 'error', message: err.message }),
+  });
+
+  const suggestionMutation = useMutation({
+    mutationFn: (suggestion: MerchantRuleSuggestion) => rulesApi.create({
+      pattern: suggestion.pattern,
+      category_id: suggestion.category_id,
+      apply_existing: true,
+    }),
+    onSuccess: (result) => {
+      invalidateFinancialData(qc);
       addToast({
         type: 'success',
         message: result.applied > 0
@@ -809,6 +833,43 @@ function RulesSection() {
         <p className="text-xs text-muted">
           New matches will be categorized as <span className="text-text">{selectedCategory.name}</span>.
         </p>
+      )}
+
+      {suggestions.length > 0 && (
+        <div className="border border-[#d4a44c]/30 bg-[#d4a44c]/10 rounded">
+          <div className="flex items-center gap-2 px-3 py-2 border-b border-[#d4a44c]/20">
+            <Sparkles size={13} className="text-[#d4a44c]" />
+            <p className="text-xs font-medium text-text">Suggested rules</p>
+          </div>
+          <div className="divide-y divide-[#d4a44c]/15">
+            {suggestions.map((suggestion) => (
+              <div key={`${suggestion.pattern}:${suggestion.category_id}`} className="flex items-center gap-3 px-3 py-3">
+                <div
+                  className="w-2.5 h-2.5 rounded-full flex-shrink-0"
+                  style={{ backgroundColor: suggestion.category_color ?? '#6b6b7a' }}
+                />
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm text-text truncate">{suggestion.pattern}</p>
+                  <p className="text-xs text-muted">
+                    {suggestion.categorized_count} categorized as {suggestion.category_name}
+                    {' '}
+                    - {suggestion.uncategorized_count} uncategorized
+                    {' '}
+                    - {Math.round(suggestion.confidence * 100)}% confidence
+                  </p>
+                </div>
+                <button
+                  className="flex items-center gap-1.5 text-xs text-[#0f0f11] bg-[#d4a44c] rounded px-2.5 py-1.5 hover:opacity-90 disabled:opacity-40"
+                  onClick={() => suggestionMutation.mutate(suggestion)}
+                  disabled={suggestionMutation.isPending}
+                >
+                  <Check size={12} />
+                  Accept
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
       )}
 
       <div className="flex items-center justify-between">

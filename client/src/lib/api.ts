@@ -5,6 +5,7 @@ import type {
   Category,
   Goal,
   MerchantRule,
+  MerchantRuleSuggestion,
   Budget,
   RecurringPattern,
   RecurringForecast,
@@ -202,6 +203,7 @@ export const categoriesApi = {
 
 export const rulesApi = {
   list: () => apiFetch<MerchantRule[]>('/api/rules'),
+  suggestions: () => apiFetch<MerchantRuleSuggestion[]>('/api/rules/suggestions'),
   create: (body: { pattern: string; category_id: string; apply_existing?: boolean }) =>
     apiFetch<{ rule: MerchantRule | null; applied: number }>('/api/rules', {
       method: 'POST',

@@ -185,6 +185,17 @@ export interface MerchantRule {
   match_count?: number;
 }
 
+export interface MerchantRuleSuggestion {
+  pattern: string;
+  category_id: string;
+  category_name: string;
+  category_color?: string | null;
+  category_icon?: string | null;
+  categorized_count: number;
+  uncategorized_count: number;
+  confidence: number;
+}
+
 export type GoalType = 'savings' | 'debt';
 
 export interface Goal {
