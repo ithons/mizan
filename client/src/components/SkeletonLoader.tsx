@@ -34,7 +34,7 @@ export function SkeletonList({ rows = 8, cols = 5 }: { rows?: number; cols?: num
 
 export function SkeletonCard() {
   return (
-    <div className="bg-surface border border-border rounded p-4 space-y-3">
+    <div className="bg-surface shadow-sm border border-border rounded p-4 space-y-3">
       <div className="h-3 bg-border/60 rounded animate-pulse w-1/3" />
       <div className="h-6 bg-border/60 rounded animate-pulse w-2/3" />
       <div className="h-3 bg-border/60 rounded animate-pulse w-1/2" />

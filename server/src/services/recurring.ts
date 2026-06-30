@@ -7,6 +7,8 @@ import {
   subMonths,
 } from 'date-fns';
 import { getDb } from '../db/index';
+import { compareTwoStrings } from "string-similarity";
+
 
 const US_STATES = new Set([
   'AL','AK','AZ','AR','CA','CO','CT','DE','FL','GA','HI','ID','IL','IN','IA',
@@ -92,14 +94,30 @@ export function detectRecurring(): void {
 
   // 2. Group by normalized merchant name
   const groups = new Map<string, Array<{ id: string; date: string; amount: number }>>();
+  const groupNames: string[] = [];
+
 
   for (const txn of transactions) {
     const raw = txn.merchant_name || txn.original_name;
     if (!raw) continue;
-    const normalized = normalizeMerchant(raw);
+    let normalized = normalizeMerchant(raw);
     if (!normalized) continue;
+    // Fuzzy matching: check if normalized name is very similar to an existing group
+    let matchedGroup = normalized;
+    let highestScore = 0;
+    for (const gName of groupNames) {
+      const score = compareTwoStrings(normalized, gName);
+      if (score > highestScore) {
+        highestScore = score;
+        matchedGroup = score > 0.85 ? gName : normalized;
+      }
+    }
+    normalized = matchedGroup;
+
 
     if (!groups.has(normalized)) {
+      groupNames.push(normalized);
+
       groups.set(normalized, []);
     }
     groups.get(normalized)!.push({ id: txn.id, date: txn.date, amount: txn.amount });

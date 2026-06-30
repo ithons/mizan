@@ -60,6 +60,9 @@ interface TreemapContentProps {
 interface DrillCategory {
   category_id: string;
   category_name: string;
+  color?: string | null;
+  amount?: number;
+  percentage?: number;
   children?: DrillCategory[];
 }
 
@@ -109,7 +112,7 @@ function getDateRange(preset: DatePreset, customStart?: string, customEnd?: stri
 function ChartTooltip({ active, payload, label }: ChartTooltipProps) {
   if (!active || !payload?.length) return null;
   return (
-    <div className="bg-surface border border-border rounded px-3 py-2 text-xs">
+    <div className="bg-surface shadow-sm border border-border rounded px-3 py-2 text-xs">
       <p className="text-muted mb-1 font-mono">{label}</p>
       {payload.map((p) => (
         <div key={p.dataKey} className="flex items-center gap-2">
@@ -284,7 +287,7 @@ function ReportSummaryPanel({ summary }: { summary?: ReportSummary }) {
             {summary.top_spending.slice(0, 3).map((category) => (
               <div key={category.category_id} className="flex items-center justify-between gap-3 text-xs">
                 <span className="text-text truncate">{category.category_name}</span>
-                <span className="font-mono text-[#ef6f8a]">{formatCurrency(category.current)}</span>
+                <span className="font-mono text-rose">{formatCurrency(category.current)}</span>
               </div>
             ))}
             {summary.top_spending.length === 0 && <p className="text-sm text-muted">No spending</p>}
@@ -423,7 +426,7 @@ function SpendingTab({ startDate, endDate }: { startDate: string; endDate: strin
       {/* Breadcrumb */}
       <div className="flex items-center gap-1 text-xs">
         <button
-          className={drillId ? 'text-[#32bfa3] hover:opacity-80' : 'text-muted cursor-default'}
+          className={drillId ? 'text-green hover:opacity-80' : 'text-muted cursor-default'}
           onClick={() => { setDrillId(null); setDrillName(null); }}
         >
           All Categories
@@ -437,7 +440,7 @@ function SpendingTab({ startDate, endDate }: { startDate: string; endDate: strin
       </div>
 
       {treemapData.length > 0 ? (
-        <div className="bg-surface border border-border rounded p-4">
+        <div className="bg-surface shadow-sm border border-border rounded p-4">
           <ResponsiveContainer width="100%" height={280}>
             <Treemap
               data={treemapData}
@@ -468,7 +471,7 @@ function SpendingTab({ startDate, endDate }: { startDate: string; endDate: strin
       )}
 
       {/* Data table */}
-      <div className="bg-surface border border-border rounded overflow-hidden">
+      <div className="bg-surface shadow-sm border border-border rounded overflow-hidden">
         <table className="w-full text-xs">
           <thead className="border-b border-border">
             <tr>
@@ -494,8 +497,8 @@ function SpendingTab({ startDate, endDate }: { startDate: string; endDate: strin
                     <span className="text-text">{c.category_name}</span>
                   </div>
                 </td>
-                <td className="px-4 py-2 font-mono text-right text-[#ef6f8a]">{formatCurrency(c.amount)}</td>
-                <td className="px-4 py-2 font-mono text-right text-muted">{formatPercent(c.percentage)}</td>
+                <td className="px-4 py-2 font-mono text-right text-rose">{formatCurrency(c.amount ?? 0)}</td>
+                <td className="px-4 py-2 font-mono text-right text-muted">{formatPercent(c.percentage ?? 0)}</td>
               </tr>
             ))}
           </tbody>
@@ -503,7 +506,7 @@ function SpendingTab({ startDate, endDate }: { startDate: string; endDate: strin
             <tfoot className="border-t border-border bg-background/30">
               <tr>
                 <td className="px-4 py-2 text-sm font-medium text-text">Total</td>
-                <td className="px-4 py-2 font-mono text-right text-[#ef6f8a] font-medium">{formatCurrency(spending.total)}</td>
+                <td className="px-4 py-2 font-mono text-right text-rose font-medium">{formatCurrency(spending.total)}</td>
                 <td />
               </tr>
             </tfoot>
@@ -542,7 +545,7 @@ function IncomeTab({ startDate, endDate }: { startDate: string; endDate: string 
   return (
     <div className="space-y-6">
       {treemapData.length > 0 ? (
-        <div className="bg-surface border border-border rounded p-4">
+        <div className="bg-surface shadow-sm border border-border rounded p-4">
           <ResponsiveContainer width="100%" height={280}>
             <Treemap
               data={treemapData}
@@ -562,7 +565,7 @@ function IncomeTab({ startDate, endDate }: { startDate: string; endDate: string 
           secondaryActionLabel="Connect Account"
         />
       )}
-      <div className="bg-surface border border-border rounded overflow-hidden">
+      <div className="bg-surface shadow-sm border border-border rounded overflow-hidden">
         <table className="w-full text-xs">
           <thead className="border-b border-border">
             <tr>
@@ -588,7 +591,7 @@ function IncomeTab({ startDate, endDate }: { startDate: string; endDate: string 
                     <span className="text-text">{c.category_name}</span>
                   </div>
                 </td>
-                <td className="px-4 py-2 font-mono text-right text-[#32bfa3]">{formatCurrency(c.amount)}</td>
+                <td className="px-4 py-2 font-mono text-right text-green">{formatCurrency(c.amount)}</td>
                 <td className="px-4 py-2 font-mono text-right text-muted">{formatPercent(c.percentage)}</td>
               </tr>
             ))}
@@ -597,7 +600,7 @@ function IncomeTab({ startDate, endDate }: { startDate: string; endDate: string 
             <tfoot className="border-t border-border bg-background/30">
               <tr>
                 <td className="px-4 py-2 text-sm font-medium text-text">Total</td>
-                <td className="px-4 py-2 font-mono text-right text-[#32bfa3] font-medium">{formatCurrency(income.total)}</td>
+                <td className="px-4 py-2 font-mono text-right text-green font-medium">{formatCurrency(income.total)}</td>
                 <td />
               </tr>
             </tfoot>
@@ -675,13 +678,13 @@ function TrendsTab({ startDate, endDate }: { startDate: string; endDate: string 
       </div>
 
       {selectedCats.length === 0 ? (
-        <div className="bg-surface border border-border rounded p-12 text-center text-muted text-sm">
+        <div className="bg-surface shadow-sm border border-border rounded p-12 text-center text-muted text-sm">
           Select categories above to see spending trends
         </div>
       ) : isLoading ? (
         <PageLoader />
       ) : (
-        <div className="bg-surface border border-border rounded p-4">
+        <div className="bg-surface shadow-sm border border-border rounded p-4">
           <ResponsiveContainer width="100%" height={280}>
             <LineChart data={chartData}>
               <CartesianGrid vertical={false} stroke="#dbe7e2" />
@@ -714,7 +717,7 @@ const PIE_COLORS = { liquid: '#32bfa3', investments: '#6487f0', crypto: '#e2a53f
 
 function AssetPieChart({ data, title }: { data: Array<{ name: string; value: number; color: string }>; title: string }) {
   return (
-    <div className="flex-1 bg-surface border border-border rounded p-4">
+    <div className="flex-1 bg-surface shadow-sm border border-border rounded p-4">
       <p className="text-xs text-muted font-medium uppercase tracking-wider mb-3">{title}</p>
       <ResponsiveContainer width="100%" height={160}>
         <PieChart>
@@ -819,7 +822,7 @@ function NetWorthTab() {
       </div>
 
       {/* Area chart */}
-      <div className="bg-surface border border-border rounded p-4">
+      <div className="bg-surface shadow-sm border border-border rounded p-4">
         <ResponsiveContainer width="100%" height={240}>
           <AreaChart data={chartData}>
             <defs>
@@ -852,7 +855,7 @@ function NetWorthTab() {
       </div>
 
       {/* Monthly table */}
-      <div className="bg-surface border border-border rounded overflow-hidden">
+      <div className="bg-surface shadow-sm border border-border rounded overflow-hidden">
         <table className="w-full text-xs">
           <thead className="border-b border-border">
             <tr>
@@ -868,8 +871,8 @@ function NetWorthTab() {
               return (
                 <tr key={s.id} className="border-b border-border hover:bg-white/2">
                   <td className="px-4 py-2 font-mono text-muted">{formatDate(s.date)}</td>
-                  <td className="px-4 py-2 font-mono text-[#32bfa3]">{formatCurrency(s.total_assets)}</td>
-                  <td className="px-4 py-2 font-mono text-[#ef6f8a]">{formatCurrency(s.total_liabilities)}</td>
+                  <td className="px-4 py-2 font-mono text-green">{formatCurrency(s.total_assets)}</td>
+                  <td className="px-4 py-2 font-mono text-rose">{formatCurrency(s.total_liabilities)}</td>
                   <td className="px-4 py-2 font-mono text-text">{formatCurrency(s.net_worth)}</td>
                   <td className="px-4 py-2 font-mono" style={{ color: delta != null ? (delta >= 0 ? '#32bfa3' : '#ef6f8a') : '#6b6b7a' }}>
                     {delta != null ? `${delta >= 0 ? '+' : ''}${formatCurrency(delta)}` : '-'}
@@ -942,9 +945,9 @@ function InvestmentsTab() {
       {/* Summary + Pie */}
       <div className="grid grid-cols-2 gap-4">
         {/* Portfolio history */}
-        <div className="bg-surface border border-border rounded p-4">
+        <div className="bg-surface shadow-sm border border-border rounded p-4">
           <p className="text-xs text-muted mb-1">Portfolio Value</p>
-          <p className="font-mono text-2xl text-[#6487f0] mb-3">{formatCurrency(totalValue)}</p>
+          <p className="font-mono text-2xl text-blue mb-3">{formatCurrency(totalValue)}</p>
           {historyData.length > 0 && (
             <ResponsiveContainer width="100%" height={120}>
               <AreaChart data={historyData}>
@@ -964,7 +967,7 @@ function InvestmentsTab() {
         </div>
 
         {/* Allocation pie */}
-        <div className="bg-surface border border-border rounded p-4">
+        <div className="bg-surface shadow-sm border border-border rounded p-4">
           <p className="text-sm font-medium text-text mb-3">Allocation</p>
           {pieData.length > 0 ? (
             <ResponsiveContainer width="100%" height={160}>
@@ -985,7 +988,7 @@ function InvestmentsTab() {
       </div>
 
       {/* P&L table */}
-      <div className="bg-surface border border-border rounded overflow-hidden">
+      <div className="bg-surface shadow-sm border border-border rounded overflow-hidden">
         <table className="w-full text-xs">
           <thead className="border-b border-border">
             <tr>
@@ -1000,7 +1003,7 @@ function InvestmentsTab() {
               const pnlPct = h.cost_basis && h.cost_basis > 0 ? ((h.institution_value - h.cost_basis) / h.cost_basis) * 100 : null;
               return (
                 <tr key={h.id} className="border-b border-border hover:bg-white/2">
-                  <td className="px-4 py-2 font-mono text-[#6487f0] font-medium">{h.ticker ?? '-'}</td>
+                  <td className="px-4 py-2 font-mono text-blue font-medium">{h.ticker ?? '-'}</td>
                   <td className="px-4 py-2 text-text max-w-[160px] truncate">{h.security_name}</td>
                   <td className="px-4 py-2 font-mono text-muted">{h.quantity.toFixed(4)}</td>
                   <td className="px-4 py-2 font-mono text-muted">{formatCurrency(h.institution_price)}</td>
@@ -1084,7 +1087,7 @@ export function Reports() {
             onClick={() => setPreset(p.key)}
             className={`px-3 py-1.5 text-xs rounded border transition-all ${
               preset === p.key
-                ? 'bg-[#32bfa3]/10 text-[#32bfa3] border-[#32bfa3]/40'
+                ? 'bg-green-10 text-green border-green/40'
                 : 'text-muted border-border hover:text-text'
             }`}
           >
@@ -1113,13 +1116,13 @@ export function Reports() {
       <ReportSummaryPanel summary={summary} />
 
       {/* Tab selector */}
-      <div className="flex gap-1 bg-surface border border-border rounded p-0.5 w-fit">
+      <div className="flex gap-1 bg-surface shadow-sm border border-border rounded p-0.5 w-fit">
         {(['spending', 'income', 'trends', 'networth', 'investments'] as ReportTab[]).map((t) => (
           <button
             key={t}
             onClick={() => setTab(t)}
             className={`px-3 py-1.5 text-xs rounded capitalize transition-all ${
-              tab === t ? 'bg-[#32bfa3]/10 text-[#32bfa3]' : 'text-muted hover:text-text'
+              tab === t ? 'bg-green-10 text-green' : 'text-muted hover:text-text'
             }`}
           >
             {t === 'networth' ? 'Net Worth' : t}

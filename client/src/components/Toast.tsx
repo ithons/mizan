@@ -15,20 +15,20 @@ function ToastItem({ toast, onRemove }: ToastItemProps) {
   }, [toast.id, onRemove]);
 
   const icons = {
-    success: <CheckCircle size={16} className="text-[#32bfa3] flex-shrink-0" />,
-    error: <XCircle size={16} className="text-[#ef6f8a] flex-shrink-0" />,
-    info: <Info size={16} className="text-[#6487f0] flex-shrink-0" />,
+    success: <CheckCircle size={16} className="text-green flex-shrink-0" />,
+    error: <XCircle size={16} className="text-rose flex-shrink-0" />,
+    info: <Info size={16} className="text-blue flex-shrink-0" />,
   };
 
   const borderColors = {
-    success: 'border-l-[#32bfa3]',
-    error: 'border-l-[#ef6f8a]',
-    info: 'border-l-[#6487f0]',
+    success: 'border-l-green',
+    error: 'border-l-rose',
+    info: 'border-l-blue',
   };
 
   return (
     <div
-      className={`flex items-start gap-3 bg-surface border border-border border-l-2 ${borderColors[toast.type]} rounded px-4 py-3 shadow-lg min-w-[280px] max-w-[380px]`}
+      className={`flex items-start gap-3 bg-surface shadow-sm border border-border border-l-2 ${borderColors[toast.type]} rounded px-4 py-3 shadow-lg min-w-[280px] max-w-[380px]`}
       style={{ animation: 'slideInRight 0.2s ease-out' }}
     >
       <style>{`

@@ -26,16 +26,16 @@ export function ConfirmRemoveModal({
   return (
     <Modal open={open} onClose={onClose} title={title}>
       <div className="space-y-4">
-        <div className="flex items-start gap-2 p-3 bg-[#ef6f8a]/10 border border-[#ef6f8a]/30 rounded">
-          <AlertTriangle size={14} className="text-[#ef6f8a] mt-0.5 flex-shrink-0" />
+        <div className="flex items-start gap-2 p-3 bg-rose/10 border border-rose/30 rounded">
+          <AlertTriangle size={14} className="text-rose mt-0.5 flex-shrink-0" />
           <p className="text-xs text-muted">{description}</p>
         </div>
         <div className="flex gap-3">
           <button
             className={`flex-1 py-2 text-sm font-medium rounded hover:opacity-90 disabled:opacity-40 ${
               danger
-                ? 'bg-[#ef6f8a] text-white'
-                : 'bg-[#32bfa3] text-[#273238]'
+                ? 'bg-rose text-white'
+                : 'bg-text text-surface'
             }`}
             onClick={onConfirm}
             disabled={isPending}

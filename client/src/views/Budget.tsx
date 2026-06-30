@@ -81,7 +81,7 @@ function BudgetRow({
                 }}
               />
               <button onClick={commitEdit}>
-                <Check size={12} className="text-[#32bfa3]" />
+                <Check size={12} className="text-green" />
               </button>
               <button onClick={() => setEditing(false)}>
                 <X size={12} className="text-muted" />
@@ -96,7 +96,7 @@ function BudgetRow({
             </button>
           )}
           <button
-            className="text-muted hover:text-[#ef6f8a] transition-colors"
+            className="text-muted hover:text-rose transition-colors"
             onClick={() => onDelete(budget.id)}
           >
             <Trash2 size={12} />
@@ -120,9 +120,9 @@ function BudgetRow({
       <div className="flex justify-between mt-1 gap-3">
         <span className="text-xs text-muted">
           {remaining >= 0 ? (
-            <span className="text-[#32bfa3]">{formatCurrency(remaining)} remaining</span>
+            <span className="text-green">{formatCurrency(remaining)} remaining</span>
           ) : (
-            <span className="text-[#ef6f8a]">{formatCurrency(Math.abs(remaining))} over budget</span>
+            <span className="text-rose">{formatCurrency(Math.abs(remaining))} over budget</span>
           )}
         </span>
         <span className="text-xs text-muted text-right">
@@ -199,7 +199,7 @@ function AddBudgetModal({
         <div>
           <label className="block text-xs text-muted mb-1">Category</label>
           <select
-            className="w-full bg-background border border-border rounded px-3 py-2 text-sm text-text focus:outline-none focus:ring-1 focus:ring-[#32bfa3]/50"
+            className="w-full bg-background border border-border rounded px-3 py-2 text-sm text-text focus:outline-none focus:ring-1 focus:ring-green-50"
             value={form.category_id}
             onChange={(e) => setForm({ ...form, category_id: e.target.value })}
           >
@@ -212,7 +212,7 @@ function AddBudgetModal({
           <label className="block text-xs text-muted mb-1">Budget Amount</label>
           <input
             type="number"
-            className="w-full bg-background border border-border rounded px-3 py-2 text-sm text-text font-mono focus:outline-none focus:ring-1 focus:ring-[#32bfa3]/50"
+            className="w-full bg-background border border-border rounded px-3 py-2 text-sm text-text font-mono focus:outline-none focus:ring-1 focus:ring-green-50"
             value={form.amount}
             onChange={(e) => setForm({ ...form, amount: e.target.value })}
             placeholder="0.00"
@@ -222,7 +222,7 @@ function AddBudgetModal({
           <input
             type="checkbox"
             id="rollover"
-            className="accent-[#32bfa3]"
+            className="accent-green"
             checked={form.rollover}
             onChange={(e) => setForm({ ...form, rollover: e.target.checked })}
           />
@@ -230,7 +230,7 @@ function AddBudgetModal({
         </div>
         <div className="flex gap-3 pt-1">
           <button
-            className="flex-1 py-2 text-sm bg-[#32bfa3] text-[#273238] font-medium rounded hover:opacity-90"
+            className="flex-1 py-2 text-sm bg-text text-surface font-medium rounded hover:opacity-90"
             onClick={() => mutation.mutate()}
             disabled={mutation.isPending}
           >
@@ -295,13 +295,13 @@ function RecurringTab() {
   return (
     <div className="space-y-6">
       {/* Annual total */}
-      <div className="bg-surface border border-border rounded p-4 flex items-center justify-between">
+      <div className="bg-surface shadow-sm border border-border rounded p-4 flex items-center justify-between">
         <span className="text-sm text-muted">Total Confirmed Annual Spend</span>
-        <span className="font-mono text-xl text-[#ef6f8a]">{formatCurrency(annualTotal)}</span>
+        <span className="font-mono text-xl text-rose">{formatCurrency(annualTotal)}</span>
       </div>
 
       {/* Recurring table */}
-      <div className="bg-surface border border-border rounded overflow-hidden">
+      <div className="bg-surface shadow-sm border border-border rounded overflow-hidden">
         <div className="px-4 py-3 border-b border-border">
           <h3 className="text-sm font-medium text-text">All Recurring</h3>
         </div>
@@ -337,7 +337,7 @@ function RecurringTab() {
                   <td className="px-4 py-2 text-muted">{FREQUENCY_LABELS[r.frequency]}</td>
                   <td className="px-4 py-2 font-mono text-text">{formatCurrency(r.average_amount)}</td>
                   <td className="px-4 py-2 font-mono text-muted">{formatDate(r.next_expected)}</td>
-                  <td className="px-4 py-2 font-mono text-[#ef6f8a]">{formatCurrency(annual)}</td>
+                  <td className="px-4 py-2 font-mono text-rose">{formatCurrency(annual)}</td>
                   <td className="px-4 py-2">
                     <span
                       className="text-xs px-2 py-0.5 rounded-full"
@@ -353,7 +353,7 @@ function RecurringTab() {
                     <div className="flex gap-1">
                       {!r.is_confirmed && r.is_active && (
                         <button
-                          className="text-xs text-[#32bfa3] hover:opacity-80"
+                          className="text-xs text-green hover:opacity-80"
                           onClick={() => confirmMutation.mutate(r.id)}
                         >
                           Confirm
@@ -361,7 +361,7 @@ function RecurringTab() {
                       )}
                       {r.is_active && (
                         <button
-                          className="text-xs text-muted hover:text-[#ef6f8a]"
+                          className="text-xs text-muted hover:text-rose"
                           onClick={() => dismissMutation.mutate(r.id)}
                         >
                           Dismiss
@@ -380,7 +380,7 @@ function RecurringTab() {
       </div>
 
       {/* Upcoming 30 days */}
-      <div className="bg-surface border border-border rounded overflow-hidden">
+      <div className="bg-surface shadow-sm border border-border rounded overflow-hidden">
         <div className="px-4 py-3 border-b border-border">
           <h3 className="text-sm font-medium text-text">Upcoming (Next 30 Days)</h3>
         </div>
@@ -391,7 +391,7 @@ function RecurringTab() {
                 <p className="text-sm text-text">{r.merchant_name}</p>
                 <p className="text-xs text-muted font-mono">{formatDate(r.next_expected)}</p>
               </div>
-              <span className="font-mono text-sm text-[#ef6f8a]">{formatCurrency(r.average_amount)}</span>
+              <span className="font-mono text-sm text-rose">{formatCurrency(r.average_amount)}</span>
             </div>
           ))}
           {upcoming.length === 0 && (
@@ -455,15 +455,15 @@ export function Budget() {
       {/* Header */}
       <div className="flex items-center justify-between">
         <h1 className="text-xl font-semibold text-text">Budget</h1>
-        <div className="flex gap-1 bg-surface border border-border rounded p-0.5">
+        <div className="flex gap-1 bg-surface shadow-sm border border-border rounded p-0.5">
           <button
-            className={`px-3 py-1.5 text-xs rounded ${tab === 'monthly' ? 'bg-[#32bfa3]/10 text-[#32bfa3]' : 'text-muted hover:text-text'}`}
+            className={`px-3 py-1.5 text-xs rounded ${tab === 'monthly' ? 'bg-green-10 text-green' : 'text-muted hover:text-text'}`}
             onClick={() => setTab('monthly')}
           >
             Monthly
           </button>
           <button
-            className={`px-3 py-1.5 text-xs rounded ${tab === 'recurring' ? 'bg-[#32bfa3]/10 text-[#32bfa3]' : 'text-muted hover:text-text'}`}
+            className={`px-3 py-1.5 text-xs rounded ${tab === 'recurring' ? 'bg-green-10 text-green' : 'text-muted hover:text-text'}`}
             onClick={() => setTab('recurring')}
           >
             Recurring
@@ -481,7 +481,7 @@ export function Budget() {
             >
               <ChevronLeft size={16} />
             </button>
-            <span className="font-mono text-sm text-text px-3 py-1 bg-surface border border-border rounded min-w-[120px] text-center">
+            <span className="font-mono text-sm text-text px-3 py-1 bg-surface shadow-sm border border-border rounded min-w-[120px] text-center">
               {formatMonth(currentMonth)}
             </span>
             <button
@@ -494,15 +494,15 @@ export function Budget() {
 
           {/* Summary bar */}
           <div className="grid grid-cols-4 gap-4">
-            <div className="bg-surface border border-border rounded p-4">
+            <div className="bg-surface shadow-sm border border-border rounded p-4">
               <p className="text-xs text-muted mb-1">Budgeted</p>
               <p className="font-mono text-lg text-text">{formatCurrency(budgeted)}</p>
             </div>
-            <div className="bg-surface border border-border rounded p-4">
+            <div className="bg-surface shadow-sm border border-border rounded p-4">
               <p className="text-xs text-muted mb-1">Spent</p>
-              <p className="font-mono text-lg text-[#ef6f8a]">{formatCurrency(spent)}</p>
+              <p className="font-mono text-lg text-rose">{formatCurrency(spent)}</p>
             </div>
-            <div className="bg-surface border border-border rounded p-4">
+            <div className="bg-surface shadow-sm border border-border rounded p-4">
               <p className="text-xs text-muted mb-1">Remaining</p>
               <p
                 className="font-mono text-lg"
@@ -511,7 +511,7 @@ export function Budget() {
                 {formatCurrency(remaining)}
               </p>
             </div>
-            <div className="bg-surface border border-border rounded p-4">
+            <div className="bg-surface shadow-sm border border-border rounded p-4">
               <p className="text-xs text-muted mb-1">Projected</p>
               <p
                 className="font-mono text-lg"
@@ -528,11 +528,11 @@ export function Budget() {
           </div>
 
           {/* Budget list */}
-          <div className="bg-surface border border-border rounded p-4">
+          <div className="bg-surface shadow-sm border border-border rounded p-4">
             <div className="flex items-center justify-between mb-2">
               <h2 className="text-sm font-medium text-text">Budgets</h2>
               <button
-                className="flex items-center gap-1 text-xs text-[#32bfa3] hover:opacity-80"
+                className="flex items-center gap-1 text-xs text-green hover:opacity-80"
                 onClick={() => setShowAddModal(true)}
               >
                 <Plus size={13} /> Add Budget

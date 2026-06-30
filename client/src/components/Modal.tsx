@@ -31,7 +31,7 @@ export function Modal({ open, onClose, title, children, maxWidth = '480px' }: Mo
       />
       {/* Modal */}
       <div
-        className="relative bg-surface border border-border rounded-lg w-full shadow-xl"
+        className="relative bg-surface shadow-sm border border-border rounded-lg w-full shadow-xl"
         style={{ maxWidth }}
       >
         {/* Header */}

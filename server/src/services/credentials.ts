@@ -1,11 +1,10 @@
 import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
-import { machineIdSync } from 'node-machine-id';
 import { MIZAN_DIR } from '../db/index';
 
 const CREDENTIALS_PATH = path.join(MIZAN_DIR, 'credentials.json');
-const SALT = 'mizan-v1';
+const KEY_PATH = path.join(MIZAN_DIR, 'mizan.key');
 
 interface EncryptedFile {
   iv: string;
@@ -35,8 +34,14 @@ let _cache: CredentialsStore | null = null;
 
 function getDerivedKey(): Buffer {
   if (_key) return _key;
-  const machineId = machineIdSync(true);
-  _key = crypto.scryptSync(machineId, SALT, 32, { N: 16384 });
+
+  if (fs.existsSync(KEY_PATH)) {
+    _key = fs.readFileSync(KEY_PATH);
+  } else {
+    _key = crypto.randomBytes(32);
+    fs.writeFileSync(KEY_PATH, _key, { mode: 0o600 });
+  }
+
   return _key;
 }
 

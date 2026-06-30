@@ -39,7 +39,7 @@ export function TransactionReviewPanel({
           <p className="text-xs text-muted font-mono">{totalOpen} open</p>
         </div>
         {totalOpen === 0 && (
-          <div className="flex items-center gap-1.5 text-xs text-[#32bfa3]">
+          <div className="flex items-center gap-1.5 text-xs text-green">
             <CheckCircle2 size={13} />
             Clear
           </div>
@@ -53,7 +53,7 @@ export function TransactionReviewPanel({
           return (
             <button
               key={queue.id}
-              className="border border-border bg-surface rounded p-3 text-left hover:border-[#32bfa3]/40 transition-colors disabled:opacity-50"
+              className="border border-border bg-surface rounded p-3 text-left hover:border-green/40 transition-colors disabled:opacity-50"
               onClick={() => onQueueSelect(queue.id)}
               disabled={queue.count === 0}
             >
@@ -74,7 +74,7 @@ export function TransactionReviewPanel({
         <div className="border border-border bg-surface rounded divide-y divide-border">
           {suggestions.map((suggestion) => (
             <div key={`${suggestion.pattern}:${suggestion.category_id}`} className="flex items-center gap-3 px-3 py-2">
-              <Sparkles size={13} className="text-[#6487f0] flex-shrink-0" />
+              <Sparkles size={13} className="text-blue flex-shrink-0" />
               <div className="min-w-0 flex-1">
                 <div className="flex items-center gap-2 mb-0.5">
                   <span className="text-sm text-text truncate">{suggestion.pattern}</span>
@@ -89,7 +89,7 @@ export function TransactionReviewPanel({
                 </p>
               </div>
               <button
-                className="text-xs text-muted hover:text-[#32bfa3] disabled:opacity-40"
+                className="text-xs text-muted hover:text-green disabled:opacity-40"
                 onClick={() => onApplySuggestion(suggestion)}
                 disabled={applyingPattern === suggestion.pattern}
               >

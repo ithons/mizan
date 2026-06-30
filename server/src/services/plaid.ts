@@ -81,7 +81,7 @@ export function resetPlaidClient(): void {
 function shouldSendRedirectUri(redirectUri: string): boolean {
   try {
     const url = new URL(redirectUri);
-    return url.protocol === 'https:' || ['localhost', '127.0.0.1'].includes(url.hostname);
+    return url.protocol === 'https:' || url.hostname === 'localhost';
   } catch (err) {
     console.warn('[plaid] Invalid redirect URI ignored:', redirectUri, err);
     return false;

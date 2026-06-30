@@ -125,7 +125,7 @@ function GoalCard({
         </div>
         <div className="flex items-center justify-between gap-2 mt-2 text-xs">
           <span className="font-mono text-muted">{goal.progress_percent.toFixed(1)}%</span>
-          <span className={complete ? 'text-[#32bfa3]' : 'text-muted'}>
+          <span className={complete ? 'text-green' : 'text-muted'}>
             {complete ? 'Complete' : `${formatCurrency(goal.remaining_amount)} left`}
           </span>
         </div>
@@ -211,7 +211,7 @@ function GoalModal({
         <div>
           <label className="block text-xs text-muted mb-1">Name</label>
           <input
-            className="w-full bg-background border border-border rounded px-3 py-2 text-sm text-text focus:outline-none focus:ring-1 focus:ring-[#32bfa3]/50"
+            className="w-full bg-background border border-border rounded px-3 py-2 text-sm text-text focus:outline-none focus:ring-1 focus:ring-green-50"
             value={form.name}
             onChange={(e) => setForm({ ...form, name: e.target.value })}
             placeholder="Emergency fund"
@@ -229,7 +229,7 @@ function GoalModal({
                   key={type}
                   className={`flex items-center justify-center gap-2 border rounded px-3 py-2 text-sm capitalize ${
                     active
-                      ? 'border-[#32bfa3]/50 bg-[#32bfa3]/10 text-[#32bfa3]'
+                      ? 'border-green-50 bg-green-10 text-green'
                       : 'border-border text-muted hover:text-text'
                   }`}
                   onClick={() => setForm({ ...form, type })}
@@ -248,7 +248,7 @@ function GoalModal({
             <input
               type="number"
               step="0.01"
-              className="w-full bg-background border border-border rounded px-3 py-2 text-sm text-text font-mono focus:outline-none focus:ring-1 focus:ring-[#32bfa3]/50"
+              className="w-full bg-background border border-border rounded px-3 py-2 text-sm text-text font-mono focus:outline-none focus:ring-1 focus:ring-green-50"
               value={form.target_amount}
               onChange={(e) => setForm({ ...form, target_amount: e.target.value })}
               placeholder="0.00"
@@ -258,7 +258,7 @@ function GoalModal({
             <label className="block text-xs text-muted mb-1">Target Date</label>
             <input
               type="date"
-              className="w-full bg-background border border-border rounded px-3 py-2 text-sm text-text font-mono focus:outline-none focus:ring-1 focus:ring-[#32bfa3]/50"
+              className="w-full bg-background border border-border rounded px-3 py-2 text-sm text-text font-mono focus:outline-none focus:ring-1 focus:ring-green-50"
               value={form.target_date}
               onChange={(e) => setForm({ ...form, target_date: e.target.value })}
             />
@@ -268,7 +268,7 @@ function GoalModal({
         <div>
           <label className="block text-xs text-muted mb-1">Linked Account</label>
           <select
-            className="w-full bg-background border border-border rounded px-3 py-2 text-sm text-text focus:outline-none focus:ring-1 focus:ring-[#32bfa3]/50"
+            className="w-full bg-background border border-border rounded px-3 py-2 text-sm text-text focus:outline-none focus:ring-1 focus:ring-green-50"
             value={form.account_id}
             onChange={(e) => {
               const account = accounts.find((candidate) => candidate.id === e.target.value);
@@ -295,7 +295,7 @@ function GoalModal({
             <input
               type="number"
               step="0.01"
-              className="w-full bg-background border border-border rounded px-3 py-2 text-sm text-text font-mono focus:outline-none focus:ring-1 focus:ring-[#32bfa3]/50"
+              className="w-full bg-background border border-border rounded px-3 py-2 text-sm text-text font-mono focus:outline-none focus:ring-1 focus:ring-green-50"
               value={form.current_amount}
               onChange={(e) => setForm({ ...form, current_amount: e.target.value })}
               placeholder="0.00"
@@ -309,7 +309,7 @@ function GoalModal({
             <input
               type="number"
               step="0.01"
-              className="w-full bg-background border border-border rounded px-3 py-2 text-sm text-text font-mono focus:outline-none focus:ring-1 focus:ring-[#32bfa3]/50"
+              className="w-full bg-background border border-border rounded px-3 py-2 text-sm text-text font-mono focus:outline-none focus:ring-1 focus:ring-green-50"
               value={form.starting_amount}
               onChange={(e) => setForm({ ...form, starting_amount: e.target.value })}
               placeholder={linkedAccount ? String(linkedAccount.current_balance) : '0.00'}
@@ -340,7 +340,7 @@ function GoalModal({
             Cancel
           </button>
           <button
-            className="flex items-center gap-1.5 px-4 py-2 text-xs bg-[#32bfa3] text-[#273238] font-medium rounded hover:opacity-90"
+            className="flex items-center gap-1.5 px-4 py-2 text-xs bg-text text-surface font-medium rounded hover:opacity-90"
             onClick={submit}
           >
             <Target size={13} />
@@ -438,7 +438,7 @@ export function Goals() {
           </p>
         </div>
         <button
-          className="flex items-center gap-1.5 text-xs bg-[#32bfa3] text-[#273238] font-medium rounded px-3 py-1.5 hover:opacity-90"
+          className="flex items-center gap-1.5 text-xs bg-text text-surface font-medium rounded px-3 py-1.5 hover:opacity-90"
           onClick={openNewGoal}
         >
           <Plus size={13} />
@@ -456,7 +456,7 @@ export function Goals() {
             <p className="text-xs text-muted">{goals.length} active</p>
           </div>
           <div className="h-2 bg-background border border-border rounded overflow-hidden">
-            <div className="h-full bg-[#32bfa3]" style={{ width: `${totals.percent}%` }} />
+            <div className="h-full bg-green" style={{ width: `${totals.percent}%` }} />
           </div>
         </div>
       )}

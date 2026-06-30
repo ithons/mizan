@@ -10,7 +10,8 @@ import { loadPlaidLink } from './lib/plaidLink';
 import { invalidateFinancialData } from './lib/queryInvalidation';
 
 const Dashboard = lazy(() => import('./views/Dashboard').then((module) => ({ default: module.Dashboard })));
-const Accounts = lazy(() => import('./views/Accounts').then((module) => ({ default: module.Accounts })));
+const Onboarding = lazy(() => import('./views/Onboarding').then((module) => ({ default: module.Onboarding })));
+const Accounts = lazy(() => import('./views/accounts/Accounts').then((module) => ({ default: module.Accounts })));
 const Transactions = lazy(() => import('./views/Transactions').then((module) => ({ default: module.Transactions })));
 const ReviewInbox = lazy(() => import('./views/ReviewInbox').then((module) => ({ default: module.ReviewInbox })));
 const CashFlow = lazy(() => import('./views/CashFlow').then((module) => ({ default: module.CashFlow })));
@@ -19,7 +20,7 @@ const Budget = lazy(() => import('./views/Budget').then((module) => ({ default: 
 const Goals = lazy(() => import('./views/Goals').then((module) => ({ default: module.Goals })));
 const Investments = lazy(() => import('./views/Investments').then((module) => ({ default: module.Investments })));
 const Reports = lazy(() => import('./views/Reports').then((module) => ({ default: module.Reports })));
-const Settings = lazy(() => import('./views/Settings').then((module) => ({ default: module.Settings })));
+const Settings = lazy(() => import('./views/settings/Settings').then((module) => ({ default: module.Settings })));
 const Advisor = lazy(() => import('./views/Advisor').then((module) => ({ default: module.Advisor })));
 
 function errorMessage(err: unknown, fallback: string) {
@@ -99,6 +100,7 @@ function AppRoutes() {
       <Routes>
         <Route element={<Layout />}>
           <Route path="/" element={lazyView(<Dashboard />)} />
+          <Route path="/onboarding" element={lazyView(<Onboarding />)} />
           <Route path="/accounts" element={lazyView(<Accounts />)} />
           <Route path="/review" element={lazyView(<ReviewInbox />)} />
           <Route path="/transactions" element={lazyView(<Transactions />)} />

@@ -39,10 +39,10 @@ type ActiveTab = 'holdings' | 'transactions';
 const INV_ACCOUNT_TYPES = ['brokerage', 'ira_traditional', 'ira_roth', 'crypto_wallet'];
 
 const TX_TYPE_COLORS: Record<string, string> = {
-  buy: 'bg-[#32bfa3]/10 text-[#32bfa3]',
-  sell: 'bg-[#ef6f8a]/10 text-[#ef6f8a]',
-  dividend: 'bg-[#6487f0]/10 text-[#6487f0]',
-  transfer: 'bg-[#e2a53f]/10 text-[#e2a53f]',
+  buy: 'bg-green-10 text-green',
+  sell: 'bg-rose/10 text-rose',
+  dividend: 'bg-blue/10 text-blue',
+  transfer: 'bg-amber/10 text-amber',
   fee: 'bg-border text-muted',
   other: 'bg-border text-muted',
 };
@@ -71,14 +71,14 @@ function dataQualityTone(status: 'empty' | 'strong' | 'limited' | 'attention'): 
 }
 
 function issueSeverityClass(severity: 'info' | 'warning' | 'attention'): string {
-  if (severity === 'attention') return 'border-[#ef6f8a]/30 bg-[#ef6f8a]/5';
-  if (severity === 'warning') return 'border-[#e2a53f]/30 bg-[#e2a53f]/5';
+  if (severity === 'attention') return 'border-rose/30 bg-rose/5';
+  if (severity === 'warning') return 'border-amber/30 bg-amber/5';
   return 'border-border bg-background';
 }
 
 function PnlCell({ value, pct }: { value: number | null; pct: number | null }) {
   if (value == null) return <span className="text-muted">-</span>;
-  const color = value >= 0 ? 'text-[#32bfa3]' : 'text-[#ef6f8a]';
+  const color = value >= 0 ? 'text-green' : 'text-rose';
   return (
     <span className={`font-mono ${color}`}>
       {value >= 0 ? '+' : ''}{formatCurrency(value)}
@@ -127,9 +127,9 @@ function SortableHeader({
 function ChartTooltip({ active, payload, label }: { active?: boolean; payload?: Array<{ value: number }>; label?: string }) {
   if (!active || !payload?.length) return null;
   return (
-    <div className="bg-surface border border-border rounded px-3 py-2 text-xs">
+    <div className="bg-surface shadow-sm border border-border rounded px-3 py-2 text-xs">
       <p className="text-muted">{label}</p>
-      <p className="font-mono text-[#6487f0] font-medium">{formatCurrency(payload[0].value)}</p>
+      <p className="font-mono text-blue font-medium">{formatCurrency(payload[0].value)}</p>
     </div>
   );
 }
@@ -331,22 +331,22 @@ export function Investments() {
           <><SkeletonCard /><SkeletonCard /><SkeletonCard /><SkeletonCard /><SkeletonCard /></>
         ) : (
           <>
-            <div className="bg-surface border border-border rounded p-5">
+            <div className="bg-surface shadow-sm border border-border rounded p-5">
               <p className="text-xs text-muted mb-1">Portfolio Value</p>
               <p className="font-mono text-2xl font-medium text-text">{formatCurrency(totalValue)}</p>
             </div>
-            <div className="bg-surface border border-border rounded p-5">
+            <div className="bg-surface shadow-sm border border-border rounded p-5">
               <p className="text-xs text-muted mb-1">Total Cost Basis</p>
               <p className="font-mono text-2xl font-medium text-text">
                 {hasCostBasis ? formatCurrency(totalCostBasis) : '-'}
               </p>
               {costBasisStats.missingCount > 0 && (
-                <p className="text-[11px] text-[#e2a53f] mt-1">
+                <p className="text-[11px] text-amber mt-1">
                   {costBasisStats.missingCount} holding{costBasisStats.missingCount === 1 ? '' : 's'} missing
                 </p>
               )}
             </div>
-            <div className="bg-surface border border-border rounded p-5">
+            <div className="bg-surface shadow-sm border border-border rounded p-5">
               <p className="text-xs text-muted mb-1">Unrealized P&L</p>
               <p
                 className="font-mono text-2xl font-medium"
@@ -356,7 +356,7 @@ export function Investments() {
                 {unrealized == null ? '-' : `${unrealized >= 0 ? '+' : ''}${formatCurrency(unrealized)}`}
               </p>
             </div>
-            <div className="bg-surface border border-border rounded p-5">
+            <div className="bg-surface shadow-sm border border-border rounded p-5">
               <p className="text-xs text-muted mb-1">Total Return</p>
               <p
                 className="font-mono text-2xl font-medium"
@@ -366,7 +366,7 @@ export function Investments() {
                 {totalReturn == null ? '-' : formatPct(totalReturn)}
               </p>
             </div>
-            <div className="bg-surface border border-border rounded p-5">
+            <div className="bg-surface shadow-sm border border-border rounded p-5">
               <p className="text-xs text-muted mb-1">Cost Basis Quality</p>
               <p
                 className="font-mono text-2xl font-medium"
@@ -385,7 +385,7 @@ export function Investments() {
       </div>
 
       {!holdingsLoading && !txsLoading && (
-        <div className="bg-surface border border-border rounded p-4 space-y-4">
+        <div className="bg-surface shadow-sm border border-border rounded p-4 space-y-4">
           <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
             <div>
               <p className="text-xs text-muted font-medium uppercase tracking-wider">Investment Data Quality</p>
@@ -424,14 +424,14 @@ export function Investments() {
       {/* Account selector + Chart */}
       <div className="grid grid-cols-5 gap-4">
         {/* Account selector */}
-        <div className="col-span-2 bg-surface border border-border rounded p-4 flex flex-col gap-2">
+        <div className="col-span-2 bg-surface shadow-sm border border-border rounded p-4 flex flex-col gap-2">
           <p className="text-xs text-muted font-medium uppercase tracking-wider mb-1">Accounts</p>
           {/* All accounts pill */}
           <button
             onClick={() => setSelectedAccountId(null)}
             className={`flex items-center justify-between px-3 py-2 text-xs rounded-full border transition-all ${
               selectedAccountId === null
-                ? 'bg-[#32bfa3]/10 text-[#32bfa3] border-[#32bfa3]/40'
+                ? 'bg-green-10 text-green border-green/40'
                 : 'text-muted border-border hover:text-text'
             }`}
           >
@@ -448,7 +448,7 @@ export function Investments() {
                 onClick={() => setSelectedAccountId(acct.id === selectedAccountId ? null : acct.id)}
                 className={`flex items-center justify-between px-3 py-2 text-xs rounded-full border transition-all ${
                   selectedAccountId === acct.id
-                    ? 'bg-[#32bfa3]/10 text-[#32bfa3] border-[#32bfa3]/40'
+                    ? 'bg-green-10 text-green border-green/40'
                     : 'text-muted border-border hover:text-text'
                 }`}
               >
@@ -465,7 +465,7 @@ export function Investments() {
         </div>
 
         {/* Portfolio chart */}
-        <div className="col-span-3 bg-surface border border-border rounded p-4">
+        <div className="col-span-3 bg-surface shadow-sm border border-border rounded p-4">
           <p className="text-xs text-muted font-medium uppercase tracking-wider mb-3">Portfolio Value History</p>
           {chartData.length > 0 ? (
             <ResponsiveContainer width="100%" height={200}>
@@ -498,7 +498,7 @@ export function Investments() {
 
       {/* Allocation breakdown */}
       {allocationSlices.length > 0 && (
-        <div className="bg-surface border border-border rounded p-4 space-y-4">
+        <div className="bg-surface shadow-sm border border-border rounded p-4 space-y-4">
           <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
             <div>
               <p className="text-xs text-muted font-medium uppercase tracking-wider">Portfolio Allocation</p>
@@ -513,7 +513,7 @@ export function Investments() {
                   onClick={() => setAllocationLens(lens.id)}
                   className={`px-3 py-1.5 text-xs rounded-full transition-colors ${
                     allocationLens === lens.id
-                      ? 'bg-[#32bfa3] text-white'
+                      ? 'bg-green text-white'
                       : 'text-muted hover:text-text hover:bg-surface'
                   }`}
                 >
@@ -590,7 +590,7 @@ export function Investments() {
 
       {/* Investment activity */}
       {!txsLoading && investmentActivity.transactionCount > 0 && (
-        <div className="bg-surface border border-border rounded p-4 space-y-4">
+        <div className="bg-surface shadow-sm border border-border rounded p-4 space-y-4">
           <div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
             <div>
               <p className="text-xs text-muted font-medium uppercase tracking-wider">Investment Activity</p>
@@ -628,7 +628,7 @@ export function Investments() {
 
       {/* Account summary table */}
       {invAccounts.length > 0 && (
-        <div className="bg-surface border border-border rounded overflow-hidden">
+        <div className="bg-surface shadow-sm border border-border rounded overflow-hidden">
           <table className="w-full text-xs">
             <thead className="border-b border-border">
               <tr>
@@ -647,7 +647,7 @@ export function Investments() {
                 return (
                   <tr
                     key={acct.id}
-                    className={`border-b border-border hover:bg-white/2 cursor-pointer ${selectedAccountId === acct.id ? 'bg-[#32bfa3]/5' : ''}`}
+                    className={`border-b border-border hover:bg-white/2 cursor-pointer ${selectedAccountId === acct.id ? 'bg-green/5' : ''}`}
                     onClick={() => setSelectedAccountId(acct.id === selectedAccountId ? null : acct.id)}
                   >
                     <td className="px-3 py-2.5 text-text font-medium">{acct.account_name}</td>
@@ -659,7 +659,7 @@ export function Investments() {
                         {acctStats.knownCount > 0 ? formatCurrency(acctStats.knownCostBasis) : 'Missing'}
                       </p>
                       {acctStats.missingCount > 0 && (
-                        <p className="text-[10px] text-[#e2a53f]">
+                        <p className="text-[10px] text-amber">
                           {acctStats.missingCount} missing
                         </p>
                       )}
@@ -690,7 +690,7 @@ export function Investments() {
                         {totalStats.knownCount > 0 ? formatCurrency(totalStats.knownCostBasis) : 'Missing'}
                       </p>
                       {totalStats.missingCount > 0 && (
-                        <p className="text-[10px] text-[#e2a53f]">{totalStats.missingCount} missing</p>
+                        <p className="text-[10px] text-amber">{totalStats.missingCount} missing</p>
                       )}
                     </td>
                     <td className="px-3 py-2.5 text-right font-bold">
@@ -729,7 +729,7 @@ export function Investments() {
         </div>
 
         {activeTab === 'holdings' && (
-          <div className="bg-surface border border-border rounded overflow-hidden">
+          <div className="bg-surface shadow-sm border border-border rounded overflow-hidden">
             <table className="w-full text-xs">
               <thead className="sticky top-0 bg-surface border-b border-border z-10">
                 <tr>
@@ -773,7 +773,7 @@ export function Investments() {
                           {h.cost_basis != null ? (
                             <span className="text-muted">{formatCurrency(h.cost_basis)}</span>
                           ) : (
-                            <span className="text-[#e2a53f]">Missing</span>
+                            <span className="text-amber">Missing</span>
                           )}
                         </td>
                         <td className="px-3 py-2.5 text-right">
@@ -799,7 +799,7 @@ export function Investments() {
                           {visibleStats.knownCount > 0 ? formatCurrency(visibleStats.knownCostBasis) : 'Missing'}
                         </p>
                         {visibleStats.missingCount > 0 && (
-                          <p className="text-[10px] text-[#e2a53f]">{visibleStats.missingCount} missing</p>
+                          <p className="text-[10px] text-amber">{visibleStats.missingCount} missing</p>
                         )}
                       </td>
                       <td className="px-3 py-2.5 text-right font-bold">
@@ -832,7 +832,7 @@ export function Investments() {
             {/* Transaction filters */}
             <div className="flex items-center gap-2 mb-3">
               <select
-                className="bg-background border border-border rounded px-2 py-1 text-xs text-text focus:outline-none focus:ring-1 focus:ring-[#32bfa3]/50"
+                className="bg-background border border-border rounded px-2 py-1 text-xs text-text focus:outline-none focus:ring-1 focus:ring-green-50"
                 value={txTypeFilter}
                 onChange={(e) => setTxTypeFilter(e.target.value)}
               >
@@ -851,7 +851,7 @@ export function Investments() {
               )}
             </div>
 
-            <div className="bg-surface border border-border rounded overflow-hidden">
+            <div className="bg-surface shadow-sm border border-border rounded overflow-hidden">
               <table className="w-full text-xs">
                 <thead className="sticky top-0 bg-surface border-b border-border z-10">
                   <tr>

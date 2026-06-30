@@ -16,9 +16,18 @@ import { refreshTransactionIntegrity } from './transactionIntegrity';
 
 // SSE clients registry
 const sseClients = new Set<Response>();
+let _activeSyncPromise: Promise<void> | null = null;
+let _lastSyncEvent: SyncEvent | null = null;
 
 export function addSseClient(res: Response): void {
   sseClients.add(res);
+  if (_activeSyncPromise && _lastSyncEvent) {
+    try {
+      res.write(`data: ${JSON.stringify(_lastSyncEvent)}\n\n`);
+    } catch {
+      sseClients.delete(res);
+    }
+  }
 }
 
 export function removeSseClient(res: Response): void {
@@ -26,6 +35,7 @@ export function removeSseClient(res: Response): void {
 }
 
 export function emitSyncEvent(event: SyncEvent): void {
+  _lastSyncEvent = event;
   const payload = `data: ${JSON.stringify(event)}\n\n`;
   for (const client of sseClients) {
     try {
@@ -46,6 +56,20 @@ function formatIssueNames(
 }
 
 export async function runFullSync(): Promise<void> {
+  if (_activeSyncPromise) {
+    console.log('[sync] Full sync already in progress, returning existing promise');
+    return _activeSyncPromise;
+  }
+
+  _activeSyncPromise = _runFullSyncInternal().finally(() => {
+    _activeSyncPromise = null;
+    _lastSyncEvent = null;
+  });
+
+  return _activeSyncPromise;
+}
+
+async function _runFullSyncInternal(): Promise<void> {
   const db = getDb();
   const run = startSyncRun(db, 'full', 'Full sync started');
   let finished = false;

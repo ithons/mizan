@@ -63,7 +63,7 @@ export function CategoryDropdown({
         )}
       </button>
       {open && (
-        <div className="absolute left-0 top-6 bg-surface border border-border rounded shadow-xl z-30 w-52 max-h-64 overflow-y-auto">
+        <div className="absolute left-0 top-6 bg-surface shadow-sm border border-border rounded shadow-xl z-30 w-52 max-h-64 overflow-y-auto">
           {categories.map((category) => (
             <button
               key={category.id}
@@ -97,7 +97,7 @@ export function BulkCategoryDropdown({
         Assign Category <ChevronDown size={11} />
       </button>
       {open && (
-        <div className="absolute left-0 top-7 bg-surface border border-border rounded shadow-xl z-30 w-52 max-h-64 overflow-y-auto">
+        <div className="absolute left-0 top-7 bg-surface shadow-sm border border-border rounded shadow-xl z-30 w-52 max-h-64 overflow-y-auto">
           {categories.map((category) => (
             <button
               key={category.id}

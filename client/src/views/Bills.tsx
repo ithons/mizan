@@ -118,7 +118,7 @@ function ScheduleRow({
           <div className="flex items-center gap-2">
             <p className="text-sm text-text truncate">{occurrence.merchant_name}</p>
             {occurrence.status === 'overdue' && (
-              <span className="text-[10px] text-[#ef6f8a] border border-[#ef6f8a]/40 rounded px-1.5 py-0.5">
+              <span className="text-[10px] text-rose border border-rose/40 rounded px-1.5 py-0.5">
                 overdue
               </span>
             )}
@@ -152,7 +152,7 @@ function ScheduleRow({
           <div className="flex items-center gap-1">
             {!occurrence.is_confirmed && (
               <button
-                className="p-1 text-muted hover:text-[#32bfa3] disabled:opacity-30"
+                className="p-1 text-muted hover:text-green disabled:opacity-30"
                 onClick={() => onConfirm(occurrence.pattern_id)}
                 disabled={isMutating}
                 title="Confirm recurring pattern"
@@ -161,7 +161,7 @@ function ScheduleRow({
               </button>
             )}
             <button
-              className="p-1 text-muted hover:text-[#ef6f8a] disabled:opacity-30"
+              className="p-1 text-muted hover:text-rose disabled:opacity-30"
               onClick={() => onDismiss(occurrence.pattern_id)}
               disabled={isMutating}
               title="Dismiss recurring pattern"
@@ -256,7 +256,7 @@ export function Bills() {
               key={option}
               className={`text-xs border rounded px-3 py-1.5 ${
                 days === option
-                  ? 'border-[#32bfa3]/50 bg-[#32bfa3]/10 text-[#32bfa3]'
+                  ? 'border-green-50 bg-green-10 text-green'
                   : 'border-border text-muted hover:text-text'
               }`}
               onClick={() => setDays(option)}
@@ -274,8 +274,8 @@ export function Bills() {
       </div>
 
       {reviewCount > 0 && (
-        <div className="border border-[#e2a53f]/30 bg-[#e2a53f]/10 rounded p-4 flex items-start gap-3">
-          <CircleAlert size={16} className="text-[#e2a53f] flex-shrink-0 mt-0.5" />
+        <div className="border border-amber/30 bg-amber/10 rounded p-4 flex items-start gap-3">
+          <CircleAlert size={16} className="text-amber flex-shrink-0 mt-0.5" />
           <div>
             <p className="text-sm text-text mb-1">Cash flow needs review</p>
             <p className="text-xs text-muted leading-relaxed">
@@ -293,7 +293,7 @@ export function Bills() {
               {liquidAccounts.length} liquid {liquidAccounts.length === 1 ? 'account' : 'accounts'}
             </p>
           </div>
-          <Wallet size={18} className="text-[#6487f0]" />
+          <Wallet size={18} className="text-blue" />
         </div>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-4">
           <div>
@@ -339,14 +339,14 @@ export function Bills() {
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <div className="border border-border bg-surface rounded p-4 flex items-center gap-3">
-          <CalendarDays size={18} className="text-[#6487f0]" />
+          <CalendarDays size={18} className="text-blue" />
           <div>
             <p className="text-xs text-muted">Scheduled</p>
             <p className="font-mono text-lg text-text">{occurrences.length}</p>
           </div>
         </div>
         <div className="border border-border bg-surface rounded p-4 flex items-center gap-3">
-          <CheckCircle2 size={18} className="text-[#32bfa3]" />
+          <CheckCircle2 size={18} className="text-green" />
           <div>
             <p className="text-xs text-muted">Confirmed</p>
             <p className="font-mono text-lg text-text">{confirmedCount}</p>
@@ -356,7 +356,7 @@ export function Bills() {
           </div>
         </div>
         <div className="border border-border bg-surface rounded p-4 flex items-center gap-3">
-          <Clock3 size={18} className="text-[#6487f0]" />
+          <Clock3 size={18} className="text-blue" />
           <div>
             <p className="text-xs text-muted">Likely</p>
             <p className="font-mono text-lg text-text">{likelyCount}</p>

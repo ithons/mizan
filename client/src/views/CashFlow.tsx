@@ -19,6 +19,7 @@ import {
   reportsApi,
   transactionsApi,
   categoriesApi,
+  recurringApi,
   flattenCategories,
   collectCategoryAndDescendantIds,
 } from '../lib/api';
@@ -44,7 +45,7 @@ interface CustomTooltipProps {
 function CustomTooltip({ active, payload, label }: CustomTooltipProps) {
   if (!active || !payload?.length) return null;
   return (
-    <div className="bg-surface border border-border rounded px-3 py-2 text-xs">
+    <div className="bg-surface shadow-sm border border-border rounded px-3 py-2 text-xs">
       <p className="text-muted mb-1 font-mono">{label}</p>
       {payload.map((p) => (
         <div key={p.dataKey} className="flex items-center gap-2">
@@ -68,6 +69,11 @@ export function CashFlow() {
 
   const selectedStartDate = format(startOfMonth(monthDate), 'yyyy-MM-dd');
   const selectedEndDate = format(endOfMonth(monthDate), 'yyyy-MM-dd');
+
+  const { data: forecast } = useQuery({
+    queryKey: ["recurring", "forecast", 30],
+    queryFn: () => recurringApi.forecast(30),
+  });
 
   const { data: cashflow, isLoading } = useQuery({
     queryKey: ['cashflow', startDate, endDate],
@@ -125,7 +131,7 @@ export function CashFlow() {
           >
             <ChevronLeft size={16} />
           </button>
-          <span className="font-mono text-sm text-text px-3 py-1 bg-surface border border-border rounded min-w-[120px] text-center">
+          <span className="font-mono text-sm text-text px-3 py-1 bg-surface shadow-sm border border-border rounded min-w-[120px] text-center">
             {formatMonth(currentMonth)}
           </span>
           <button
@@ -139,7 +145,7 @@ export function CashFlow() {
       </div>
 
       {/* Bar Chart */}
-      <div className="bg-surface border border-border rounded p-4">
+      <div className="bg-surface shadow-sm border border-border rounded p-4">
         <h2 className="text-sm font-medium text-text mb-4">Income vs Expenses - Trailing 12 Months</h2>
         <ResponsiveContainer width="100%" height={220}>
           <BarChart data={chartData} barCategoryGap="30%">
@@ -155,7 +161,7 @@ export function CashFlow() {
       </div>
 
       {/* Line Chart */}
-      <div className="bg-surface border border-border rounded p-4">
+      <div className="bg-surface shadow-sm border border-border rounded p-4">
         <h2 className="text-sm font-medium text-text mb-4">Net Cash Flow - Trailing 12 Months</h2>
         <ResponsiveContainer width="100%" height={180}>
           <LineChart data={chartData}>
@@ -176,24 +182,70 @@ export function CashFlow() {
         </ResponsiveContainer>
       </div>
 
+
+      {/* 30-Day Forward Forecast */}
+      {currentMonth === format(now, 'yyyy-MM') && forecast && (
+        <div className="bg-surface shadow-sm border border-border rounded p-4">
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-sm font-medium text-text">30-Day Forward Projection</h2>
+            <div className="text-right">
+              <p className="text-xs text-muted mb-0.5">Projected Net</p>
+              <p className={`font-mono text-sm font-medium ${forecast.net >= 0 ? 'text-green' : 'text-rose'}`}>
+                {forecast.net >= 0 ? '+' : ''}{formatCurrency(forecast.net)}
+              </p>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            <div className="bg-background border border-border rounded p-3">
+              <p className="text-xs text-muted mb-1 flex items-center justify-between">
+                Confirmed Income
+                <span className="w-1.5 h-1.5 rounded-full bg-green" />
+              </p>
+              <p className="font-mono text-sm text-green">{formatCurrency(forecast.confirmed_income)}</p>
+            </div>
+            <div className="bg-background border border-border rounded p-3">
+              <p className="text-xs text-muted mb-1 flex items-center justify-between">
+                Likely Income
+                <span className="w-1.5 h-1.5 rounded-full bg-green-50" />
+              </p>
+              <p className="font-mono text-sm text-green/80">{formatCurrency(forecast.likely_income)}</p>
+            </div>
+            <div className="bg-background border border-border rounded p-3">
+              <p className="text-xs text-muted mb-1 flex items-center justify-between">
+                Confirmed Bills
+                <span className="w-1.5 h-1.5 rounded-full bg-rose" />
+              </p>
+              <p className="font-mono text-sm text-rose">{formatCurrency(forecast.confirmed_bills)}</p>
+            </div>
+            <div className="bg-background border border-border rounded p-3">
+              <p className="text-xs text-muted mb-1 flex items-center justify-between">
+                Likely Bills
+                <span className="w-1.5 h-1.5 rounded-full bg-rose/50" />
+              </p>
+              <p className="font-mono text-sm text-rose/80">{formatCurrency(forecast.likely_bills)}</p>
+            </div>
+          </div>
+        </div>
+      )}
       {/* Selected month breakdown */}
       {selectedMonthData && (
         <div className="grid grid-cols-3 gap-4">
           <div
-            className="bg-surface border border-border rounded p-4 cursor-pointer hover:bg-[#32bfa3]/5 transition-colors"
+            className="bg-surface shadow-sm border border-border rounded p-4 cursor-pointer hover:bg-green/5 transition-colors"
             onClick={() => navigate('/transactions')}
           >
             <p className="text-xs text-muted mb-1">Income</p>
-            <p className="font-mono text-xl text-[#32bfa3]">{formatCurrency(selectedMonthData.income)}</p>
+            <p className="font-mono text-xl text-green">{formatCurrency(selectedMonthData.income)}</p>
           </div>
           <div
-            className="bg-surface border border-border rounded p-4 cursor-pointer hover:bg-[#32bfa3]/5 transition-colors"
+            className="bg-surface shadow-sm border border-border rounded p-4 cursor-pointer hover:bg-green/5 transition-colors"
             onClick={() => navigate('/transactions')}
           >
             <p className="text-xs text-muted mb-1">Expenses</p>
-            <p className="font-mono text-xl text-[#ef6f8a]">{formatCurrency(Math.abs(selectedMonthData.expenses))}</p>
+            <p className="font-mono text-xl text-rose">{formatCurrency(Math.abs(selectedMonthData.expenses))}</p>
           </div>
-          <div className="bg-surface border border-border rounded p-4">
+          <div className="bg-surface shadow-sm border border-border rounded p-4">
             <p className="text-xs text-muted mb-1">Net</p>
             <p
               className="font-mono text-xl"
@@ -206,7 +258,7 @@ export function CashFlow() {
       )}
 
       {/* Transaction list for selected month */}
-      <div className="bg-surface border border-border rounded">
+      <div className="bg-surface shadow-sm border border-border rounded">
         <div className="flex items-center justify-between px-4 py-3 border-b border-border">
           <h2 className="text-sm font-medium text-text">Transactions - {formatMonth(currentMonth)}</h2>
           <div className="flex items-center gap-2">
@@ -260,7 +312,7 @@ export function CashFlow() {
                 <div className="flex items-center justify-between px-4 py-3 border-t border-border">
                   <span className="text-xs text-muted">Showing 50 of {txs.length}</span>
                   <button
-                    className="text-xs text-[#32bfa3] hover:opacity-80 flex items-center gap-1"
+                    className="text-xs text-green hover:opacity-80 flex items-center gap-1"
                     onClick={() => navigate('/transactions')}
                   >
                     View all <ArrowRight size={11} />

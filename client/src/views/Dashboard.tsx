@@ -28,8 +28,9 @@ import {
 import type { LucideIcon } from 'lucide-react';
 import { format, startOfMonth, endOfMonth, subMonths, parseISO } from 'date-fns';
 import type { DataQualitySummary, Goal, Insight, RecurringForecast, SyncHealth, SyncRun, TransactionReviewSummary } from '@shared/types';
-import { accountsApi, networthApi, reportsApi, recurringApi, budgetsApi, transactionsApi, investmentsApi, insightsApi, goalsApi, syncApi } from '../lib/api';
+import { accountsApi, networthApi, reportsApi, recurringApi, budgetsApi, transactionsApi, investmentsApi, insightsApi, goalsApi, syncApi, settingsApi } from '../lib/api';
 import { getDashboardMode, type DashboardMode } from '../lib/dashboardState';
+import { getOnboardingPlan, type OnboardingPlan } from '../lib/onboarding';
 import { formatCurrency, formatDate, formatDateShort, formatMonth, formatRelativeTime } from '../lib/formatters';
 import { AmountBadge } from '../components/AmountBadge';
 import { CategoryBadge } from '../components/CategoryBadge';
@@ -59,7 +60,7 @@ function StatCard({
   onClick?: () => void;
 }) {
   const isGood = positive !== undefined ? positive : (delta ?? 0) >= 0;
-  const cls = `bg-surface border border-border rounded p-5 ${onClick ? 'cursor-pointer hover:bg-[#32bfa3]/5 transition-colors' : ''}`;
+  const cls = `bg-surface shadow-sm border border-border rounded p-5 ${onClick ? 'cursor-pointer hover:bg-green/5 transition-colors' : ''}`;
   return (
     <div className={cls} onClick={onClick}>
       <p className="text-xs text-muted mb-1">{title}</p>
@@ -67,9 +68,9 @@ function StatCard({
       {delta !== undefined && (
         <div className="flex items-center gap-1">
           {isGood ? (
-            <TrendingUp size={12} className="text-[#32bfa3]" />
+            <TrendingUp size={12} className="text-green" />
           ) : (
-            <TrendingDown size={12} className="text-[#ef6f8a]" />
+            <TrendingDown size={12} className="text-rose" />
           )}
           <span
             className="text-xs font-mono"
@@ -86,9 +87,9 @@ function StatCard({
 function CustomTooltip({ active, payload }: { active?: boolean; payload?: Array<{ name: string; value: number; payload: { color?: string } }> }) {
   if (!active || !payload?.length) return null;
   return (
-    <div className="bg-surface border border-border rounded px-3 py-2 text-sm">
+    <div className="bg-surface shadow-sm border border-border rounded px-3 py-2 text-sm">
       <p className="text-text">{payload[0].name}</p>
-      <p className="font-mono text-[#32bfa3]">{formatCurrency(payload[0].value)}</p>
+      <p className="font-mono text-green">{formatCurrency(payload[0].value)}</p>
     </div>
   );
 }
@@ -125,15 +126,15 @@ function SignalsPanel({
   const visibleInsights = insights?.slice(0, 4) ?? [];
 
   return (
-    <div className="bg-surface border border-border rounded">
+    <div className="bg-surface shadow-sm border border-border rounded">
       <div className="px-4 py-3 border-b border-border flex items-center justify-between">
         <div className="flex items-center gap-2">
-          <Lightbulb size={15} className="text-[#e2a53f]" />
+          <Lightbulb size={15} className="text-amber" />
           <h2 className="text-sm font-medium text-text">Signals</h2>
         </div>
         <button
           onClick={() => onNavigate('/advisor')}
-          className="text-xs text-muted hover:text-[#32bfa3] flex items-center gap-1"
+          className="text-xs text-muted hover:text-green flex items-center gap-1"
         >
           Ask advisor <ArrowRight size={11} />
         </button>
@@ -167,7 +168,7 @@ function SignalsPanel({
                 {actionRoute && actionLabel && (
                   <button
                     onClick={() => onNavigate(actionRoute)}
-                    className="text-xs text-muted hover:text-[#32bfa3] flex items-center gap-1 flex-shrink-0 pt-1"
+                    className="text-xs text-muted hover:text-green flex items-center gap-1 flex-shrink-0 pt-1"
                   >
                     {actionLabel}
                     <ArrowRight size={11} />
@@ -226,13 +227,13 @@ function DataQualityPanel({
   const primaryRoute = visibleIssues[0]?.route ?? '/advisor';
 
   return (
-    <div className="bg-surface border border-border rounded p-4">
+    <div className="bg-surface shadow-sm border border-border rounded p-4">
       <div className="flex items-center justify-between mb-4">
         <div className="flex items-center gap-2">
           <Icon size={14} style={{ color: tone.color }} />
           <h2 className="text-sm font-medium text-text">Data Quality</h2>
         </div>
-        <button onClick={() => onNavigate(primaryRoute)} className="text-xs text-muted hover:text-[#32bfa3] flex items-center gap-1">
+        <button onClick={() => onNavigate(primaryRoute)} className="text-xs text-muted hover:text-green flex items-center gap-1">
           Review <ArrowRight size={11} />
         </button>
       </div>
@@ -302,13 +303,13 @@ function SyncHealthPanel({
   const topConnections = health?.connections.slice(0, 3) ?? [];
 
   return (
-    <div className="bg-surface border border-border rounded p-4">
+    <div className="bg-surface shadow-sm border border-border rounded p-4">
       <div className="flex items-center justify-between mb-4">
         <div className="flex items-center gap-2">
           <RefreshCw size={14} style={{ color: tone.color }} />
           <h2 className="text-sm font-medium text-text">Sync Health</h2>
         </div>
-        <button onClick={() => onNavigate('/accounts')} className="text-xs text-muted hover:text-[#32bfa3] flex items-center gap-1">
+        <button onClick={() => onNavigate('/accounts')} className="text-xs text-muted hover:text-green flex items-center gap-1">
           Accounts <ArrowRight size={11} />
         </button>
       </div>
@@ -374,7 +375,7 @@ function SyncHealthPanel({
                     {actionLabel && (
                       <button
                         onClick={() => onNavigate('/accounts')}
-                        className="text-muted hover:text-[#32bfa3]"
+                        className="text-muted hover:text-green"
                       >
                         {actionLabel}
                       </button>
@@ -396,42 +397,40 @@ function SyncHealthPanel({
 
 function DashboardFocusPanel({
   mode,
+  onboardingPlan,
   syncHealth,
   reviewSummary,
   forecast,
   onNavigate,
 }: {
   mode: DashboardMode;
+  onboardingPlan?: OnboardingPlan;
   syncHealth?: SyncHealth;
   reviewSummary?: TransactionReviewSummary;
   forecast?: RecurringForecast;
   onNavigate: (route: string) => void;
 }) {
   if (mode === 'first_run') {
-    const setupSteps = [
-      { label: 'Source', active: true },
-      { label: 'Sync', active: false },
-      { label: 'Review', active: false },
-      { label: 'Dashboard', active: false },
-    ];
+    const setupSteps = onboardingPlan?.steps ?? [];
+    const current = onboardingPlan?.currentStep;
 
     return (
-      <div className="bg-surface border border-border rounded p-5">
+      <div className="bg-surface shadow-sm border border-border rounded p-5">
         <div className="grid grid-cols-1 xl:grid-cols-[1fr_380px] gap-6">
           <div>
             <div className="flex items-center gap-2 mb-3">
-              <CreditCard size={16} className="text-[#32bfa3]" />
+              <CreditCard size={16} className="text-green" />
               <h2 className="text-base font-medium text-text">Connect your first money source</h2>
             </div>
             <p className="text-sm text-muted max-w-2xl leading-relaxed mb-5">
-              Live bank sync gives Mizān the cleanest first dashboard.
+              {current?.detail ?? 'Live bank sync gives Mizān the cleanest first dashboard.'}
             </p>
             <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-2">
               <button
-                onClick={() => onNavigate('/accounts?connect=bank')}
-                className="flex items-center justify-center gap-2 rounded border border-[#32bfa3]/35 bg-[#32bfa3]/15 text-[#32bfa3] px-3 py-2.5 text-sm hover:bg-[#32bfa3]/20"
+                onClick={() => onNavigate('/onboarding')}
+                className="flex items-center justify-center gap-2 rounded border border-green/35 bg-green/15 text-green px-3 py-2.5 text-sm hover:bg-green/20"
               >
-                <CreditCard size={15} /> Bank or card
+                <CreditCard size={15} /> Start setup
               </button>
               <button
                 onClick={() => onNavigate('/accounts?manual=1')}
@@ -455,19 +454,21 @@ function DashboardFocusPanel({
           </div>
           <div className="border border-border rounded p-4 bg-background/40">
             <p className="text-xs text-muted mb-3">Setup path</p>
-            <div className="grid grid-cols-4 gap-2">
+            <div className="grid grid-cols-5 gap-2">
               {setupSteps.map((step, index) => (
                 <div key={step.label} className="min-w-0">
                   <div
                     className="h-1.5 rounded-full mb-2"
-                    style={{ backgroundColor: step.active ? '#32bfa3' : '#dbe7e2' }}
+                    style={{ backgroundColor: step.status === 'complete' ? '#32bfa3' : step.status === 'active' ? '#6487f0' : '#dbe7e2' }}
                   />
                   <p className="text-[11px] text-text truncate">{index + 1}. {step.label}</p>
                 </div>
               ))}
             </div>
             <p className="text-xs text-muted leading-relaxed mt-4">
-              After the first source syncs, Mizān will route open cleanup into Review Inbox.
+              {onboardingPlan
+                ? `${onboardingPlan.completedCount} of ${onboardingPlan.totalCount} steps complete.`
+                : 'After the first source syncs, Mizān will route open cleanup into Review Inbox.'}
             </p>
           </div>
         </div>
@@ -521,7 +522,7 @@ function DashboardFocusPanel({
   const Icon = item.icon;
 
   return (
-    <div className="bg-surface border border-border rounded px-4 py-3 flex items-center justify-between gap-4">
+    <div className="bg-surface shadow-sm border border-border rounded px-4 py-3 flex items-center justify-between gap-4">
       <div className="flex items-start gap-3 min-w-0">
         <div
           className="w-8 h-8 rounded flex items-center justify-center flex-shrink-0"
@@ -536,7 +537,7 @@ function DashboardFocusPanel({
       </div>
       <button
         onClick={() => onNavigate(item.route)}
-        className="flex items-center gap-1.5 text-xs text-muted hover:text-[#32bfa3] flex-shrink-0"
+        className="flex items-center gap-1.5 text-xs text-muted hover:text-green flex-shrink-0"
       >
         {item.action} <ArrowRight size={11} />
       </button>
@@ -621,6 +622,11 @@ export function Dashboard() {
     queryFn: () => insightsApi.quality(),
   });
 
+  const { data: credentials } = useQuery({
+    queryKey: ['credential-status', 'dashboard'],
+    queryFn: () => settingsApi.getCredentials(),
+  });
+
   if (nwLoading || accountsLoading) {
     return (
       <div className="p-6 space-y-6">
@@ -686,6 +692,13 @@ export function Dashboard() {
     forecast,
     dataQuality,
   });
+  const visibleAccountCount = accounts.filter((account) => !account.is_hidden).length;
+  const onboardingPlan = getOnboardingPlan({
+    accountCount: visibleAccountCount,
+    credentialStatus: credentials,
+    syncHealth,
+    reviewSummary,
+  });
 
   if (dashboardMode === 'first_run') {
     return (
@@ -696,6 +709,7 @@ export function Dashboard() {
         </div>
         <DashboardFocusPanel
           mode={dashboardMode}
+          onboardingPlan={onboardingPlan}
           syncHealth={syncHealth}
           reviewSummary={reviewSummary}
           forecast={forecast}
@@ -715,6 +729,7 @@ export function Dashboard() {
 
       <DashboardFocusPanel
         mode={dashboardMode}
+        onboardingPlan={onboardingPlan}
         syncHealth={syncHealth}
         reviewSummary={reviewSummary}
         forecast={forecast}
@@ -748,14 +763,14 @@ export function Dashboard() {
           onClick={() => navigate('/transactions')}
         />
         <div
-          className="bg-surface border border-border rounded p-5 cursor-pointer hover:bg-[#32bfa3]/5 transition-colors"
+          className="bg-surface shadow-sm border border-border rounded p-5 cursor-pointer hover:bg-green/5 transition-colors"
           onClick={() => navigate('/reports')}
         >
           <p className="text-xs text-muted mb-1">Top Category</p>
           {topCategory ? (
             <>
               <p className="text-sm font-medium text-text mb-1">{topCategory.category_name}</p>
-              <p className="font-mono text-2xl font-medium text-[#ef6f8a]">{formatCurrency(topCategory.amount)}</p>
+              <p className="font-mono text-2xl font-medium text-rose">{formatCurrency(topCategory.amount)}</p>
             </>
           ) : (
             <p className="text-sm text-muted">No data</p>
@@ -774,7 +789,7 @@ export function Dashboard() {
       <SyncActivityPanel runs={syncRuns} />
 
       {/* Row 2: Asset Breakdown */}
-      <div className="bg-surface border border-border rounded p-4">
+      <div className="bg-surface shadow-sm border border-border rounded p-4">
         <h2 className="text-sm font-medium text-text mb-4">Asset Breakdown</h2>
         {assetDonutData.length > 0 ? (
           <div className="flex items-center gap-8">
@@ -824,7 +839,7 @@ export function Dashboard() {
       {/* Row 3: Donut + Upcoming bills */}
       <div className="grid grid-cols-5 gap-4">
         {/* Spending Donut */}
-        <div className="col-span-3 bg-surface border border-border rounded p-4">
+        <div className="col-span-3 bg-surface shadow-sm border border-border rounded p-4">
           <h2 className="text-sm font-medium text-text mb-4">Spending by Category</h2>
           {donutData.length > 0 ? (
             <>
@@ -865,10 +880,10 @@ export function Dashboard() {
         </div>
 
         {/* Upcoming Bills */}
-        <div className="col-span-2 bg-surface border border-border rounded p-4">
+        <div className="col-span-2 bg-surface shadow-sm border border-border rounded p-4">
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-sm font-medium text-text">Next 30 Days</h2>
-            <button onClick={() => navigate('/bills')} className="text-xs text-muted hover:text-[#32bfa3] flex items-center gap-1">
+            <button onClick={() => navigate('/bills')} className="text-xs text-muted hover:text-green flex items-center gap-1">
               View all <ArrowRight size={11} />
             </button>
           </div>
@@ -877,11 +892,11 @@ export function Dashboard() {
               <div className="grid grid-cols-3 gap-2 text-xs">
                 <div>
                   <p className="text-muted mb-0.5">Income</p>
-                  <p className="font-mono text-[#32bfa3]">{formatCurrency(forecast.income)}</p>
+                  <p className="font-mono text-green">{formatCurrency(forecast.income)}</p>
                 </div>
                 <div>
                   <p className="text-muted mb-0.5">Bills</p>
-                  <p className="font-mono text-[#ef6f8a]">{formatCurrency(-forecast.bills)}</p>
+                  <p className="font-mono text-rose">{formatCurrency(-forecast.bills)}</p>
                 </div>
                 <div>
                   <p className="text-muted mb-0.5">Net</p>
@@ -918,10 +933,10 @@ export function Dashboard() {
       {/* Row 4: Budget + Goals + Investments */}
       <div className="grid grid-cols-3 gap-4">
         {/* Budget progress */}
-        <div className="bg-surface border border-border rounded p-4">
+        <div className="bg-surface shadow-sm border border-border rounded p-4">
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-sm font-medium text-text">Budget Progress</h2>
-            <button onClick={() => navigate('/budget')} className="text-xs text-muted hover:text-[#32bfa3] flex items-center gap-1">
+            <button onClick={() => navigate('/budget')} className="text-xs text-muted hover:text-green flex items-center gap-1">
               View all <ArrowRight size={11} />
             </button>
           </div>
@@ -961,13 +976,13 @@ export function Dashboard() {
         </div>
 
         {/* Goal progress */}
-        <div className="bg-surface border border-border rounded p-4">
+        <div className="bg-surface shadow-sm border border-border rounded p-4">
           <div className="flex items-center justify-between mb-4">
             <div className="flex items-center gap-2">
-              <Target size={14} className="text-[#e2a53f]" />
+              <Target size={14} className="text-amber" />
               <h2 className="text-sm font-medium text-text">Goals</h2>
             </div>
-            <button onClick={() => navigate('/goals')} className="text-xs text-muted hover:text-[#32bfa3] flex items-center gap-1">
+            <button onClick={() => navigate('/goals')} className="text-xs text-muted hover:text-green flex items-center gap-1">
               View all <ArrowRight size={11} />
             </button>
           </div>
@@ -985,23 +1000,23 @@ export function Dashboard() {
         </div>
 
         {/* Investment Snapshot */}
-        <div className="bg-surface border border-border rounded p-4">
+        <div className="bg-surface shadow-sm border border-border rounded p-4">
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-sm font-medium text-text">Investments</h2>
-            <button onClick={() => navigate('/investments')} className="text-xs text-muted hover:text-[#32bfa3] flex items-center gap-1">
+            <button onClick={() => navigate('/investments')} className="text-xs text-muted hover:text-green flex items-center gap-1">
               View all <ArrowRight size={11} />
             </button>
           </div>
           {holdings && holdings.length > 0 ? (
             <>
-              <p className="font-mono text-2xl text-[#6487f0] mb-4">{formatCurrency(investmentTotal)}</p>
+              <p className="font-mono text-2xl text-blue mb-4">{formatCurrency(investmentTotal)}</p>
               <div className="space-y-2">
                 {holdings.slice(0, 5).map((h) => {
                   const unrealized = h.cost_basis != null ? h.institution_value - h.cost_basis : null;
                   return (
                     <div key={h.id} className="flex items-center justify-between text-xs">
                       <div className="flex items-center gap-2">
-                        <span className="font-mono text-[#6487f0] font-medium">{h.ticker ?? '-'}</span>
+                        <span className="font-mono text-blue font-medium">{h.ticker ?? '-'}</span>
                         <span className="text-muted truncate max-w-[120px]">{h.security_name}</span>
                       </div>
                       <div className="text-right">
@@ -1026,10 +1041,10 @@ export function Dashboard() {
       </div>
 
       {/* Row 5: Recent Transactions */}
-      <div className="bg-surface border border-border rounded">
+      <div className="bg-surface shadow-sm border border-border rounded">
         <div className="px-4 py-3 border-b border-border flex items-center justify-between">
           <h2 className="text-sm font-medium text-text">Recent Transactions</h2>
-          <button onClick={() => navigate('/transactions')} className="text-xs text-muted hover:text-[#32bfa3] flex items-center gap-1">
+          <button onClick={() => navigate('/transactions')} className="text-xs text-muted hover:text-green flex items-center gap-1">
             View all <ArrowRight size={11} />
           </button>
         </div>
