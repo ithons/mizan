@@ -23,8 +23,27 @@ import type { Holding, InvestmentTransaction, Account } from '@shared/types';
 type SortCol = 'ticker' | 'value' | 'pnl' | 'pnl_pct';
 type SortDir = 'asc' | 'desc';
 type ActiveTab = 'holdings' | 'transactions';
+type AllocationLens = 'asset_type' | 'account_type' | 'tax_treatment' | 'symbol';
 
 const INV_ACCOUNT_TYPES = ['brokerage', 'ira_traditional', 'ira_roth', 'crypto_wallet'];
+
+const ALLOCATION_LENSES: Array<{ id: AllocationLens; label: string }> = [
+  { id: 'asset_type', label: 'Asset' },
+  { id: 'account_type', label: 'Account' },
+  { id: 'tax_treatment', label: 'Tax' },
+  { id: 'symbol', label: 'Symbol' },
+];
+
+const ALLOCATION_COLORS = [
+  '#6487f0',
+  '#32bfa3',
+  '#ef6f8a',
+  '#e2a53f',
+  '#9b7ef2',
+  '#5bbad5',
+  '#f08c6d',
+  '#7bbf6a',
+];
 
 const TX_TYPE_COLORS: Record<string, string> = {
   buy: 'bg-[#32bfa3]/10 text-[#32bfa3]',
@@ -53,9 +72,31 @@ interface CostBasisStats {
   label: 'Complete' | 'Partial' | 'Missing' | 'No holdings';
 }
 
+interface AllocationAccumulator {
+  key: string;
+  label: string;
+  value: number;
+  count: number;
+}
+
+interface AllocationSlice extends AllocationAccumulator {
+  pct: number;
+  color: string;
+}
+
 function formatPct(n: number | null): string {
   if (n == null) return '-';
   return `${n >= 0 ? '+' : ''}${n.toFixed(1)}%`;
+}
+
+function formatHoldingCount(count: number): string {
+  return `${count} holding${count === 1 ? '' : 's'}`;
+}
+
+function titleCase(value: string): string {
+  return value
+    .replace(/_/g, ' ')
+    .replace(/\b\w/g, (char) => char.toUpperCase());
 }
 
 function getCostBasisStats(holdings: Holding[]): CostBasisStats {
@@ -91,6 +132,112 @@ function costBasisTone(label: CostBasisStats['label']): string {
   if (label === 'Complete') return '#32bfa3';
   if (label === 'No holdings') return '#718087';
   return '#e2a53f';
+}
+
+function getTaxTreatmentLabel(type: Account['type'] | undefined): string {
+  if (type === 'ira_traditional' || type === 'ira_roth') return 'Tax-advantaged';
+  if (type === 'brokerage') return 'Taxable';
+  if (type === 'crypto_wallet') return 'Crypto';
+  return 'Other';
+}
+
+function getAllocationGroup(
+  holding: Holding,
+  lens: AllocationLens,
+  accountById: Map<string, Account>
+): { key: string; label: string } {
+  const account = accountById.get(holding.account_id);
+
+  if (lens === 'asset_type') {
+    const type = holding.security_type ?? 'unclassified';
+    return { key: `asset:${type}`, label: titleCase(type) };
+  }
+
+  if (lens === 'account_type') {
+    const type = account?.type ?? 'other';
+    return { key: `account:${type}`, label: ACCOUNT_TYPE_LABELS[type] ?? titleCase(type) };
+  }
+
+  if (lens === 'tax_treatment') {
+    const label = getTaxTreatmentLabel(account?.type);
+    return { key: `tax:${label}`, label };
+  }
+
+  const symbol = holding.ticker ?? holding.security_name ?? 'Unlabeled security';
+  return { key: `symbol:${symbol}`, label: symbol };
+}
+
+function getAllocationSlices(
+  holdings: Holding[],
+  lens: AllocationLens,
+  accountById: Map<string, Account>
+): AllocationSlice[] {
+  const total = holdings.reduce((sum, holding) => sum + holding.institution_value, 0);
+  if (total <= 0) return [];
+
+  const groups = new Map<string, AllocationAccumulator>();
+
+  for (const holding of holdings) {
+    const group = getAllocationGroup(holding, lens, accountById);
+    const existing = groups.get(group.key);
+    if (existing) {
+      existing.value += holding.institution_value;
+      existing.count += 1;
+    } else {
+      groups.set(group.key, {
+        key: group.key,
+        label: group.label,
+        value: holding.institution_value,
+        count: 1,
+      });
+    }
+  }
+
+  const sorted = Array.from(groups.values()).sort((a, b) => b.value - a.value);
+  const visible = lens === 'symbol' && sorted.length > 8
+    ? [
+        ...sorted.slice(0, 7),
+        sorted.slice(7).reduce<AllocationAccumulator>(
+          (rest, slice) => ({
+            key: 'symbol:other',
+            label: 'Other',
+            value: rest.value + slice.value,
+            count: rest.count + slice.count,
+          }),
+          { key: 'symbol:other', label: 'Other', value: 0, count: 0 }
+        ),
+      ]
+    : sorted;
+
+  return visible.map((slice, index) => ({
+    ...slice,
+    pct: (slice.value / total) * 100,
+    color: ALLOCATION_COLORS[index % ALLOCATION_COLORS.length],
+  }));
+}
+
+function getAllocationQualityLabel(
+  holdings: Holding[],
+  lens: AllocationLens,
+  accountById: Map<string, Account>
+): string {
+  if (holdings.length === 0) return 'No holdings';
+
+  if (lens === 'account_type' || lens === 'tax_treatment') {
+    const missingAccounts = holdings.filter((holding) => !accountById.has(holding.account_id)).length;
+    if (missingAccounts > 0) return `${formatHoldingCount(missingAccounts)} missing account links`;
+    return lens === 'tax_treatment' ? 'Inferred from account type' : 'Linked to accounts';
+  }
+
+  if (lens === 'asset_type') {
+    const unclassified = holdings.filter((holding) => !holding.security_type).length;
+    if (unclassified > 0) return `${formatHoldingCount(unclassified)} unclassified`;
+    return 'Classified by provider type';
+  }
+
+  const unlabeled = holdings.filter((holding) => !holding.ticker && !holding.security_name).length;
+  if (unlabeled > 0) return `${formatHoldingCount(unlabeled)} unlabeled`;
+  return 'Labeled by security';
 }
 
 function PnlCell({ value, pct }: { value: number | null; pct: number | null }) {
@@ -160,6 +307,7 @@ export function Investments() {
   const [sortBy, setSortBy] = useState<SortCol>('value');
   const [sortDir, setSortDir] = useState<SortDir>('desc');
   const [txTypeFilter, setTxTypeFilter] = useState<string>('');
+  const [allocationLens, setAllocationLens] = useState<AllocationLens>('asset_type');
 
   const startDate = format(subMonths(new Date(), 12), 'yyyy-MM-dd');
   const endDate = format(new Date(), 'yyyy-MM-dd');
@@ -188,6 +336,11 @@ export function Investments() {
     queryKey: ['accounts'],
     queryFn: accountsApi.list,
   });
+
+  const accountById = useMemo(
+    () => new Map(accounts.map((account) => [account.id, account])),
+    [accounts]
+  );
 
   const invAccounts = useMemo(
     () => accounts.filter((a) => INV_ACCOUNT_TYPES.includes(a.type)),
@@ -299,13 +452,14 @@ export function Investments() {
   );
 
   // Allocation breakdown
-  const allocation = useMemo(() => {
-    const total = (invReport?.allocation ?? []).reduce((s, a) => s + a.total_value, 0);
-    return (invReport?.allocation ?? []).map((a) => ({
-      ...a,
-      pct: total > 0 ? (a.total_value / total) * 100 : 0,
-    }));
-  }, [invReport]);
+  const allocationSlices = useMemo(
+    () => getAllocationSlices(filteredHoldings, allocationLens, accountById),
+    [filteredHoldings, allocationLens, accountById]
+  );
+  const allocationQuality = useMemo(
+    () => getAllocationQualityLabel(filteredHoldings, allocationLens, accountById),
+    [filteredHoldings, allocationLens, accountById]
+  );
 
   return (
     <div className="p-6 space-y-6">
@@ -446,18 +600,76 @@ export function Investments() {
       </div>
 
       {/* Allocation breakdown */}
-      {allocation.length > 0 && (
-        <div className="flex flex-wrap gap-3">
-          {allocation.map((a) => (
-            <div key={a.security_type} className="flex flex-col gap-1.5 p-3 bg-surface border border-border rounded min-w-[130px]">
-              <p className="text-xs text-text font-medium capitalize">{a.security_type}</p>
-              <div className="h-1 rounded bg-[#6487f0]" style={{ width: `${Math.max(a.pct, 4)}%`, maxWidth: '100%' }} />
-              <div className="flex items-center justify-between gap-2 text-xs">
-                <span className="font-mono text-muted">{a.pct.toFixed(0)}%</span>
-                <span className="font-mono text-text">{formatCurrency(a.total_value)}</span>
-              </div>
+      {allocationSlices.length > 0 && (
+        <div className="bg-surface border border-border rounded p-4 space-y-4">
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+            <div>
+              <p className="text-xs text-muted font-medium uppercase tracking-wider">Portfolio Allocation</p>
+              <p className="text-xs text-muted mt-1">
+                {selectedAccountId ? 'Filtered to selected account' : 'All investment accounts'}
+              </p>
             </div>
-          ))}
+            <div className="flex flex-wrap gap-1 rounded-full border border-border bg-background p-1">
+              {ALLOCATION_LENSES.map((lens) => (
+                <button
+                  key={lens.id}
+                  onClick={() => setAllocationLens(lens.id)}
+                  className={`px-3 py-1.5 text-xs rounded-full transition-colors ${
+                    allocationLens === lens.id
+                      ? 'bg-[#32bfa3] text-white'
+                      : 'text-muted hover:text-text hover:bg-surface'
+                  }`}
+                >
+                  {lens.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="space-y-3">
+            {allocationSlices.map((slice) => (
+              <div key={slice.key} className="space-y-1.5">
+                <div className="flex items-center justify-between gap-3 text-xs">
+                  <div className="min-w-0">
+                    <span className="font-medium text-text truncate block">{slice.label}</span>
+                    <span className="text-muted">{formatHoldingCount(slice.count)}</span>
+                  </div>
+                  <div className="text-right flex-shrink-0">
+                    <p className="font-mono text-text">{formatCurrency(slice.value)}</p>
+                    <p className="font-mono text-muted">{slice.pct.toFixed(1)}%</p>
+                  </div>
+                </div>
+                <div className="h-2 rounded-full bg-background border border-border/70 overflow-hidden">
+                  <div
+                    className="h-full rounded-full"
+                    style={{
+                      width: `${Math.max(slice.pct, 1)}%`,
+                      backgroundColor: slice.color,
+                    }}
+                  />
+                </div>
+              </div>
+            ))}
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3 border-t border-border pt-3 text-xs">
+            <div>
+              <p className="text-muted">Largest Exposure</p>
+              <p className="font-mono text-text mt-1">
+                {allocationSlices[0].label} / {allocationSlices[0].pct.toFixed(1)}%
+              </p>
+            </div>
+            <div>
+              <p className="text-muted">Lens</p>
+              <p className="text-text mt-1">
+                {ALLOCATION_LENSES.find((lens) => lens.id === allocationLens)?.label ?? 'Asset'}
+              </p>
+            </div>
+            <div>
+              <p className="text-muted">Data Quality</p>
+              <p className="text-text mt-1">{allocationQuality}</p>
+            </div>
+          </div>
         </div>
       )}
 
