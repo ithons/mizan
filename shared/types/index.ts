@@ -189,6 +189,7 @@ export interface Budget {
   projected_spend?: number;
   projected_remaining?: number;
   projected_percent?: number;
+  pacing_velocity?: number;
   forecast_confidence?: 'none' | 'confirmed' | 'likely' | 'uncertain';
 }
 

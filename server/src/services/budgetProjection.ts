@@ -287,6 +287,21 @@ export function getMonthlyBudgetsWithProjection(
     const availableAmount = budget.amount + rolloverBalance;
     const projectedSpend = (budget.spent ?? 0) + expectedRecurring;
     const projectedRemaining = availableAmount - projectedSpend;
+    
+    let pacingVelocity = 0;
+    if (availableAmount > 0) {
+      const daysInMonth = new Date(year, month, 0).getDate();
+      const currentDay = Math.min(now.getDate(), daysInMonth);
+      const isPastMonth = now.getFullYear() > year || (now.getFullYear() === year && now.getMonth() + 1 > month);
+      const isFutureMonth = now.getFullYear() < year || (now.getFullYear() === year && now.getMonth() + 1 < month);
+      
+      const timeElapsedRatio = isPastMonth ? 1 : isFutureMonth ? 0 : currentDay / daysInMonth;
+      const spendRatio = (budget.spent ?? 0) / availableAmount;
+      
+      if (timeElapsedRatio > 0) {
+        pacingVelocity = spendRatio / timeElapsedRatio;
+      }
+    }
 
     return {
       ...budget,
@@ -296,6 +311,7 @@ export function getMonthlyBudgetsWithProjection(
       projected_spend: projectedSpend,
       projected_remaining: projectedRemaining,
       projected_percent: availableAmount > 0 ? (projectedSpend / availableAmount) * 100 : 0,
+      pacing_velocity: pacingVelocity,
       forecast_confidence: confidence,
     };
   });
