@@ -22,9 +22,9 @@ function insertTransaction(
   db.prepare(`
     INSERT INTO transactions (
       id, account_id, date, amount, merchant_name, original_name, category_id, pending,
-      recurring_id, review_status, duplicate_status, transfer_status, created_at, updated_at
+      source_type, recurring_id, review_status, duplicate_status, transfer_status, created_at, updated_at
     )
-    VALUES (?, 'acct_checking', ?, ?, ?, ?, ?, 0, ?, ?, 'none', 'none', ?, ?)
+    VALUES (?, 'acct_checking', ?, ?, ?, ?, ?, 0, 'manual', ?, ?, 'none', 'none', ?, ?)
   `).run(
     params.id,
     params.date,
@@ -70,6 +70,23 @@ function setupAdvisorDb(): Database.Database {
       institution_name TEXT,
       status TEXT NOT NULL,
       last_synced_at TEXT
+    );
+
+    CREATE TABLE teller_items (
+      id TEXT PRIMARY KEY,
+      enrollment_id TEXT UNIQUE NOT NULL,
+      institution_name TEXT NOT NULL DEFAULT '',
+      last_synced_at TEXT,
+      status TEXT NOT NULL DEFAULT 'active',
+      created_at TEXT NOT NULL
+    );
+
+    CREATE TABLE simplefin_connections (
+      id TEXT PRIMARY KEY,
+      access_url TEXT UNIQUE NOT NULL,
+      last_synced_at TEXT,
+      status TEXT NOT NULL DEFAULT 'active',
+      created_at TEXT NOT NULL
     );
 
     CREATE TABLE coinbase_connections (

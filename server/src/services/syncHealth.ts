@@ -12,7 +12,7 @@ const STALE_AFTER_DAYS = 3;
 
 export interface SyncHealthConnectionRow {
   id: string;
-  provider: 'plaid' | 'coinbase';
+  provider: 'plaid' | 'coinbase' | 'teller' | 'simplefin';
   institution_name: string | null;
   status: string;
   last_synced_at: string | null;
@@ -29,7 +29,13 @@ function ageInDays(iso: string | null, now: Date): number | null {
 }
 
 function fallbackInstitutionName(provider: SyncHealthConnectionRow['provider']): string {
-  return provider === 'plaid' ? 'Bank connection' : 'Coinbase';
+  switch (provider) {
+    case 'plaid': return 'Bank connection';
+    case 'teller': return 'Teller connection';
+    case 'simplefin': return 'SimpleFIN connection';
+    case 'coinbase': return 'Coinbase';
+    default: return 'Connection';
+  }
 }
 
 function classifyStatus(row: SyncHealthConnectionRow, syncAgeDays: number | null): {
@@ -199,6 +205,38 @@ export function getSyncHealth(db: Database.Database): SyncHealth {
     GROUP BY pi.id
   `).all() as SyncHealthConnectionRow[];
 
+  const tellerRows = db.prepare(`
+    SELECT
+      ti.id,
+      'teller' AS provider,
+      ti.institution_name,
+      ti.status,
+      ti.last_synced_at,
+      COUNT(a.id) AS account_count
+    FROM teller_items ti
+    LEFT JOIN accounts a
+      ON a.connection_id = ti.id
+     AND a.connection_type = 'teller'
+     AND a.is_hidden = 0
+    GROUP BY ti.id
+  `).all() as SyncHealthConnectionRow[];
+
+  const simplefinRows = db.prepare(`
+    SELECT
+      sc.id,
+      'simplefin' AS provider,
+      'SimpleFIN' AS institution_name,
+      sc.status,
+      sc.last_synced_at,
+      COUNT(a.id) AS account_count
+    FROM simplefin_connections sc
+    LEFT JOIN accounts a
+      ON a.connection_id = sc.id
+     AND a.connection_type = 'simplefin'
+     AND a.is_hidden = 0
+    GROUP BY sc.id
+  `).all() as SyncHealthConnectionRow[];
+
   const coinbaseRows = db.prepare(`
     SELECT
       cc.id,
@@ -216,6 +254,6 @@ export function getSyncHealth(db: Database.Database): SyncHealth {
     GROUP BY cc.id
   `).all() as SyncHealthConnectionRow[];
 
-  const connections = [...plaidRows, ...coinbaseRows].map((row) => classifySyncConnection(row));
+  const connections = [...plaidRows, ...tellerRows, ...simplefinRows, ...coinbaseRows].map((row) => classifySyncConnection(row));
   return summarizeSyncHealth(connections);
 }
