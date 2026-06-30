@@ -31,6 +31,7 @@ import type { DataQualitySummary, Goal, Insight, RecurringForecast, SyncHealth, 
 import { accountsApi, networthApi, reportsApi, recurringApi, budgetsApi, transactionsApi, investmentsApi, insightsApi, goalsApi, syncApi, settingsApi } from '../lib/api';
 import { getDashboardMode, type DashboardMode } from '../lib/dashboardState';
 import { getOnboardingPlan, type OnboardingPlan } from '../lib/onboarding';
+import { advisorRouteState } from '../lib/advisorRouteState';
 import { formatCurrency, formatDate, formatDateShort, formatMonth, formatRelativeTime } from '../lib/formatters';
 import { AmountBadge } from '../components/AmountBadge';
 import { CategoryBadge } from '../components/CategoryBadge';
@@ -119,9 +120,11 @@ const dataQualityTone: Record<DataQualitySummary['status'], {
 function SignalsPanel({
   insights,
   onNavigate,
+  onAskAdvisor,
 }: {
   insights?: Insight[];
   onNavigate: (route: string) => void;
+  onAskAdvisor: (prompt: string) => void;
 }) {
   const visibleInsights = insights?.slice(0, 4) ?? [];
 
@@ -133,7 +136,7 @@ function SignalsPanel({
           <h2 className="text-sm font-medium text-text">Signals</h2>
         </div>
         <button
-          onClick={() => onNavigate('/advisor')}
+          onClick={() => onAskAdvisor('Give me a financial overview from the dashboard. Explain sync health, review blockers, cash flow, budget risk, goals, and the most important next action.')}
           className="text-xs text-muted hover:text-green flex items-center gap-1"
         >
           Ask advisor <ArrowRight size={11} />
@@ -699,6 +702,15 @@ export function Dashboard() {
     syncHealth,
     reviewSummary,
   });
+  const askAdvisor = (prompt: string) => {
+    navigate('/advisor', {
+      state: advisorRouteState({
+        source: 'dashboard',
+        prompt,
+        recordKind: 'dashboard',
+      }),
+    });
+  };
 
   if (dashboardMode === 'first_run') {
     return (
@@ -780,7 +792,7 @@ export function Dashboard() {
 
       <div className="grid grid-cols-1 xl:grid-cols-4 gap-4">
         <div className="xl:col-span-2">
-          <SignalsPanel insights={insights} onNavigate={navigate} />
+        <SignalsPanel insights={insights} onNavigate={navigate} onAskAdvisor={askAdvisor} />
         </div>
         <DataQualityPanel quality={dataQuality} onNavigate={navigate} />
         <SyncHealthPanel health={syncHealth} onNavigate={navigate} />

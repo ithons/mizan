@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import {
   ArrowRight,
   Send,
@@ -24,6 +24,7 @@ import type {
 import { aiApi, insightsApi } from '../lib/api';
 import { useAiChat } from '../hooks/useAiChat';
 import { formatRelativeTime } from '../lib/formatters';
+import { isAdvisorRouteState } from '../lib/advisorRouteState';
 
 // ── Simple inline markdown renderer ──────────────────────────────────────────
 
@@ -509,9 +510,12 @@ function EmptyChat({
 
 export function Advisor() {
   const { messages, isStreaming, sendMessage, stopStreaming, clearChat } = useAiChat();
+  const location = useLocation();
+  const navigate = useNavigate();
   const [input, setInput] = useState('');
   const bottomRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const handledRoutePromptRef = useRef<string | null>(null);
 
   const { data: contextStatus, isError: contextError } = useQuery({
     queryKey: ['ai-context'],
@@ -550,6 +554,18 @@ export function Advisor() {
     if (isStreaming) return;
     void sendMessage(prompt);
   }, [isStreaming, sendMessage]);
+
+  useEffect(() => {
+    if (isStreaming || contextUnavailable || !isAdvisorRouteState(location.state)) return;
+
+    const routePrompt = location.state.advisorPrompt;
+    const promptKey = `${routePrompt.source}:${routePrompt.prompt}`;
+    if (handledRoutePromptRef.current === promptKey) return;
+
+    handledRoutePromptRef.current = promptKey;
+    void sendMessage(routePrompt.prompt);
+    navigate(location.pathname, { replace: true, state: null });
+  }, [contextUnavailable, isStreaming, location.pathname, location.state, navigate, sendMessage]);
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) {

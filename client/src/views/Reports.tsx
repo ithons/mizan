@@ -20,6 +20,7 @@ import {
 import { ChevronRight } from 'lucide-react';
 import { format, subMonths, startOfMonth, endOfMonth, startOfYear } from 'date-fns';
 import { reportsApi, networthApi, investmentsApi, categoriesApi } from '../lib/api';
+import { advisorRouteState } from '../lib/advisorRouteState';
 import { formatCurrency, formatMonth, formatDate, formatPercent } from '../lib/formatters';
 import { PageLoader } from '../components/LoadingSpinner';
 import { EmptyState } from '../components/EmptyState';
@@ -249,7 +250,13 @@ function ReportMetricCard({
   );
 }
 
-function ReportSummaryPanel({ summary }: { summary?: ReportSummary }) {
+function ReportSummaryPanel({
+  summary,
+  onAsk,
+}: {
+  summary?: ReportSummary;
+  onAsk?: (summary: ReportSummary) => void;
+}) {
   if (!summary) return null;
 
   const topMover = summary.spending_movers[0];
@@ -263,7 +270,17 @@ function ReportSummaryPanel({ summary }: { summary?: ReportSummary }) {
         <span>
           Compared with <span className="text-text">{summary.comparison_label}</span>
         </span>
-        <span className="font-mono">{comparisonRange}</span>
+        <div className="flex items-center gap-3">
+          <span className="font-mono">{comparisonRange}</span>
+          {onAsk && (
+            <button
+              className="text-muted hover:text-green flex items-center gap-1"
+              onClick={() => onAsk(summary)}
+            >
+              Ask advisor <ChevronRight size={11} />
+            </button>
+          )}
+        </div>
       </div>
       <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
         <ReportMetricCard label="Income" metric={summary.income} tone="#32bfa3" />
@@ -1270,6 +1287,7 @@ const REPORT_VIEW_PRESETS: ReportViewPreset[] = [
 ];
 
 export function Reports() {
+  const navigate = useNavigate();
   const [preset, setPreset] = useState<DatePreset>('this_month');
   const [customStart, setCustomStart] = useState('');
   const [customEnd, setCustomEnd] = useState('');
@@ -1288,6 +1306,22 @@ export function Reports() {
     setComparison(view.comparison);
     setTab(view.tab);
     setTrendCategoryIds(view.categoryIds ?? []);
+  };
+  const askAdvisorAboutReport = (report: ReportSummary) => {
+    navigate('/advisor', {
+      state: advisorRouteState({
+        source: 'reports',
+        prompt: `Explain this ${tab === 'cashflow' ? 'cash-flow' : tab} report from ${report.start_date ?? startDate} to ${report.end_date ?? endDate}. Focus on income, spending, net cash flow, excluded flows, and what changed versus ${report.comparison_label}.`,
+        recordKind: 'report_summary',
+        recordId: `${report.start_date ?? startDate}:${report.end_date ?? endDate}`,
+        params: {
+          tab,
+          startDate: report.start_date ?? startDate,
+          endDate: report.end_date ?? endDate,
+          comparison: report.comparison,
+        },
+      }),
+    });
   };
 
   return (
@@ -1369,7 +1403,7 @@ export function Reports() {
         </div>
       </div>
 
-      <ReportSummaryPanel summary={summary} />
+      <ReportSummaryPanel summary={summary} onAsk={askAdvisorAboutReport} />
 
       {/* Tab selector */}
       <div className="flex gap-1 bg-surface shadow-sm border border-border rounded p-0.5 w-fit">
