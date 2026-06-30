@@ -378,7 +378,7 @@ export function buildDashboardCardAdvisorPrompt(
       `The displayed value is ${formatMoneyValue(context.value)}.`,
       deltaPhrase,
       extraContext,
-      'Explain what changed, whether this needs review, and which accounts, transactions, reports, sync runs, or budget rows I should inspect.',
+      'Explain why this number changed, whether it needs review, and which accounts, transactions, reports, sync runs, or budget rows I should inspect.',
     ].join(' '),
   };
 }

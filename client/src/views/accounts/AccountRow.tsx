@@ -127,11 +127,13 @@ export function AccountRow({
         {formatCurrency(account.current_balance)}
       </span>
       <button
-        className="opacity-0 group-hover:opacity-100 p-1 text-muted hover:text-blue transition-all"
+        className="opacity-0 group-hover:opacity-100 px-1.5 py-1 text-[11px] text-muted hover:text-blue transition-all flex items-center gap-1"
         onClick={(e) => { e.stopPropagation(); onAsk(); }}
-        title="Ask advisor"
+        title="Why did this balance change?"
+        aria-label={`Why did ${account.account_name} balance change?`}
       >
         <Sparkles size={13} />
+        Why?
       </button>
 
       {/* Kebab */}

@@ -458,6 +458,7 @@ test('dashboard card advisor prompt captures the selected metric context', () =>
   assert.match(prompt.prompt, /displayed value is \$3200\.00/);
   assert.match(prompt.prompt, /displayed change is \+\$200\.00 vs last month/);
   assert.match(prompt.prompt, /Transfers are excluded/);
+  assert.match(prompt.prompt, /Explain why this number changed/);
 });
 
 test('recurring forecast advisor prompt captures cash projection context', () => {

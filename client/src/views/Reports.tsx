@@ -250,9 +250,11 @@ function formatDelta(metric: ReportMetricSummary, isRate = false): string {
 function AdvisorEvidenceButton({
   disabled,
   onClick,
+  label = 'Why changed?',
 }: {
   disabled: boolean;
   onClick: () => void;
+  label?: string;
 }) {
   return (
     <button
@@ -260,9 +262,10 @@ function AdvisorEvidenceButton({
       disabled={disabled}
       onClick={onClick}
       className="text-xs border border-border rounded px-3 py-1.5 text-muted hover:text-green disabled:opacity-40 disabled:hover:text-muted flex items-center gap-1"
+      title={label}
     >
       <Sparkles size={13} />
-      Ask advisor
+      {label}
     </button>
   );
 }
@@ -321,8 +324,9 @@ function ReportSummaryPanel({
             <button
               className="text-muted hover:text-green flex items-center gap-1"
               onClick={() => onAsk(summary)}
+              title="Why did these report numbers change?"
             >
-              Ask advisor <ChevronRight size={11} />
+              Why changed? <ChevronRight size={11} />
             </button>
           )}
         </div>

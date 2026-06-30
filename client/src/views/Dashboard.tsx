@@ -77,15 +77,16 @@ function StatCard({
         {onAsk && (
           <button
             type="button"
-            className="text-muted hover:text-green transition-colors"
-            title="Ask advisor"
-            aria-label={`Ask advisor about ${title}`}
+            className="text-[11px] text-muted hover:text-green transition-colors flex items-center gap-1"
+            title={`Why did ${title} change?`}
+            aria-label={`Why did ${title} change?`}
             onClick={(event) => {
               event.stopPropagation();
               onAsk();
             }}
           >
             <Sparkles size={12} />
+            Why changed?
           </button>
         )}
       </div>
@@ -837,9 +838,9 @@ export function Dashboard() {
             <p className="text-xs text-muted">Top Category</p>
             <button
               type="button"
-              className="text-muted hover:text-green transition-colors"
-              title="Ask advisor"
-              aria-label="Ask advisor about Top Category"
+              className="text-[11px] text-muted hover:text-green transition-colors flex items-center gap-1"
+              title="Why did this top category change?"
+              aria-label="Why did this top category change?"
               onClick={(event) => {
                 event.stopPropagation();
                 askAdvisorAboutDashboardCard({
@@ -854,6 +855,7 @@ export function Dashboard() {
               }}
             >
               <Sparkles size={12} />
+              Why changed?
             </button>
           </div>
           {topCategory ? (
