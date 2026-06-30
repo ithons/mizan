@@ -37,13 +37,13 @@ test('dashboard layout normalization drops invalid entries and appends missing c
 });
 
 test('dashboard card movement respects boundaries', () => {
-  const movedDown = moveDashboardCard(DEFAULT_DASHBOARD_LAYOUT, 'overview', 'down');
-  assert.deepEqual(ids(movedDown).slice(0, 2), ['signals', 'overview']);
+  const movedDown = moveDashboardCard(DEFAULT_DASHBOARD_LAYOUT, 'morning_briefing', 'down');
+  assert.deepEqual(ids(movedDown).slice(0, 2), ['overview', 'morning_briefing']);
 
-  const movedUp = moveDashboardCard(movedDown, 'overview', 'up');
-  assert.deepEqual(ids(movedUp).slice(0, 2), ['overview', 'signals']);
+  const movedUp = moveDashboardCard(movedDown, 'morning_briefing', 'up');
+  assert.deepEqual(ids(movedUp).slice(0, 2), ['morning_briefing', 'overview']);
 
-  const firstStillFirst = moveDashboardCard(DEFAULT_DASHBOARD_LAYOUT, 'overview', 'up');
+  const firstStillFirst = moveDashboardCard(DEFAULT_DASHBOARD_LAYOUT, 'morning_briefing', 'up');
   assert.deepEqual(ids(firstStillFirst), ids(DEFAULT_DASHBOARD_LAYOUT));
 });
 
@@ -53,8 +53,8 @@ test('dashboard visible cards place pinned cards first and exclude hidden cards'
 
   assert.deepEqual(visibleDashboardCardIds(pinned).slice(0, 3), [
     'recent_transactions',
+    'morning_briefing',
     'overview',
-    'sync_activity',
   ]);
   assert.equal(visibleDashboardCardIds(pinned).includes('signals'), false);
 });

@@ -6,9 +6,9 @@ import {
 } from '../client/src/lib/reviewInboxBatch';
 
 test('review inbox queue navigation wraps through desktop queues', () => {
-  assert.equal(nextReviewQueue('uncategorized', 1), 'rule_suggestions');
-  assert.equal(nextReviewQueue('uncategorized', -1), 'transfer_candidates');
-  assert.equal(nextReviewQueue('transfer_candidates', 1), 'uncategorized');
+  assert.equal(nextReviewQueue('ai_insights', 1), 'uncategorized');
+  assert.equal(nextReviewQueue('ai_insights', -1), 'transfer_candidates');
+  assert.equal(nextReviewQueue('transfer_candidates', 1), 'ai_insights');
 });
 
 test('review inbox exposes batch actions only where safe', () => {

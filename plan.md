@@ -18,6 +18,9 @@ Clean up stray development scripts from the root directory to ensure a clean wor
 
 ## Phase 3: Data Integrity & Tech Debt
 
+✅ 3.1 Cross-Provider Duplicate Detection
+✅ 3.2 Stale State Degradation
+
 ### 3.1 Cross-Provider Duplicate Detection
 When migrating from Plaid to Teller or SimpleFIN, overlapping transaction histories will artificially inflate spending and net flow.
 *   **Target:** `server/src/services/transactionIntegrity.ts`
@@ -38,6 +41,10 @@ If sync fails, "Safe to Spend" math becomes dangerous to trust.
 
 ## Phase 4: The Proactive Engine
 
+✅ 4.2 Woven AI (Proactive Inbox)
+
+✅ 4.1 "Safe to Spend" & Velocity Pacing
+
 ### 4.1 "Safe to Spend" & Velocity Pacing
 Shift budgeting from static monthly limits to velocity and pacing.
 *   **Target:** `server/src/services/budgetProjection.ts`, `shared/types/index.ts`
@@ -57,6 +64,9 @@ The AI should act as a background worker, not just a chatbot.
 ---
 
 ## Phase 5: Design & UI ("Morning Briefing")
+
+✅ 5.1 The Windshield Redesign
+✅ 5.2 Action-Oriented Inbox
 
 ### 5.1 The Windshield Redesign
 Replace the generic SaaS dashboard with a highly opinionated, action-oriented briefing.

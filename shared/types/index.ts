@@ -387,6 +387,7 @@ export interface MerchantRuleSuggestion {
 }
 
 export type TransactionReviewQueueId =
+  | 'ai_insights'
   | 'uncategorized'
   | 'rule_suggestions'
   | 'pending'

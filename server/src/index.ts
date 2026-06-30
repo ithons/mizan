@@ -106,13 +106,12 @@ async function main() {
     : ViteExpress.listen(app, PORT, announce);
 
   // Startup sync is opt-in because it calls external providers.
+  // It intentionally runs asynchronously without awaiting so the UI can paint immediately.
   if (process.env.MIZAN_AUTO_SYNC_ON_STARTUP === 'true') {
-    setTimeout(async () => {
-      try {
-        await runFullSync();
-      } catch (err) {
+    setTimeout(() => {
+      runFullSync().catch((err) => {
         console.error('[startup] Sync failed:', (err as Error).message);
-      }
+      });
     }, 2000);
   }
 
