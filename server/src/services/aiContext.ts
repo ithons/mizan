@@ -327,8 +327,11 @@ export function buildFinancialContext(): string {
       const sign = occurrence.amount >= 0 ? '+' : '-';
       const status = occurrence.is_confirmed ? 'confirmed' : 'detected';
       const category = occurrence.category_name ?? 'Uncategorized';
+      const adjustment = occurrence.adjustment_action
+        ? `, ${occurrence.adjustment_action} adjustment from ${occurrence.original_expected_date ?? occurrence.expected_date}`
+        : '';
       lines.push(
-        `    ${occurrence.expected_date}: ${occurrence.merchant_name} ${sign}${fmt(Math.abs(occurrence.amount))} (${category}, ${occurrence.frequency}, ${status})`
+        `    ${occurrence.expected_date}: ${occurrence.merchant_name} ${sign}${fmt(Math.abs(occurrence.amount))} (${category}, ${occurrence.frequency}, ${status}${adjustment})`
       );
     }
   }

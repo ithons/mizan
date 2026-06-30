@@ -222,6 +222,20 @@ export interface RecurringPattern {
   category_color?: string | null;
 }
 
+export type RecurringAdjustmentAction = 'skip' | 'snooze' | 'adjust';
+
+export interface RecurringOccurrenceAdjustment {
+  id: string;
+  recurring_id: string;
+  original_date: string;
+  action: RecurringAdjustmentAction;
+  adjusted_date?: string | null;
+  adjusted_amount?: number | null;
+  note?: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface RecurringForecastOccurrence {
   id: string;
   pattern_id: string;
@@ -239,6 +253,12 @@ export interface RecurringForecastOccurrence {
   status: 'overdue' | 'upcoming';
   days_until: number;
   needs_review: boolean;
+  adjustment_id?: string | null;
+  adjustment_action?: RecurringAdjustmentAction | null;
+  original_expected_date?: string | null;
+  adjusted_date?: string | null;
+  adjusted_amount?: number | null;
+  adjustment_note?: string | null;
 }
 
 export interface RecurringForecast {

@@ -96,6 +96,14 @@ export const UpdateRecurringSchema = z.object({
   category_id: z.string().nullable().optional(),
 });
 
+export const UpsertRecurringAdjustmentSchema = z.object({
+  original_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  action: z.enum(['skip', 'snooze', 'adjust']),
+  adjusted_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(),
+  adjusted_amount: z.number().nullable().optional(),
+  note: z.string().max(240).nullable().optional(),
+});
+
 export const CreateGoalSchema = z.object({
   name: z.string().min(1),
   type: z.enum(['savings', 'debt']),

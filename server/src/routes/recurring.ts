@@ -1,9 +1,14 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import { getDb } from '../db/index';
 import { validate } from '../middleware/validate';
-import { UpdateRecurringSchema } from '../../../shared/schemas';
+import { UpdateRecurringSchema, UpsertRecurringAdjustmentSchema } from '../../../shared/schemas';
 import { buildRecurringForecast } from '../services/recurringForecast';
 import { buildSubscriptionInsights } from '../services/subscriptionInsights';
+import {
+  deleteRecurringAdjustment,
+  listRecurringAdjustments,
+  upsertRecurringAdjustment,
+} from '../services/recurringAdjustments';
 import { format, addDays } from 'date-fns';
 
 const router = Router();
@@ -16,6 +21,10 @@ function parseDays(value: unknown): number | null {
   if (!Number.isSafeInteger(parsed)) return null;
 
   return Math.min(Math.max(parsed, 1), 365);
+}
+
+function routeParam(value: string | string[] | undefined): string | null {
+  return typeof value === 'string' && value.length > 0 ? value : null;
 }
 
 // GET / - all active recurring_patterns JOIN categories
@@ -96,6 +105,62 @@ router.get('/subscriptions', (req: Request, res: Response, next: NextFunction): 
     }
 
     res.json({ data: buildSubscriptionInsights(db, days) });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.get('/:id/adjustments', (req: Request, res: Response, next: NextFunction): void => {
+  try {
+    const db = getDb();
+    const id = routeParam(req.params.id);
+    if (!id) {
+      res.status(400).json({ error: 'Invalid recurring pattern id' });
+      return;
+    }
+
+    res.json({ data: listRecurringAdjustments(db, id) });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.put(
+  '/:id/adjustments',
+  validate(UpsertRecurringAdjustmentSchema),
+  (req: Request, res: Response, next: NextFunction): void => {
+    try {
+      const db = getDb();
+      const id = routeParam(req.params.id);
+      if (!id) {
+        res.status(400).json({ error: 'Invalid recurring pattern id' });
+        return;
+      }
+
+      res.json({ data: upsertRecurringAdjustment(db, id, req.body) });
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
+router.delete('/:id/adjustments/:adjustmentId', (req: Request, res: Response, next: NextFunction): void => {
+  try {
+    const db = getDb();
+    const id = routeParam(req.params.id);
+    const adjustmentId = routeParam(req.params.adjustmentId);
+    if (!id || !adjustmentId) {
+      res.status(400).json({ error: 'Invalid recurring adjustment id' });
+      return;
+    }
+
+    const deleted = deleteRecurringAdjustment(db, id, adjustmentId);
+    if (!deleted) {
+      res.status(404).json({ error: 'Recurring adjustment not found' });
+      return;
+    }
+
+    res.json({ data: { success: true } });
   } catch (err) {
     next(err);
   }

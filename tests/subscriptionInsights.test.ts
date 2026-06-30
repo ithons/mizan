@@ -35,6 +35,19 @@ function setupDb(): Database.Database {
       amount REAL NOT NULL,
       pending INTEGER NOT NULL DEFAULT 0
     );
+
+    CREATE TABLE recurring_occurrence_adjustments (
+      id TEXT PRIMARY KEY,
+      recurring_id TEXT NOT NULL,
+      original_date TEXT NOT NULL,
+      action TEXT NOT NULL,
+      adjusted_date TEXT,
+      adjusted_amount REAL,
+      note TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      UNIQUE(recurring_id, original_date)
+    );
   `);
 
   db.prepare(`
@@ -162,6 +175,35 @@ function closeTo(actual: number, expected: number) {
   assert.ok(Math.abs(actual - expected) < 0.01, `${actual} should be close to ${expected}`);
 }
 
+function insertAdjustment(
+  db: Database.Database,
+  params: {
+    id: string;
+    recurringId: string;
+    originalDate: string;
+    action: 'skip' | 'snooze' | 'adjust';
+    adjustedDate?: string | null;
+    adjustedAmount?: number | null;
+  }
+): void {
+  const now = new Date().toISOString();
+  db.prepare(`
+    INSERT INTO recurring_occurrence_adjustments (
+      id, recurring_id, original_date, action, adjusted_date, adjusted_amount, note, created_at, updated_at
+    )
+    VALUES (?, ?, ?, ?, ?, ?, NULL, ?, ?)
+  `).run(
+    params.id,
+    params.recurringId,
+    params.originalDate,
+    params.action,
+    params.adjustedDate ?? null,
+    params.adjustedAmount ?? null,
+    now,
+    now
+  );
+}
+
 test('subscription insights summarize recurring bills without income or weak patterns', (t) => {
   const db = setupDb();
   t.after(() => db.close());
@@ -180,4 +222,32 @@ test('subscription insights summarize recurring bills without income or weak pat
   assert.ok(insights.upcoming.some((item) => item.merchant_name === 'Cloud Storage'));
   closeTo(insights.total_monthly_amount, 1000 + (49 / 3) + 10 + (10 * 52 / 12) + 8);
   assert.ok(insights.total_upcoming_amount > insights.total_monthly_amount);
+});
+
+test('subscription insights apply recurring occurrence adjustments', (t) => {
+  const db = setupDb();
+  t.after(() => db.close());
+
+  const today = format(new Date(), 'yyyy-MM-dd');
+  insertAdjustment(db, {
+    id: 'adj_rent_skip',
+    recurringId: 'rent',
+    originalDate: today,
+    action: 'skip',
+  });
+  insertAdjustment(db, {
+    id: 'adj_streaming_amount',
+    recurringId: 'streaming',
+    originalDate: today,
+    action: 'adjust',
+    adjustedAmount: -25,
+  });
+
+  const insights = buildSubscriptionInsights(db, 1);
+  const rent = insights.subscriptions.find((item) => item.pattern_id === 'rent');
+  const streaming = insights.subscriptions.find((item) => item.pattern_id === 'streaming');
+
+  assert.equal(rent?.upcoming_amount, 0);
+  assert.equal(insights.upcoming.some((item) => item.pattern_id === 'rent'), false);
+  assert.equal(streaming?.upcoming_amount, 25);
 });

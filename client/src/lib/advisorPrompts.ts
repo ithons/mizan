@@ -91,9 +91,12 @@ function summarizeForecastOccurrences(forecast: RecurringForecast): string {
   if (forecast.occurrences.length === 0) return 'none';
   return forecast.occurrences
     .slice(0, 5)
-    .map((occurrence) => (
-      `${occurrence.expected_date} ${occurrence.merchant_name} ${formatSignedMoneyValue(occurrence.amount)} (${occurrence.confidence_label})`
-    ))
+    .map((occurrence) => {
+      const adjustment = occurrence.adjustment_action
+        ? `, ${occurrence.adjustment_action} adjustment${occurrence.original_expected_date ? ` from ${occurrence.original_expected_date}` : ''}`
+        : '';
+      return `${occurrence.expected_date} ${occurrence.merchant_name} ${formatSignedMoneyValue(occurrence.amount)} (${occurrence.confidence_label}${adjustment})`;
+    })
     .join('; ');
 }
 
@@ -437,6 +440,9 @@ export function buildRecurringOccurrenceAdvisorPrompt(
 ): AdvisorRoutePrompt {
   const categoryName = occurrence.category_name ?? 'uncategorized';
   const reviewState = occurrence.needs_review ? 'needs review' : 'does not need review';
+  const adjustmentContext = occurrence.adjustment_action
+    ? `This occurrence has a ${occurrence.adjustment_action} one-time adjustment from ${occurrence.original_expected_date ?? occurrence.expected_date}${occurrence.adjusted_amount != null ? ` to ${formatSignedMoneyValue(occurrence.adjusted_amount)}` : ''}${occurrence.adjusted_date ? ` on ${occurrence.adjusted_date}` : ''}.`
+    : 'This occurrence has no one-time adjustment.';
 
   return {
     source: 'recurring',
@@ -458,12 +464,18 @@ export function buildRecurringOccurrenceAdvisorPrompt(
       status: occurrence.status,
       daysUntil: occurrence.days_until,
       needsReview: occurrence.needs_review,
+      adjustmentId: occurrence.adjustment_id ?? null,
+      adjustmentAction: occurrence.adjustment_action ?? null,
+      originalExpectedDate: occurrence.original_expected_date ?? null,
+      adjustedDate: occurrence.adjusted_date ?? null,
+      adjustedAmount: occurrence.adjusted_amount ?? null,
     },
     prompt: [
       `Analyze this recurring ${occurrence.is_income ? 'income' : 'bill'} item from ${occurrence.merchant_name}.`,
       `It is expected on ${occurrence.expected_date} for ${formatSignedMoneyValue(occurrence.amount)} and repeats ${occurrence.frequency}.`,
       `It is categorized as ${categoryName}, has ${occurrence.confidence_label} confidence (${Math.round(occurrence.confidence * 100)}%), and ${reviewState}.`,
       `The pattern is ${occurrence.is_confirmed ? 'confirmed' : 'unconfirmed'} and the occurrence is ${occurrence.status}.`,
+      adjustmentContext,
       'Explain whether this recurring item should be trusted in my cash-flow forecast, what evidence supports it, and whether I should confirm, dismiss, recategorize, or inspect matching transactions.',
     ].join(' '),
   };

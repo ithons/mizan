@@ -3,8 +3,10 @@ import { addDays, addMonths, format, parseISO } from 'date-fns';
 import type {
   RecurringForecast,
   RecurringForecastOccurrence,
+  RecurringOccurrenceAdjustment,
   RecurringPattern,
 } from '../../../shared/types';
+import { getRecurringAdjustmentMap } from './recurringAdjustments';
 
 type Frequency = RecurringPattern['frequency'];
 
@@ -52,6 +54,64 @@ function forecastBucket(occurrence: RecurringForecastOccurrence): 'confirmed' | 
   return occurrence.confidence_label === 'likely' ? 'likely' : 'uncertain';
 }
 
+function daysUntil(date: Date, now: Date): number {
+  const diff = Math.round((date.getTime() - now.getTime()) / 86_400_000);
+  return diff < 0 ? -1 * Math.max(1, Math.abs(diff)) : Math.max(0, diff);
+}
+
+function buildOccurrence(
+  pattern: RecurringForecastRow,
+  originalDate: string,
+  baseAmount: number,
+  confidence: number,
+  confidenceLabelValue: RecurringForecastOccurrence['confidence_label'],
+  now: Date,
+  today: string,
+  endDate: string,
+  adjustment?: RecurringOccurrenceAdjustment
+): RecurringForecastOccurrence | null {
+  if (adjustment?.action === 'skip') return null;
+
+  const expectedDate = adjustment?.action === 'snooze' && adjustment.adjusted_date
+    ? adjustment.adjusted_date
+    : originalDate;
+  if (expectedDate > endDate) return null;
+
+  const amount = adjustment?.action === 'adjust' && adjustment.adjusted_amount != null
+    ? adjustment.adjusted_amount
+    : baseAmount;
+  const effectiveDate = parseISO(expectedDate);
+  const status: RecurringForecastOccurrence['status'] = expectedDate < today ? 'overdue' : 'upcoming';
+  const needsReview = status === 'overdue'
+    ? true
+    : !pattern.is_confirmed && confidenceLabelValue !== 'likely';
+
+  return {
+    id: `${pattern.id}:${originalDate}`,
+    pattern_id: pattern.id,
+    merchant_name: pattern.merchant_name,
+    category_id: pattern.category_id,
+    category_name: pattern.category_name,
+    category_color: pattern.category_color,
+    frequency: pattern.frequency,
+    expected_date: expectedDate,
+    amount,
+    is_income: amount > 0,
+    is_confirmed: Boolean(pattern.is_confirmed),
+    confidence,
+    confidence_label: confidenceLabelValue,
+    status,
+    days_until: daysUntil(effectiveDate, now),
+    needs_review: needsReview,
+    adjustment_id: adjustment?.id ?? null,
+    adjustment_action: adjustment?.action ?? null,
+    original_expected_date: adjustment ? originalDate : null,
+    adjusted_date: adjustment?.adjusted_date ?? null,
+    adjusted_amount: adjustment?.adjusted_amount ?? null,
+    adjustment_note: adjustment?.note ?? null,
+  };
+}
+
 export function buildRecurringForecast(
   db: Database.Database,
   days: number
@@ -87,6 +147,7 @@ export function buildRecurringForecast(
     ORDER BY rp.next_expected ASC
   `).all(endDate) as RecurringForecastRow[];
 
+  const adjustmentMap = getRecurringAdjustmentMap(db, patterns.map((pattern) => pattern.id));
   const occurrences: RecurringForecastOccurrence[] = [];
 
   for (const pattern of patterns) {
@@ -105,54 +166,35 @@ export function buildRecurringForecast(
     if (overdueExpectedDate) {
       const expectedDate = format(overdueExpectedDate, 'yyyy-MM-dd');
       const amount = pattern.average_signed_amount;
-      const daysUntil = -1 * Math.max(
-        1,
-        Math.round((now.getTime() - overdueExpectedDate.getTime()) / 86_400_000)
-      );
-
-      occurrences.push({
-        id: `${pattern.id}:${expectedDate}`,
-        pattern_id: pattern.id,
-        merchant_name: pattern.merchant_name,
-        category_id: pattern.category_id,
-        category_name: pattern.category_name,
-        category_color: pattern.category_color,
-        frequency: pattern.frequency,
-        expected_date: expectedDate,
+      const occurrence = buildOccurrence(
+        pattern,
+        expectedDate,
         amount,
-        is_income: amount > 0,
-        is_confirmed: Boolean(pattern.is_confirmed),
         confidence,
         confidence_label,
-        status: 'overdue',
-        days_until: daysUntil,
-        needs_review: true,
-      });
+        now,
+        today,
+        endDate,
+        adjustmentMap.get(`${pattern.id}:${expectedDate}`)
+      );
+      if (occurrence) occurrences.push(occurrence);
     }
 
     while (format(expected, 'yyyy-MM-dd') <= endDate && guard < 500) {
       const expectedDate = format(expected, 'yyyy-MM-dd');
       const amount = pattern.average_signed_amount;
-      const daysUntil = Math.max(0, Math.round((expected.getTime() - now.getTime()) / 86_400_000));
-
-      occurrences.push({
-        id: `${pattern.id}:${expectedDate}`,
-        pattern_id: pattern.id,
-        merchant_name: pattern.merchant_name,
-        category_id: pattern.category_id,
-        category_name: pattern.category_name,
-        category_color: pattern.category_color,
-        frequency: pattern.frequency,
-        expected_date: expectedDate,
+      const occurrence = buildOccurrence(
+        pattern,
+        expectedDate,
         amount,
-        is_income: amount > 0,
-        is_confirmed: Boolean(pattern.is_confirmed),
         confidence,
         confidence_label,
-        status: 'upcoming',
-        days_until: daysUntil,
-        needs_review: !pattern.is_confirmed && confidence_label !== 'likely',
-      });
+        now,
+        today,
+        endDate,
+        adjustmentMap.get(`${pattern.id}:${expectedDate}`)
+      );
+      if (occurrence) occurrences.push(occurrence);
 
       expected = nextOccurrenceDate(expected, pattern.frequency);
       guard++;

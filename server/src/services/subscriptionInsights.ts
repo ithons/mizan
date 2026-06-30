@@ -104,6 +104,7 @@ export function buildSubscriptionInsights(
   const endDate = format(addDays(new Date(), days), 'yyyy-MM-dd');
   const forecast = buildRecurringForecast(db, days);
   const nextAmountByPattern = new Map<string, number>();
+  const nextOccurrenceByPattern = new Map<string, RecurringForecastOccurrence>();
 
   for (const occurrence of forecast.occurrences) {
     if (occurrence.amount >= 0) continue;
@@ -111,6 +112,9 @@ export function buildSubscriptionInsights(
       occurrence.pattern_id,
       (nextAmountByPattern.get(occurrence.pattern_id) ?? 0) + Math.abs(occurrence.amount)
     );
+    if (!nextOccurrenceByPattern.has(occurrence.pattern_id)) {
+      nextOccurrenceByPattern.set(occurrence.pattern_id, occurrence);
+    }
   }
 
   const rows = db.prepare(`
@@ -145,6 +149,7 @@ export function buildSubscriptionInsights(
       const averageAmount = Math.abs(row.average_signed_amount);
       const confidence = confidenceForPattern(row);
       const increase = priceIncreaseForPattern(db, row.id);
+      const nextOccurrence = nextOccurrenceByPattern.get(row.id);
 
       return {
         pattern_id: row.id,
@@ -155,7 +160,7 @@ export function buildSubscriptionInsights(
         frequency: row.frequency,
         average_amount: averageAmount,
         monthly_amount: monthlyEquivalent(averageAmount, row.frequency),
-        next_expected: row.next_expected,
+        next_expected: nextOccurrence?.expected_date ?? row.next_expected,
         upcoming_amount: nextAmountByPattern.get(row.id) ?? 0,
         is_confirmed: Boolean(row.is_confirmed),
         confidence,
@@ -176,7 +181,7 @@ export function buildSubscriptionInsights(
     .filter((subscription) => !subscription.is_confirmed || subscription.confidence_label === 'uncertain')
     .sort((a, b) => b.monthly_amount - a.monthly_amount);
   const upcoming = subscriptions
-    .filter((subscription) => subscription.next_expected <= endDate)
+    .filter((subscription) => subscription.upcoming_amount > 0 && subscription.next_expected <= endDate)
     .sort((a, b) => a.next_expected.localeCompare(b.next_expected));
 
   return {

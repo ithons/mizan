@@ -120,6 +120,19 @@ function setupAdvisorDb(): Database.Database {
       updated_at TEXT NOT NULL
     );
 
+    CREATE TABLE recurring_occurrence_adjustments (
+      id TEXT PRIMARY KEY,
+      recurring_id TEXT NOT NULL,
+      original_date TEXT NOT NULL,
+      action TEXT NOT NULL,
+      adjusted_date TEXT,
+      adjusted_amount REAL,
+      note TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      UNIQUE(recurring_id, original_date)
+    );
+
     CREATE TABLE budgets (
       id TEXT PRIMARY KEY,
       category_id TEXT NOT NULL,
@@ -365,6 +378,38 @@ test('advisor subscription analysis cites recurring subscription evidence', (t) 
   assert.match(analysis.answer, /subscription-like recurring bill/);
   assert.match(analysis.answer, /Price increases/);
   assert.ok(analysis.citations.some((citation) => citation.id === 'subscription:rec_streaming'));
+});
+
+test('advisor recurring analysis cites adjusted occurrences', (t) => {
+  const db = setupAdvisorDb();
+  t.after(() => db.close());
+
+  const today = format(new Date(), 'yyyy-MM-dd');
+  db.prepare(`
+    INSERT INTO recurring_patterns (
+      id, merchant_name, category_id, average_amount, frequency, last_seen, next_expected,
+      is_active, is_confirmed, transaction_count, created_at, updated_at
+    )
+    VALUES ('rec_rent', 'Rent', 'cat_food', 1000, 'monthly', ?, ?, 1, 1, 4, ?, ?)
+  `).run(today, today, TEST_NOW, TEST_NOW);
+  db.prepare(`
+    INSERT INTO recurring_occurrence_adjustments (
+      id, recurring_id, original_date, action, adjusted_date, adjusted_amount, note, created_at, updated_at
+    )
+    VALUES ('adj_rent', 'rec_rent', ?, 'adjust', NULL, -900, NULL, ?, ?)
+  `).run(today, TEST_NOW, TEST_NOW);
+
+  const analysis = analyzeAdvisorQuestion(
+    db,
+    'What bills are coming up?',
+    new Date(TEST_NOW)
+  );
+
+  assert.equal(analysis.intent, 'recurring');
+  assert.match(analysis.answer, /Adjusted occurrences: Rent amount adjustment/);
+  assert.ok(analysis.citations.some((citation) =>
+    citation.id.includes('rec_rent') && citation.detail?.includes('amount adjustment')
+  ));
 });
 
 test('advisor anomaly analysis cites unusual report signals', (t) => {

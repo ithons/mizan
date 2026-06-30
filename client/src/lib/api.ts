@@ -11,6 +11,7 @@ import type {
   BudgetRolloverLedgerEntry,
   RecurringPattern,
   RecurringForecast,
+  RecurringOccurrenceAdjustment,
   SubscriptionInsights,
   NetWorthSnapshot,
   PlaidItem,
@@ -329,6 +330,26 @@ export const recurringApi = {
     apiFetch<RecurringForecast>(`/api/recurring/forecast${days ? `?days=${days}` : ''}`),
   subscriptions: (days?: number) =>
     apiFetch<SubscriptionInsights>(`/api/recurring/subscriptions${days ? `?days=${days}` : ''}`),
+  adjustments: (id: string) =>
+    apiFetch<RecurringOccurrenceAdjustment[]>(`/api/recurring/${id}/adjustments`),
+  upsertAdjustment: (
+    id: string,
+    body: {
+      original_date: string;
+      action: 'skip' | 'snooze' | 'adjust';
+      adjusted_date?: string | null;
+      adjusted_amount?: number | null;
+      note?: string | null;
+    }
+  ) =>
+    apiFetch<RecurringOccurrenceAdjustment>(`/api/recurring/${id}/adjustments`, {
+      method: 'PUT',
+      body: JSON.stringify(body),
+    }),
+  deleteAdjustment: (id: string, adjustmentId: string) =>
+    apiFetch<{ success: boolean }>(`/api/recurring/${id}/adjustments/${adjustmentId}`, {
+      method: 'DELETE',
+    }),
   confirm: (id: string) =>
     apiFetch<RecurringPattern>(`/api/recurring/${id}/confirm`, { method: 'POST' }),
   dismiss: (id: string) =>

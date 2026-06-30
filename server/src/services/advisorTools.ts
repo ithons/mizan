@@ -246,6 +246,11 @@ function analyzeBudget(
 function analyzeRecurring(db: Database.Database): Pick<AdvisorAnalysis, 'answer' | 'citations'> {
   const forecast = buildRecurringForecast(db, 60);
   const nextItems = forecast.occurrences.slice(0, 5);
+  const adjustedItems = forecast.occurrences
+    .filter((item) => item.adjustment_action)
+    .slice(0, 3);
+  const adjustmentLabel = (action: string | null | undefined): string =>
+    action === 'adjust' ? 'amount adjustment' : `${action} adjustment`;
   const lines = [
     `Over the next 60 days, Mizān projects ${fmt(forecast.income)} income, ${fmt(forecast.bills)} bills, and ${fmt(forecast.net)} net scheduled cash flow.`,
   ];
@@ -257,6 +262,14 @@ function analyzeRecurring(db: Database.Database): Pick<AdvisorAnalysis, 'answer'
       `${item.expected_date}: ${item.merchant_name} ${item.amount >= 0 ? '+' : '-'}${fmt(Math.abs(item.amount))}`
     ).join('\n'));
   }
+  if (adjustedItems.length > 0) {
+    lines.push(`Adjusted occurrences: ${adjustedItems.map((item) => {
+      const original = item.original_expected_date && item.original_expected_date !== item.expected_date
+        ? ` from ${item.original_expected_date}`
+        : '';
+      return `${item.merchant_name} ${adjustmentLabel(item.adjustment_action)}${original} on ${item.expected_date}`;
+    }).join('; ')}.`);
+  }
 
   return {
     answer: lines.join('\n\n'),
@@ -265,7 +278,9 @@ function analyzeRecurring(db: Database.Database): Pick<AdvisorAnalysis, 'answer'
         id: `recurring:${item.id}`,
         kind: 'recurring',
         label: item.merchant_name,
-        detail: `${item.frequency}, ${item.confidence_label}`,
+        detail: item.adjustment_action
+          ? `${item.frequency}, ${item.confidence_label}, ${adjustmentLabel(item.adjustment_action)}`
+          : `${item.frequency}, ${item.confidence_label}`,
         route: '/bills',
         record_id: item.pattern_id,
         amount: item.amount,
