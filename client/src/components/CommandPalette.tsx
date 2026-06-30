@@ -69,7 +69,20 @@ export function CommandPalette() {
 
   if (!open) return null;
 
-  const drafts = analysis?.drafts || [];
+  // Restrict Command Palette drafts to lower-stakes, easily reversible actions (transactions & budgets).
+  // High-stakes actions (goals, tax envelopes, investments) should be handled via explicit UI or chat.
+  const ALLOWED_PALETTE_DRAFTS = new Set([
+    'categorize_transaction',
+    'create_merchant_rule',
+    'update_budget',
+    'create_budget_group',
+    'rename_budget_group',
+    'assign_category_to_budget_group',
+    'confirm_recurring',
+    'create_recurring_adjustment',
+  ]);
+
+  const drafts = (analysis?.drafts || []).filter((draft) => ALLOWED_PALETTE_DRAFTS.has(draft.payload.kind));
   const hasResults = drafts.length > 0;
 
   return (
