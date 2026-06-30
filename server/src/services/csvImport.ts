@@ -125,6 +125,27 @@ function duplicateCandidateCount(
   return duplicate?.count ?? 0;
 }
 
+function transferCandidateCount(
+  db: Database.Database,
+  row: CsvImportPreviewRow
+): number {
+  if (!row.account_id || !row.date || row.amount == null) return 0;
+
+  const transfer = db.prepare(`
+    SELECT COUNT(*) AS count
+    FROM transactions
+    WHERE account_id <> ?
+      AND date = ?
+      AND ABS(amount + ?) < 0.005
+  `).get(
+    row.account_id,
+    row.date,
+    row.amount
+  ) as { count: number } | undefined;
+
+  return transfer?.count ?? 0;
+}
+
 function normalizeCsvRow(
   db: Database.Database,
   rawRow: Record<string, string>,
@@ -178,6 +199,7 @@ function normalizeCsvRow(
     category_name: category?.name ?? null,
     notes,
     duplicate_candidate_count: 0,
+    transfer_candidate_count: 0,
     balance_delta: account?.is_manual && amount != null ? amount : 0,
     issues,
   };
@@ -186,6 +208,16 @@ function normalizeCsvRow(
   previewRow.duplicate_candidate_count = duplicateCount;
   if (duplicateCount > 0) {
     previewRow.issues.push(rowIssue(rowNumber, 'warning', `${duplicateCount} matching transaction already exists`));
+  }
+
+  const transferCount = transferCandidateCount(db, previewRow);
+  previewRow.transfer_candidate_count = transferCount;
+  if (transferCount > 0) {
+    previewRow.issues.push(rowIssue(
+      rowNumber,
+      'warning',
+      `${transferCount} equal and opposite transaction${transferCount === 1 ? '' : 's'} may be ${transferCount === 1 ? 'a transfer' : 'transfers'}`
+    ));
   }
 
   return previewRow;
@@ -206,6 +238,7 @@ export function buildCsvImportPreview(
     valid_count: validRows.length,
     invalid_count: rows.length - validRows.length,
     duplicate_candidate_count: rows.reduce((sum, row) => sum + row.duplicate_candidate_count, 0),
+    transfer_candidate_count: rows.reduce((sum, row) => sum + row.transfer_candidate_count, 0),
     balance_delta: validRows.reduce((sum, row) => sum + row.balance_delta, 0),
     errors,
     warnings,

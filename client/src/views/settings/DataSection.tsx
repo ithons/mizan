@@ -273,7 +273,7 @@ export function DataSection() {
           <div className="border border-border bg-background rounded p-3 space-y-3 md:col-span-2">
             <div>
               <p className="text-sm text-text">CSV Import Preview</p>
-              <p className="text-xs text-muted mt-1">Preview normalized rows, invalid rows, duplicate warnings, and manual-account balance impact before importing.</p>
+              <p className="text-xs text-muted mt-1">Preview normalized rows, invalid rows, duplicate and transfer warnings, and manual-account balance impact before importing.</p>
             </div>
 
             <textarea
@@ -365,7 +365,7 @@ export function DataSection() {
 
             {csvPreview && (
               <div className="border border-border rounded p-3 bg-surface space-y-3">
-                <div className="grid grid-cols-2 md:grid-cols-5 gap-3 text-xs">
+                <div className="grid grid-cols-2 md:grid-cols-6 gap-3 text-xs">
                   <div>
                     <p className="text-muted mb-0.5">Valid</p>
                     <p className="font-mono text-green">{csvPreview.valid_count}</p>
@@ -377,6 +377,10 @@ export function DataSection() {
                   <div>
                     <p className="text-muted mb-0.5">Duplicates</p>
                     <p className="font-mono text-amber">{csvPreview.duplicate_candidate_count}</p>
+                  </div>
+                  <div>
+                    <p className="text-muted mb-0.5">Transfers</p>
+                    <p className="font-mono text-blue">{csvPreview.transfer_candidate_count}</p>
                   </div>
                   <div>
                     <p className="text-muted mb-0.5">Balance impact</p>

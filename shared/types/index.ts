@@ -788,6 +788,7 @@ export interface CsvImportPreviewRow {
   category_name?: string | null;
   notes?: string | null;
   duplicate_candidate_count: number;
+  transfer_candidate_count: number;
   balance_delta: number;
   issues: CsvImportPreviewIssue[];
 }
@@ -797,6 +798,7 @@ export interface CsvImportPreview {
   valid_count: number;
   invalid_count: number;
   duplicate_candidate_count: number;
+  transfer_candidate_count: number;
   balance_delta: number;
   errors: CsvImportPreviewIssue[];
   warnings: CsvImportPreviewIssue[];

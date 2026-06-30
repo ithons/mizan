@@ -38,7 +38,9 @@ function setupCsvImportDb(): Database.Database {
     );
 
     INSERT INTO accounts (id, account_name, institution_name, current_balance, is_manual)
-    VALUES ('acct_cash', 'Cash', 'Manual', 100, 1);
+    VALUES
+      ('acct_cash', 'Cash', 'Manual', 100, 1),
+      ('acct_savings', 'Savings', 'Manual', 250, 1);
 
     INSERT INTO categories (id, name)
     VALUES ('cat_food', 'Food');
@@ -49,6 +51,10 @@ function setupCsvImportDb(): Database.Database {
     VALUES (
       'txn_existing', 'acct_cash', '2026-06-30', -4.5, 'Coffee', 'Coffee', 'cat_food',
       '2026-06-30T00:00:00.000Z', '2026-06-30T00:00:00.000Z'
+    ),
+    (
+      'txn_transfer_pair', 'acct_savings', '2026-06-29', 12, 'Transfer', 'Transfer', NULL,
+      '2026-06-29T00:00:00.000Z', '2026-06-29T00:00:00.000Z'
     );
   `);
 
@@ -102,10 +108,13 @@ test('csv import preview validates rows and surfaces duplicate warnings without 
   assert.equal(preview.valid_count, 2);
   assert.equal(preview.invalid_count, 1);
   assert.equal(preview.duplicate_candidate_count, 1);
+  assert.equal(preview.transfer_candidate_count, 1);
   assert.equal(preview.balance_delta, -16.5);
   assert.equal(preview.errors.length, 2);
-  assert.equal(preview.warnings.length, 2);
+  assert.equal(preview.warnings.length, 3);
   assert.equal(preview.rows[0]?.duplicate_candidate_count, 1);
+  assert.equal(preview.rows[2]?.transfer_candidate_count, 1);
+  assert.match(preview.rows[2]?.issues.at(-1)?.message ?? '', /may be a transfer/);
 
   const account = db.prepare('SELECT current_balance FROM accounts WHERE id = ?').get('acct_cash') as { current_balance: number };
   assert.equal(account.current_balance, 100);
@@ -122,7 +131,7 @@ test('csv import commit imports valid rows and reports invalid row errors', (t) 
   assert.equal(result.balanceChanged, true);
 
   const transactionCount = db.prepare('SELECT COUNT(*) AS count FROM transactions').get() as { count: number };
-  assert.equal(transactionCount.count, 3);
+  assert.equal(transactionCount.count, 4);
 
   const account = db.prepare('SELECT current_balance FROM accounts WHERE id = ?').get('acct_cash') as { current_balance: number };
   assert.equal(account.current_balance, 83.5);
