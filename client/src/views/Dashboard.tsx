@@ -20,6 +20,7 @@ import {
   Plus,
   RefreshCw,
   ShieldCheck,
+  Sparkles,
   Wallet,
   Target,
   TrendingDown,
@@ -32,6 +33,10 @@ import { accountsApi, networthApi, reportsApi, recurringApi, budgetsApi, transac
 import { getDashboardMode, type DashboardMode } from '../lib/dashboardState';
 import { getOnboardingPlan, type OnboardingPlan } from '../lib/onboarding';
 import { advisorRouteState } from '../lib/advisorRouteState';
+import {
+  buildDashboardCardAdvisorPrompt,
+  type DashboardCardAdvisorPromptContext,
+} from '../lib/advisorPrompts';
 import { availableBudgetAmount, budgetProjectedPercent, budgetProjectedSpend } from '../lib/budgetMath';
 import { formatCurrency, formatDate, formatDateShort, formatMonth, formatRelativeTime } from '../lib/formatters';
 import { AmountBadge } from '../components/AmountBadge';
@@ -53,6 +58,7 @@ function StatCard({
   deltaLabel,
   positive,
   onClick,
+  onAsk,
 }: {
   title: string;
   value: string;
@@ -60,12 +66,29 @@ function StatCard({
   deltaLabel?: string;
   positive?: boolean;
   onClick?: () => void;
+  onAsk?: () => void;
 }) {
   const isGood = positive !== undefined ? positive : (delta ?? 0) >= 0;
   const cls = `bg-surface shadow-sm border border-border rounded p-5 ${onClick ? 'cursor-pointer hover:bg-green/5 transition-colors' : ''}`;
   return (
     <div className={cls} onClick={onClick}>
-      <p className="text-xs text-muted mb-1">{title}</p>
+      <div className="flex items-start justify-between gap-2 mb-1">
+        <p className="text-xs text-muted">{title}</p>
+        {onAsk && (
+          <button
+            type="button"
+            className="text-muted hover:text-green transition-colors"
+            title="Ask advisor"
+            aria-label={`Ask advisor about ${title}`}
+            onClick={(event) => {
+              event.stopPropagation();
+              onAsk();
+            }}
+          >
+            <Sparkles size={12} />
+          </button>
+        )}
+      </div>
       <p className="font-mono text-2xl font-medium text-text mb-2">{value}</p>
       {delta !== undefined && (
         <div className="flex items-center gap-1">
@@ -712,6 +735,11 @@ export function Dashboard() {
       }),
     });
   };
+  const askAdvisorAboutDashboardCard = (context: DashboardCardAdvisorPromptContext) => {
+    navigate('/advisor', {
+      state: advisorRouteState(buildDashboardCardAdvisorPrompt(context)),
+    });
+  };
 
   if (dashboardMode === 'first_run') {
     return (
@@ -758,6 +786,14 @@ export function Dashboard() {
           deltaLabel="vs last month"
           positive={nwDelta !== undefined ? nwDelta >= 0 : undefined}
           onClick={() => navigate('/reports')}
+          onAsk={() => askAdvisorAboutDashboardCard({
+            card: 'net_worth',
+            title: 'Net Worth',
+            period: currentMonth,
+            value: latestNW?.net_worth ?? 0,
+            delta: nwDelta ?? null,
+            deltaLabel: 'vs last month',
+          })}
         />
         <StatCard
           title="Monthly Spend"
@@ -766,6 +802,15 @@ export function Dashboard() {
           deltaLabel="vs last month"
           positive={spendDelta !== undefined ? spendDelta <= 0 : undefined}
           onClick={() => navigate('/transactions')}
+          onAsk={() => askAdvisorAboutDashboardCard({
+            card: 'monthly_spend',
+            title: 'Monthly Spend',
+            period: currentMonth,
+            value: monthlySpend,
+            delta: spendDelta ?? null,
+            deltaLabel: 'vs last month',
+            extraContext: 'Transfers, investments, crypto, and pending transactions are excluded from reportable spending.',
+          })}
         />
         <StatCard
           title="Monthly Income"
@@ -774,12 +819,43 @@ export function Dashboard() {
           deltaLabel="vs last month"
           positive={incomeDelta !== undefined ? incomeDelta >= 0 : undefined}
           onClick={() => navigate('/transactions')}
+          onAsk={() => askAdvisorAboutDashboardCard({
+            card: 'monthly_income',
+            title: 'Monthly Income',
+            period: currentMonth,
+            value: monthlyIncome,
+            delta: incomeDelta ?? null,
+            deltaLabel: 'vs last month',
+            extraContext: 'Only reportable income is included. Transfers and investment flows are excluded.',
+          })}
         />
         <div
           className="bg-surface shadow-sm border border-border rounded p-5 cursor-pointer hover:bg-green/5 transition-colors"
           onClick={() => navigate('/reports')}
         >
-          <p className="text-xs text-muted mb-1">Top Category</p>
+          <div className="flex items-start justify-between gap-2 mb-1">
+            <p className="text-xs text-muted">Top Category</p>
+            <button
+              type="button"
+              className="text-muted hover:text-green transition-colors"
+              title="Ask advisor"
+              aria-label="Ask advisor about Top Category"
+              onClick={(event) => {
+                event.stopPropagation();
+                askAdvisorAboutDashboardCard({
+                  card: 'top_category',
+                  title: 'Top Category',
+                  period: currentMonth,
+                  value: topCategory?.amount ?? 0,
+                  extraContext: topCategory
+                    ? `Top spending category is ${topCategory.category_name}.`
+                    : 'No categorized spending is available for this period.',
+                });
+              }}
+            >
+              <Sparkles size={12} />
+            </button>
+          </div>
           {topCategory ? (
             <>
               <p className="text-sm font-medium text-text mb-1">{topCategory.category_name}</p>

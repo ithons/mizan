@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {
   buildAccountAdvisorPrompt,
   buildBudgetAdvisorPrompt,
+  buildDashboardCardAdvisorPrompt,
   buildHoldingAdvisorPrompt,
   buildReportAdvisorPrompt,
   buildTransactionAdvisorPrompt,
@@ -169,6 +170,28 @@ test('report advisor prompt captures summary metrics and exclusions', () => {
   assert.match(prompt.prompt, /Compared with Prior month/);
   assert.match(prompt.prompt, /Food \$820\.00 \(\+\$120\.00\)/);
   assert.match(prompt.prompt, /transfers: 6 transactions/);
+});
+
+test('dashboard card advisor prompt captures the selected metric context', () => {
+  const prompt = buildDashboardCardAdvisorPrompt({
+    card: 'monthly_spend',
+    title: 'Monthly Spend',
+    period: '2026-06',
+    value: 3200,
+    delta: 200,
+    deltaLabel: 'vs last month',
+    extraContext: 'Transfers are excluded from this number.',
+  });
+
+  assert.equal(prompt.source, 'dashboard');
+  assert.equal(prompt.recordKind, 'dashboard_card');
+  assert.equal(prompt.recordId, 'monthly_spend:2026-06');
+  assert.equal(prompt.params?.currentValue, 3200);
+  assert.equal(prompt.params?.delta, 200);
+  assert.match(prompt.prompt, /dashboard Monthly Spend card for 2026-06/);
+  assert.match(prompt.prompt, /displayed value is \$3200\.00/);
+  assert.match(prompt.prompt, /displayed change is \+\$200\.00 vs last month/);
+  assert.match(prompt.prompt, /Transfers are excluded/);
 });
 
 test('budget advisor prompt captures row context and projection math', () => {

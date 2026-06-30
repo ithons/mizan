@@ -19,6 +19,18 @@ export interface ReportAdvisorPromptContext {
   endDate: string;
 }
 
+export type DashboardAdvisorCardKind = 'net_worth' | 'monthly_spend' | 'monthly_income' | 'top_category';
+
+export interface DashboardCardAdvisorPromptContext {
+  card: DashboardAdvisorCardKind;
+  title: string;
+  period: string;
+  value: number;
+  delta?: number | null;
+  deltaLabel?: string | null;
+  extraContext?: string | null;
+}
+
 function formatMoneyValue(value: number): string {
   const amount = Math.abs(value).toFixed(2);
   return value < 0 ? `-$${amount}` : `$${amount}`;
@@ -113,6 +125,37 @@ export function buildReportAdvisorPrompt(
       `Spending movers: ${spendingMovers}.`,
       `Excluded flows: ${excludedFlows}.`,
       'Explain the main changes, whether exclusions affect interpretation, and which backing report evidence I should inspect.',
+    ].join(' '),
+  };
+}
+
+export function buildDashboardCardAdvisorPrompt(
+  context: DashboardCardAdvisorPromptContext
+): AdvisorRoutePrompt {
+  const deltaPhrase = context.delta == null
+    ? 'No comparison delta is shown on this card.'
+    : `The displayed change is ${formatSignedMoneyValue(context.delta)} ${context.deltaLabel ?? 'versus comparison'}.`;
+  const extraContext = context.extraContext?.trim() || 'No extra dashboard context is attached.';
+
+  return {
+    source: 'dashboard',
+    recordKind: 'dashboard_card',
+    recordId: `${context.card}:${context.period}`,
+    params: {
+      card: context.card,
+      title: context.title,
+      period: context.period,
+      currentValue: context.value,
+      delta: context.delta ?? null,
+      deltaLabel: context.deltaLabel ?? null,
+      extraContext,
+    },
+    prompt: [
+      `Analyze my dashboard ${context.title} card for ${context.period}.`,
+      `The displayed value is ${formatMoneyValue(context.value)}.`,
+      deltaPhrase,
+      extraContext,
+      'Explain what changed, whether this needs review, and which accounts, transactions, reports, sync runs, or budget rows I should inspect.',
     ].join(' '),
   };
 }
