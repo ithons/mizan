@@ -18,6 +18,7 @@ import type {
   SyncRunDetail,
   CashflowReport,
   ReportDrilldown,
+  ReportComparisonMode,
   ReportSummary,
   SpendingReport,
   NetWorthHistory,
@@ -331,6 +332,7 @@ export interface ReportParams {
   startDate?: string;
   endDate?: string;
   month?: string;
+  comparison?: ReportComparisonMode;
 }
 
 export const reportsApi = {
@@ -338,6 +340,7 @@ export const reportsApi = {
     const q = new URLSearchParams();
     if (params?.startDate) q.set('startDate', params.startDate);
     if (params?.endDate) q.set('endDate', params.endDate);
+    if (params?.comparison) q.set('comparison', params.comparison);
     return apiFetch<ReportSummary>(`/api/reports/summary?${q.toString()}`);
   },
   cashflow: (params?: ReportParams) => {

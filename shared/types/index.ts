@@ -664,6 +664,13 @@ export interface ReportMetricSummary {
   delta_percent: number | null;
 }
 
+export type ReportComparisonMode =
+  | 'prior_period'
+  | 'prior_month'
+  | 'same_month_last_year'
+  | 'trailing_3'
+  | 'trailing_12';
+
 export interface ReportCategoryChange {
   category_id: string;
   category_name: string;
@@ -685,6 +692,10 @@ export interface ReportExcludedFlowSummary {
 export interface ReportSummary {
   start_date?: string;
   end_date?: string;
+  comparison: ReportComparisonMode;
+  comparison_label: string;
+  comparison_start_date?: string;
+  comparison_end_date?: string;
   previous_start_date?: string;
   previous_end_date?: string;
   income: ReportMetricSummary;

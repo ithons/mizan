@@ -249,6 +249,10 @@ test('report summary compares equal prior period and explains excluded flows', (
     endDate: '2026-06-30',
   });
 
+  assert.equal(summary.comparison, 'prior_period');
+  assert.equal(summary.comparison_label, 'Prior period');
+  assert.equal(summary.comparison_start_date, '2026-05-02');
+  assert.equal(summary.comparison_end_date, '2026-05-31');
   assert.equal(summary.previous_start_date, '2026-05-02');
   assert.equal(summary.previous_end_date, '2026-05-31');
   assert.deepEqual(summary.income, {
@@ -277,6 +281,45 @@ test('report summary compares equal prior period and explains excluded flows', (
   assert.equal(summary.excluded_flows.find((flow) => flow.flow_type === 'crypto')?.outflows, 50);
   assert.equal(summary.excluded_flows.find((flow) => flow.flow_type === 'investments')?.inflows, 20);
   assert.equal(summary.spending_movers[0].category_id, 'uncategorized');
+});
+
+test('report summary supports explicit comparison ranges', (t) => {
+  const db = setupReportingDb();
+  t.after(() => db.close());
+
+  const priorMonth = getReportSummary(db, {
+    startDate: '2026-06-01',
+    endDate: '2026-06-30',
+    comparison: 'prior_month',
+  });
+
+  assert.equal(priorMonth.comparison_label, 'Prior month');
+  assert.equal(priorMonth.comparison_start_date, '2026-05-01');
+  assert.equal(priorMonth.comparison_end_date, '2026-05-31');
+  assert.equal(priorMonth.income.previous, 900);
+  assert.equal(priorMonth.expenses.previous, 80);
+
+  const sameMonthLastYear = getReportSummary(db, {
+    startDate: '2026-06-01',
+    endDate: '2026-06-30',
+    comparison: 'same_month_last_year',
+  });
+
+  assert.equal(sameMonthLastYear.comparison_label, 'Same month last year');
+  assert.equal(sameMonthLastYear.comparison_start_date, '2025-06-01');
+  assert.equal(sameMonthLastYear.comparison_end_date, '2025-06-30');
+  assert.equal(sameMonthLastYear.income.previous, 0);
+
+  const trailing = getReportSummary(db, {
+    startDate: '2026-06-01',
+    endDate: '2026-06-30',
+    comparison: 'trailing_3',
+  });
+
+  assert.equal(trailing.comparison_label, 'Trailing 3 months');
+  assert.equal(trailing.comparison_start_date, '2026-03-01');
+  assert.equal(trailing.comparison_end_date, '2026-05-31');
+  assert.equal(trailing.expenses.previous, 80);
 });
 
 test('report drilldown returns backing spending transactions for category rollups', (t) => {

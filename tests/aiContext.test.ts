@@ -28,6 +28,10 @@ function baseReportSummary(overrides: Partial<ReportSummary> = {}): ReportSummar
   return {
     start_date: '2026-06-01',
     end_date: '2026-06-30',
+    comparison: 'prior_period',
+    comparison_label: 'Prior period',
+    comparison_start_date: '2026-05-02',
+    comparison_end_date: '2026-05-31',
     previous_start_date: '2026-05-02',
     previous_end_date: '2026-05-31',
     income: { current: 5000, previous: 5000, delta: 0, delta_percent: 0 },

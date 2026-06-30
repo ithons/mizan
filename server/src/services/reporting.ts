@@ -1,9 +1,20 @@
 import type Database from 'better-sqlite3';
-import { addDays, differenceInCalendarDays, format, parseISO, subDays } from 'date-fns';
+import {
+  addDays,
+  differenceInCalendarDays,
+  endOfMonth,
+  format,
+  parseISO,
+  startOfMonth,
+  subDays,
+  subMonths,
+  subYears,
+} from 'date-fns';
 import type {
   CashflowReport,
   ReportDrilldown,
   ReportCategoryChange,
+  ReportComparisonMode,
   ReportExcludedFlowSummary,
   ReportMetricSummary,
   ReportSummary,
@@ -13,6 +24,7 @@ import type {
 interface ReportDateRange {
   startDate?: string;
   endDate?: string;
+  comparison?: ReportComparisonMode;
 }
 
 interface SpendingReportOptions extends ReportDateRange {
@@ -136,6 +148,50 @@ function previousRange(range: ReportDateRange): ReportDateRange {
     startDate: format(previousStart, 'yyyy-MM-dd'),
     endDate: format(previousEnd, 'yyyy-MM-dd'),
   };
+}
+
+function comparisonLabel(comparison: ReportComparisonMode): string {
+  if (comparison === 'prior_month') return 'Prior month';
+  if (comparison === 'same_month_last_year') return 'Same month last year';
+  if (comparison === 'trailing_3') return 'Trailing 3 months';
+  if (comparison === 'trailing_12') return 'Trailing 12 months';
+  return 'Prior period';
+}
+
+function calendarMonthRange(date: Date): ReportDateRange {
+  return {
+    startDate: format(startOfMonth(date), 'yyyy-MM-dd'),
+    endDate: format(endOfMonth(date), 'yyyy-MM-dd'),
+  };
+}
+
+function comparisonRange(
+  range: ReportDateRange,
+  comparison: ReportComparisonMode
+): ReportDateRange {
+  if (!range.startDate || !range.endDate) return {};
+
+  const start = parseISO(range.startDate);
+  const end = parseISO(range.endDate);
+  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return {};
+
+  if (comparison === 'prior_month') {
+    return calendarMonthRange(subMonths(start, 1));
+  }
+
+  if (comparison === 'same_month_last_year') {
+    return calendarMonthRange(subYears(start, 1));
+  }
+
+  if (comparison === 'trailing_3' || comparison === 'trailing_12') {
+    const months = comparison === 'trailing_3' ? 3 : 12;
+    return {
+      startDate: format(subMonths(start, months), 'yyyy-MM-dd'),
+      endDate: format(subDays(start, 1), 'yyyy-MM-dd'),
+    };
+  }
+
+  return previousRange(range);
 }
 
 function flattenReportCategories(report: SpendingReport): ReportCategoryChange[] {
@@ -667,7 +723,8 @@ export function getReportSummary(
   db: Database.Database,
   range: ReportDateRange
 ): ReportSummary {
-  const previous = previousRange(range);
+  const comparison = range.comparison ?? 'prior_period';
+  const previous = comparisonRange(range, comparison);
 
   const currentCashflow = totalsFromCashflow(getCashflowReport(db, range));
   const previousCashflow = totalsFromCashflow(getCashflowReport(db, previous));
@@ -679,6 +736,10 @@ export function getReportSummary(
   return {
     start_date: range.startDate,
     end_date: range.endDate,
+    comparison,
+    comparison_label: comparisonLabel(comparison),
+    comparison_start_date: previous.startDate,
+    comparison_end_date: previous.endDate,
     previous_start_date: previous.startDate,
     previous_end_date: previous.endDate,
     income: metric(currentCashflow.income, previousCashflow.income),

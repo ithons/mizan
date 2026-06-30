@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import {
@@ -26,7 +26,7 @@ import { EmptyState } from '../components/EmptyState';
 import { AmountBadge } from '../components/AmountBadge';
 import { CategoryBadge } from '../components/CategoryBadge';
 import { Modal } from '../components/Modal';
-import type { Category, ReportDrilldown, ReportMetricSummary, ReportSummary } from '@shared/types';
+import type { Category, ReportComparisonMode, ReportDrilldown, ReportMetricSummary, ReportSummary } from '@shared/types';
 const COLORS = [
   '#32bfa3', '#6487f0', '#e2a53f', '#ef6f8a', '#a78bfa',
   '#f472b6', '#34d399', '#fb923c', '#60a5fa', '#f87171',
@@ -253,9 +253,18 @@ function ReportSummaryPanel({ summary }: { summary?: ReportSummary }) {
   if (!summary) return null;
 
   const topMover = summary.spending_movers[0];
+  const comparisonRange = summary.comparison_start_date && summary.comparison_end_date
+    ? `${formatDate(summary.comparison_start_date)} to ${formatDate(summary.comparison_end_date)}`
+    : 'No comparison range';
 
   return (
     <div className="space-y-3">
+      <div className="flex items-center justify-between gap-3 text-xs text-muted">
+        <span>
+          Compared with <span className="text-text">{summary.comparison_label}</span>
+        </span>
+        <span className="font-mono">{comparisonRange}</span>
+      </div>
       <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
         <ReportMetricCard label="Income" metric={summary.income} tone="#32bfa3" />
         <ReportMetricCard label="Spending" metric={summary.expenses} tone="#ef6f8a" lowerIsBetter />
@@ -619,13 +628,26 @@ function IncomeTab({ startDate, endDate }: { startDate: string; endDate: string 
 
 // ─── Trends Tab ───────────────────────────────────────────────────────────────
 
-function TrendsTab({ startDate, endDate }: { startDate: string; endDate: string }) {
+function TrendsTab({
+  startDate,
+  endDate,
+  initialCategoryIds,
+}: {
+  startDate: string;
+  endDate: string;
+  initialCategoryIds: string[];
+}) {
   const { data: categories = [] } = useQuery({
     queryKey: ['categories'],
     queryFn: categoriesApi.list,
   });
 
-  const [selectedCats, setSelectedCats] = useState<string[]>([]);
+  const initialCategoryKey = initialCategoryIds.join('|');
+  const [selectedCats, setSelectedCats] = useState<string[]>(initialCategoryIds);
+
+  useEffect(() => {
+    setSelectedCats(initialCategoryIds);
+  }, [initialCategoryKey]);
 
   const { data: trends, isLoading } = useQuery({
     queryKey: ['trends', startDate, endDate, selectedCats],
@@ -707,6 +729,113 @@ function TrendsTab({ startDate, endDate }: { startDate: string; endDate: string 
           </ResponsiveContainer>
         </div>
       )}
+    </div>
+  );
+}
+
+// ─── Cash Flow Tab ───────────────────────────────────────────────────────────
+
+function CashflowTab({ startDate, endDate }: { startDate: string; endDate: string }) {
+  const { data: cashflow, isLoading } = useQuery({
+    queryKey: ['cashflow', 'reports', startDate, endDate],
+    queryFn: () => reportsApi.cashflow({ startDate, endDate }),
+  });
+
+  if (isLoading) return <PageLoader />;
+
+  const months = cashflow?.months ?? [];
+  const totals = months.reduce(
+    (sum, month) => ({
+      income: sum.income + month.income,
+      expenses: sum.expenses + month.expenses,
+      net: sum.net + month.net,
+    }),
+    { income: 0, expenses: 0, net: 0 }
+  );
+  const chartData = months.map((month) => ({
+    month: format(new Date(`${month.month}-01`), 'MMM yy'),
+    income: month.income,
+    expenses: month.expenses,
+    net: month.net,
+  }));
+
+  if (months.length === 0) {
+    return (
+      <EmptyState
+        icon={ChevronRight}
+        title="No cash flow for the selected period"
+        description="Cash-flow reports populate from posted income and spending after report exclusions."
+      />
+    );
+  }
+
+  return (
+    <div className="space-y-6">
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+        <ReportMetricCard
+          label="Income"
+          metric={{ current: totals.income, previous: 0, delta: totals.income, delta_percent: null }}
+          tone="#32bfa3"
+        />
+        <ReportMetricCard
+          label="Spending"
+          metric={{ current: totals.expenses, previous: 0, delta: totals.expenses, delta_percent: null }}
+          tone="#ef6f8a"
+          lowerIsBetter
+        />
+        <ReportMetricCard
+          label="Net"
+          metric={{ current: totals.net, previous: 0, delta: totals.net, delta_percent: null }}
+          tone={totals.net >= 0 ? '#32bfa3' : '#ef6f8a'}
+        />
+      </div>
+
+      <div className="bg-surface shadow-sm border border-border rounded p-4">
+        <ResponsiveContainer width="100%" height={260}>
+          <AreaChart data={chartData}>
+            <defs>
+              <linearGradient id="cashIncomeGrad" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="5%" stopColor="#32bfa3" stopOpacity={0.2} />
+                <stop offset="95%" stopColor="#32bfa3" stopOpacity={0} />
+              </linearGradient>
+              <linearGradient id="cashExpenseGrad" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="5%" stopColor="#ef6f8a" stopOpacity={0.18} />
+                <stop offset="95%" stopColor="#ef6f8a" stopOpacity={0} />
+              </linearGradient>
+            </defs>
+            <CartesianGrid vertical={false} stroke="#dbe7e2" />
+            <XAxis dataKey="month" tick={{ fill: '#6b6b7a', fontSize: 11, fontFamily: 'JetBrains Mono' }} axisLine={false} tickLine={false} />
+            <YAxis tick={{ fill: '#6b6b7a', fontSize: 11, fontFamily: 'JetBrains Mono' }} axisLine={false} tickLine={false} tickFormatter={(v) => `$${(Number(v) / 1000).toFixed(0)}k`} />
+            <Tooltip content={<ChartTooltip />} />
+            <Area type="monotone" dataKey="income" name="Income" stroke="#32bfa3" fill="url(#cashIncomeGrad)" strokeWidth={2} dot={false} />
+            <Area type="monotone" dataKey="expenses" name="Spending" stroke="#ef6f8a" fill="url(#cashExpenseGrad)" strokeWidth={2} dot={false} />
+          </AreaChart>
+        </ResponsiveContainer>
+      </div>
+
+      <div className="bg-surface shadow-sm border border-border rounded overflow-hidden">
+        <table className="w-full text-xs">
+          <thead className="border-b border-border">
+            <tr>
+              {['Month', 'Income', 'Spending', 'Net'].map((header) => (
+                <th key={header} className="text-left px-4 py-2 text-muted font-medium">{header}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {months.map((month) => (
+              <tr key={month.month} className="border-b border-border hover:bg-white/2">
+                <td className="px-4 py-2 font-mono text-muted">{formatMonth(month.month)}</td>
+                <td className="px-4 py-2 font-mono text-green">{formatCurrency(month.income)}</td>
+                <td className="px-4 py-2 font-mono text-rose">{formatCurrency(month.expenses)}</td>
+                <td className="px-4 py-2 font-mono" style={{ color: month.net >= 0 ? '#32bfa3' : '#ef6f8a' }}>
+                  {formatCurrency(month.net, { showSign: true })}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }
@@ -1059,19 +1188,107 @@ const PRESETS: { key: DatePreset; label: string }[] = [
   { key: 'custom', label: 'Custom' },
 ];
 
-type ReportTab = 'spending' | 'income' | 'trends' | 'networth' | 'investments';
+type ReportTab = 'spending' | 'income' | 'trends' | 'cashflow' | 'networth' | 'investments';
+
+const COMPARISON_OPTIONS: { key: ReportComparisonMode; label: string }[] = [
+  { key: 'prior_period', label: 'Prior Period' },
+  { key: 'prior_month', label: 'Prior Month' },
+  { key: 'same_month_last_year', label: 'Last Year' },
+  { key: 'trailing_3', label: 'Trailing 3M' },
+  { key: 'trailing_12', label: 'Trailing 12M' },
+];
+
+type ReportViewPresetId =
+  | 'monthly_spending'
+  | 'food_trend'
+  | 'income_stability'
+  | 'subscription_total'
+  | 'net_worth_change'
+  | 'cash_flow_after_transfers'
+  | 'investment_activity';
+
+interface ReportViewPreset {
+  id: ReportViewPresetId;
+  label: string;
+  tab: ReportTab;
+  datePreset: DatePreset;
+  comparison: ReportComparisonMode;
+  categoryIds?: string[];
+}
+
+const REPORT_VIEW_PRESETS: ReportViewPreset[] = [
+  {
+    id: 'monthly_spending',
+    label: 'Monthly Spending',
+    tab: 'spending',
+    datePreset: 'this_month',
+    comparison: 'prior_month',
+  },
+  {
+    id: 'food_trend',
+    label: 'Food Trend',
+    tab: 'trends',
+    datePreset: '12m',
+    comparison: 'same_month_last_year',
+    categoryIds: ['cat_food'],
+  },
+  {
+    id: 'income_stability',
+    label: 'Income Stability',
+    tab: 'income',
+    datePreset: '6m',
+    comparison: 'trailing_3',
+  },
+  {
+    id: 'subscription_total',
+    label: 'Subscription Total',
+    tab: 'spending',
+    datePreset: 'this_month',
+    comparison: 'prior_month',
+  },
+  {
+    id: 'net_worth_change',
+    label: 'Net Worth Change',
+    tab: 'networth',
+    datePreset: '12m',
+    comparison: 'trailing_12',
+  },
+  {
+    id: 'cash_flow_after_transfers',
+    label: 'Cash Flow After Transfers',
+    tab: 'cashflow',
+    datePreset: '6m',
+    comparison: 'trailing_3',
+  },
+  {
+    id: 'investment_activity',
+    label: 'Investment Activity',
+    tab: 'investments',
+    datePreset: '12m',
+    comparison: 'trailing_12',
+  },
+];
 
 export function Reports() {
   const [preset, setPreset] = useState<DatePreset>('this_month');
   const [customStart, setCustomStart] = useState('');
   const [customEnd, setCustomEnd] = useState('');
   const [tab, setTab] = useState<ReportTab>('spending');
+  const [comparison, setComparison] = useState<ReportComparisonMode>('prior_period');
+  const [trendCategoryIds, setTrendCategoryIds] = useState<string[]>([]);
 
   const { startDate, endDate } = getDateRange(preset, customStart, customEnd);
   const { data: summary } = useQuery({
-    queryKey: ['reports', 'summary', startDate, endDate],
-    queryFn: () => reportsApi.summary({ startDate, endDate }),
+    queryKey: ['reports', 'summary', startDate, endDate, comparison],
+    queryFn: () => reportsApi.summary({ startDate, endDate, comparison }),
   });
+
+  const applyReportView = (view: ReportViewPreset) => {
+    setPreset(view.datePreset);
+    setComparison(view.comparison);
+    setTab(view.tab);
+    setTrendCategoryIds(view.categoryIds ?? []);
+  };
 
   return (
     <div className="p-6 space-y-6">
@@ -1079,45 +1296,84 @@ export function Reports() {
         <h1 className="text-xl font-semibold text-text">Reports</h1>
       </div>
 
+      <div className="space-y-2">
+        <p className="text-xs text-muted">Saved views</p>
+        <div className="flex items-center gap-2 flex-wrap">
+          {REPORT_VIEW_PRESETS.map((view) => (
+            <button
+              key={view.id}
+              onClick={() => applyReportView(view)}
+              className="px-3 py-1.5 text-xs rounded border border-border text-muted hover:text-text hover:bg-green/5"
+            >
+              {view.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
       {/* Date range picker */}
-      <div className="flex items-center gap-2 flex-wrap">
-        {PRESETS.map((p) => (
-          <button
-            key={p.key}
-            onClick={() => setPreset(p.key)}
-            className={`px-3 py-1.5 text-xs rounded border transition-all ${
-              preset === p.key
-                ? 'bg-green-10 text-green border-green/40'
-                : 'text-muted border-border hover:text-text'
-            }`}
-          >
-            {p.label}
-          </button>
-        ))}
-        {preset === 'custom' && (
-          <div className="flex items-center gap-2">
-            <input
-              type="date"
-              className="bg-background border border-border rounded px-2 py-1 text-xs text-text font-mono focus:outline-none"
-              value={customStart}
-              onChange={(e) => setCustomStart(e.target.value)}
-            />
-            <span className="text-muted text-xs">to</span>
-            <input
-              type="date"
-              className="bg-background border border-border rounded px-2 py-1 text-xs text-text font-mono focus:outline-none"
-              value={customEnd}
-              onChange={(e) => setCustomEnd(e.target.value)}
-            />
+      <div className="flex items-start gap-6 flex-wrap">
+        <div className="space-y-2">
+          <p className="text-xs text-muted">Period</p>
+          <div className="flex items-center gap-2 flex-wrap">
+            {PRESETS.map((p) => (
+              <button
+                key={p.key}
+                onClick={() => setPreset(p.key)}
+                className={`px-3 py-1.5 text-xs rounded border transition-all ${
+                  preset === p.key
+                    ? 'bg-green-10 text-green border-green/40'
+                    : 'text-muted border-border hover:text-text'
+                }`}
+              >
+                {p.label}
+              </button>
+            ))}
+            {preset === 'custom' && (
+              <div className="flex items-center gap-2">
+                <input
+                  type="date"
+                  className="bg-background border border-border rounded px-2 py-1 text-xs text-text font-mono focus:outline-none"
+                  value={customStart}
+                  onChange={(e) => setCustomStart(e.target.value)}
+                />
+                <span className="text-muted text-xs">to</span>
+                <input
+                  type="date"
+                  className="bg-background border border-border rounded px-2 py-1 text-xs text-text font-mono focus:outline-none"
+                  value={customEnd}
+                  onChange={(e) => setCustomEnd(e.target.value)}
+                />
+              </div>
+            )}
           </div>
-        )}
+        </div>
+
+        <div className="space-y-2">
+          <p className="text-xs text-muted">Compare</p>
+          <div className="flex items-center gap-2 flex-wrap">
+            {COMPARISON_OPTIONS.map((option) => (
+              <button
+                key={option.key}
+                onClick={() => setComparison(option.key)}
+                className={`px-3 py-1.5 text-xs rounded border transition-all ${
+                  comparison === option.key
+                    ? 'bg-blue/10 text-blue border-blue/40'
+                    : 'text-muted border-border hover:text-text'
+                }`}
+              >
+                {option.label}
+              </button>
+            ))}
+          </div>
+        </div>
       </div>
 
       <ReportSummaryPanel summary={summary} />
 
       {/* Tab selector */}
       <div className="flex gap-1 bg-surface shadow-sm border border-border rounded p-0.5 w-fit">
-        {(['spending', 'income', 'trends', 'networth', 'investments'] as ReportTab[]).map((t) => (
+        {(['spending', 'income', 'trends', 'cashflow', 'networth', 'investments'] as ReportTab[]).map((t) => (
           <button
             key={t}
             onClick={() => setTab(t)}
@@ -1125,7 +1381,7 @@ export function Reports() {
               tab === t ? 'bg-green-10 text-green' : 'text-muted hover:text-text'
             }`}
           >
-            {t === 'networth' ? 'Net Worth' : t}
+            {t === 'networth' ? 'Net Worth' : t === 'cashflow' ? 'Cash Flow' : t}
           </button>
         ))}
       </div>
@@ -1133,7 +1389,8 @@ export function Reports() {
       {/* Tab content */}
       {tab === 'spending' && <SpendingTab startDate={startDate} endDate={endDate} />}
       {tab === 'income' && <IncomeTab startDate={startDate} endDate={endDate} />}
-      {tab === 'trends' && <TrendsTab startDate={startDate} endDate={endDate} />}
+      {tab === 'trends' && <TrendsTab startDate={startDate} endDate={endDate} initialCategoryIds={trendCategoryIds} />}
+      {tab === 'cashflow' && <CashflowTab startDate={startDate} endDate={endDate} />}
       {tab === 'networth' && <NetWorthTab />}
       {tab === 'investments' && <InvestmentsTab />}
     </div>

@@ -8,6 +8,7 @@ import {
   getSpendingReport,
   getSpendingTrendsReport,
 } from '../services/reporting';
+import type { ReportComparisonMode } from '../../../shared/types';
 
 const router = Router();
 
@@ -24,6 +25,20 @@ function splitQueryValues(value: unknown): string[] {
       ? entry.split(',').map((part) => part.trim()).filter(Boolean)
       : []
   );
+}
+
+function reportComparison(value: unknown): ReportComparisonMode | undefined {
+  const parsed = firstQueryValue(value);
+  if (
+    parsed === 'prior_period' ||
+    parsed === 'prior_month' ||
+    parsed === 'same_month_last_year' ||
+    parsed === 'trailing_3' ||
+    parsed === 'trailing_12'
+  ) {
+    return parsed;
+  }
+  return undefined;
 }
 
 // GET /cashflow?startDate&endDate
@@ -44,7 +59,8 @@ router.get('/summary', (req: Request, res: Response, next: NextFunction): void =
     const db = getDb();
     const startDate = firstQueryValue(req.query.startDate);
     const endDate = firstQueryValue(req.query.endDate);
-    res.json({ data: getReportSummary(db, { startDate, endDate }) });
+    const comparison = reportComparison(req.query.comparison);
+    res.json({ data: getReportSummary(db, { startDate, endDate, comparison }) });
   } catch (err) {
     next(err);
   }
