@@ -17,7 +17,7 @@ import {
   CartesianGrid,
   Legend,
 } from 'recharts';
-import { ChevronRight, Sparkles } from 'lucide-react';
+import { ChevronRight, Save, Sparkles, X } from 'lucide-react';
 import { format, subMonths, startOfMonth, endOfMonth, startOfYear } from 'date-fns';
 import { reportsApi, networthApi, investmentsApi, categoriesApi } from '../lib/api';
 import { advisorRouteState } from '../lib/advisorRouteState';
@@ -27,6 +27,16 @@ import {
   buildReportDrilldownAdvisorPrompt,
   buildReportEvidenceAdvisorPrompt,
 } from '../lib/advisorPrompts';
+import {
+  REPORT_VIEW_STORAGE_KEY,
+  createCustomReportView,
+  parseCustomReportViews,
+  serializeCustomReportViews,
+  upsertCustomReportView,
+  type CustomReportView,
+  type ReportDatePreset,
+  type ReportTab,
+} from '../lib/reportViews';
 import { formatCurrency, formatMonth, formatDate, formatPercent } from '../lib/formatters';
 import { PageLoader } from '../components/LoadingSpinner';
 import { EmptyState } from '../components/EmptyState';
@@ -49,7 +59,7 @@ const COLORS = [
   '#f472b6', '#34d399', '#fb923c', '#60a5fa', '#f87171',
 ];
 
-type DatePreset = 'this_month' | 'last_month' | '3m' | '6m' | '12m' | 'ytd' | 'all' | 'custom';
+type DatePreset = ReportDatePreset;
 
 interface TooltipPayload {
   dataKey: string | number;
@@ -1523,8 +1533,6 @@ const PRESETS: { key: DatePreset; label: string }[] = [
   { key: 'custom', label: 'Custom' },
 ];
 
-type ReportTab = 'spending' | 'income' | 'trends' | 'cashflow' | 'networth' | 'investments';
-
 const COMPARISON_OPTIONS: { key: ReportComparisonMode; label: string }[] = [
   { key: 'prior_period', label: 'Prior Period' },
   { key: 'prior_month', label: 'Prior Month' },
@@ -1613,6 +1621,11 @@ export function Reports() {
   const [comparison, setComparison] = useState<ReportComparisonMode>('prior_period');
   const [trendCategoryIds, setTrendCategoryIds] = useState<string[]>([]);
   const [evidenceTarget, setEvidenceTarget] = useState<EvidenceTarget | null>(null);
+  const [customViews, setCustomViews] = useState<CustomReportView[]>(() => {
+    if (typeof window === 'undefined') return [];
+    return parseCustomReportViews(window.localStorage.getItem(REPORT_VIEW_STORAGE_KEY));
+  });
+  const [newViewName, setNewViewName] = useState('');
 
   const { startDate, endDate } = getDateRange(preset, customStart, customEnd);
   const { data: summary } = useQuery({
@@ -1625,6 +1638,34 @@ export function Reports() {
     setComparison(view.comparison);
     setTab(view.tab);
     setTrendCategoryIds(view.categoryIds ?? []);
+  };
+  const persistCustomViews = (views: CustomReportView[]) => {
+    setCustomViews(views);
+    window.localStorage.setItem(REPORT_VIEW_STORAGE_KEY, serializeCustomReportViews(views));
+  };
+  const saveCurrentView = () => {
+    const nextView = createCustomReportView({
+      label: newViewName,
+      tab,
+      datePreset: preset,
+      comparison,
+      customStart,
+      customEnd,
+      categoryIds: trendCategoryIds,
+    });
+    persistCustomViews(upsertCustomReportView(customViews, nextView));
+    setNewViewName('');
+  };
+  const applyCustomReportView = (view: CustomReportView) => {
+    setPreset(view.datePreset);
+    setComparison(view.comparison);
+    setTab(view.tab);
+    setCustomStart(view.customStart ?? '');
+    setCustomEnd(view.customEnd ?? '');
+    setTrendCategoryIds(view.categoryIds ?? []);
+  };
+  const deleteCustomReportView = (viewId: string) => {
+    persistCustomViews(customViews.filter((view) => view.id !== viewId));
   };
   const askAdvisorAboutReport = (report: ReportSummary) => {
     navigate('/advisor', {
@@ -1650,6 +1691,41 @@ export function Reports() {
               {view.label}
             </button>
           ))}
+          {customViews.map((view) => (
+            <div key={view.id} className="flex items-center border border-border rounded overflow-hidden">
+              <button
+                onClick={() => applyCustomReportView(view)}
+                className="px-3 py-1.5 text-xs text-muted hover:text-text hover:bg-green/5"
+              >
+                {view.label}
+              </button>
+              <button
+                onClick={() => deleteCustomReportView(view.id)}
+                className="px-2 py-1.5 text-muted hover:text-rose border-l border-border"
+                title={`Delete ${view.label}`}
+                aria-label={`Delete ${view.label}`}
+              >
+                <X size={12} />
+              </button>
+            </div>
+          ))}
+          <div className="flex items-center gap-2 border border-border rounded px-2 py-1 bg-surface">
+            <input
+              value={newViewName}
+              onChange={(event) => setNewViewName(event.target.value)}
+              placeholder="Name this view"
+              className="w-32 bg-transparent text-xs text-text placeholder:text-muted focus:outline-none"
+            />
+            <button
+              type="button"
+              disabled={!newViewName.trim()}
+              onClick={saveCurrentView}
+              className="flex items-center gap-1 text-xs text-muted hover:text-green disabled:opacity-40 disabled:hover:text-muted"
+            >
+              <Save size={12} />
+              Save
+            </button>
+          </div>
         </div>
       </div>
 
