@@ -210,6 +210,43 @@ export interface RecurringForecast {
   occurrences: RecurringForecastOccurrence[];
 }
 
+export interface SubscriptionInsightItem {
+  pattern_id: string;
+  merchant_name: string;
+  category_id?: string | null;
+  category_name?: string | null;
+  category_color?: string | null;
+  frequency: RecurringPattern['frequency'];
+  average_amount: number;
+  monthly_amount: number;
+  next_expected: string;
+  upcoming_amount: number;
+  is_confirmed: boolean;
+  confidence: number;
+  confidence_label: RecurringForecastOccurrence['confidence_label'];
+  transaction_count: number;
+  latest_amount?: number | null;
+  previous_amount?: number | null;
+  increase_amount?: number | null;
+  increase_percent?: number | null;
+}
+
+export interface SubscriptionInsights {
+  days: number;
+  subscription_count: number;
+  total_monthly_amount: number;
+  total_upcoming_amount: number;
+  confirmed_monthly_amount: number;
+  unconfirmed_monthly_amount: number;
+  increase_count: number;
+  unconfirmed_count: number;
+  upcoming_renewal_count: number;
+  subscriptions: SubscriptionInsightItem[];
+  increases: SubscriptionInsightItem[];
+  unconfirmed: SubscriptionInsightItem[];
+  upcoming: SubscriptionInsightItem[];
+}
+
 export interface MerchantRule {
   id: string;
   pattern: string;

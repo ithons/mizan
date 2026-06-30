@@ -3,6 +3,7 @@ import { getDb } from '../db/index';
 import { validate } from '../middleware/validate';
 import { UpdateRecurringSchema } from '../../../shared/schemas';
 import { buildRecurringForecast } from '../services/recurringForecast';
+import { buildSubscriptionInsights } from '../services/subscriptionInsights';
 import { format, addDays } from 'date-fns';
 
 const router = Router();
@@ -80,6 +81,21 @@ router.get('/forecast', (req: Request, res: Response, next: NextFunction): void 
     }
 
     res.json({ data: buildRecurringForecast(db, days) });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.get('/subscriptions', (req: Request, res: Response, next: NextFunction): void => {
+  try {
+    const db = getDb();
+    const days = parseDays(req.query.days ?? '60');
+    if (days === null) {
+      res.status(400).json({ error: 'Invalid days filter' });
+      return;
+    }
+
+    res.json({ data: buildSubscriptionInsights(db, days) });
   } catch (err) {
     next(err);
   }

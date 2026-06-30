@@ -1,0 +1,183 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import Database from 'better-sqlite3';
+import { addDays, format, subDays } from 'date-fns';
+import { buildSubscriptionInsights } from '../server/src/services/subscriptionInsights';
+
+function setupDb(): Database.Database {
+  const db = new Database(':memory:');
+
+  db.exec(`
+    CREATE TABLE categories (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      color TEXT,
+      is_income INTEGER NOT NULL DEFAULT 0
+    );
+
+    CREATE TABLE recurring_patterns (
+      id TEXT PRIMARY KEY,
+      merchant_name TEXT NOT NULL,
+      category_id TEXT,
+      average_amount REAL NOT NULL,
+      frequency TEXT NOT NULL,
+      last_seen TEXT NOT NULL,
+      next_expected TEXT NOT NULL,
+      is_active INTEGER NOT NULL DEFAULT 1,
+      is_confirmed INTEGER NOT NULL DEFAULT 0,
+      transaction_count INTEGER NOT NULL DEFAULT 0
+    );
+
+    CREATE TABLE transactions (
+      id TEXT PRIMARY KEY,
+      recurring_id TEXT,
+      date TEXT NOT NULL,
+      amount REAL NOT NULL,
+      pending INTEGER NOT NULL DEFAULT 0
+    );
+  `);
+
+  db.prepare(`
+    INSERT INTO categories (id, name, color, is_income)
+    VALUES
+      ('income', 'Income', '#4ecba3', 1),
+      ('bills', 'Bills', '#e07070', 0)
+  `).run();
+
+  const today = format(new Date(), 'yyyy-MM-dd');
+  const inTwentyDays = format(addDays(new Date(), 20), 'yyyy-MM-dd');
+  const insertPattern = db.prepare(`
+    INSERT INTO recurring_patterns (
+      id,
+      merchant_name,
+      category_id,
+      average_amount,
+      frequency,
+      last_seen,
+      next_expected,
+      is_active,
+      is_confirmed,
+      transaction_count
+    )
+    VALUES (@id, @merchant_name, @category_id, @average_amount, @frequency, @last_seen, @next_expected, @is_active, @is_confirmed, @transaction_count)
+  `);
+
+  insertPattern.run({
+    id: 'paycheck',
+    merchant_name: 'MIT Payroll',
+    category_id: 'income',
+    average_amount: 2500,
+    frequency: 'monthly',
+    last_seen: today,
+    next_expected: today,
+    is_active: 1,
+    is_confirmed: 1,
+    transaction_count: 4,
+  });
+  insertPattern.run({
+    id: 'rent',
+    merchant_name: 'Rent',
+    category_id: 'bills',
+    average_amount: 1000,
+    frequency: 'monthly',
+    last_seen: today,
+    next_expected: today,
+    is_active: 1,
+    is_confirmed: 1,
+    transaction_count: 4,
+  });
+  insertPattern.run({
+    id: 'streaming',
+    merchant_name: 'Streaming',
+    category_id: 'bills',
+    average_amount: 15,
+    frequency: 'monthly',
+    last_seen: today,
+    next_expected: today,
+    is_active: 1,
+    is_confirmed: 1,
+    transaction_count: 4,
+  });
+  insertPattern.run({
+    id: 'cloud',
+    merchant_name: 'Cloud Storage',
+    category_id: 'bills',
+    average_amount: 120,
+    frequency: 'annual',
+    last_seen: today,
+    next_expected: inTwentyDays,
+    is_active: 1,
+    is_confirmed: 1,
+    transaction_count: 3,
+  });
+  insertPattern.run({
+    id: 'coffee',
+    merchant_name: 'Coffee Club',
+    category_id: 'bills',
+    average_amount: 10,
+    frequency: 'weekly',
+    last_seen: today,
+    next_expected: today,
+    is_active: 1,
+    is_confirmed: 1,
+    transaction_count: 5,
+  });
+  insertPattern.run({
+    id: 'trial',
+    merchant_name: 'App Trial',
+    category_id: 'bills',
+    average_amount: 8,
+    frequency: 'monthly',
+    last_seen: today,
+    next_expected: today,
+    is_active: 1,
+    is_confirmed: 0,
+    transaction_count: 3,
+  });
+  insertPattern.run({
+    id: 'weak',
+    merchant_name: 'Weak Pattern',
+    category_id: 'bills',
+    average_amount: 40,
+    frequency: 'monthly',
+    last_seen: today,
+    next_expected: today,
+    is_active: 1,
+    is_confirmed: 0,
+    transaction_count: 2,
+  });
+
+  const insertTransaction = db.prepare(`
+    INSERT INTO transactions (id, recurring_id, date, amount, pending)
+    VALUES (?, ?, ?, ?, 0)
+  `);
+  insertTransaction.run('streaming_1', 'streaming', format(subDays(new Date(), 90), 'yyyy-MM-dd'), -15);
+  insertTransaction.run('streaming_2', 'streaming', format(subDays(new Date(), 60), 'yyyy-MM-dd'), -15);
+  insertTransaction.run('streaming_3', 'streaming', format(subDays(new Date(), 30), 'yyyy-MM-dd'), -19);
+
+  return db;
+}
+
+function closeTo(actual: number, expected: number) {
+  assert.ok(Math.abs(actual - expected) < 0.01, `${actual} should be close to ${expected}`);
+}
+
+test('subscription insights summarize recurring bills without income or weak patterns', (t) => {
+  const db = setupDb();
+  t.after(() => db.close());
+
+  const insights = buildSubscriptionInsights(db, 30);
+
+  assert.equal(insights.subscription_count, 5);
+  assert.equal(insights.unconfirmed_count, 1);
+  assert.equal(insights.increase_count, 1);
+  assert.equal(insights.increases[0].merchant_name, 'Streaming');
+  closeTo(insights.increases[0].increase_amount ?? 0, 4);
+  closeTo(insights.increases[0].increase_percent ?? 0, 4 / 15);
+  assert.equal(insights.subscriptions.some((item) => item.merchant_name === 'MIT Payroll'), false);
+  assert.equal(insights.subscriptions.some((item) => item.merchant_name === 'Weak Pattern'), false);
+  assert.equal(insights.unconfirmed[0].merchant_name, 'App Trial');
+  assert.ok(insights.upcoming.some((item) => item.merchant_name === 'Cloud Storage'));
+  closeTo(insights.total_monthly_amount, 1000 + (49 / 3) + 10 + (10 * 52 / 12) + 8);
+  assert.ok(insights.total_upcoming_amount > insights.total_monthly_amount);
+});

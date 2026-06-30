@@ -9,6 +9,7 @@ import type {
   Budget,
   RecurringPattern,
   RecurringForecast,
+  SubscriptionInsights,
   NetWorthSnapshot,
   PlaidItem,
   Insight,
@@ -298,6 +299,8 @@ export const recurringApi = {
     apiFetch<RecurringPattern[]>(`/api/recurring/upcoming${days ? `?days=${days}` : ''}`),
   forecast: (days?: number) =>
     apiFetch<RecurringForecast>(`/api/recurring/forecast${days ? `?days=${days}` : ''}`),
+  subscriptions: (days?: number) =>
+    apiFetch<SubscriptionInsights>(`/api/recurring/subscriptions${days ? `?days=${days}` : ''}`),
   confirm: (id: string) =>
     apiFetch<RecurringPattern>(`/api/recurring/${id}/confirm`, { method: 'POST' }),
   dismiss: (id: string) =>

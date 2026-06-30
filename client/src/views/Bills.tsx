@@ -10,11 +10,12 @@ import {
   CircleAlert,
   RefreshCw,
   Sparkles,
+  TrendingUp,
   Wallet,
   XCircle,
 } from 'lucide-react';
 import { format } from 'date-fns';
-import type { Account, RecurringForecast, RecurringForecastOccurrence } from '@shared/types';
+import type { Account, RecurringForecast, RecurringForecastOccurrence, SubscriptionInsights } from '@shared/types';
 import { accountsApi, recurringApi } from '../lib/api';
 import { advisorRouteState } from '../lib/advisorRouteState';
 import {
@@ -93,6 +94,105 @@ function Stat({
       <p className="font-mono text-xl" style={{ color }}>
         {formatCurrency(value)}
       </p>
+    </div>
+  );
+}
+
+function SubscriptionInsightPanel({ insights }: { insights: SubscriptionInsights }) {
+  return (
+    <div className="border border-border bg-surface rounded p-4">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between mb-4">
+        <div>
+          <h2 className="text-sm font-medium text-text">Subscriptions</h2>
+          <p className="text-xs text-muted mt-1">{insights.subscription_count} recurring bills</p>
+        </div>
+        <span className="text-xs text-muted font-mono">{insights.days} days</span>
+      </div>
+
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+        <div>
+          <p className="text-xs text-muted mb-1">Monthly</p>
+          <p className="font-mono text-lg text-text">{formatCurrency(insights.total_monthly_amount)}</p>
+        </div>
+        <div>
+          <p className="text-xs text-muted mb-1">Upcoming</p>
+          <p className="font-mono text-lg text-rose">{formatCurrency(insights.total_upcoming_amount)}</p>
+        </div>
+        <div>
+          <p className="text-xs text-muted mb-1">Increases</p>
+          <p className="font-mono text-lg text-amber">{insights.increase_count}</p>
+        </div>
+        <div>
+          <p className="text-xs text-muted mb-1">Needs review</p>
+          <p className="font-mono text-lg text-blue">{insights.unconfirmed_count}</p>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 xl:grid-cols-3 gap-3 mt-4">
+        <div className="border border-border rounded bg-background/40">
+          <div className="px-3 py-2 border-b border-border flex items-center gap-2">
+            <TrendingUp size={13} className="text-amber" />
+            <p className="text-xs font-medium text-text">Price increases</p>
+          </div>
+          {insights.increases.length > 0 ? (
+            <div className="divide-y divide-border">
+              {insights.increases.slice(0, 3).map((item) => (
+                <div key={item.pattern_id} className="px-3 py-2 text-xs flex items-center justify-between gap-3">
+                  <span className="text-text truncate">{item.merchant_name}</span>
+                  <span className="font-mono text-amber flex-shrink-0">
+                    +{formatCurrency(item.increase_amount ?? 0)}
+                  </span>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="px-3 py-5 text-xs text-muted">No increases detected</div>
+          )}
+        </div>
+
+        <div className="border border-border rounded bg-background/40">
+          <div className="px-3 py-2 border-b border-border flex items-center gap-2">
+            <CircleAlert size={13} className="text-blue" />
+            <p className="text-xs font-medium text-text">Needs review</p>
+          </div>
+          {insights.unconfirmed.length > 0 ? (
+            <div className="divide-y divide-border">
+              {insights.unconfirmed.slice(0, 3).map((item) => (
+                <div key={item.pattern_id} className="px-3 py-2 text-xs flex items-center justify-between gap-3">
+                  <span className="text-text truncate">{item.merchant_name}</span>
+                  <span className="font-mono text-muted flex-shrink-0">{Math.round(item.confidence * 100)}%</span>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="px-3 py-5 text-xs text-muted">All subscriptions confirmed</div>
+          )}
+        </div>
+
+        <div className="border border-border rounded bg-background/40">
+          <div className="px-3 py-2 border-b border-border flex items-center gap-2">
+            <CalendarDays size={13} className="text-green" />
+            <p className="text-xs font-medium text-text">Upcoming renewals</p>
+          </div>
+          {insights.upcoming.length > 0 ? (
+            <div className="divide-y divide-border">
+              {insights.upcoming.slice(0, 3).map((item) => (
+                <div key={item.pattern_id} className="px-3 py-2 text-xs flex items-center justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="text-text truncate">{item.merchant_name}</p>
+                    <p className="text-[11px] text-muted">
+                      {formatDate(item.next_expected)} · {FREQUENCY_LABELS[item.frequency]}
+                    </p>
+                  </div>
+                  <span className="font-mono text-rose flex-shrink-0">{formatCurrency(item.average_amount)}</span>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="px-3 py-5 text-xs text-muted">No renewals in this window</div>
+          )}
+        </div>
+      </div>
     </div>
   );
 }
@@ -200,6 +300,11 @@ export function Bills() {
   const { data: forecast, isLoading } = useQuery({
     queryKey: ['recurring', 'forecast', days],
     queryFn: () => recurringApi.forecast(days),
+  });
+
+  const { data: subscriptionInsights } = useQuery({
+    queryKey: ['recurring', 'subscriptions', days],
+    queryFn: () => recurringApi.subscriptions(days),
   });
 
   const { data: accounts = [] } = useQuery({
@@ -314,6 +419,10 @@ export function Bills() {
         <Stat label="Bills" value={-(forecast?.bills ?? 0)} tone="bill" />
         <Stat label="Net Impact" value={forecast?.net ?? 0} tone="net" />
       </div>
+
+      {subscriptionInsights && (
+        <SubscriptionInsightPanel insights={subscriptionInsights} />
+      )}
 
       {reviewCount > 0 && (
         <div className="border border-amber/30 bg-amber/10 rounded p-4 flex items-start gap-3">
