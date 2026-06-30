@@ -334,7 +334,7 @@ function RecurringTab() {
               const status = !r.is_active ? 'dismissed' : r.is_confirmed ? 'confirmed' : 'unconfirmed';
 
               return (
-                <tr key={r.id} className="border-b border-border hover:bg-white/2">
+                <tr key={r.id} className="border-b border-border hover:bg-black/5">
                   <td className="px-4 py-2 text-text font-medium">{r.merchant_name}</td>
                   <td className="px-4 py-2">
                     <select

@@ -620,7 +620,7 @@ export function Transactions() {
                 </tr>
               ) : (
                 txs.map((tx) => (
-                  <tr key={tx.id} className={`border-b border-border hover:bg-white/2 group ${selectedIds.has(tx.id) ? 'bg-green/5' : ''}`}>
+                  <tr key={tx.id} className={`border-b border-border hover:bg-black/5 group ${selectedIds.has(tx.id) ? 'bg-green/5' : ''}`}>
                     <td className="px-3 py-2.5">
                       <input
                         type="checkbox"

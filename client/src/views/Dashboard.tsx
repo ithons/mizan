@@ -268,7 +268,7 @@ function DataQualityPanel({
               <button
                 key={issue.id}
                 onClick={() => onNavigate(issue.route)}
-                className="w-full flex items-start gap-2 text-left text-xs hover:bg-white/5 rounded p-1 -m-1"
+                className="w-full flex items-start gap-2 text-left text-xs hover:bg-black/5 rounded p-1 -m-1"
               >
                 <span className="w-1.5 h-1.5 rounded-full flex-shrink-0 mt-1.5" style={{ backgroundColor: issueTone.color }} />
                 <span className="min-w-0">
@@ -437,19 +437,19 @@ function DashboardFocusPanel({
               </button>
               <button
                 onClick={() => onNavigate('/accounts?manual=1')}
-                className="flex items-center justify-center gap-2 rounded border border-border text-text px-3 py-2.5 text-sm hover:bg-white/5"
+                className="flex items-center justify-center gap-2 rounded border border-border text-text px-3 py-2.5 text-sm hover:bg-black/5"
               >
                 <Plus size={15} /> Manual account
               </button>
               <button
                 onClick={() => onNavigate('/settings?section=coinbase')}
-                className="flex items-center justify-center gap-2 rounded border border-border text-text px-3 py-2.5 text-sm hover:bg-white/5"
+                className="flex items-center justify-center gap-2 rounded border border-border text-text px-3 py-2.5 text-sm hover:bg-black/5"
               >
                 <Wallet size={15} /> Coinbase
               </button>
               <button
                 onClick={() => onNavigate('/settings?section=data')}
-                className="flex items-center justify-center gap-2 rounded border border-border text-text px-3 py-2.5 text-sm hover:bg-white/5"
+                className="flex items-center justify-center gap-2 rounded border border-border text-text px-3 py-2.5 text-sm hover:bg-black/5"
               >
                 <FileInput size={15} /> Import CSV
               </button>
@@ -1063,7 +1063,7 @@ export function Dashboard() {
         {recentTxs && recentTxs.data.length > 0 ? (
           <div className="divide-y divide-border">
             {recentTxs.data.map((tx) => (
-              <div key={tx.id} className="flex items-center px-4 py-2.5 gap-4 hover:bg-white/2 cursor-pointer" onClick={() => navigate('/transactions')}>
+              <div key={tx.id} className="flex items-center px-4 py-2.5 gap-4 hover:bg-black/5 cursor-pointer" onClick={() => navigate('/transactions')}>
                 <span className="font-mono text-xs text-muted w-20 flex-shrink-0">{formatDate(tx.date)}</span>
                 <span className="text-sm text-text flex-1 truncate">{tx.merchant_name || tx.original_name}</span>
                 <span className="text-xs text-muted flex-shrink-0">

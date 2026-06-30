@@ -657,7 +657,7 @@ export function Investments() {
                 return (
                   <tr
                     key={acct.id}
-                    className={`border-b border-border hover:bg-white/2 cursor-pointer ${selectedAccountId === acct.id ? 'bg-green/5' : ''}`}
+                    className={`border-b border-border hover:bg-black/5 cursor-pointer ${selectedAccountId === acct.id ? 'bg-green/5' : ''}`}
                     onClick={() => setSelectedAccountId(acct.id === selectedAccountId ? null : acct.id)}
                   >
                     <td className="px-3 py-2.5 text-text font-medium">{acct.account_name}</td>
@@ -767,7 +767,7 @@ export function Investments() {
                     const acct = accounts.find((a) => a.id === h.account_id);
                     const isCash = h.security_type === 'cash';
                     return (
-                      <tr key={h.id} className={`border-b border-border hover:bg-white/2 group ${isCash ? 'opacity-60' : ''}`}>
+                      <tr key={h.id} className={`border-b border-border hover:bg-black/5 group ${isCash ? 'opacity-60' : ''}`}>
                         <td className="px-3 py-2.5 font-mono font-bold text-text">{h.ticker ?? '-'}</td>
                         <td className="px-3 py-2.5 text-muted max-w-[140px]">
                           <span className="truncate block" title={h.security_name ?? undefined}>{h.security_name}</span>
@@ -892,7 +892,7 @@ export function Investments() {
                     filteredTxs.map((tx) => {
                       const acct = accounts.find((a) => a.id === tx.account_id);
                       return (
-                        <tr key={tx.id} className="border-b border-border hover:bg-white/2">
+                        <tr key={tx.id} className="border-b border-border hover:bg-black/5">
                           <td className="px-3 py-2.5 font-mono text-muted whitespace-nowrap">{formatDate(tx.date)}</td>
                           <td className="px-3 py-2.5">
                             <span className={`px-1.5 py-0.5 rounded text-xs ${TX_TYPE_COLORS[tx.type] ?? TX_TYPE_COLORS.other}`}>

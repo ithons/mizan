@@ -79,7 +79,7 @@ export function CategoryRow({
   return (
     <div>
       <div
-        className="flex items-center gap-2 py-1.5 hover:bg-white/3 group rounded px-2"
+        className="flex items-center gap-2 py-1.5 hover:bg-black/5 group rounded px-2"
         style={{ paddingLeft: `${8 + depth * 20}px` }}
       >
         <span className="w-3 h-3 rounded-full flex-shrink-0" style={{ backgroundColor: category.color || '#6b6b7a' }} />

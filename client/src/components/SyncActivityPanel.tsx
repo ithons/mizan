@@ -42,8 +42,8 @@ function RunSummary({ run, selected, onSelect }: {
 
   return (
     <button
-      className={`w-full flex items-center gap-3 px-3 py-2.5 text-left hover:bg-white/5 transition-colors ${
-        selected ? 'bg-white/5' : ''
+      className={`w-full flex items-center gap-3 px-3 py-2.5 text-left hover:bg-black/5 transition-colors ${
+        selected ? 'bg-green/5' : ''
       }`}
       onClick={onSelect}
     >

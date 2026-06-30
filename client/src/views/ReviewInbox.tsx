@@ -84,7 +84,7 @@ function QueueButton({
   return (
     <button
       className={`flex items-center gap-3 border rounded px-3 py-2 text-left transition-colors ${
-        active ? 'bg-white/5 border-green/40' : 'bg-surface border-border hover:border-white/20'
+        active ? 'bg-green/5 border-green/40' : 'bg-surface border-border hover:border-green/40'
       }`}
       onClick={onClick}
     >

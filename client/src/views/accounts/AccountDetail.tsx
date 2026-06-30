@@ -246,7 +246,7 @@ export function AccountDetail({ account }: { account: Account }) {
               ) : (holdings).map((h) => {
                 const unr = h.cost_basis != null ? h.institution_value - h.cost_basis : null;
                 return (
-                  <tr key={h.id} className="border-b border-border hover:bg-white/2">
+                  <tr key={h.id} className="border-b border-border hover:bg-black/5">
                     <td className="px-4 py-2.5 font-mono text-blue font-medium">{h.ticker ?? '-'}</td>
                     <td className="px-4 py-2.5 text-text truncate max-w-[160px]" title={h.security_name ?? ''}>{h.security_name}</td>
                     <td className="px-4 py-2.5 font-mono text-muted">{h.quantity.toFixed(4)}</td>
@@ -277,7 +277,7 @@ export function AccountDetail({ account }: { account: Account }) {
               {invTxLoading ? (
                 <SkeletonList rows={6} cols={6} />
               ) : (invTxs ?? []).map((tx) => (
-                <tr key={tx.id} className="border-b border-border hover:bg-white/2">
+                <tr key={tx.id} className="border-b border-border hover:bg-black/5">
                   <td className="px-4 py-2.5 font-mono text-muted">{formatDate(tx.date)}</td>
                   <td className="px-4 py-2.5">
                     <span className={`px-1.5 py-0.5 rounded text-xs ${
@@ -313,7 +313,7 @@ export function AccountDetail({ account }: { account: Account }) {
               {txLoading ? (
                 <SkeletonList rows={8} cols={4} />
               ) : (txs?.data ?? []).map((tx) => (
-                <tr key={tx.id} className="border-b border-border hover:bg-white/2">
+                <tr key={tx.id} className="border-b border-border hover:bg-black/5">
                   <td className="px-4 py-2.5 font-mono text-muted">{formatDate(tx.date)}</td>
                   <td className="px-4 py-2.5 text-text truncate max-w-[200px]" title={tx.merchant_name || tx.original_name}>
                     {tx.merchant_name || tx.original_name}

@@ -39,7 +39,7 @@ export function Modal({ open, onClose, title, children, maxWidth = '480px' }: Mo
           <h2 className="text-base font-semibold text-text">{title}</h2>
           <button
             onClick={onClose}
-            className="text-muted hover:text-text transition-colors rounded p-1 hover:bg-white/5"
+            className="text-muted hover:text-text transition-colors rounded p-1 hover:bg-black/5"
           >
             <X size={18} />
           </button>

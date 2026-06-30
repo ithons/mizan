@@ -87,14 +87,14 @@ function GoalCard({
         </div>
         <div className="flex items-center gap-1">
           <button
-            className="w-7 h-7 flex items-center justify-center rounded text-muted hover:text-text hover:bg-white/5"
+            className="w-7 h-7 flex items-center justify-center rounded text-muted hover:text-text hover:bg-black/5"
             onClick={onEdit}
             title="Edit goal"
           >
             <Pencil size={14} />
           </button>
           <button
-            className="w-7 h-7 flex items-center justify-center rounded text-muted hover:text-text hover:bg-white/5"
+            className="w-7 h-7 flex items-center justify-center rounded text-muted hover:text-text hover:bg-black/5"
             onClick={onArchive}
             title="Archive goal"
           >

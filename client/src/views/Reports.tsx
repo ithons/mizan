@@ -724,7 +724,7 @@ function SpendingTab({ startDate, endDate }: { startDate: string; endDate: strin
             {displayCats.map((c, i) => (
               <tr
                 key={c.category_id}
-                className="border-b border-border hover:bg-white/2 cursor-pointer"
+                className="border-b border-border hover:bg-black/5 cursor-pointer"
                 onClick={() => setDetailTarget({
                   kind: 'spending',
                   categoryId: c.category_id,
@@ -818,7 +818,7 @@ function IncomeTab({ startDate, endDate }: { startDate: string; endDate: string 
             {categories.map((c, i) => (
               <tr
                 key={c.category_id}
-                className="border-b border-border hover:bg-white/2 cursor-pointer"
+                className="border-b border-border hover:bg-black/5 cursor-pointer"
                 onClick={() => setDetailTarget({
                   kind: 'income',
                   categoryId: c.category_id,
@@ -1406,7 +1406,7 @@ function InvestmentsTab() {
               const unrealized = h.cost_basis != null ? h.institution_value - h.cost_basis : null;
               const pnlPct = h.cost_basis && h.cost_basis > 0 ? ((h.institution_value - h.cost_basis) / h.cost_basis) * 100 : null;
               return (
-                <tr key={h.id} className="border-b border-border hover:bg-white/2">
+                <tr key={h.id} className="border-b border-border hover:bg-black/5">
                   <td className="px-4 py-2 font-mono text-blue font-medium">{h.ticker ?? '-'}</td>
                   <td className="px-4 py-2 text-text max-w-[160px] truncate">{h.security_name}</td>
                   <td className="px-4 py-2 font-mono text-muted">{h.quantity.toFixed(4)}</td>

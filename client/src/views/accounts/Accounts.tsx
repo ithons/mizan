@@ -346,7 +346,7 @@ export function Accounts() {
             <span className="text-sm font-medium text-text">Accounts</span>
             <button
               onClick={toggleLeft}
-              className="w-5 h-5 flex items-center justify-center rounded text-muted hover:text-text hover:bg-white/10 transition-colors"
+              className="w-5 h-5 flex items-center justify-center rounded text-muted hover:text-text hover:bg-black/5 transition-colors"
               title="Hide panel"
             >
               <PanelLeftClose size={13} />
@@ -362,21 +362,21 @@ export function Accounts() {
             {addMenuOpen && (
               <div className="absolute right-0 top-6 bg-surface shadow-sm border border-border rounded shadow-lg z-20 w-52 py-1">
                 <button
-                  className="flex items-center gap-2 w-full px-3 py-2 text-xs text-text hover:bg-white/5"
+                  className="flex items-center gap-2 w-full px-3 py-2 text-xs text-text hover:bg-black/5"
                   onClick={connectPlaid}
                 >
                   <Link size={12} className="text-green" />
                   Connect Bank or Card
                 </button>
                 <button
-                  className="flex items-center gap-2 w-full px-3 py-2 text-xs text-text hover:bg-white/5"
+                  className="flex items-center gap-2 w-full px-3 py-2 text-xs text-text hover:bg-black/5"
                   onClick={connectCoinbase}
                 >
                   <Link size={12} className="text-blue" />
                   Connect Coinbase
                 </button>
                 <button
-                  className="flex items-center gap-2 w-full px-3 py-2 text-xs text-text hover:bg-white/5"
+                  className="flex items-center gap-2 w-full px-3 py-2 text-xs text-text hover:bg-black/5"
                   onClick={() => { setAddMenuOpen(false); setShowManualModal(true); }}
                 >
                   <Plus size={12} className="text-muted" />

@@ -67,7 +67,7 @@ export function CategoryDropdown({
           {categories.map((category) => (
             <button
               key={category.id}
-              className="flex items-center gap-2 w-full px-3 py-1.5 text-xs hover:bg-white/5 text-left"
+              className="flex items-center gap-2 w-full px-3 py-1.5 text-xs hover:bg-black/5 text-left"
               onClick={() => { onChange(category.id); setOpen(false); }}
             >
               <CategoryBadge name={category.name} color={category.color} icon={category.icon} />
@@ -91,7 +91,7 @@ export function BulkCategoryDropdown({
   return (
     <div className="relative">
       <button
-        className="flex items-center gap-1 text-xs border border-border rounded px-2 py-1 text-text hover:bg-white/5"
+        className="flex items-center gap-1 text-xs border border-border rounded px-2 py-1 text-text hover:bg-black/5"
         onClick={() => setOpen(!open)}
       >
         Assign Category <ChevronDown size={11} />
@@ -101,7 +101,7 @@ export function BulkCategoryDropdown({
           {categories.map((category) => (
             <button
               key={category.id}
-              className="flex items-center gap-2 w-full px-3 py-1.5 text-xs hover:bg-white/5 text-left"
+              className="flex items-center gap-2 w-full px-3 py-1.5 text-xs hover:bg-black/5 text-left"
               onClick={() => { onSelect(category.id); setOpen(false); }}
             >
               <CategoryBadge name={category.name} color={category.color} icon={category.icon} />

@@ -65,7 +65,7 @@ function inlineFormat(text: string): React.ReactNode {
       return <strong key={i} className="font-semibold text-text">{part.slice(2, -2)}</strong>;
     }
     if (part.startsWith('`') && part.endsWith('`')) {
-      return <code key={i} className="font-mono text-xs bg-white/10 px-1 py-0.5 rounded">{part.slice(1, -1)}</code>;
+      return <code key={i} className="font-mono text-xs bg-black/5 px-1 py-0.5 rounded">{part.slice(1, -1)}</code>;
     }
     return part;
   });
@@ -84,14 +84,14 @@ function ContextPanel() {
   return (
     <div className="border border-border rounded-lg overflow-hidden flex-shrink-0">
       <button
-        className="w-full flex items-center gap-2 px-3 py-2.5 text-xs text-muted hover:text-text hover:bg-white/5 transition-colors"
+        className="w-full flex items-center gap-2 px-3 py-2.5 text-xs text-muted hover:text-text hover:bg-black/5 transition-colors"
         onClick={() => setOpen((p) => !p)}
       >
         {open ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
         <span className="flex-1 text-left">Local advisor context</span>
         <button
           onClick={(e) => { e.stopPropagation(); refetch(); }}
-          className="p-1 rounded hover:bg-white/10 transition-colors"
+          className="p-1 rounded hover:bg-black/5 transition-colors"
           title="Refresh context"
         >
           <RefreshCw size={11} className={isLoading ? 'animate-spin' : ''} />
@@ -206,7 +206,7 @@ function AdvisorToolsPanel({ tools }: { tools?: AdvisorToolStatus[] }) {
           <Link
             key={tool.id}
             to={tool.route}
-            className="flex items-center justify-between gap-3 px-3 py-2 text-xs hover:bg-white/5 transition-colors"
+            className="flex items-center justify-between gap-3 px-3 py-2 text-xs hover:bg-black/5 transition-colors"
           >
             <span className="text-text">{tool.label}</span>
             <span className="font-mono" style={{ color: toolTone[tool.status] }}>

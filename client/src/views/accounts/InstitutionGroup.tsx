@@ -127,14 +127,14 @@ export function InstitutionGroup({
                   {groupType === 'plaid' && (
                     <>
                       <button
-                        className="flex items-center gap-2 w-full px-3 py-1.5 text-xs text-muted hover:text-text hover:bg-white/5"
+                        className="flex items-center gap-2 w-full px-3 py-1.5 text-xs text-muted hover:text-text hover:bg-black/5"
                         onClick={() => { onSyncItem?.(); setMenuOpen(false); }}
                       >
                         <RefreshCw size={12} /> Sync Institution
                       </button>
                       {needsReauth && (
                         <button
-                          className="flex items-center gap-2 w-full px-3 py-1.5 text-xs text-amber hover:bg-white/5"
+                          className="flex items-center gap-2 w-full px-3 py-1.5 text-xs text-amber hover:bg-black/5"
                           onClick={() => { onReauthItem?.(); setMenuOpen(false); }}
                         >
                           <Unlink size={12} /> Reconnect
@@ -142,7 +142,7 @@ export function InstitutionGroup({
                       )}
                       <div className="border-t border-border my-1" />
                       <button
-                        className="flex items-center gap-2 w-full px-3 py-1.5 text-xs text-rose hover:bg-white/5"
+                        className="flex items-center gap-2 w-full px-3 py-1.5 text-xs text-rose hover:bg-black/5"
                         onClick={() => { onRemoveItem?.(); setMenuOpen(false); }}
                       >
                         <Trash2 size={12} /> Remove Institution
@@ -152,14 +152,14 @@ export function InstitutionGroup({
                   {groupType === 'coinbase' && (
                     <>
                       <button
-                        className="flex items-center gap-2 w-full px-3 py-1.5 text-xs text-muted hover:text-text hover:bg-white/5"
+                        className="flex items-center gap-2 w-full px-3 py-1.5 text-xs text-muted hover:text-text hover:bg-black/5"
                         onClick={() => { onSyncCoinbase?.(); setMenuOpen(false); }}
                       >
                         <RefreshCw size={12} /> Sync Coinbase
                       </button>
                       <div className="border-t border-border my-1" />
                       <button
-                        className="flex items-center gap-2 w-full px-3 py-1.5 text-xs text-rose hover:bg-white/5"
+                        className="flex items-center gap-2 w-full px-3 py-1.5 text-xs text-rose hover:bg-black/5"
                         onClick={() => { onDisconnectCoinbase?.(); setMenuOpen(false); }}
                       >
                         <Unlink size={12} /> Disconnect Coinbase

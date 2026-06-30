@@ -297,7 +297,7 @@ export function CashFlow() {
           ) : (
             <>
               {txs.slice(0, 50).map((tx) => (
-                <div key={tx.id} className="flex items-center px-4 py-2.5 gap-4 hover:bg-white/2">
+                <div key={tx.id} className="flex items-center px-4 py-2.5 gap-4 hover:bg-black/5">
                   <span className="font-mono text-xs text-muted w-20 flex-shrink-0">{tx.date}</span>
                   <span className="text-sm text-text flex-1 truncate">{tx.merchant_name || tx.original_name}</span>
                   {tx.category_name ? (

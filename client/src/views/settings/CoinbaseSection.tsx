@@ -158,7 +158,7 @@ export function CoinbaseSection() {
       {credStatus?.coinbaseFromEnv || connected ? (
         <div className="flex gap-2">
           <button
-            className="px-4 py-2 text-sm border border-border rounded text-text hover:bg-white/5 flex items-center gap-1.5"
+            className="px-4 py-2 text-sm border border-border rounded text-text hover:bg-black/5 flex items-center gap-1.5"
             onClick={() => syncMutation.mutate()}
             disabled={syncMutation.isPending}
           >

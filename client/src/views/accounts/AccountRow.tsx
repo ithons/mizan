@@ -91,8 +91,8 @@ export function AccountRow({
 
   return (
     <div
-      className={`flex items-center gap-2 px-3 py-2 cursor-pointer hover:bg-white/3 group relative transition-opacity ${
-        selected ? 'bg-white/5' : ''
+      className={`flex items-center gap-2 px-3 py-2 cursor-pointer hover:bg-black/5 group relative transition-opacity ${
+        selected ? 'bg-green/5' : ''
       } ${isHidden ? 'opacity-40' : ''}`}
       onClick={onSelect}
     >
@@ -145,7 +145,7 @@ export function AccountRow({
         {menuOpen && (
           <div className="absolute right-0 top-6 bg-surface shadow-sm border border-border rounded shadow-lg z-20 w-44 py-1">
             <button
-              className="flex items-center gap-2 w-full px-3 py-1.5 text-xs text-muted hover:text-text hover:bg-white/5"
+              className="flex items-center gap-2 w-full px-3 py-1.5 text-xs text-muted hover:text-text hover:bg-black/5"
               onClick={() => { onHide(); setMenuOpen(false); }}
             >
               {isHidden ? <Eye size={12} /> : <EyeOff size={12} />}
@@ -153,7 +153,7 @@ export function AccountRow({
             </button>
             {account.is_manual && onEdit && (
               <button
-                className="flex items-center gap-2 w-full px-3 py-1.5 text-xs text-muted hover:text-text hover:bg-white/5"
+                className="flex items-center gap-2 w-full px-3 py-1.5 text-xs text-muted hover:text-text hover:bg-black/5"
                 onClick={() => { onEdit(); setMenuOpen(false); }}
               >
                 <Edit2 size={12} />
@@ -164,7 +164,7 @@ export function AccountRow({
               <>
                 <div className="border-t border-border my-1" />
                 <button
-                  className="flex items-center gap-2 w-full px-3 py-1.5 text-xs text-rose hover:bg-white/5"
+                  className="flex items-center gap-2 w-full px-3 py-1.5 text-xs text-rose hover:bg-black/5"
                   onClick={() => { onDelete(); setMenuOpen(false); }}
                 >
                   <Trash2 size={12} />
