@@ -410,6 +410,7 @@ export interface TransactionReviewSummary {
   recurring_candidates: RecurringPattern[];
   duplicate_candidates: DuplicateCandidateGroup[];
   transfer_candidates: TransferCandidatePair[];
+  ai_drafts: AdvisorDraftAction[];
 }
 
 export type GoalType = 'savings' | 'debt';
@@ -800,6 +801,9 @@ export interface AdvisorDraftAction {
   changes: AdvisorDraftChange[];
   citations: AdvisorCitation[];
   confirmation_required: true;
+  status?: 'open' | 'confirmed' | 'dismissed';
+  created_at?: string;
+  updated_at?: string;
 }
 
 export interface AdvisorConfirmRequest {

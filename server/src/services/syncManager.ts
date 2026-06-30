@@ -16,6 +16,7 @@ import {
 } from './syncHistory';
 import { refreshTransactionIntegrity } from './transactionIntegrity';
 import { describeBalanceChange } from './balanceChanges';
+import { runBackgroundAiReview } from './aiWorker';
 
 // SSE clients registry
 const sseClients = new Set<Response>();
@@ -284,6 +285,13 @@ async function _runFullSyncInternal(): Promise<void> {
     }
 
     emitSyncEvent({ type: 'sync_complete', message: 'Sync complete', progress: 100, completedAt: new Date().toISOString() });
+    
+    // Proactive background AI worker
+    setTimeout(() => {
+      runBackgroundAiReview().catch(err => {
+        console.error('[sync] Background AI review failed:', err);
+      });
+    }, 100);
   } catch (err) {
     const message = (err as Error).message || 'Sync failed';
     if (!finished) {

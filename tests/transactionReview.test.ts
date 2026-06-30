@@ -50,6 +50,20 @@ function setupReviewDb(): Database.Database {
       updated_at TEXT NOT NULL
     );
 
+    CREATE TABLE advisor_drafts (
+      id TEXT PRIMARY KEY,
+      kind TEXT NOT NULL,
+      label TEXT NOT NULL,
+      summary TEXT NOT NULL,
+      route TEXT NOT NULL,
+      payload TEXT NOT NULL,
+      changes TEXT NOT NULL,
+      citations TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'open',
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+
     CREATE TABLE merchant_rules (
       id TEXT PRIMARY KEY,
       pattern TEXT NOT NULL,

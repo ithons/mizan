@@ -50,8 +50,27 @@ export function getTransactionReviewSummary(db: Database.Database): TransactionR
   const recurringCandidates = getRecurringCandidates(db);
   const duplicateCandidates = getDuplicateCandidateGroups(db);
   const transferCandidates = getTransferCandidatePairs(db);
+  
+  const aiDraftsRaw = db.prepare(`
+    SELECT * FROM advisor_drafts WHERE status = 'open' ORDER BY created_at DESC
+  `).all() as Array<any>;
+  
+  const aiDrafts = aiDraftsRaw.map(row => ({
+    ...row,
+    payload: JSON.parse(row.payload),
+    changes: JSON.parse(row.changes),
+    citations: JSON.parse(row.citations),
+    confirmation_required: true,
+  }));
 
   const queues: TransactionReviewQueueSummary[] = [
+    {
+      id: 'ai_insights',
+      label: 'AI Insights',
+      count: aiDrafts.length,
+      action_label: 'Review',
+      severity: 'info',
+    },
     {
       id: 'uncategorized',
       label: 'Needs category',
@@ -118,5 +137,6 @@ export function getTransactionReviewSummary(db: Database.Database): TransactionR
     recurring_candidates: recurringCandidates,
     duplicate_candidates: duplicateCandidates,
     transfer_candidates: transferCandidates,
+    ai_drafts: aiDrafts,
   };
 }
