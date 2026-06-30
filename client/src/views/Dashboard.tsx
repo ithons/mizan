@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useEffect, useState } from 'react';
+import { useMutation, useQuery } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import {
   PieChart,
@@ -44,12 +44,13 @@ import { getOnboardingPlan, type OnboardingPlan } from '../lib/onboarding';
 import { advisorRouteState } from '../lib/advisorRouteState';
 import {
   DASHBOARD_CARD_DEFINITIONS,
+  DASHBOARD_LAYOUT_IMPORTED_STORAGE_KEY,
+  DASHBOARD_LAYOUT_PREFERENCE_KEY,
   DASHBOARD_LAYOUT_STORAGE_KEY,
   DEFAULT_DASHBOARD_LAYOUT,
   moveDashboardCard,
   normalizeDashboardLayout,
   parseDashboardLayout,
-  serializeDashboardLayout,
   setDashboardCardHidden,
   setDashboardCardPinned,
   visibleDashboardCardIds,
@@ -702,15 +703,34 @@ export function Dashboard() {
   const startDate = format(startOfMonth(now), 'yyyy-MM-dd');
   const endDate = format(endOfMonth(now), 'yyyy-MM-dd');
   const [isCustomizingDashboard, setIsCustomizingDashboard] = useState(false);
-  const [dashboardLayout, setDashboardLayout] = useState<DashboardLayoutItem[]>(() => {
-    if (typeof window === 'undefined') return DEFAULT_DASHBOARD_LAYOUT;
-    try {
-      return parseDashboardLayout(window.localStorage.getItem(DASHBOARD_LAYOUT_STORAGE_KEY));
-    } catch (error) {
-      console.warn('Unable to load dashboard layout', error);
-      return DEFAULT_DASHBOARD_LAYOUT;
-    }
+  const [dashboardLayout, setDashboardLayout] = useState<DashboardLayoutItem[]>(DEFAULT_DASHBOARD_LAYOUT);
+
+  const { data: dashboardLayoutPreference, isFetched: dashboardLayoutPreferenceFetched } = useQuery({
+    queryKey: ['settings', 'preferences', DASHBOARD_LAYOUT_PREFERENCE_KEY],
+    queryFn: () => settingsApi.getPreference<DashboardLayoutItem[]>(DASHBOARD_LAYOUT_PREFERENCE_KEY),
   });
+
+  const saveDashboardLayoutPreference = useMutation({
+    mutationFn: (layout: DashboardLayoutItem[]) =>
+      settingsApi.setPreference(DASHBOARD_LAYOUT_PREFERENCE_KEY, normalizeDashboardLayout(layout)),
+  });
+
+  useEffect(() => {
+    if (!dashboardLayoutPreferenceFetched) return;
+
+    if (dashboardLayoutPreference) {
+      setDashboardLayout(normalizeDashboardLayout(dashboardLayoutPreference.value));
+      return;
+    }
+
+    if (typeof window === 'undefined') return;
+    if (window.localStorage.getItem(DASHBOARD_LAYOUT_IMPORTED_STORAGE_KEY) === '1') return;
+
+    const imported = parseDashboardLayout(window.localStorage.getItem(DASHBOARD_LAYOUT_STORAGE_KEY));
+    setDashboardLayout(imported);
+    saveDashboardLayoutPreference.mutate(imported);
+    window.localStorage.setItem(DASHBOARD_LAYOUT_IMPORTED_STORAGE_KEY, '1');
+  }, [dashboardLayoutPreference, dashboardLayoutPreferenceFetched]);
 
   const { data: networthHistory, isLoading: nwLoading } = useQuery({
     queryKey: ['networth', 'history'],
@@ -876,13 +896,7 @@ export function Dashboard() {
   const persistDashboardLayout = (layout: DashboardLayoutItem[]) => {
     const normalized = normalizeDashboardLayout(layout);
     setDashboardLayout(normalized);
-    if (typeof window !== 'undefined') {
-      try {
-        window.localStorage.setItem(DASHBOARD_LAYOUT_STORAGE_KEY, serializeDashboardLayout(normalized));
-      } catch (error) {
-        console.warn('Unable to save dashboard layout', error);
-      }
-    }
+    saveDashboardLayoutPreference.mutate(normalized);
   };
   const moveDashboardSection = (cardId: DashboardCardId, direction: 'up' | 'down') => {
     persistDashboardLayout(moveDashboardCard(dashboardLayout, cardId, direction));

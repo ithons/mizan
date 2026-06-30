@@ -18,6 +18,8 @@ export const LOCAL_BACKUP_TABLES = [
   'sync_runs',
   'sync_run_items',
   'sync_changes',
+  'app_preferences',
+  'data_import_runs',
 ] as const;
 
 export type LocalBackupTableName = typeof LOCAL_BACKUP_TABLES[number];

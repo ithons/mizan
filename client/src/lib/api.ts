@@ -42,7 +42,9 @@ import type {
   AdvisorConfirmResponse,
   AdvisorDraftAction,
   AdvisorContextResponse,
+  AppPreference,
   CsvImportPreview,
+  DataImportRun,
   LocalBackupRestorePreview,
   LocalBackupRestoreResult,
   TransactionUpdateResult,
@@ -557,6 +559,15 @@ export const coinbaseApi = {
 
 export const settingsApi = {
   getCredentials: () => apiFetch<CredentialStatus>('/api/settings/credentials'),
+  getPreference: <T = unknown>(key: string) =>
+    apiFetch<AppPreference<T> | null>(`/api/settings/preferences/${encodeURIComponent(key)}`),
+  setPreference: <T = unknown>(key: string, value: T) =>
+    apiFetch<AppPreference<T>>(`/api/settings/preferences/${encodeURIComponent(key)}`, {
+      method: 'PUT',
+      body: JSON.stringify({ value }),
+    }),
+  importRuns: (limit = 20) =>
+    apiFetch<DataImportRun[]>(`/api/settings/import-runs?limit=${limit}`),
   savePlaidCredentials: (body: { clientId: string; secret: string; environment: string }) =>
     apiFetch<void>('/api/settings/credentials/plaid', {
       method: 'POST',

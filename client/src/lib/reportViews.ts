@@ -1,6 +1,8 @@
 import type { ReportComparisonMode } from '@shared/types';
 
 export const REPORT_VIEW_STORAGE_KEY = 'mizan:custom-report-views';
+export const REPORT_VIEW_PREFERENCE_KEY = 'custom_report_views';
+export const REPORT_VIEW_IMPORTED_STORAGE_KEY = 'mizan:custom-report-views:sqlite-imported';
 
 export type ReportDatePreset = 'this_month' | 'last_month' | '3m' | '6m' | '12m' | 'ytd' | 'all' | 'custom';
 export type ReportTab = 'spending' | 'income' | 'trends' | 'cashflow' | 'networth' | 'investments';

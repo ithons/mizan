@@ -46,6 +46,7 @@ import { PageLoader } from '../../components/LoadingSpinner';
 import type {
   Category,
   CsvImportPreview,
+  DataImportRun,
   LocalBackupRestorePreview,
   MerchantRule,
   MerchantRuleSuggestion,
@@ -128,6 +129,16 @@ function parseCsvHeaders(text: string): string[] {
   return headerLine ? parseCsvLine(headerLine) : [];
 }
 
+function importRunStatusClass(status: DataImportRun['status']): string {
+  if (status === 'succeeded') return 'text-green';
+  if (status === 'partial') return 'text-amber';
+  return 'text-rose';
+}
+
+function importRunSourceLabel(source: DataImportRun['source']): string {
+  return source === 'csv' ? 'CSV import' : 'Backup restore';
+}
+
 export function DataSection() {
   const { addToast } = useAppStore();
   const qc = useQueryClient();
@@ -145,6 +156,11 @@ export function DataSection() {
   const { data: syncRuns } = useQuery<SyncRun[]>({
     queryKey: ['sync', 'history', 'settings'],
     queryFn: () => syncApi.history(10),
+  });
+
+  const { data: importRuns = [] } = useQuery<DataImportRun[]>({
+    queryKey: ['settings', 'import-runs'],
+    queryFn: () => settingsApi.importRuns(10),
   });
 
   const deleteAllMutation = useMutation({
@@ -186,6 +202,7 @@ export function DataSection() {
     },
     onSuccess: (result) => {
       invalidateFinancialData(qc);
+      void qc.invalidateQueries({ queryKey: ['settings', 'import-runs'] });
       setCsvPreview(null);
       addToast({
         type: result.errors.length > 0 ? 'info' : 'success',
@@ -225,6 +242,7 @@ export function DataSection() {
     },
     onSuccess: (result) => {
       qc.invalidateQueries();
+      void qc.invalidateQueries({ queryKey: ['settings', 'import-runs'] });
       setBackupPreview(null);
       setBackupConfirm('');
       addToast({
@@ -579,6 +597,41 @@ export function DataSection() {
             </div>
           </div>
         </div>
+      </div>
+
+      <div className="border border-border bg-background rounded p-3 space-y-3">
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <p className="text-sm text-text">Import Audit</p>
+            <p className="text-xs text-muted mt-1">Recent CSV imports and backup restores recorded locally.</p>
+          </div>
+          <Database size={16} className="text-muted" />
+        </div>
+
+        {importRuns.length === 0 ? (
+          <p className="text-xs text-muted">No import or restore runs recorded yet.</p>
+        ) : (
+          <div className="divide-y divide-border rounded border border-border bg-surface">
+            {importRuns.map((run) => (
+              <div key={run.id} className="grid grid-cols-[1fr_auto_auto] gap-3 px-3 py-2 text-xs items-center">
+                <div className="min-w-0">
+                  <p className="text-text truncate">{importRunSourceLabel(run.source)}</p>
+                  <p className="text-muted truncate">{run.summary}</p>
+                </div>
+                <div className="text-right font-mono text-muted">
+                  <p>{run.rows_imported}/{run.rows_seen}</p>
+                  <p>{formatRelativeTime(run.created_at)}</p>
+                </div>
+                <div className="text-right">
+                  <p className={`font-mono ${importRunStatusClass(run.status)}`}>{run.status}</p>
+                  <p className="font-mono text-muted">
+                    {run.warnings_count}w {run.errors_count}e
+                  </p>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
       <SyncActivityPanel runs={syncRuns} showDetail />

@@ -79,6 +79,28 @@ export interface TransactionUpdateResult {
   categorization: TransactionCategorizationResult;
 }
 
+export interface AppPreference<T = unknown> {
+  key: string;
+  value: T;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface DataImportRun {
+  id: string;
+  source: 'csv' | 'backup_restore';
+  status: 'succeeded' | 'partial' | 'failed';
+  rows_seen: number;
+  rows_imported: number;
+  rows_invalid: number;
+  duplicate_candidates: number;
+  transfer_candidates: number;
+  warnings_count: number;
+  errors_count: number;
+  summary: string;
+  created_at: string;
+}
+
 export interface InvestmentTransaction {
   id: string;
   plaid_investment_transaction_id?: string | null;

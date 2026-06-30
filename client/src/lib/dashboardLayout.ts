@@ -1,4 +1,6 @@
 export const DASHBOARD_LAYOUT_STORAGE_KEY = 'mizan:dashboard-layout';
+export const DASHBOARD_LAYOUT_PREFERENCE_KEY = 'dashboard_layout';
+export const DASHBOARD_LAYOUT_IMPORTED_STORAGE_KEY = 'mizan:dashboard-layout:sqlite-imported';
 
 export type DashboardCardId =
   | 'overview'

@@ -8,6 +8,7 @@ import {
   DeleteDataSchema,
   BackupRestorePreviewSchema,
   BackupRestoreSchema,
+  SetPreferenceSchema,
 } from '../../../shared/schemas';
 import {
   getCredentials,
@@ -27,6 +28,8 @@ import {
   LocalBackupValidationError,
 } from '../services/localBackup';
 import { buildCsvImportPreview, commitCsvImport } from '../services/csvImport';
+import { listDataImportRuns, recordDataImportRun } from '../services/importRuns';
+import { getPreference, setPreference } from '../services/preferences';
 import {
   buildTransactionsCsv,
   transactionCsvFilename,
@@ -35,6 +38,10 @@ import {
 import type { z } from 'zod';
 
 const router = Router();
+
+function routeParam(value: string | string[] | undefined): string | null {
+  return typeof value === 'string' && value.length > 0 ? value : null;
+}
 
 // GET /credentials
 router.get('/credentials', (_req: Request, res: Response, next: NextFunction): void => {
@@ -135,6 +142,47 @@ router.get('/backup-json', (_req: Request, res: Response, next: NextFunction): v
   }
 });
 
+router.get('/preferences/:key', (req: Request, res: Response, next: NextFunction): void => {
+  try {
+    const key = routeParam(req.params.key);
+    if (!key) {
+      res.status(400).json({ error: 'Invalid preference key' });
+      return;
+    }
+
+    res.json({ data: getPreference(getDb(), key) });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.put(
+  '/preferences/:key',
+  validate(SetPreferenceSchema),
+  (req: Request, res: Response, next: NextFunction): void => {
+    try {
+      const key = routeParam(req.params.key);
+      if (!key) {
+        res.status(400).json({ error: 'Invalid preference key' });
+        return;
+      }
+
+      res.json({ data: setPreference(getDb(), key, req.body.value) });
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
+router.get('/import-runs', (req: Request, res: Response, next: NextFunction): void => {
+  try {
+    const limit = typeof req.query.limit === 'string' ? Number(req.query.limit) : 20;
+    res.json({ data: listDataImportRuns(getDb(), Number.isFinite(limit) ? limit : 20) });
+  } catch (err) {
+    next(err);
+  }
+});
+
 // POST /backup-json/preview
 router.post(
   '/backup-json/preview',
@@ -154,7 +202,18 @@ router.post(
   validate(BackupRestoreSchema),
   (req: Request, res: Response, next: NextFunction): void => {
     try {
-      res.json({ data: restoreLocalBackup(getDb(), req.body.backup) });
+      const db = getDb();
+      const result = restoreLocalBackup(db, req.body.backup);
+      recordDataImportRun(db, {
+        source: 'backup_restore',
+        status: result.warnings.length > 0 ? 'partial' : 'succeeded',
+        rows_seen: result.restored_rows,
+        rows_imported: result.restored_rows,
+        warnings_count: result.warnings.length,
+        errors_count: 0,
+        summary: `Restored ${result.restored_rows} row${result.restored_rows === 1 ? '' : 's'} from local backup.`,
+      });
+      res.json({ data: result });
     } catch (err) {
       if (err instanceof LocalBackupValidationError) {
         res.status(400).json({ error: err.message, details: err.errors });
@@ -208,6 +267,7 @@ router.post('/import-csv', (req: Request, res: Response, next: NextFunction): vo
 
     const mapping = mappingResult.data;
     const rows = body.rows || [];
+    const preview = buildCsvImportPreview(db, { rows, mapping });
     const result = commitCsvImport(db, { rows, mapping });
 
     if (result.balanceChanged) {
@@ -217,6 +277,23 @@ router.post('/import-csv', (req: Request, res: Response, next: NextFunction): vo
       detectRecurring();
       refreshTransactionIntegrity(db);
     }
+
+    recordDataImportRun(db, {
+      source: 'csv',
+      status: result.imported === 0 && result.errors.length > 0
+        ? 'failed'
+        : result.errors.length > 0 || preview.invalid_count > 0
+          ? 'partial'
+          : 'succeeded',
+      rows_seen: rows.length,
+      rows_imported: result.imported,
+      rows_invalid: preview.invalid_count,
+      duplicate_candidates: preview.duplicate_candidate_count,
+      transfer_candidates: preview.transfer_candidate_count,
+      warnings_count: preview.warnings.length,
+      errors_count: result.errors.length,
+      summary: `Imported ${result.imported} of ${rows.length} CSV row${rows.length === 1 ? '' : 's'}.`,
+    });
 
     res.json({ data: { imported: result.imported, errors: result.errors } });
   } catch (err) {
@@ -249,6 +326,7 @@ router.delete(
         DELETE FROM sync_changes;
         DELETE FROM sync_run_items;
         DELETE FROM sync_runs;
+        DELETE FROM data_import_runs;
       `);
 
       res.json({ data: { success: true } });

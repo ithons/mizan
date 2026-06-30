@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import {
   AreaChart,
@@ -19,7 +19,7 @@ import {
 } from 'recharts';
 import { ChevronRight, Save, Sparkles, X } from 'lucide-react';
 import { format, subMonths, startOfMonth, endOfMonth, startOfYear } from 'date-fns';
-import { accountsApi, reportsApi, networthApi, investmentsApi, categoriesApi } from '../lib/api';
+import { accountsApi, reportsApi, networthApi, investmentsApi, categoriesApi, settingsApi } from '../lib/api';
 import { advisorRouteState } from '../lib/advisorRouteState';
 import {
   buildNetWorthEvidenceAdvisorPrompt,
@@ -29,9 +29,11 @@ import {
 } from '../lib/advisorPrompts';
 import {
   REPORT_VIEW_STORAGE_KEY,
+  REPORT_VIEW_IMPORTED_STORAGE_KEY,
+  REPORT_VIEW_PREFERENCE_KEY,
   createCustomReportView,
+  normalizeCustomReportViews,
   parseCustomReportViews,
-  serializeCustomReportViews,
   upsertCustomReportView,
   type CustomReportView,
   type ReportDatePreset,
@@ -1742,11 +1744,35 @@ export function Reports() {
   const [comparison, setComparison] = useState<ReportComparisonMode>('prior_period');
   const [trendCategoryIds, setTrendCategoryIds] = useState<string[]>([]);
   const [evidenceTarget, setEvidenceTarget] = useState<EvidenceTarget | null>(null);
-  const [customViews, setCustomViews] = useState<CustomReportView[]>(() => {
-    if (typeof window === 'undefined') return [];
-    return parseCustomReportViews(window.localStorage.getItem(REPORT_VIEW_STORAGE_KEY));
-  });
+  const [customViews, setCustomViews] = useState<CustomReportView[]>([]);
   const [newViewName, setNewViewName] = useState('');
+
+  const { data: customViewsPreference, isFetched: customViewsPreferenceFetched } = useQuery({
+    queryKey: ['settings', 'preferences', REPORT_VIEW_PREFERENCE_KEY],
+    queryFn: () => settingsApi.getPreference<CustomReportView[]>(REPORT_VIEW_PREFERENCE_KEY),
+  });
+
+  const saveCustomViewsPreference = useMutation({
+    mutationFn: (views: CustomReportView[]) =>
+      settingsApi.setPreference(REPORT_VIEW_PREFERENCE_KEY, normalizeCustomReportViews(views)),
+  });
+
+  useEffect(() => {
+    if (!customViewsPreferenceFetched) return;
+
+    if (customViewsPreference) {
+      setCustomViews(normalizeCustomReportViews(customViewsPreference.value));
+      return;
+    }
+
+    if (typeof window === 'undefined') return;
+    if (window.localStorage.getItem(REPORT_VIEW_IMPORTED_STORAGE_KEY) === '1') return;
+
+    const imported = parseCustomReportViews(window.localStorage.getItem(REPORT_VIEW_STORAGE_KEY));
+    setCustomViews(imported);
+    saveCustomViewsPreference.mutate(imported);
+    window.localStorage.setItem(REPORT_VIEW_IMPORTED_STORAGE_KEY, '1');
+  }, [customViewsPreference, customViewsPreferenceFetched]);
 
   const { startDate, endDate } = getDateRange(preset, customStart, customEnd);
   const { data: summary } = useQuery({
@@ -1761,8 +1787,9 @@ export function Reports() {
     setTrendCategoryIds(view.categoryIds ?? []);
   };
   const persistCustomViews = (views: CustomReportView[]) => {
-    setCustomViews(views);
-    window.localStorage.setItem(REPORT_VIEW_STORAGE_KEY, serializeCustomReportViews(views));
+    const normalized = normalizeCustomReportViews(views);
+    setCustomViews(normalized);
+    saveCustomViewsPreference.mutate(normalized);
   };
   const saveCurrentView = () => {
     const nextView = createCustomReportView({
