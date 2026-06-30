@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
+import { useNavigate } from 'react-router-dom';
 import {
   AlertTriangle,
   CheckCircle2,
@@ -7,10 +8,13 @@ import {
   CircleAlert,
   Clock3,
   RefreshCw,
+  Sparkles,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
-import type { SyncRun, SyncRunStatus } from '@shared/types';
+import type { SyncRun, SyncRunDetail, SyncRunStatus } from '@shared/types';
 import { syncApi } from '../lib/api';
+import { advisorRouteState } from '../lib/advisorRouteState';
+import { buildSyncRunAdvisorPrompt } from '../lib/advisorPrompts';
 import { formatRelativeTime } from '../lib/formatters';
 
 const statusTone = {
@@ -80,6 +84,7 @@ export function SyncActivityPanel({
   title?: string;
   showDetail?: boolean;
 }) {
+  const navigate = useNavigate();
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const visibleRuns = runs ?? [];
 
@@ -88,13 +93,20 @@ export function SyncActivityPanel({
     setSelectedId(visibleRuns[0].id);
   }, [selectedId, visibleRuns]);
 
-  const { data: detail } = useQuery({
+  const { data: detail } = useQuery<SyncRunDetail>({
     queryKey: ['sync', 'history', selectedId],
     queryFn: () => syncApi.historyDetail(selectedId!),
     enabled: showDetail && !!selectedId,
   });
 
   const selectedRun = visibleRuns.find((run) => run.id === selectedId) ?? visibleRuns[0];
+  const selectedDetail = detail?.id === selectedRun?.id ? detail : undefined;
+  const askAdvisorAboutSync = () => {
+    if (!selectedRun) return;
+    navigate('/advisor', {
+      state: advisorRouteState(buildSyncRunAdvisorPrompt(selectedRun, selectedDetail)),
+    });
+  };
 
   return (
     <div className="bg-surface shadow-sm border border-border rounded">
@@ -103,11 +115,23 @@ export function SyncActivityPanel({
           <Clock3 size={14} className="text-blue" />
           <h2 className="text-sm font-medium text-text">{title}</h2>
         </div>
-        {selectedRun && (
-          <span className="text-xs text-muted font-mono">
-            {formatRelativeTime(selectedRun.started_at)}
-          </span>
-        )}
+        <div className="flex items-center gap-2">
+          {selectedRun && (
+            <>
+              <button
+                type="button"
+                onClick={askAdvisorAboutSync}
+                className="text-xs border border-border rounded px-2.5 py-1 text-muted hover:text-green flex items-center gap-1"
+              >
+                <Sparkles size={12} />
+                Ask advisor
+              </button>
+              <span className="text-xs text-muted font-mono">
+                {formatRelativeTime(selectedRun.started_at)}
+              </span>
+            </>
+          )}
+        </div>
       </div>
 
       {visibleRuns.length === 0 ? (

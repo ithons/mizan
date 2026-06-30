@@ -12,6 +12,7 @@ import {
   buildReportAdvisorPrompt,
   buildReportDrilldownAdvisorPrompt,
   buildReportEvidenceAdvisorPrompt,
+  buildSyncRunAdvisorPrompt,
   buildTransactionAdvisorPrompt,
 } from '../client/src/lib/advisorPrompts';
 import type {
@@ -25,6 +26,8 @@ import type {
   ReportEvidenceDrilldown,
   ReportNetWorthEvidence,
   ReportSummary,
+  SyncRun,
+  SyncRunDetail,
   Transaction,
 } from '../shared/types';
 
@@ -272,6 +275,61 @@ function netWorthEvidence(overrides: Partial<ReportNetWorthEvidence> = {}): Repo
   };
 }
 
+function syncRun(overrides: Partial<SyncRun> = {}): SyncRun {
+  return {
+    id: overrides.id ?? 'sync_run_1',
+    scope: overrides.scope ?? 'plaid_all',
+    status: overrides.status ?? 'partial',
+    started_at: overrides.started_at ?? '2026-06-30T12:00:00.000Z',
+    completed_at: overrides.completed_at ?? '2026-06-30T12:00:10.000Z',
+    message: overrides.message ?? 'Completed with provider attention',
+    error_code: overrides.error_code ?? null,
+    error_message: overrides.error_message ?? null,
+    recovery_action: overrides.recovery_action ?? null,
+    accounts_seen: overrides.accounts_seen ?? 4,
+    transactions_added: overrides.transactions_added ?? 12,
+    transactions_modified: overrides.transactions_modified ?? 3,
+    transactions_removed: overrides.transactions_removed ?? 1,
+    transactions_skipped: overrides.transactions_skipped ?? 2,
+    duplicate_candidates: overrides.duplicate_candidates ?? 1,
+    transfer_candidates: overrides.transfer_candidates ?? 2,
+  };
+}
+
+function syncRunDetail(overrides: Partial<SyncRunDetail> = {}): SyncRunDetail {
+  const base = syncRun(overrides);
+  return {
+    ...base,
+    items: overrides.items ?? [{
+      id: 'sync_item_1',
+      run_id: base.id,
+      provider: 'plaid',
+      connection_id: 'item_1',
+      institution_name: 'Test Bank',
+      status: 'reauth_required',
+      started_at: base.started_at,
+      completed_at: base.completed_at,
+      accounts_seen: 2,
+      transactions_added: 8,
+      transactions_modified: 1,
+      transactions_removed: 0,
+      transactions_skipped: 2,
+      error_code: 'ITEM_LOGIN_REQUIRED',
+      error_message: 'Bank login required',
+      recovery_action: 'Reconnect Test Bank',
+    }],
+    changes: overrides.changes ?? [{
+      id: 'sync_change_1',
+      run_item_id: 'sync_item_1',
+      entity_type: 'transaction',
+      entity_id: 'tx_1',
+      change_type: 'inserted',
+      description: 'Imported City Market transaction',
+      created_at: '2026-06-30T12:00:11.000Z',
+    }],
+  };
+}
+
 function recurringForecast(overrides: Partial<RecurringForecast> = {}): RecurringForecast {
   return {
     days: overrides.days ?? 60,
@@ -361,6 +419,23 @@ test('net worth evidence advisor prompt captures account attribution', () => {
   assert.match(prompt.prompt, /net-worth evidence for 2026-06-30/);
   assert.match(prompt.prompt, /net worth is \$70000\.00/);
   assert.match(prompt.prompt, /Brokerage at Test Bank \$62000\.00 asset/);
+});
+
+test('sync run advisor prompt captures provider status and detected changes', () => {
+  const detail = syncRunDetail();
+  const prompt = buildSyncRunAdvisorPrompt(detail, detail);
+
+  assert.equal(prompt.source, 'sync');
+  assert.equal(prompt.recordKind, 'sync_run');
+  assert.equal(prompt.recordId, 'sync_run_1');
+  assert.equal(prompt.params?.status, 'partial');
+  assert.equal(prompt.params?.changedTransactions, 16);
+  assert.equal(prompt.params?.providerCount, 1);
+  assert.equal(prompt.params?.changeCount, 1);
+  assert.match(prompt.prompt, /plaid_all sync run/);
+  assert.match(prompt.prompt, /12 added, 3 updated, 1 removed, 2 skipped/);
+  assert.match(prompt.prompt, /Test Bank plaid reauth_required/);
+  assert.match(prompt.prompt, /Imported City Market transaction/);
 });
 
 test('dashboard card advisor prompt captures the selected metric context', () => {
