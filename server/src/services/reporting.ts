@@ -15,6 +15,8 @@ import type {
   ReportDrilldown,
   ReportCategoryChange,
   ReportComparisonMode,
+  ReportEvidenceDrilldown,
+  ReportEvidenceKind,
   ReportExcludedFlowSummary,
   ReportMetricSummary,
   ReportSummary,
@@ -34,6 +36,12 @@ interface SpendingReportOptions extends ReportDateRange {
 interface ReportDrilldownOptions extends ReportDateRange {
   kind: 'spending' | 'income';
   categoryId: string;
+}
+
+interface ReportEvidenceOptions extends ReportDateRange {
+  kind: ReportEvidenceKind;
+  month?: string;
+  flowType?: ReportExcludedFlowSummary['flow_type'];
 }
 
 export interface TrendReport {
@@ -241,6 +249,12 @@ function excludedFlowType(rootId: string): ReportExcludedFlowSummary['flow_type'
   if (rootId === 'cat_inv') return 'investments';
   if (rootId === 'cat_crypto') return 'crypto';
   return 'transfers';
+}
+
+function rootIdsForFlowType(flowType: ReportExcludedFlowSummary['flow_type']): string[] {
+  if (flowType === 'investments') return ['cat_inv'];
+  if (flowType === 'crypto') return ['cat_crypto'];
+  return ['cat_xfer'];
 }
 
 export function getCashflowReport(
@@ -668,6 +682,120 @@ export function getSpendingTrendsReport(
       values: months.map((month) => series.valuesByMonth.get(month) ?? 0),
     })),
   };
+}
+
+function transactionEvidenceSelect(): string {
+  return `
+    SELECT
+      t.*,
+      c.name AS category_name,
+      c.color AS category_color,
+      c.icon AS category_icon,
+      a.account_name,
+      a.institution_name
+    FROM transactions t
+    LEFT JOIN categories c ON c.id = t.category_id
+    LEFT JOIN accounts a ON a.id = t.account_id
+  `;
+}
+
+function evidenceTotals(rows: ReportEvidenceDrilldown['transactions']): Pick<
+  ReportEvidenceDrilldown,
+  'income' | 'expenses' | 'net' | 'total' | 'count'
+> {
+  const income = rows.reduce((sum, transaction) => sum + (transaction.amount > 0 ? transaction.amount : 0), 0);
+  const expenses = rows.reduce((sum, transaction) => sum + (transaction.amount < 0 ? Math.abs(transaction.amount) : 0), 0);
+  const net = rows.reduce((sum, transaction) => sum + transaction.amount, 0);
+
+  return {
+    income,
+    expenses,
+    net,
+    total: income + expenses,
+    count: rows.length,
+  };
+}
+
+function monthRangeFromYearMonth(month: string): ReportDateRange | null {
+  if (!/^\d{4}-\d{2}$/.test(month)) return null;
+
+  const monthStart = parseISO(`${month}-01`);
+  if (Number.isNaN(monthStart.getTime())) return null;
+
+  return {
+    startDate: format(startOfMonth(monthStart), 'yyyy-MM-dd'),
+    endDate: format(endOfMonth(monthStart), 'yyyy-MM-dd'),
+  };
+}
+
+function getCashflowEvidence(
+  db: Database.Database,
+  options: ReportEvidenceOptions
+): ReportEvidenceDrilldown {
+  const monthRange = options.month ? monthRangeFromYearMonth(options.month) : null;
+  const range = monthRange ?? { startDate: options.startDate, endDate: options.endDate };
+  const { conditions, params } = dateConditions(range);
+  conditions.push(`(
+    (t.amount > 0 AND ${incomeCategoryCondition()})
+    OR (t.amount < 0 AND ${expenseCategoryCondition()})
+  )`);
+
+  const rows = db.prepare(`
+    ${excludedCategoriesCte()}
+    ${transactionEvidenceSelect()}
+    WHERE ${conditions.join(' AND ')}
+    ORDER BY t.date DESC, t.created_at DESC
+  `).all(...excludedCategoryParams(), ...params) as ReportEvidenceDrilldown['transactions'];
+
+  return {
+    kind: 'cashflow_month',
+    label: options.month ? `Cash flow for ${options.month}` : 'Cash flow',
+    start_date: range.startDate,
+    end_date: range.endDate,
+    month: options.month,
+    ...evidenceTotals(rows),
+    transactions: rows,
+  };
+}
+
+function getExcludedFlowEvidence(
+  db: Database.Database,
+  options: ReportEvidenceOptions
+): ReportEvidenceDrilldown {
+  const flowType = options.flowType ?? 'transfers';
+  const rootIds = rootIdsForFlowType(flowType);
+  const { conditions, params } = dateConditions(options);
+  conditions.push(`excluded.root_id IN (${rootIds.map(() => '?').join(',')})`);
+  params.push(...rootIds);
+
+  const rows = db.prepare(`
+    ${excludedCategoriesWithRootCte()}
+    ${transactionEvidenceSelect()}
+    JOIN excluded_report_categories excluded ON excluded.id = t.category_id
+    WHERE ${conditions.join(' AND ')}
+    ORDER BY t.date DESC, t.created_at DESC
+  `).all(...excludedCategoryParams(), ...params) as ReportEvidenceDrilldown['transactions'];
+
+  return {
+    kind: 'excluded_flow',
+    label: `Excluded ${flowType}`,
+    start_date: options.startDate,
+    end_date: options.endDate,
+    flow_type: flowType,
+    ...evidenceTotals(rows),
+    transactions: rows,
+  };
+}
+
+export function getReportEvidenceDrilldown(
+  db: Database.Database,
+  options: ReportEvidenceOptions
+): ReportEvidenceDrilldown {
+  if (options.kind === 'cashflow_month') {
+    return getCashflowEvidence(db, options);
+  }
+
+  return getExcludedFlowEvidence(db, options);
 }
 
 function getExcludedFlowSummary(

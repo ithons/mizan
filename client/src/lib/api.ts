@@ -18,6 +18,9 @@ import type {
   SyncRunDetail,
   CashflowReport,
   ReportDrilldown,
+  ReportEvidenceDrilldown,
+  ReportEvidenceKind,
+  ReportExcludedFlowSummary,
   ReportComparisonMode,
   ReportSummary,
   SpendingReport,
@@ -378,6 +381,19 @@ export const reportsApi = {
     if (params.startDate) q.set('startDate', params.startDate);
     if (params.endDate) q.set('endDate', params.endDate);
     return apiFetch<ReportDrilldown>(`/api/reports/drilldown?${q.toString()}`);
+  },
+  evidence: (params: ReportParams & {
+    kind: ReportEvidenceKind;
+    month?: string;
+    flowType?: ReportExcludedFlowSummary['flow_type'];
+  }) => {
+    const q = new URLSearchParams();
+    q.set('kind', params.kind);
+    if (params.month) q.set('month', params.month);
+    if (params.flowType) q.set('flowType', params.flowType);
+    if (params.startDate) q.set('startDate', params.startDate);
+    if (params.endDate) q.set('endDate', params.endDate);
+    return apiFetch<ReportEvidenceDrilldown>(`/api/reports/evidence?${q.toString()}`);
   },
   networth: (params?: { months?: number }) =>
     apiFetch<NetWorthHistory>(`/api/reports/networth${params?.months ? `?months=${params.months}` : ''}`),

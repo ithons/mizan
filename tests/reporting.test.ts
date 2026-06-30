@@ -5,6 +5,7 @@ import {
   getCashflowReport,
   getIncomeReport,
   getReportDrilldown,
+  getReportEvidenceDrilldown,
   getReportSummary,
   getSpendingReport,
   getSpendingTrendsReport,
@@ -363,4 +364,69 @@ test('report drilldown keeps uncategorized and income evidence traceable', (t) =
 
   assert.equal(income.total, 1000);
   assert.deepEqual(income.transactions.map((transaction) => transaction.id), ['paycheck']);
+});
+
+test('cashflow evidence returns the transactions behind a monthly aggregate', (t) => {
+  const db = setupReportingDb();
+  t.after(() => db.close());
+
+  const detail = getReportEvidenceDrilldown(db, {
+    kind: 'cashflow_month',
+    month: '2026-06',
+    startDate: '2026-01-01',
+    endDate: '2026-12-31',
+  });
+
+  assert.equal(detail.label, 'Cash flow for 2026-06');
+  assert.equal(detail.start_date, '2026-06-01');
+  assert.equal(detail.end_date, '2026-06-30');
+  assert.equal(detail.income, 1040);
+  assert.equal(detail.expenses, 130);
+  assert.equal(detail.net, 910);
+  assert.equal(detail.count, 4);
+  assert.deepEqual(
+    detail.transactions.map((transaction) => transaction.id).sort(),
+    ['paycheck', 'restaurant', 'uncategorized_expense', 'uncategorized_income'].sort()
+  );
+});
+
+test('excluded flow evidence returns omitted transfers, investments, and crypto', (t) => {
+  const db = setupReportingDb();
+  t.after(() => db.close());
+
+  const transfers = getReportEvidenceDrilldown(db, {
+    kind: 'excluded_flow',
+    flowType: 'transfers',
+    startDate: '2026-06-01',
+    endDate: '2026-06-30',
+  });
+
+  assert.equal(transfers.label, 'Excluded transfers');
+  assert.equal(transfers.income, 500);
+  assert.equal(transfers.expenses, 200);
+  assert.equal(transfers.net, 300);
+  assert.deepEqual(
+    transfers.transactions.map((transaction) => transaction.id).sort(),
+    ['transfer_in', 'transfer_out']
+  );
+
+  const investments = getReportEvidenceDrilldown(db, {
+    kind: 'excluded_flow',
+    flowType: 'investments',
+    startDate: '2026-06-01',
+    endDate: '2026-06-30',
+  });
+
+  assert.equal(investments.income, 20);
+  assert.deepEqual(investments.transactions.map((transaction) => transaction.id), ['investment_income']);
+
+  const crypto = getReportEvidenceDrilldown(db, {
+    kind: 'excluded_flow',
+    flowType: 'crypto',
+    startDate: '2026-06-01',
+    endDate: '2026-06-30',
+  });
+
+  assert.equal(crypto.expenses, 50);
+  assert.deepEqual(crypto.transactions.map((transaction) => transaction.id), ['crypto_buy']);
 });

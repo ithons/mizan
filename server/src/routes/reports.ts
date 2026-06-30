@@ -3,12 +3,13 @@ import { getDb } from '../db/index';
 import {
   getCashflowReport,
   getIncomeReport,
+  getReportEvidenceDrilldown,
   getReportDrilldown,
   getReportSummary,
   getSpendingReport,
   getSpendingTrendsReport,
 } from '../services/reporting';
-import type { ReportComparisonMode } from '../../../shared/types';
+import type { ReportComparisonMode, ReportEvidenceKind, ReportExcludedFlowSummary } from '../../../shared/types';
 
 const router = Router();
 
@@ -39,6 +40,26 @@ function reportComparison(value: unknown): ReportComparisonMode | undefined {
     return parsed;
   }
   return undefined;
+}
+
+function reportEvidenceKind(value: unknown): ReportEvidenceKind | undefined {
+  const parsed = firstQueryValue(value);
+  if (parsed === 'cashflow_month' || parsed === 'excluded_flow') {
+    return parsed;
+  }
+  return undefined;
+}
+
+function excludedFlowType(value: unknown): ReportExcludedFlowSummary['flow_type'] | undefined {
+  const parsed = firstQueryValue(value);
+  if (parsed === 'transfers' || parsed === 'investments' || parsed === 'crypto') {
+    return parsed;
+  }
+  return undefined;
+}
+
+function isReportMonth(value: string | undefined): value is string {
+  return !!value && /^\d{4}-\d{2}$/.test(value);
 }
 
 // GET /cashflow?startDate&endDate
@@ -138,6 +159,43 @@ router.get('/drilldown', (req: Request, res: Response, next: NextFunction): void
       data: getReportDrilldown(db, {
         kind,
         categoryId,
+        startDate,
+        endDate,
+      }),
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// GET /evidence?kind=cashflow_month|excluded_flow&month&flowType&startDate&endDate
+router.get('/evidence', (req: Request, res: Response, next: NextFunction): void => {
+  try {
+    const db = getDb();
+    const kind = reportEvidenceKind(req.query.kind);
+    const month = firstQueryValue(req.query.month);
+    const flowType = excludedFlowType(req.query.flowType);
+    const startDate = firstQueryValue(req.query.startDate);
+    const endDate = firstQueryValue(req.query.endDate);
+
+    if (!kind) {
+      res.status(400).json({ error: 'Invalid report evidence kind' });
+      return;
+    }
+    if (kind === 'cashflow_month' && !isReportMonth(month)) {
+      res.status(400).json({ error: 'month is required for cash flow evidence' });
+      return;
+    }
+    if (kind === 'excluded_flow' && !flowType) {
+      res.status(400).json({ error: 'flowType is required for excluded flow evidence' });
+      return;
+    }
+
+    res.json({
+      data: getReportEvidenceDrilldown(db, {
+        kind,
+        month,
+        flowType,
         startDate,
         endDate,
       }),

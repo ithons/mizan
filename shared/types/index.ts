@@ -719,6 +719,23 @@ export interface ReportDrilldown {
   transactions: Transaction[];
 }
 
+export type ReportEvidenceKind = 'cashflow_month' | 'excluded_flow';
+
+export interface ReportEvidenceDrilldown {
+  kind: ReportEvidenceKind;
+  label: string;
+  start_date?: string;
+  end_date?: string;
+  month?: string;
+  flow_type?: ReportExcludedFlowSummary['flow_type'];
+  income: number;
+  expenses: number;
+  net: number;
+  total: number;
+  count: number;
+  transactions: Transaction[];
+}
+
 export interface NetWorthHistory {
   snapshots: NetWorthSnapshot[];
 }

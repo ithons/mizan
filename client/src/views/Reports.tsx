@@ -27,7 +27,15 @@ import { EmptyState } from '../components/EmptyState';
 import { AmountBadge } from '../components/AmountBadge';
 import { CategoryBadge } from '../components/CategoryBadge';
 import { Modal } from '../components/Modal';
-import type { Category, ReportComparisonMode, ReportDrilldown, ReportMetricSummary, ReportSummary } from '@shared/types';
+import type {
+  Category,
+  ReportComparisonMode,
+  ReportDrilldown,
+  ReportEvidenceDrilldown,
+  ReportExcludedFlowSummary,
+  ReportMetricSummary,
+  ReportSummary,
+} from '@shared/types';
 const COLORS = [
   '#32bfa3', '#6487f0', '#e2a53f', '#ef6f8a', '#a78bfa',
   '#f472b6', '#34d399', '#fb923c', '#60a5fa', '#f87171',
@@ -84,6 +92,13 @@ interface DrilldownTarget {
   kind: 'spending' | 'income';
   categoryId: string;
   categoryName: string;
+}
+
+interface EvidenceTarget {
+  kind: 'cashflow_month' | 'excluded_flow';
+  label: string;
+  month?: string;
+  flowType?: ReportExcludedFlowSummary['flow_type'];
 }
 
 function getDateRange(preset: DatePreset, customStart?: string, customEnd?: string) {
@@ -253,9 +268,11 @@ function ReportMetricCard({
 function ReportSummaryPanel({
   summary,
   onAsk,
+  onExcludedFlow,
 }: {
   summary?: ReportSummary;
   onAsk?: (summary: ReportSummary) => void;
+  onExcludedFlow?: (flow: ReportExcludedFlowSummary) => void;
 }) {
   if (!summary) return null;
 
@@ -324,12 +341,17 @@ function ReportSummaryPanel({
           <p className="text-xs text-muted mb-2">Excluded from reports</p>
           <div className="space-y-1.5">
             {summary.excluded_flows.map((flow) => (
-              <div key={flow.flow_type} className="flex items-center justify-between gap-3 text-xs">
+              <button
+                key={flow.flow_type}
+                type="button"
+                className="flex w-full items-center justify-between gap-3 rounded px-1.5 py-1 text-left text-xs hover:bg-green/5 focus:outline-none focus:ring-1 focus:ring-green/30"
+                onClick={() => onExcludedFlow?.(flow)}
+              >
                 <span className="text-text capitalize">{flow.flow_type}</span>
                 <span className="font-mono text-muted">
                   {flow.count} tx, {formatCurrency(flow.net, { showSign: true })}
                 </span>
-              </div>
+              </button>
             ))}
             {summary.excluded_flows.length === 0 && <p className="text-sm text-muted">No excluded flows</p>}
           </div>
@@ -390,6 +412,94 @@ function ReportDrilldownModal({
         <div className="border border-border rounded overflow-hidden max-h-[420px] overflow-y-auto">
           {isLoading ? (
             <div className="py-12 text-center text-sm text-muted">Loading transactions...</div>
+          ) : data && data.transactions.length > 0 ? (
+            <div className="divide-y divide-border">
+              {data.transactions.map((transaction) => (
+                <div key={transaction.id} className="grid grid-cols-[88px_1fr_150px_96px] gap-3 items-center px-3 py-2.5">
+                  <span className="text-xs text-muted font-mono">{formatDate(transaction.date)}</span>
+                  <div className="min-w-0">
+                    <p className="text-sm text-text truncate">{transaction.merchant_name || transaction.original_name}</p>
+                    <p className="text-xs text-muted truncate">{transaction.account_name}</p>
+                  </div>
+                  {transaction.category_name ? (
+                    <CategoryBadge
+                      name={transaction.category_name}
+                      color={transaction.category_color}
+                      icon={transaction.category_icon}
+                    />
+                  ) : (
+                    <span className="text-xs text-muted">Uncategorized</span>
+                  )}
+                  <AmountBadge amount={transaction.amount} className="text-right" />
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="py-12 text-center text-sm text-muted">No backing transactions</div>
+          )}
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+function ReportEvidenceModal({
+  target,
+  startDate,
+  endDate,
+  onClose,
+}: {
+  target: EvidenceTarget | null;
+  startDate: string;
+  endDate: string;
+  onClose: () => void;
+}) {
+  const { data, isLoading } = useQuery<ReportEvidenceDrilldown>({
+    queryKey: ['reports', 'evidence', target?.kind, target?.month, target?.flowType, startDate, endDate],
+    queryFn: () => reportsApi.evidence({
+      kind: target!.kind,
+      month: target?.month,
+      flowType: target?.flowType,
+      startDate,
+      endDate,
+    }),
+    enabled: !!target,
+  });
+
+  return (
+    <Modal
+      open={!!target}
+      onClose={onClose}
+      title={target?.label ?? 'Report Evidence'}
+      maxWidth="800px"
+    >
+      <div className="space-y-4">
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs">
+          <div>
+            <p className="text-muted mb-1">Backed by</p>
+            <p className="font-mono text-lg text-text">
+              {data ? `${data.count} transaction${data.count === 1 ? '' : 's'}` : 'Loading'}
+            </p>
+          </div>
+          <div>
+            <p className="text-muted mb-1">Income</p>
+            <p className="font-mono text-lg text-green">{data ? formatCurrency(data.income) : '-'}</p>
+          </div>
+          <div>
+            <p className="text-muted mb-1">Spending</p>
+            <p className="font-mono text-lg text-rose">{data ? formatCurrency(data.expenses) : '-'}</p>
+          </div>
+          <div>
+            <p className="text-muted mb-1">Net</p>
+            <p className="font-mono text-lg" style={{ color: (data?.net ?? 0) >= 0 ? '#32bfa3' : '#ef6f8a' }}>
+              {data ? formatCurrency(data.net, { showSign: true }) : '-'}
+            </p>
+          </div>
+        </div>
+
+        <div className="border border-border rounded overflow-hidden max-h-[440px] overflow-y-auto">
+          {isLoading ? (
+            <div className="py-12 text-center text-sm text-muted">Loading evidence...</div>
           ) : data && data.transactions.length > 0 ? (
             <div className="divide-y divide-border">
               {data.transactions.map((transaction) => (
@@ -753,6 +863,7 @@ function TrendsTab({
 // ─── Cash Flow Tab ───────────────────────────────────────────────────────────
 
 function CashflowTab({ startDate, endDate }: { startDate: string; endDate: string }) {
+  const [evidenceTarget, setEvidenceTarget] = useState<EvidenceTarget | null>(null);
   const { data: cashflow, isLoading } = useQuery({
     queryKey: ['cashflow', 'reports', startDate, endDate],
     queryFn: () => reportsApi.cashflow({ startDate, endDate }),
@@ -841,7 +952,27 @@ function CashflowTab({ startDate, endDate }: { startDate: string; endDate: strin
           </thead>
           <tbody>
             {months.map((month) => (
-              <tr key={month.month} className="border-b border-border hover:bg-white/2">
+              <tr
+                key={month.month}
+                className="border-b border-border hover:bg-green/5 cursor-pointer focus:bg-green/5 focus:outline-none focus:ring-1 focus:ring-green/30"
+                tabIndex={0}
+                role="button"
+                onClick={() => setEvidenceTarget({
+                  kind: 'cashflow_month',
+                  label: `Cash flow for ${formatMonth(month.month)}`,
+                  month: month.month,
+                })}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter' || event.key === ' ') {
+                    event.preventDefault();
+                    setEvidenceTarget({
+                      kind: 'cashflow_month',
+                      label: `Cash flow for ${formatMonth(month.month)}`,
+                      month: month.month,
+                    });
+                  }
+                }}
+              >
                 <td className="px-4 py-2 font-mono text-muted">{formatMonth(month.month)}</td>
                 <td className="px-4 py-2 font-mono text-green">{formatCurrency(month.income)}</td>
                 <td className="px-4 py-2 font-mono text-rose">{formatCurrency(month.expenses)}</td>
@@ -853,6 +984,12 @@ function CashflowTab({ startDate, endDate }: { startDate: string; endDate: strin
           </tbody>
         </table>
       </div>
+      <ReportEvidenceModal
+        target={evidenceTarget}
+        startDate={startDate}
+        endDate={endDate}
+        onClose={() => setEvidenceTarget(null)}
+      />
     </div>
   );
 }
@@ -1294,6 +1431,7 @@ export function Reports() {
   const [tab, setTab] = useState<ReportTab>('spending');
   const [comparison, setComparison] = useState<ReportComparisonMode>('prior_period');
   const [trendCategoryIds, setTrendCategoryIds] = useState<string[]>([]);
+  const [evidenceTarget, setEvidenceTarget] = useState<EvidenceTarget | null>(null);
 
   const { startDate, endDate } = getDateRange(preset, customStart, customEnd);
   const { data: summary } = useQuery({
@@ -1403,7 +1541,21 @@ export function Reports() {
         </div>
       </div>
 
-      <ReportSummaryPanel summary={summary} onAsk={askAdvisorAboutReport} />
+      <ReportSummaryPanel
+        summary={summary}
+        onAsk={askAdvisorAboutReport}
+        onExcludedFlow={(flow) => setEvidenceTarget({
+          kind: 'excluded_flow',
+          label: `Excluded ${flow.flow_type}`,
+          flowType: flow.flow_type,
+        })}
+      />
+      <ReportEvidenceModal
+        target={evidenceTarget}
+        startDate={startDate}
+        endDate={endDate}
+        onClose={() => setEvidenceTarget(null)}
+      />
 
       {/* Tab selector */}
       <div className="flex gap-1 bg-surface shadow-sm border border-border rounded p-0.5 w-fit">
