@@ -428,6 +428,7 @@ export interface Goal {
   target_date?: string | null;
   color?: string | null;
   is_archived: boolean;
+  is_tax_envelope: boolean;
   created_at: string;
   updated_at: string;
   progress_amount: number;
@@ -763,6 +764,7 @@ export type AdvisorDraftPayload =
       type: GoalType;
       target_amount: number;
       account_id?: string | null;
+      is_tax_envelope?: boolean;
     }
   | {
       kind: 'confirm_recurring';

@@ -119,6 +119,7 @@ export const CreateGoalSchema = z.object({
   account_id: z.string().nullable().optional(),
   target_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(),
   color: z.string().nullable().optional(),
+  is_tax_envelope: z.boolean().default(false),
 });
 
 export const UpdateGoalSchema = CreateGoalSchema.partial().extend({

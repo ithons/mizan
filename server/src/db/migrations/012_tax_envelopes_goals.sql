@@ -1,0 +1,1 @@
+ALTER TABLE goals ADD COLUMN is_tax_envelope INTEGER NOT NULL DEFAULT 0;

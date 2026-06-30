@@ -13,6 +13,10 @@ fs.mkdirSync(path.join(MIZAN_DIR, 'logs'), { recursive: true });
 
 let _db: Database.Database | null = null;
 
+export function _setDbForTesting(testDb: Database.Database) {
+  _db = testDb;
+}
+
 export function getDb(): Database.Database {
   if (!_db) {
     _db = new Database(DB_PATH);
