@@ -71,6 +71,27 @@ the OAuth state instead of your localhost URL, and the browser cannot handle it.
 
 In production, replace `http://localhost:3001` with your actual domain.
 
+## SimpleFIN Setup
+
+SimpleFIN Bridge provides read-only access to thousands of financial institutions for a small monthly fee (~$1.50/mo). This is a reliable, privacy-respecting alternative to Plaid.
+
+1. Create an account at [bridge.simplefin.org](https://bridge.simplefin.org)
+2. Connect your financial institutions through their dashboard.
+3. Once connected, generate a new **Setup Token**.
+4. In Mizān, go to **Settings → SimpleFIN**.
+5. Paste your Setup Token and click **Connect**. Mizān will securely exchange this for a permanent Access URL and sync your accounts.
+
+## Teller Setup
+
+Teller provides direct, API-based bank connections using TLS certificates.
+
+1. Apply for developer access at [teller.io](https://teller.io)
+2. Once approved, create an application in the Teller dashboard.
+3. Generate and download your TLS certificate (`certificate.pem` and `private_key.pem`).
+4. In Mizān, go to **Settings → Teller**.
+5. Paste the contents of your Certificate and Private Key into the respective fields.
+6. Click **Save** and use the Teller link to connect institutions.
+
 ## Coinbase Setup
 
 1. Go to [portal.cdp.coinbase.com/projects/api-keys](https://portal.cdp.coinbase.com/projects/api-keys)
@@ -93,7 +114,7 @@ Mizān relies on Anthropic's Claude 3.5 Sonnet / Haiku to perform background syn
 ## Privacy
 
 No data leaves your machine except for direct API calls to:
-- Plaid (transaction syncing)
+- Plaid, SimpleFIN, or Teller (transaction syncing)
 - Coinbase (balance syncing)
 - `api.coinbase.com/v2/prices` (public spot price endpoint, no auth)
 - Anthropic (explicit AI chat and background sync reviews)
