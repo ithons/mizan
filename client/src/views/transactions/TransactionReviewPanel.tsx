@@ -9,6 +9,7 @@ import { CategoryBadge } from '../../components/CategoryBadge';
 import { formatCurrency, formatDate } from '../../lib/formatters';
 
 const queueTone: Record<TransactionReviewQueueId, { color: string; icon: React.ElementType }> = {
+  ai_insights: { color: '#32bfa3', icon: Sparkles },
   uncategorized: { color: '#e2a53f', icon: Tag },
   rule_suggestions: { color: '#6487f0', icon: Sparkles },
   pending: { color: '#e2a53f', icon: Clock },

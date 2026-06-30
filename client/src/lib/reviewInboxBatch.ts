@@ -1,6 +1,7 @@
 import type { TransactionReviewQueueId } from '@shared/types';
 
 export const REVIEW_QUEUE_ORDER: TransactionReviewQueueId[] = [
+  'ai_insights',
   'uncategorized',
   'rule_suggestions',
   'pending',
@@ -33,6 +34,11 @@ export function reviewBatchActions(
   if (itemCount <= 0) return [];
 
   switch (queueId) {
+    case 'ai_insights':
+      return [
+        { id: 'primary', label: 'Approve All' },
+        { id: 'dismiss', label: 'Dismiss All' },
+      ];
     case 'rule_suggestions':
       return [{ id: 'primary', label: 'Apply All' }];
     case 'pending':
