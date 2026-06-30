@@ -473,10 +473,14 @@ export function ReviewInbox() {
     onError: (err: Error) => addToast({ type: 'error', message: err.message }),
   });
 
-  const bulkCategoryMutation = useMutation({
-    mutationFn: ({ ids, categoryId }: { ids: string[]; categoryId: string }) =>
-      transactionsApi.bulkCategory(ids, categoryId),
-    onSuccess: (_result, variables) => {
+  const batchRuleMutation = useMutation({
+    mutationFn: ({ pattern, categoryId }: { ids: string[]; pattern: string; categoryId: string }) =>
+      rulesApi.create({
+        pattern,
+        category_id: categoryId,
+        apply_existing: true,
+      }),
+    onSuccess: (result, variables) => {
       invalidateReview();
       setBatchCategories((existing) => {
         const next = { ...existing };
@@ -489,7 +493,9 @@ export function ReviewInbox() {
       });
       addToast({
         type: 'success',
-        message: `Categorized ${variables.ids.length} transaction${variables.ids.length === 1 ? '' : 's'} and saved rule`,
+        message: result.applied > 0
+          ? `Rule saved and applied to ${result.applied} transaction${result.applied === 1 ? '' : 's'}`
+          : 'Rule saved',
       });
     },
     onError: (err: Error) => addToast({ type: 'error', message: err.message }),
@@ -669,8 +675,8 @@ export function ReviewInbox() {
                   </div>
                   {uncategorizedGroups.slice(0, 4).map((group) => {
                     const categoryId = batchCategories[group.key] ?? null;
-                    const busy = bulkCategoryMutation.isPending &&
-                      bulkCategoryMutation.variables?.ids.join('|') === group.transaction_ids.join('|');
+                    const busy = batchRuleMutation.isPending &&
+                      batchRuleMutation.variables?.ids.join('|') === group.transaction_ids.join('|');
                     return (
                       <BatchGroupRow
                         key={group.key}
@@ -683,8 +689,9 @@ export function ReviewInbox() {
                         }
                         onApply={() => {
                           if (!categoryId) return;
-                          bulkCategoryMutation.mutate({
+                          batchRuleMutation.mutate({
                             ids: group.transaction_ids,
+                            pattern: group.merchant_name,
                             categoryId,
                           });
                         }}
