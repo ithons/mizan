@@ -34,6 +34,11 @@ import {
 import { formatCurrency, formatRelativeTime } from '../../lib/formatters';
 import { useAppStore } from '../../store';
 import { invalidateFinancialData } from '../../lib/queryInvalidation';
+import {
+  detectCsvImportMapping,
+  MIZAN_CSV_MAPPING,
+  MONARCH_CSV_MAPPING,
+} from '../../lib/csvImportMapping';
 import { Modal } from '../../components/Modal';
 import { ConfirmRemoveModal } from '../../components/ConfirmRemoveModal';
 import { SyncActivityPanel } from '../../components/SyncActivityPanel';
@@ -118,16 +123,10 @@ function parseBackupJsonText(text: string): unknown {
   }
 }
 
-const DEFAULT_CSV_MAPPING = {
-  date: 'date',
-  amount: 'amount',
-  merchant: 'merchant_name',
-  category: 'category_name',
-  account: 'account_name',
-  notes: 'notes',
-  dateFormat: 'yyyy-MM-dd',
-  amountNegate: false,
-};
+function parseCsvHeaders(text: string): string[] {
+  const headerLine = text.split(/\r?\n/).find((line) => line.trim().length > 0);
+  return headerLine ? parseCsvLine(headerLine) : [];
+}
 
 export function DataSection() {
   const { addToast } = useAppStore();
@@ -135,7 +134,7 @@ export function DataSection() {
   const [showDangerModal, setShowDangerModal] = useState(false);
   const [deleteConfirm, setDeleteConfirm] = useState('');
   const [csvText, setCsvText] = useState('');
-  const [csvMapping, setCsvMapping] = useState(DEFAULT_CSV_MAPPING);
+  const [csvMapping, setCsvMapping] = useState(MIZAN_CSV_MAPPING);
   const [csvPreview, setCsvPreview] = useState<CsvImportPreview | null>(null);
   const [csvParseError, setCsvParseError] = useState<string | null>(null);
   const [backupText, setBackupText] = useState('');
@@ -281,7 +280,12 @@ export function DataSection() {
               className="w-full min-h-28 bg-surface border border-border rounded px-3 py-2 text-xs text-text font-mono resize-y focus:outline-none focus:ring-1 focus:ring-green-50"
               value={csvText}
               onChange={(event) => {
-                setCsvText(event.target.value);
+                const nextText = event.target.value;
+                const headers = parseCsvHeaders(nextText);
+                setCsvText(nextText);
+                if (headers.length > 0) {
+                  setCsvMapping(detectCsvImportMapping(headers));
+                }
                 setCsvPreview(null);
                 setCsvParseError(null);
               }}
@@ -322,6 +326,37 @@ export function DataSection() {
                 />
                 Flip amount signs
               </label>
+            </div>
+
+            <div className="flex flex-wrap gap-2">
+              <button
+                className="px-3 py-1.5 text-xs border border-border rounded text-muted hover:text-text hover:bg-black/5"
+                onClick={() => {
+                  setCsvMapping(MIZAN_CSV_MAPPING);
+                  setCsvPreview(null);
+                }}
+              >
+                Mizan preset
+              </button>
+              <button
+                className="px-3 py-1.5 text-xs border border-border rounded text-muted hover:text-text hover:bg-black/5"
+                onClick={() => {
+                  setCsvMapping(MONARCH_CSV_MAPPING);
+                  setCsvPreview(null);
+                }}
+              >
+                Monarch preset
+              </button>
+              <button
+                className="px-3 py-1.5 text-xs border border-border rounded text-muted hover:text-text hover:bg-black/5 disabled:opacity-40"
+                onClick={() => {
+                  setCsvMapping(detectCsvImportMapping(parseCsvHeaders(csvText)));
+                  setCsvPreview(null);
+                }}
+                disabled={csvText.trim().length === 0}
+              >
+                Auto detect
+              </button>
             </div>
 
             {csvParseError && (
