@@ -1,6 +1,7 @@
 import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
+import { Entry } from '@napi-rs/keyring';
 import { MIZAN_DIR } from '../db/index';
 
 const CREDENTIALS_PATH = path.join(MIZAN_DIR, 'credentials.json');
@@ -38,10 +39,50 @@ let _cache: CredentialsStore | null = null;
 function getDerivedKey(): Buffer {
   if (_key) return _key;
 
+  const service = 'mizan';
+  const account = 'encryption_key';
+  
+  let entry: Entry | null = null;
+  try {
+    entry = new Entry(service, account);
+    const hexKey = entry.getPassword();
+    if (hexKey && hexKey.length === 64) {
+      _key = Buffer.from(hexKey, 'hex');
+      return _key;
+    }
+  } catch (err) {
+    // If not found or keychain inaccessible, proceed to fallback/generation
+  }
+
+  // Fallback to legacy file if it exists, to migrate gracefully
   if (fs.existsSync(KEY_PATH)) {
+    console.log('[credentials] Migrating encryption key to native keychain...');
     _key = fs.readFileSync(KEY_PATH);
+    
+    if (entry) {
+      try {
+        entry.setPassword(_key.toString('hex'));
+        // Remove old file after successful migration
+        fs.unlinkSync(KEY_PATH);
+        return _key;
+      } catch (err) {
+        console.error('[credentials] Failed to migrate key to keychain:', (err as Error).message);
+        return _key;
+      }
+    }
+    return _key;
+  }
+
+  // Generate new key
+  _key = crypto.randomBytes(32);
+  if (entry) {
+    try {
+      entry.setPassword(_key.toString('hex'));
+    } catch (err) {
+      console.error('[credentials] Failed to store key in keychain, falling back to file:', (err as Error).message);
+      fs.writeFileSync(KEY_PATH, _key, { mode: 0o600 });
+    }
   } else {
-    _key = crypto.randomBytes(32);
     fs.writeFileSync(KEY_PATH, _key, { mode: 0o600 });
   }
 
