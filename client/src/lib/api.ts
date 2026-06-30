@@ -480,6 +480,17 @@ export const settingsApi = {
     a.click();
     URL.revokeObjectURL(url);
   },
+  exportBackupJson: async () => {
+    const res = await fetch('/api/settings/backup-json');
+    if (!res.ok) throw new Error('Backup export failed');
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `mizan-backup-${new Date().toISOString().split('T')[0]}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  },
   importCsv: (body: {
     rows: Array<Record<string, string>>;
     mapping: {

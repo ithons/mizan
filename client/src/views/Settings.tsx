@@ -941,12 +941,21 @@ function DataSection() {
     onError: (err: Error) => addToast({ type: 'error', message: err.message }),
   });
 
-  const handleExport = async () => {
+  const handleCsvExport = async () => {
     try {
       await settingsApi.exportCsv();
-      addToast({ type: 'success', message: 'Export complete' });
+      addToast({ type: 'success', message: 'CSV export complete' });
     } catch (err: unknown) {
       addToast({ type: 'error', message: err instanceof Error ? err.message : 'Export failed' });
+    }
+  };
+
+  const handleBackupExport = async () => {
+    try {
+      await settingsApi.exportBackupJson();
+      addToast({ type: 'success', message: 'Backup export complete' });
+    } catch (err: unknown) {
+      addToast({ type: 'error', message: err instanceof Error ? err.message : 'Backup export failed' });
     }
   };
 
@@ -954,13 +963,34 @@ function DataSection() {
     <div className="space-y-6">
       <div>
         <h3 className="text-sm font-medium text-text mb-3">Data Management</h3>
-        <div className="flex gap-3">
-          <button
-            className="flex items-center gap-2 px-4 py-2 text-sm border border-border rounded text-muted hover:text-text"
-            onClick={handleExport}
-          >
-            <Download size={14} /> Export CSV
-          </button>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+          <div className="border border-border bg-background rounded p-3 space-y-3">
+            <div>
+              <p className="text-sm text-text">Transactions CSV</p>
+              <p className="text-xs text-muted mt-1">Download transactions for spreadsheets and external analysis.</p>
+            </div>
+            <button
+              className="flex items-center gap-2 px-4 py-2 text-sm border border-border rounded text-muted hover:text-text"
+              onClick={handleCsvExport}
+            >
+              <Download size={14} /> Export CSV
+            </button>
+          </div>
+
+          <div className="border border-border bg-background rounded p-3 space-y-3">
+            <div>
+              <p className="text-sm text-text">Full Local Backup</p>
+              <p className="text-xs text-muted mt-1">
+                Download accounts, transactions, categories, budgets, goals, investments, snapshots, and sync history. Provider credentials are not included.
+              </p>
+            </div>
+            <button
+              className="flex items-center gap-2 px-4 py-2 text-sm border border-border rounded text-muted hover:text-text"
+              onClick={handleBackupExport}
+            >
+              <Download size={14} /> Export Backup
+            </button>
+          </div>
         </div>
       </div>
 

@@ -21,6 +21,7 @@ import { resetPlaidClient } from '../services/plaid';
 import { takeSnapshot } from '../services/snapshot';
 import { detectRecurring } from '../services/recurring';
 import { refreshTransactionIntegrity } from '../services/transactionIntegrity';
+import { buildLocalBackup } from '../services/localBackup';
 import type { z } from 'zod';
 
 const router = Router();
@@ -157,6 +158,23 @@ router.get('/export-csv', (req: Request, res: Response, next: NextFunction): voi
     }
 
     res.end();
+  } catch (err) {
+    next(err);
+  }
+});
+
+// GET /backup-json
+router.get('/backup-json', (_req: Request, res: Response, next: NextFunction): void => {
+  try {
+    const exportedAt = new Date();
+    const backup = buildLocalBackup(getDb(), exportedAt);
+
+    res.setHeader('Content-Type', 'application/json');
+    res.setHeader(
+      'Content-Disposition',
+      `attachment; filename="mizan-backup-${exportedAt.toISOString().split('T')[0]}.json"`
+    );
+    res.json(backup);
   } catch (err) {
     next(err);
   }
