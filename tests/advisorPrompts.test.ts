@@ -3,21 +3,28 @@ import assert from 'node:assert/strict';
 import {
   buildAccountAdvisorPrompt,
   buildBudgetAdvisorPrompt,
+  buildBudgetGroupAdvisorPrompt,
   buildDashboardCardAdvisorPrompt,
   buildGoalAdvisorPrompt,
   buildHoldingAdvisorPrompt,
+  buildImportRunAdvisorPrompt,
+  buildInvestmentAllocationAdvisorPrompt,
   buildNetWorthEvidenceAdvisorPrompt,
   buildRecurringForecastAdvisorPrompt,
   buildRecurringOccurrenceAdvisorPrompt,
   buildReportAdvisorPrompt,
   buildReportDrilldownAdvisorPrompt,
   buildReportEvidenceAdvisorPrompt,
+  buildRolloverLedgerAdvisorPrompt,
   buildSyncRunAdvisorPrompt,
   buildTransactionAdvisorPrompt,
 } from '../client/src/lib/advisorPrompts';
 import type {
   Account,
   Budget,
+  BudgetGroup,
+  BudgetRolloverLedgerEntry,
+  DataImportRun,
   Goal,
   Holding,
   NetWorthSnapshot,
@@ -47,6 +54,70 @@ function budget(overrides: Partial<Budget> = {}): Budget {
     projected_spend: overrides.projected_spend ?? 330,
     projected_remaining: overrides.projected_remaining ?? 220,
     forecast_confidence: overrides.forecast_confidence ?? 'likely',
+  };
+}
+
+function budgetGroup(): BudgetGroup {
+  return {
+    id: 'group_needs',
+    name: 'Needs',
+    color: '#32bfa3',
+    sort_order: 0,
+    created_at: '2026-06-01T00:00:00.000Z',
+    updated_at: '2026-06-01T00:00:00.000Z',
+    members: [
+      {
+        group_id: 'group_needs',
+        category_id: 'cat_food',
+        category_name: 'Food',
+        sort_order: 0,
+        created_at: '2026-06-01T00:00:00.000Z',
+      },
+    ],
+    totals: {
+      budget_count: 1,
+      budgeted: 550,
+      spent: 240,
+      rollover_balance: 50,
+      expected_recurring: 90,
+      projected_spend: 330,
+      projected_remaining: 220,
+      forecast_confidence: 'likely',
+    },
+  };
+}
+
+function rolloverLedgerRow(): BudgetRolloverLedgerEntry {
+  return {
+    id: 'budget_food:2026-06',
+    budget_id: 'budget_food',
+    category_id: 'cat_food',
+    category_name: 'Food',
+    category_color: '#e07070',
+    category_icon: null,
+    month: '2026-06',
+    starting_rollover: 50,
+    budget_amount: 500,
+    actual_spend: 240,
+    ending_rollover: 310,
+    calculated_at: '2026-06-30T12:00:00.000Z',
+  };
+}
+
+function importRun(): DataImportRun {
+  return {
+    id: 'import_csv',
+    source: 'csv',
+    status: 'partial',
+    rows_seen: 10,
+    rows_imported: 8,
+    rows_invalid: 2,
+    duplicate_candidates: 1,
+    transfer_candidates: 1,
+    warnings_count: 2,
+    errors_count: 0,
+    summary: 'Imported 8 transactions with review warnings.',
+    created_at: '2026-06-30T12:00:00.000Z',
   };
 }
 
@@ -565,6 +636,31 @@ test('budget advisor prompt falls back to actual spending without projections', 
   assert.match(prompt.prompt, /none forecast confidence/);
 });
 
+test('budget group advisor prompt captures group rollup context', () => {
+  const prompt = buildBudgetGroupAdvisorPrompt(budgetGroup(), '2026-06');
+
+  assert.equal(prompt.source, 'budget');
+  assert.equal(prompt.recordKind, 'budget_group');
+  assert.equal(prompt.recordId, 'group_needs');
+  assert.equal(prompt.params?.budgetCount, 1);
+  assert.equal(prompt.params?.projectedRemaining, 220);
+  assert.match(prompt.prompt, /Needs budget group for 2026-06/);
+  assert.match(prompt.prompt, /Food/);
+  assert.match(prompt.prompt, /Projected remaining is \$220\.00/);
+});
+
+test('rollover ledger advisor prompt captures ledger math', () => {
+  const prompt = buildRolloverLedgerAdvisorPrompt(rolloverLedgerRow());
+
+  assert.equal(prompt.source, 'budget');
+  assert.equal(prompt.recordKind, 'rollover_ledger_row');
+  assert.equal(prompt.recordId, 'budget_food:2026-06');
+  assert.equal(prompt.params?.endingRollover, 310);
+  assert.match(prompt.prompt, /rollover ledger row for Food in 2026-06/);
+  assert.match(prompt.prompt, /Starting rollover was \$50\.00/);
+  assert.match(prompt.prompt, /ending rollover was \$310\.00/);
+});
+
 test('transaction advisor prompt captures row evidence and review state', () => {
   const prompt = buildTransactionAdvisorPrompt(transaction());
 
@@ -620,4 +716,38 @@ test('holding advisor prompt captures account context and return quality', () =>
   assert.match(prompt.prompt, /held in Brokerage at InvestCo/);
   assert.match(prompt.prompt, /unrealized gain or loss is \$250\.00/);
   assert.match(prompt.prompt, /return is 25\.0%/);
+});
+
+test('investment allocation advisor prompt captures sector quality context', () => {
+  const prompt = buildInvestmentAllocationAdvisorPrompt({
+    lens: 'sector',
+    quality: '1 holding missing sector',
+    holdingCount: 2,
+    totalValue: 1500,
+    missingSectorCount: 1,
+    slices: [
+      { key: 'sector:Broad Market', label: 'Broad Market', value: 1000, pct: 66.7, count: 1 },
+      { key: 'sector:unavailable', label: 'Sector unavailable', value: 500, pct: 33.3, count: 1 },
+    ],
+  });
+
+  assert.equal(prompt.source, 'investment');
+  assert.equal(prompt.recordKind, 'investment_allocation');
+  assert.equal(prompt.recordId, 'sector');
+  assert.equal(prompt.params?.missingSectorCount, 1);
+  assert.match(prompt.prompt, /investment allocation by sector/);
+  assert.match(prompt.prompt, /1 holding is missing sector metadata/);
+  assert.match(prompt.prompt, /Broad Market/);
+});
+
+test('import run advisor prompt captures audit summary', () => {
+  const prompt = buildImportRunAdvisorPrompt(importRun());
+
+  assert.equal(prompt.source, 'import');
+  assert.equal(prompt.recordKind, 'import_run');
+  assert.equal(prompt.recordId, 'import_csv');
+  assert.equal(prompt.params?.rowsImported, 8);
+  assert.match(prompt.prompt, /CSV import audit run/);
+  assert.match(prompt.prompt, /imported 8\/10 rows/);
+  assert.match(prompt.prompt, /duplicate candidate/);
 });

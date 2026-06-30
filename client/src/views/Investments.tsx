@@ -14,7 +14,10 @@ import { format, subMonths } from 'date-fns';
 import { investmentsApi, reportsApi, accountsApi } from '../lib/api';
 import { formatCurrency, formatDate } from '../lib/formatters';
 import { advisorRouteState } from '../lib/advisorRouteState';
-import { buildHoldingAdvisorPrompt } from '../lib/advisorPrompts';
+import {
+  buildHoldingAdvisorPrompt,
+  buildInvestmentAllocationAdvisorPrompt,
+} from '../lib/advisorPrompts';
 import {
   ALLOCATION_LENSES,
   STARTER_ASSET_TARGETS,
@@ -27,6 +30,7 @@ import {
   getCostBasisStats,
   getInvestmentDataQualitySummary,
   getInvestmentActivitySummary,
+  type AllocationSlice,
   type AllocationLens,
 } from '../lib/investmentAnalytics';
 import { AmountBadge } from '../components/AmountBadge';
@@ -581,6 +585,20 @@ export function Investments() {
     [filteredHoldings, allocationLens, accountById]
   );
   const hasSectorData = filteredHoldings.some((holding) => Boolean(holding.sector));
+  const askAdvisorAboutAllocation = (slices: AllocationSlice[]) => {
+    navigate('/advisor', {
+      state: advisorRouteState(buildInvestmentAllocationAdvisorPrompt({
+        lens: allocationLens,
+        quality: allocationQuality,
+        holdingCount: filteredHoldings.length,
+        totalValue,
+        missingSectorCount: allocationLens === 'sector'
+          ? filteredHoldings.filter((holding) => !holding.sector).length
+          : null,
+        slices,
+      })),
+    });
+  };
   const allocationDrift = useMemo(
     () => allocationLens === 'asset_type'
       ? getAllocationDrift(allocationSlices, STARTER_ASSET_TARGETS)
@@ -789,20 +807,29 @@ export function Investments() {
                 {selectedAccountId ? 'Filtered to selected account' : 'All investment accounts'}
               </p>
             </div>
-            <div className="flex flex-wrap gap-1 rounded-full border border-border bg-background p-1">
-              {ALLOCATION_LENSES.map((lens) => (
-                <button
-                  key={lens.id}
-                  onClick={() => setAllocationLens(lens.id)}
-                  className={`px-3 py-1.5 text-xs rounded-full transition-colors ${
-                    allocationLens === lens.id
-                      ? 'bg-green text-white'
-                      : 'text-muted hover:text-text hover:bg-surface'
-                  }`}
-                >
-                  {lens.label}
-                </button>
-              ))}
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                className="flex items-center gap-1.5 text-xs text-muted hover:text-blue transition-colors border border-border rounded-full px-3 py-1.5"
+                onClick={() => askAdvisorAboutAllocation(allocationSlices)}
+              >
+                <Sparkles size={12} />
+                Ask advisor
+              </button>
+              <div className="flex flex-wrap gap-1 rounded-full border border-border bg-background p-1">
+                {ALLOCATION_LENSES.map((lens) => (
+                  <button
+                    key={lens.id}
+                    onClick={() => setAllocationLens(lens.id)}
+                    className={`px-3 py-1.5 text-xs rounded-full transition-colors ${
+                      allocationLens === lens.id
+                        ? 'bg-green text-white'
+                        : 'text-muted hover:text-text hover:bg-surface'
+                    }`}
+                  >
+                    {lens.label}
+                  </button>
+                ))}
+              </div>
             </div>
           </div>
 

@@ -144,6 +144,36 @@ function setupAdvisorDb(): Database.Database {
       updated_at TEXT NOT NULL
     );
 
+    CREATE TABLE budget_groups (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      color TEXT,
+      sort_order INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+
+    CREATE TABLE budget_group_members (
+      group_id TEXT NOT NULL,
+      category_id TEXT NOT NULL,
+      sort_order INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL,
+      PRIMARY KEY (group_id, category_id),
+      UNIQUE(category_id)
+    );
+
+    CREATE TABLE budget_rollover_ledger (
+      id TEXT PRIMARY KEY,
+      budget_id TEXT NOT NULL,
+      month TEXT NOT NULL,
+      starting_rollover REAL NOT NULL,
+      budget_amount REAL NOT NULL,
+      actual_spend REAL NOT NULL,
+      ending_rollover REAL NOT NULL,
+      calculated_at TEXT NOT NULL,
+      UNIQUE(budget_id, month)
+    );
+
     CREATE TABLE goals (
       id TEXT PRIMARY KEY,
       name TEXT NOT NULL,
@@ -166,6 +196,61 @@ function setupAdvisorDb(): Database.Database {
       total_liabilities REAL NOT NULL DEFAULT 0,
       net_worth REAL NOT NULL DEFAULT 0,
       breakdown TEXT NOT NULL DEFAULT '{}',
+      created_at TEXT NOT NULL
+    );
+
+    CREATE TABLE securities (
+      id TEXT PRIMARY KEY,
+      plaid_security_id TEXT,
+      ticker TEXT,
+      name TEXT NOT NULL,
+      type TEXT NOT NULL,
+      currency TEXT NOT NULL DEFAULT 'USD',
+      sector TEXT,
+      sector_source TEXT
+    );
+
+    CREATE TABLE holdings (
+      id TEXT PRIMARY KEY,
+      account_id TEXT NOT NULL,
+      security_id TEXT NOT NULL,
+      quantity REAL NOT NULL,
+      institution_price REAL NOT NULL,
+      institution_value REAL NOT NULL,
+      cost_basis REAL,
+      manual_cost_basis REAL,
+      manual_cost_basis_note TEXT,
+      manual_cost_basis_updated_at TEXT,
+      currency TEXT NOT NULL DEFAULT 'USD',
+      updated_at TEXT NOT NULL
+    );
+
+    CREATE TABLE investment_transactions (
+      id TEXT PRIMARY KEY,
+      account_id TEXT NOT NULL,
+      date TEXT NOT NULL,
+      type TEXT NOT NULL,
+      security_id TEXT,
+      quantity REAL,
+      price REAL,
+      amount REAL NOT NULL,
+      fees REAL,
+      name TEXT NOT NULL DEFAULT '',
+      created_at TEXT NOT NULL
+    );
+
+    CREATE TABLE data_import_runs (
+      id TEXT PRIMARY KEY,
+      source TEXT NOT NULL,
+      status TEXT NOT NULL,
+      rows_seen INTEGER NOT NULL,
+      rows_imported INTEGER NOT NULL,
+      rows_invalid INTEGER NOT NULL DEFAULT 0,
+      duplicate_candidates INTEGER NOT NULL DEFAULT 0,
+      transfer_candidates INTEGER NOT NULL DEFAULT 0,
+      warnings_count INTEGER NOT NULL DEFAULT 0,
+      errors_count INTEGER NOT NULL DEFAULT 0,
+      summary TEXT NOT NULL,
       created_at TEXT NOT NULL
     );
   `);
@@ -200,6 +285,12 @@ function setupAdvisorDb(): Database.Database {
     )
     VALUES ('acct_checking', 'item_1', 'plaid', 'Mizan Test Bank', 'Everyday Checking', 'checking', 2500, 0, 0)
   `).run();
+  db.prepare(`
+    INSERT INTO accounts (
+      id, connection_id, connection_type, institution_name, account_name, type, current_balance, is_hidden, is_liability
+    )
+    VALUES ('acct_brokerage', 'item_1', 'plaid', 'Mizan Test Bank', 'Brokerage', 'brokerage', 1500, 0, 0)
+  `).run();
 
   insertTransaction(db, {
     id: 'paycheck',
@@ -230,11 +321,49 @@ function setupAdvisorDb(): Database.Database {
   `).run(TEST_NOW, TEST_NOW);
 
   db.prepare(`
+    INSERT INTO budget_groups (id, name, color, sort_order, created_at, updated_at)
+    VALUES ('group_needs', 'Needs', '#32bfa3', 0, ?, ?)
+  `).run(TEST_NOW, TEST_NOW);
+  db.prepare(`
+    INSERT INTO budget_group_members (group_id, category_id, sort_order, created_at)
+    VALUES ('group_needs', 'cat_food', 0, ?)
+  `).run(TEST_NOW);
+
+  db.prepare(`
     INSERT INTO goals (
       id, name, type, target_amount, current_amount, starting_amount, account_id, target_date, color, is_archived, created_at, updated_at
     )
     VALUES ('goal_emergency', 'Emergency Fund', 'savings', 5000, 1500, NULL, NULL, '2026-12-31', '#4ecba3', 0, ?, ?)
   `).run(TEST_NOW, TEST_NOW);
+
+  db.prepare(`
+    INSERT INTO securities (id, plaid_security_id, ticker, name, type, currency, sector, sector_source)
+    VALUES
+      ('sec_vti', NULL, 'VTI', 'Vanguard Total Stock Market ETF', 'etf', 'USD', 'Broad Market', 'manual'),
+      ('sec_cash', NULL, 'CASH', 'Cash Sweep', 'cash', 'USD', NULL, NULL)
+  `).run();
+  db.prepare(`
+    INSERT INTO holdings (
+      id, account_id, security_id, quantity, institution_price, institution_value,
+      cost_basis, manual_cost_basis, manual_cost_basis_note, manual_cost_basis_updated_at, currency, updated_at
+    )
+    VALUES
+      ('holding_vti', 'acct_brokerage', 'sec_vti', 10, 100, 1000, 800, NULL, NULL, NULL, 'USD', ?),
+      ('holding_cash', 'acct_brokerage', 'sec_cash', 500, 1, 500, NULL, NULL, NULL, NULL, 'USD', ?)
+  `).run(TEST_NOW, TEST_NOW);
+  db.prepare(`
+    INSERT INTO investment_transactions (
+      id, account_id, date, type, security_id, quantity, price, amount, fees, name, created_at
+    )
+    VALUES ('inv_sell', 'acct_brokerage', '2026-06-20', 'sell', 'sec_vti', 1, 100, 100, NULL, 'VTI sale', ?)
+  `).run(TEST_NOW);
+  db.prepare(`
+    INSERT INTO data_import_runs (
+      id, source, status, rows_seen, rows_imported, rows_invalid,
+      duplicate_candidates, transfer_candidates, warnings_count, errors_count, summary, created_at
+    )
+    VALUES ('import_csv', 'csv', 'partial', 10, 8, 2, 1, 1, 2, 0, 'Imported 8 transactions with review warnings.', ?)
+  `).run(TEST_NOW);
 
   return db;
 }
@@ -247,9 +376,13 @@ test('advisor read tools summarize local availability and attention states', (t)
   const byId = new Map(tools.map((tool) => [tool.id, tool]));
 
   assert.equal(byId.get('sync_health')?.status, 'available');
-  assert.equal(byId.get('accounts')?.count, 1);
+  assert.equal(byId.get('accounts')?.count, 2);
   assert.equal(byId.get('review')?.status, 'attention');
   assert.equal(byId.get('review')?.count, 1);
+  assert.equal(byId.get('budget_groups')?.count, 1);
+  assert.equal(byId.get('investment_quality')?.status, 'attention');
+  assert.equal(byId.get('sector_allocation')?.status, 'available');
+  assert.equal(byId.get('import_audits')?.status, 'available');
 });
 
 test('advisor report analysis cites the report slice and backing categories', (t) => {
@@ -308,7 +441,44 @@ test('advisor budget analysis uses rollover-adjusted available amount', (t) => {
 
   assert.equal(analysis.intent, 'budget');
   assert.match(analysis.answer, /Food: projected \$100\.00 of \$220\.00, \$120\.00 remaining\./);
+  assert.match(analysis.answer, /Budget groups/);
+  assert.match(analysis.answer, /Recent rollover ledger/);
   assert.ok(analysis.citations.some((citation) => citation.id === 'budget:budget_food'));
+  assert.ok(analysis.citations.some((citation) => citation.id === 'budget-group:group_needs'));
+  assert.ok(analysis.citations.some((citation) => citation.id.startsWith('rollover-ledger:')));
+});
+
+test('advisor investment analysis cites cost basis and sector quality', (t) => {
+  const db = setupAdvisorDb();
+  t.after(() => db.close());
+
+  const analysis = analyzeAdvisorQuestion(
+    db,
+    'How is my investment cost basis and sector allocation quality?',
+    new Date(TEST_NOW)
+  );
+
+  assert.equal(analysis.intent, 'investments');
+  assert.match(analysis.answer, /Cost basis is available for 1\/2 holdings/);
+  assert.match(analysis.answer, /lack sector metadata/);
+  assert.match(analysis.answer, /realized gain stays unavailable/);
+  assert.ok(analysis.citations.some((citation) => citation.id === 'holding:cost-basis:holding_cash'));
+  assert.ok(analysis.citations.some((citation) => citation.id === 'holding:sector:holding_cash'));
+});
+
+test('advisor import analysis cites audit runs', (t) => {
+  const db = setupAdvisorDb();
+  t.after(() => db.close());
+
+  const analysis = analyzeAdvisorQuestion(
+    db,
+    'Explain my latest CSV import audit',
+    new Date(TEST_NOW)
+  );
+
+  assert.equal(analysis.intent, 'imports');
+  assert.match(analysis.answer, /imported 8\/10 rows/);
+  assert.ok(analysis.citations.some((citation) => citation.id === 'import-run:import_csv'));
 });
 
 test('advisor quality analysis cites local trust issues', (t) => {
@@ -561,4 +731,114 @@ test('advisor drafts and confirms a suggested merchant rule', (t) => {
   };
   assert.equal(rule.category_id, 'cat_food');
   assert.equal(updated.category_id, 'cat_food');
+});
+
+test('advisor drafts and confirms budget group changes', (t) => {
+  const db = setupAdvisorDb();
+  t.after(() => db.close());
+
+  const createAnalysis = analyzeAdvisorQuestion(
+    db,
+    'Create budget group called Fun',
+    new Date(TEST_NOW)
+  );
+  const createDraft = createAnalysis.drafts.find((item) => item.kind === 'create_budget_group');
+  assert.ok(createDraft);
+  confirmAdvisorDraft(db, createDraft, true);
+
+  const created = db.prepare('SELECT id FROM budget_groups WHERE name = ?').get('Fun') as { id: string };
+  assert.ok(created.id);
+
+  const renameAnalysis = analyzeAdvisorQuestion(
+    db,
+    'Rename Needs group to Essentials',
+    new Date(TEST_NOW)
+  );
+  const renameDraft = renameAnalysis.drafts.find((item) => item.kind === 'rename_budget_group');
+  assert.ok(renameDraft);
+  confirmAdvisorDraft(db, renameDraft, true);
+
+  const renamed = db.prepare('SELECT name FROM budget_groups WHERE id = ?').get('group_needs') as { name: string };
+  assert.equal(renamed.name, 'Essentials');
+
+  const assignAnalysis = analyzeAdvisorQuestion(
+    db,
+    'Add Restaurants to Essentials group',
+    new Date(TEST_NOW)
+  );
+  const assignDraft = assignAnalysis.drafts.find((item) => item.kind === 'assign_category_to_budget_group');
+  assert.ok(assignDraft);
+  confirmAdvisorDraft(db, assignDraft, true);
+
+  const member = db.prepare(`
+    SELECT group_id
+    FROM budget_group_members
+    WHERE category_id = 'cat_food_restaurants'
+  `).get() as { group_id: string };
+  assert.equal(member.group_id, 'group_needs');
+});
+
+test('advisor drafts and confirms recurring occurrence adjustments', (t) => {
+  const db = setupAdvisorDb();
+  t.after(() => db.close());
+
+  db.prepare(`
+    INSERT INTO recurring_patterns (
+      id, merchant_name, category_id, average_amount, frequency, last_seen, next_expected,
+      is_active, is_confirmed, transaction_count, created_at, updated_at
+    )
+    VALUES ('rec_rent', 'Rent', 'cat_food', 1000, 'monthly', '2026-06-01', '2026-07-01', 1, 1, 4, ?, ?)
+  `).run(TEST_NOW, TEST_NOW);
+
+  const analysis = analyzeAdvisorQuestion(
+    db,
+    'Skip recurring Rent on 2026-07-01',
+    new Date(TEST_NOW)
+  );
+  const draft = analysis.drafts.find((item) => item.kind === 'create_recurring_adjustment');
+  assert.ok(draft);
+  confirmAdvisorDraft(db, draft, true);
+
+  const adjustment = db.prepare(`
+    SELECT action, original_date
+    FROM recurring_occurrence_adjustments
+    WHERE recurring_id = 'rec_rent'
+  `).get() as { action: string; original_date: string };
+  assert.equal(adjustment.action, 'skip');
+  assert.equal(adjustment.original_date, '2026-07-01');
+});
+
+test('advisor drafts and confirms investment metadata changes', (t) => {
+  const db = setupAdvisorDb();
+  t.after(() => db.close());
+
+  const basisAnalysis = analyzeAdvisorQuestion(
+    db,
+    'Set CASH cost basis to $500',
+    new Date(TEST_NOW)
+  );
+  const basisDraft = basisAnalysis.drafts.find((item) => item.kind === 'set_manual_cost_basis');
+  assert.ok(basisDraft);
+  confirmAdvisorDraft(db, basisDraft, true);
+
+  const holding = db.prepare('SELECT manual_cost_basis FROM holdings WHERE id = ?').get('holding_cash') as {
+    manual_cost_basis: number;
+  };
+  assert.equal(holding.manual_cost_basis, 500);
+
+  const sectorAnalysis = analyzeAdvisorQuestion(
+    db,
+    'Set CASH sector to Cash',
+    new Date(TEST_NOW)
+  );
+  const sectorDraft = sectorAnalysis.drafts.find((item) => item.kind === 'set_sector_metadata');
+  assert.ok(sectorDraft);
+  confirmAdvisorDraft(db, sectorDraft, true);
+
+  const security = db.prepare('SELECT sector, sector_source FROM securities WHERE id = ?').get('sec_cash') as {
+    sector: string;
+    sector_source: string;
+  };
+  assert.equal(security.sector, 'Cash');
+  assert.equal(security.sector_source, 'manual');
 });

@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query';
-import { useSearchParams } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
   Eye,
   EyeOff,
@@ -34,6 +34,8 @@ import {
 import { formatCurrency, formatRelativeTime } from '../../lib/formatters';
 import { useAppStore } from '../../store';
 import { invalidateFinancialData } from '../../lib/queryInvalidation';
+import { advisorRouteState } from '../../lib/advisorRouteState';
+import { buildImportRunAdvisorPrompt } from '../../lib/advisorPrompts';
 import {
   detectCsvImportMapping,
   MIZAN_CSV_MAPPING,
@@ -142,6 +144,7 @@ function importRunSourceLabel(source: DataImportRun['source']): string {
 export function DataSection() {
   const { addToast } = useAppStore();
   const qc = useQueryClient();
+  const navigate = useNavigate();
   const [showDangerModal, setShowDangerModal] = useState(false);
   const [deleteConfirm, setDeleteConfirm] = useState('');
   const [csvText, setCsvText] = useState('');
@@ -613,7 +616,7 @@ export function DataSection() {
         ) : (
           <div className="divide-y divide-border rounded border border-border bg-surface">
             {importRuns.map((run) => (
-              <div key={run.id} className="grid grid-cols-[1fr_auto_auto] gap-3 px-3 py-2 text-xs items-center">
+              <div key={run.id} className="grid grid-cols-[1fr_auto_auto_auto] gap-3 px-3 py-2 text-xs items-center">
                 <div className="min-w-0">
                   <p className="text-text truncate">{importRunSourceLabel(run.source)}</p>
                   <p className="text-muted truncate">{run.summary}</p>
@@ -628,6 +631,15 @@ export function DataSection() {
                     {run.warnings_count}w {run.errors_count}e
                   </p>
                 </div>
+                <button
+                  className="text-muted hover:text-blue transition-colors"
+                  onClick={() => navigate('/advisor', {
+                    state: advisorRouteState(buildImportRunAdvisorPrompt(run)),
+                  })}
+                  title="Ask advisor"
+                >
+                  <Sparkles size={12} />
+                </button>
               </div>
             ))}
           </div>

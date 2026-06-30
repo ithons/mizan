@@ -8,7 +8,8 @@ export type AdvisorPromptSource =
   | 'investment'
   | 'recurring'
   | 'sync'
-  | 'review';
+  | 'review'
+  | 'import';
 
 export interface AdvisorRoutePrompt {
   source: AdvisorPromptSource;

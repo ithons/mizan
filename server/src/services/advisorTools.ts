@@ -6,13 +6,19 @@ import type {
   AdvisorCitationKind,
   AdvisorIntent,
   AdvisorToolStatus,
+  BudgetGroup,
   DataQualityIssue,
+  Holding,
   GoalType,
   SubscriptionInsightItem,
 } from '../../../shared/types';
 import { buildAdvisorDrafts } from './advisorDrafts';
 import { calculateGoalProgress } from './goalProgress';
-import { getMonthlyBudgetsWithProjection } from './budgetProjection';
+import {
+  getBudgetRolloverLedger,
+  getMonthlyBudgetsWithProjection,
+} from './budgetProjection';
+import { getBudgetGroupsWithTotals } from './budgetGroups';
 import { getReportSummary } from './reporting';
 import { buildRecurringForecast } from './recurringForecast';
 import { getSyncHealth } from './syncHealth';
@@ -20,6 +26,8 @@ import { getTransactionReviewSummary } from './transactionReview';
 import { buildSubscriptionInsights } from './subscriptionInsights';
 import { getAnomalyInsights } from './anomalyInsights';
 import { getDataQualitySummary } from './dataQuality';
+import { listDataImportRuns } from './importRuns';
+import { listHoldingsWithMetadata } from './investmentMetadata';
 
 interface CountRow {
   count: number;
@@ -38,6 +46,17 @@ interface GoalAnalysisRow {
   account_balance: number | null;
 }
 
+interface SectorAllocationRow {
+  sector: string | null;
+  value: number;
+  count: number;
+}
+
+interface InvestmentTransactionQualityRow {
+  count: number;
+  sale_count: number;
+}
+
 function fmt(amount: number | null | undefined): string {
   if (amount == null) return 'N/A';
   const abs = Math.abs(amount);
@@ -49,6 +68,10 @@ function fmt(amount: number | null | undefined): string {
 
 function availableBudgetAmount(budget: { amount: number; rollover: boolean; rollover_balance: number }): number {
   return budget.amount + (budget.rollover ? budget.rollover_balance : 0);
+}
+
+function budgetGroupLine(group: BudgetGroup): string {
+  return `${group.name}: ${fmt(group.totals.projected_spend)} projected against ${fmt(group.totals.budgeted)}, ${fmt(group.totals.projected_remaining)} remaining across ${group.totals.budget_count} budgets.`;
 }
 
 function count(db: Database.Database, sql: string, ...params: unknown[]): number {
@@ -95,6 +118,24 @@ export function buildAdvisorReadTools(
     endDate
   );
   const goalCount = count(db, 'SELECT COUNT(*) AS count FROM goals WHERE is_archived = 0');
+  const budgetGroupCount = count(db, 'SELECT COUNT(*) AS count FROM budget_groups');
+  const rolloverLedgerCount = count(db, 'SELECT COUNT(*) AS count FROM budget_rollover_ledger');
+  const recurringAdjustmentCount = count(db, 'SELECT COUNT(*) AS count FROM recurring_occurrence_adjustments');
+  const importRunCount = count(db, 'SELECT COUNT(*) AS count FROM data_import_runs');
+  const holdingCount = count(db, 'SELECT COUNT(*) AS count FROM holdings');
+  const investmentQualityIssues = count(db, `
+    SELECT COUNT(*) AS count
+    FROM holdings h
+    JOIN securities s ON s.id = h.security_id
+    WHERE (h.cost_basis IS NULL AND h.manual_cost_basis IS NULL)
+       OR NULLIF(trim(s.sector), '') IS NULL
+  `);
+  const sectorKnownCount = count(db, `
+    SELECT COUNT(*) AS count
+    FROM holdings h
+    JOIN securities s ON s.id = h.security_id
+    WHERE s.sector IS NOT NULL AND trim(s.sector) <> ''
+  `);
 
   return [
     tool(
@@ -108,9 +149,15 @@ export function buildAdvisorReadTools(
     tool('transactions', 'Transactions', transactionCount > 0 ? 'available' : 'empty', transactionCount, '/transactions'),
     tool('reports', 'Reports', hasReportData ? 'available' : 'empty', hasReportData ? 1 : 0, '/reports'),
     tool('budgets', 'Budgets', budgets.length > 0 ? 'available' : 'empty', budgets.length, '/budget'),
+    tool('budget_groups', 'Budget groups', budgetGroupCount > 0 ? 'available' : 'empty', budgetGroupCount, '/budget'),
+    tool('rollover_ledger', 'Rollover ledger', rolloverLedgerCount > 0 ? 'available' : 'empty', rolloverLedgerCount, '/budget'),
     tool('goals', 'Goals', goalCount > 0 ? 'available' : 'empty', goalCount, '/goals'),
     tool('recurring', 'Bills and recurring', forecast.occurrences.length > 0 ? 'available' : 'empty', forecast.occurrences.length, '/bills'),
+    tool('recurring_adjustments', 'Recurring adjustments', recurringAdjustmentCount > 0 ? 'available' : 'empty', recurringAdjustmentCount, '/bills'),
     tool('review', 'Review inbox', reviewSummary.total_open > 0 ? 'attention' : 'available', reviewSummary.total_open, '/review'),
+    tool('investment_quality', 'Investment quality', holdingCount === 0 ? 'empty' : investmentQualityIssues > 0 ? 'attention' : 'available', investmentQualityIssues, '/investments'),
+    tool('sector_allocation', 'Sector allocation', holdingCount === 0 ? 'empty' : sectorKnownCount === 0 ? 'attention' : 'available', sectorKnownCount, '/investments'),
+    tool('import_audits', 'Import audits', importRunCount > 0 ? 'available' : 'empty', importRunCount, '/settings?section=data'),
   ];
 }
 
@@ -124,6 +171,8 @@ function selectIntent(question: string): AdvisorIntent {
   if (/\b(data quality|trustworthy|trust|reliable|believable|invariant|wrong number|numbers wrong)\b/.test(text)) return 'quality';
   if (/\b(subscription|subscriptions|renewal|renewals|price increase|price increases)\b/.test(text)) return 'subscriptions';
   if (/\b(anomaly|anomalies|unusual|spike|spikes|gap|gaps|surge|changed a lot)\b/.test(text)) return 'insights';
+  if (/\b(import|imports|csv|backup|restore|audit|audits|export|portability)\b/.test(text)) return 'imports';
+  if (/\b(investment|investments|holding|holdings|portfolio|cost basis|sector|allocation|realized|unrealized|security|securities)\b/.test(text)) return 'investments';
   if (/\b(review|uncategorized|duplicate|transfer|rule|pending)\b/.test(text)) return 'review';
   if (/\b(budget|over budget|under budget|rollover)\b/.test(text)) return 'budget';
   if (/\b(goal|goals|target|save|debt payoff)\b/.test(text)) return 'goals';
@@ -139,7 +188,9 @@ function citationKindForRoute(route: string): AdvisorCitationKind {
   if (route.startsWith('/budget')) return 'budget';
   if (route.startsWith('/goals')) return 'goal';
   if (route.startsWith('/bills')) return 'recurring';
+  if (route.startsWith('/investments')) return 'investment';
   if (route.startsWith('/reports')) return 'report';
+  if (route.startsWith('/settings')) return 'import';
   return 'data_quality';
 }
 
@@ -204,8 +255,13 @@ function analyzeBudget(
   now: Date
 ): Pick<AdvisorAnalysis, 'answer' | 'citations'> {
   const { year, month } = monthRange(now);
+  const monthKey = `${year}-${String(month).padStart(2, '0')}`;
   const budgets = getMonthlyBudgetsWithProjection(db, year, month, now)
     .sort((a, b) => (b.projected_percent ?? 0) - (a.projected_percent ?? 0));
+  const groups = getBudgetGroupsWithTotals(db, year, month, now)
+    .filter((group) => group.totals.budget_count > 0)
+    .sort((a, b) => a.totals.projected_remaining - b.totals.projected_remaining);
+  const rolloverRows = getBudgetRolloverLedger(db, { month: monthKey, months: 3, now }).slice(0, 5);
   if (budgets.length === 0) {
     return {
       answer: 'No monthly budgets are configured yet, so Mizān cannot project budget risk.',
@@ -226,20 +282,53 @@ function analyzeBudget(
       })
       .join('\n'),
   ];
+  if (groups.length > 0) {
+    lines.push(`Budget groups:\n${groups.slice(0, 4).map(budgetGroupLine).join('\n')}`);
+  }
+  if (rolloverRows.length > 0) {
+    lines.push(`Recent rollover ledger:\n${rolloverRows.map((row) =>
+      `${row.category_name ?? row.category_id} ${row.month}: start ${fmt(row.starting_rollover)}, budget ${fmt(row.budget_amount)}, spent ${fmt(row.actual_spend)}, ending ${fmt(row.ending_rollover)}.`
+    ).join('\n')}`);
+  }
 
   return {
     answer: lines.join('\n\n'),
-    citations: watched.map((budget) =>
-      citation({
-        id: `budget:${budget.id}`,
-        kind: 'budget',
-        label: budget.category_name ?? 'Budget',
-        detail: `${Math.round(budget.projected_percent ?? 0)}% projected`,
-        route: '/budget',
-        record_id: budget.id,
-        amount: budget.projected_spend,
-      })
-    ),
+    citations: [
+      ...watched.map((budget) =>
+        citation({
+          id: `budget:${budget.id}`,
+          kind: 'budget' as const,
+          label: budget.category_name ?? 'Budget',
+          detail: `${Math.round(budget.projected_percent ?? 0)}% projected`,
+          route: '/budget',
+          record_id: budget.id,
+          amount: budget.projected_spend,
+        })
+      ),
+      ...groups.slice(0, 4).map((group) =>
+        citation({
+          id: `budget-group:${group.id}`,
+          kind: 'budget' as const,
+          label: group.name,
+          detail: `${group.totals.budget_count} budgets, ${fmt(group.totals.projected_remaining)} projected remaining`,
+          route: '/budget',
+          record_id: group.id,
+          amount: group.totals.projected_spend,
+        })
+      ),
+      ...rolloverRows.map((row) =>
+        citation({
+          id: `rollover-ledger:${row.id}`,
+          kind: 'budget' as const,
+          label: `${row.category_name ?? 'Budget'} ${row.month}`,
+          detail: `Ending rollover ${fmt(row.ending_rollover)}`,
+          route: '/budget',
+          record_id: row.id,
+          amount: row.ending_rollover,
+          date: `${row.month}-01`,
+        })
+      ),
+    ],
   };
 }
 
@@ -502,6 +591,173 @@ function analyzeQuality(db: Database.Database): Pick<AdvisorAnalysis, 'answer' |
   };
 }
 
+function holdingLabel(holding: Holding): string {
+  return holding.ticker ?? holding.security_name ?? holding.id;
+}
+
+function sectorRows(db: Database.Database): SectorAllocationRow[] {
+  return db.prepare(`
+    SELECT
+      NULLIF(trim(s.sector), '') AS sector,
+      SUM(h.institution_value) AS value,
+      COUNT(*) AS count
+    FROM holdings h
+    JOIN securities s ON s.id = h.security_id
+    GROUP BY NULLIF(trim(s.sector), '')
+    ORDER BY value DESC
+  `).all() as SectorAllocationRow[];
+}
+
+function investmentTransactionQuality(db: Database.Database): InvestmentTransactionQualityRow {
+  return db.prepare(`
+    SELECT
+      COUNT(*) AS count,
+      COALESCE(SUM(CASE WHEN type = 'sell' THEN 1 ELSE 0 END), 0) AS sale_count
+    FROM investment_transactions
+  `).get() as InvestmentTransactionQualityRow;
+}
+
+function analyzeInvestments(db: Database.Database): Pick<AdvisorAnalysis, 'answer' | 'citations'> {
+  const holdings = listHoldingsWithMetadata(db);
+  const transactionQuality = investmentTransactionQuality(db);
+  if (holdings.length === 0) {
+    return {
+      answer: 'No current investment holdings are imported, so Mizān cannot analyze portfolio allocation, cost basis quality, or gain quality yet.',
+      citations: [
+        citation({
+          id: 'investments:holdings',
+          kind: 'investment',
+          label: 'Investment holdings',
+          detail: '0 holdings',
+          route: '/investments',
+        }),
+      ],
+    };
+  }
+
+  const totalValue = holdings.reduce((sum, holding) => sum + holding.institution_value, 0);
+  const knownBasis = holdings.filter((holding) => holding.cost_basis != null);
+  const missingBasis = holdings.filter((holding) => holding.cost_basis == null);
+  const manualBasisCount = holdings.filter((holding) => holding.cost_basis_quality === 'manual').length;
+  const knownBasisValue = knownBasis.reduce((sum, holding) => sum + (holding.cost_basis ?? 0), 0);
+  const knownMarketValue = knownBasis.reduce((sum, holding) => sum + holding.institution_value, 0);
+  const unrealized = knownBasis.length > 0 ? knownMarketValue - knownBasisValue : null;
+  const missingSector = holdings.filter((holding) => !holding.sector?.trim());
+  const sectors = sectorRows(db);
+  const sectorSummary = sectors.slice(0, 5).map((row) =>
+    `${row.sector ?? 'Sector unavailable'}: ${fmt(row.value)} across ${row.count} holding${row.count === 1 ? '' : 's'}`
+  ).join('\n');
+
+  const lines = [
+    `Mizān sees ${holdings.length} current investment holding${holdings.length === 1 ? '' : 's'} worth ${fmt(totalValue)}.`,
+    `Cost basis is available for ${knownBasis.length}/${holdings.length} holdings; ${manualBasisCount} holding${manualBasisCount === 1 ? '' : 's'} use manual corrections.`,
+  ];
+
+  if (unrealized != null) {
+    lines.push(`Known-basis unrealized gain or loss is ${fmt(unrealized)} on ${fmt(knownBasisValue)} cost basis.`);
+  } else {
+    lines.push('Unrealized gain cannot be calculated because cost basis is missing for all holdings.');
+  }
+
+  if (sectorSummary) {
+    lines.push(`Sector allocation:\n${sectorSummary}`);
+  }
+  if (missingSector.length > 0) {
+    lines.push(`${missingSector.length} holding${missingSector.length === 1 ? '' : 's'} lack sector metadata.`);
+  }
+  if (transactionQuality.sale_count > 0) {
+    lines.push(`${transactionQuality.sale_count} sale transaction${transactionQuality.sale_count === 1 ? '' : 's'} exist, but realized gain stays unavailable until lot-level sale basis is available.`);
+  } else {
+    lines.push('No imported sale transactions are available for realized gain analysis.');
+  }
+
+  return {
+    answer: lines.join('\n\n'),
+    citations: [
+      citation({
+        id: 'investments:quality',
+        kind: 'investment',
+        label: 'Investment quality summary',
+        detail: `${knownBasis.length}/${holdings.length} cost basis coverage`,
+        route: '/investments',
+        amount: totalValue,
+      }),
+      ...missingBasis.slice(0, 4).map((holding) =>
+        citation({
+          id: `holding:cost-basis:${holding.id}`,
+          kind: 'investment' as const,
+          label: holdingLabel(holding),
+          detail: 'Missing cost basis',
+          route: '/investments',
+          record_id: holding.id,
+          amount: holding.institution_value,
+        })
+      ),
+      ...missingSector.slice(0, 4).map((holding) =>
+        citation({
+          id: `holding:sector:${holding.id}`,
+          kind: 'investment' as const,
+          label: holdingLabel(holding),
+          detail: 'Missing sector metadata',
+          route: '/investments',
+          record_id: holding.id,
+          amount: holding.institution_value,
+        })
+      ),
+      ...sectors.slice(0, 4).map((row) =>
+        citation({
+          id: `sector:${row.sector ?? 'unavailable'}`,
+          kind: 'investment' as const,
+          label: row.sector ?? 'Sector unavailable',
+          detail: `${row.count} holding${row.count === 1 ? '' : 's'}`,
+          route: '/investments',
+          amount: row.value,
+        })
+      ),
+    ],
+  };
+}
+
+function analyzeImports(db: Database.Database): Pick<AdvisorAnalysis, 'answer' | 'citations'> {
+  const runs = listDataImportRuns(db, 5);
+  if (runs.length === 0) {
+    return {
+      answer: 'No CSV import or backup restore audit runs have been recorded yet.',
+      citations: [
+        citation({
+          id: 'imports:none',
+          kind: 'import',
+          label: 'Import audits',
+          detail: '0 recorded runs',
+          route: '/settings?section=data',
+        }),
+      ],
+    };
+  }
+
+  const lines = [
+    `Mizān has ${runs.length} recent import or restore audit run${runs.length === 1 ? '' : 's'} available.`,
+    runs.map((run) =>
+      `${run.created_at}: ${run.source} ${run.status}, imported ${run.rows_imported}/${run.rows_seen} rows, ${run.duplicate_candidates} duplicate candidates, ${run.transfer_candidates} transfer candidates, ${run.warnings_count} warnings, ${run.errors_count} errors. ${run.summary}`
+    ).join('\n'),
+  ];
+
+  return {
+    answer: lines.join('\n\n'),
+    citations: runs.map((run) =>
+      citation({
+        id: `import-run:${run.id}`,
+        kind: 'import',
+        label: run.source === 'csv' ? 'CSV import' : 'Backup restore',
+        detail: `${run.status}, ${run.rows_imported}/${run.rows_seen} rows`,
+        route: '/settings?section=data',
+        record_id: run.id,
+        date: run.created_at,
+      })
+    ),
+  };
+}
+
 function analyzeReports(
   db: Database.Database,
   now: Date,
@@ -571,6 +827,10 @@ export function analyzeAdvisorQuestion(
         return analyzeSubscriptions(db);
       case 'goals':
         return analyzeGoals(db);
+      case 'investments':
+        return analyzeInvestments(db);
+      case 'imports':
+        return analyzeImports(db);
       case 'insights':
         return analyzeInsights(db, now);
       case 'quality':

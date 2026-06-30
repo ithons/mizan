@@ -645,6 +645,8 @@ export type AdvisorIntent =
   | 'recurring'
   | 'subscriptions'
   | 'goals'
+  | 'investments'
+  | 'imports'
   | 'reports'
   | 'insights'
   | 'quality';
@@ -658,6 +660,8 @@ export type AdvisorCitationKind =
   | 'report'
   | 'sync'
   | 'review'
+  | 'investment'
+  | 'import'
   | 'data_quality'
   | 'insight';
 
@@ -685,7 +689,13 @@ export type AdvisorDraftActionKind =
   | 'categorize_transaction'
   | 'update_budget'
   | 'update_goal_target'
-  | 'confirm_recurring';
+  | 'confirm_recurring'
+  | 'create_budget_group'
+  | 'rename_budget_group'
+  | 'assign_category_to_budget_group'
+  | 'create_recurring_adjustment'
+  | 'set_manual_cost_basis'
+  | 'set_sector_metadata';
 
 export interface AdvisorDraftChange {
   field: string;
@@ -720,6 +730,42 @@ export type AdvisorDraftPayload =
   | {
       kind: 'confirm_recurring';
       recurring_id: string;
+    }
+  | {
+      kind: 'create_budget_group';
+      name: string;
+      color?: string | null;
+    }
+  | {
+      kind: 'rename_budget_group';
+      group_id: string;
+      name: string;
+    }
+  | {
+      kind: 'assign_category_to_budget_group';
+      group_id: string;
+      category_id: string;
+    }
+  | {
+      kind: 'create_recurring_adjustment';
+      recurring_id: string;
+      original_date: string;
+      action: RecurringAdjustmentAction;
+      adjusted_date?: string | null;
+      adjusted_amount?: number | null;
+      note?: string | null;
+    }
+  | {
+      kind: 'set_manual_cost_basis';
+      holding_id: string;
+      manual_cost_basis: number | null;
+      note?: string | null;
+    }
+  | {
+      kind: 'set_sector_metadata';
+      security_id: string;
+      sector: string | null;
+      sector_source?: string | null;
     };
 
 export interface AdvisorDraftAction {

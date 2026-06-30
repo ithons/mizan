@@ -2,6 +2,9 @@ import type { AdvisorRoutePrompt } from './advisorRouteState';
 import type {
   Account,
   Budget,
+  BudgetGroup,
+  BudgetRolloverLedgerEntry,
+  DataImportRun,
   Goal,
   Holding,
   RecurringForecast,
@@ -45,6 +48,21 @@ export interface RecurringForecastAdvisorPromptContext {
   lowestBalance?: number | null;
   lowestDate?: string | null;
   liquidAccountCount?: number | null;
+}
+
+export interface InvestmentAllocationAdvisorPromptContext {
+  lens: string;
+  quality: string;
+  holdingCount: number;
+  totalValue: number;
+  missingSectorCount?: number | null;
+  slices: Array<{
+    key: string;
+    label: string;
+    value: number;
+    pct: number;
+    count: number;
+  }>;
 }
 
 function formatMoneyValue(value: number): string {
@@ -514,6 +532,65 @@ export function buildBudgetAdvisorPrompt(budget: Budget, month: string): Advisor
   };
 }
 
+export function buildBudgetGroupAdvisorPrompt(group: BudgetGroup, month: string): AdvisorRoutePrompt {
+  const totals = group.totals;
+  const memberNames = group.members.map((member) => member.category_name ?? member.category_id).join(', ') || 'no categories';
+
+  return {
+    source: 'budget',
+    recordKind: 'budget_group',
+    recordId: group.id,
+    params: {
+      groupId: group.id,
+      month,
+      name: group.name,
+      budgetCount: totals.budget_count,
+      budgeted: totals.budgeted,
+      spent: totals.spent,
+      projectedSpend: totals.projected_spend,
+      projectedRemaining: totals.projected_remaining,
+      rolloverBalance: totals.rollover_balance,
+      expectedRecurring: totals.expected_recurring,
+      forecastConfidence: totals.forecast_confidence,
+      members: memberNames,
+    },
+    prompt: [
+      `Analyze my ${group.name} budget group for ${month}.`,
+      `It contains ${totals.budget_count} category budget${totals.budget_count === 1 ? '' : 's'}: ${memberNames}.`,
+      `Budgeted amount is ${formatMoneyValue(totals.budgeted)}, actual spending is ${formatMoneyValue(totals.spent)}, and projected spending is ${formatMoneyValue(totals.projected_spend)}.`,
+      `Projected remaining is ${formatMoneyValue(totals.projected_remaining)}, rollover balance is ${formatMoneyValue(totals.rollover_balance)}, and expected recurring spend is ${formatMoneyValue(totals.expected_recurring)}.`,
+      `Forecast confidence is ${totals.forecast_confidence}.`,
+      'Explain what is driving the group result, whether any member category needs review, and whether the group is useful as a personal rollup.',
+    ].join(' '),
+  };
+}
+
+export function buildRolloverLedgerAdvisorPrompt(row: BudgetRolloverLedgerEntry): AdvisorRoutePrompt {
+  return {
+    source: 'budget',
+    recordKind: 'rollover_ledger_row',
+    recordId: row.id,
+    params: {
+      ledgerId: row.id,
+      budgetId: row.budget_id,
+      categoryId: row.category_id,
+      categoryName: row.category_name ?? null,
+      month: row.month,
+      startingRollover: row.starting_rollover,
+      budgetAmount: row.budget_amount,
+      actualSpend: row.actual_spend,
+      endingRollover: row.ending_rollover,
+      calculatedAt: row.calculated_at,
+    },
+    prompt: [
+      `Explain this rollover ledger row for ${row.category_name ?? 'this budget'} in ${row.month}.`,
+      `Starting rollover was ${formatMoneyValue(row.starting_rollover)}, budget amount was ${formatMoneyValue(row.budget_amount)}, actual spend was ${formatMoneyValue(row.actual_spend)}, and ending rollover was ${formatMoneyValue(row.ending_rollover)}.`,
+      `The row was calculated at ${row.calculated_at}.`,
+      'Explain the rollover math, whether it looks consistent, and what transactions or budget settings I should inspect if the ending balance is surprising.',
+    ].join(' '),
+  };
+}
+
 export function buildGoalAdvisorPrompt(goal: Goal): AdvisorRoutePrompt {
   const accountName = goal.account_name ?? null;
   const institutionName = goal.institution_name ?? null;
@@ -680,6 +757,67 @@ export function buildHoldingAdvisorPrompt(
         : 'Cost basis is missing, so unrealized return quality is limited.',
       `Sector is ${sector}${holding.sector_source ? ` from ${holding.sector_source}` : ''}.`,
       'Explain concentration, cost basis quality, sector metadata quality, return quality, and what I should review before making decisions about this position.',
+    ].join(' '),
+  };
+}
+
+export function buildInvestmentAllocationAdvisorPrompt(
+  context: InvestmentAllocationAdvisorPromptContext
+): AdvisorRoutePrompt {
+  const topSlices = context.slices.slice(0, 5).map((slice) =>
+    `${slice.label}: ${formatMoneyValue(slice.value)} (${slice.pct.toFixed(1)}%, ${slice.count} holding${slice.count === 1 ? '' : 's'})`
+  ).join('; ') || 'none';
+  const missingSectorLine = context.missingSectorCount != null
+    ? `${context.missingSectorCount} holding${context.missingSectorCount === 1 ? '' : 's'} ${context.missingSectorCount === 1 ? 'is' : 'are'} missing sector metadata.`
+    : '';
+
+  return {
+    source: 'investment',
+    recordKind: 'investment_allocation',
+    recordId: context.lens,
+    params: {
+      lens: context.lens,
+      quality: context.quality,
+      holdingCount: context.holdingCount,
+      totalValue: context.totalValue,
+      missingSectorCount: context.missingSectorCount ?? null,
+      topSlices,
+    },
+    prompt: [
+      `Analyze my investment allocation by ${context.lens}.`,
+      `The visible portfolio has ${context.holdingCount} holding${context.holdingCount === 1 ? '' : 's'} worth ${formatMoneyValue(context.totalValue)}.`,
+      `Data quality for this allocation view is ${context.quality}.`,
+      missingSectorLine,
+      `Top allocation slices: ${topSlices}.`,
+      'Explain concentration, diversification, sector metadata quality, and what metadata or holdings I should review before trusting this allocation view.',
+    ].filter(Boolean).join(' '),
+  };
+}
+
+export function buildImportRunAdvisorPrompt(run: DataImportRun): AdvisorRoutePrompt {
+  return {
+    source: 'import',
+    recordKind: 'import_run',
+    recordId: run.id,
+    params: {
+      runId: run.id,
+      source: run.source,
+      status: run.status,
+      rowsSeen: run.rows_seen,
+      rowsImported: run.rows_imported,
+      rowsInvalid: run.rows_invalid,
+      duplicateCandidates: run.duplicate_candidates,
+      transferCandidates: run.transfer_candidates,
+      warnings: run.warnings_count,
+      errors: run.errors_count,
+      createdAt: run.created_at,
+    },
+    prompt: [
+      `Explain this ${run.source === 'csv' ? 'CSV import' : 'backup restore'} audit run from ${run.created_at}.`,
+      `Status is ${run.status}. It imported ${run.rows_imported}/${run.rows_seen} rows, with ${run.rows_invalid} invalid rows.`,
+      `It found ${run.duplicate_candidates} duplicate candidate${run.duplicate_candidates === 1 ? '' : 's'}, ${run.transfer_candidates} transfer candidate${run.transfer_candidates === 1 ? '' : 's'}, ${run.warnings_count} warning${run.warnings_count === 1 ? '' : 's'}, and ${run.errors_count} error${run.errors_count === 1 ? '' : 's'}.`,
+      `Summary: ${run.summary}.`,
+      'Explain whether this import changed trustworthy financial data, what review queues I should inspect, and whether duplicates or transfers need cleanup.',
     ].join(' '),
   };
 }

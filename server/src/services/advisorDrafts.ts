@@ -13,6 +13,8 @@ import {
   upsertMerchantRule,
 } from './rules';
 import { refreshTransactionIntegrity } from './transactionIntegrity';
+import { upsertRecurringAdjustment } from './recurringAdjustments';
+import { setManualCostBasis, setSecurityMetadata } from './investmentMetadata';
 
 interface CategoryRow {
   id: string;
@@ -48,11 +50,31 @@ interface RecurringRow {
   id: string;
   merchant_name: string;
   category_id: string | null;
+  category_is_income: number;
   average_amount: number;
   frequency: string;
   next_expected: string;
   is_confirmed: number;
   transaction_count: number;
+}
+
+interface BudgetGroupRow {
+  id: string;
+  name: string;
+  color: string | null;
+  sort_order: number;
+}
+
+interface HoldingDraftRow {
+  id: string;
+  security_id: string;
+  ticker: string | null;
+  security_name: string | null;
+  institution_value: number;
+  provider_cost_basis: number | null;
+  manual_cost_basis: number | null;
+  effective_cost_basis: number | null;
+  sector: string | null;
 }
 
 function normalize(value: string): string {
@@ -73,6 +95,21 @@ function moneyAmount(question: string): number | null {
 
   const parsed = Number(match[1].replace(/,/g, ''));
   return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+}
+
+function dateMentions(question: string): string[] {
+  return Array.from(question.matchAll(/\b\d{4}-\d{2}-\d{2}\b/g)).map((match) => match[0]);
+}
+
+function quotedName(question: string): string | null {
+  const match = question.match(/["']([^"']{1,80})["']/);
+  return match?.[1].trim() || null;
+}
+
+function afterKeywordName(question: string, keyword: string): string | null {
+  const escaped = keyword.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const match = question.match(new RegExp(`\\b${escaped}\\b\\s+(?:called|named|to|as)?\\s*([a-zA-Z0-9 &/._-]{2,80})`, 'i'));
+  return match?.[1].trim().replace(/[.?!]+$/, '') || null;
 }
 
 function categories(db: Database.Database): CategoryRow[] {
@@ -96,6 +133,58 @@ function assertCategory(db: Database.Database, categoryId: string): CategoryRow 
     | undefined;
   if (!row) throw new Error('Category not found');
   return row;
+}
+
+function budgetGroups(db: Database.Database): BudgetGroupRow[] {
+  return db.prepare(`
+    SELECT id, name, color, sort_order
+    FROM budget_groups
+    ORDER BY length(name) DESC
+  `).all() as BudgetGroupRow[];
+}
+
+function findBudgetGroupMention(db: Database.Database, question: string): BudgetGroupRow | null {
+  const text = normalize(question);
+  return budgetGroups(db).find((group) => text.includes(normalize(group.name))) ?? null;
+}
+
+function nextBudgetGroupSort(db: Database.Database): number {
+  const row = db.prepare('SELECT COALESCE(MAX(sort_order), -1) + 1 AS next_sort FROM budget_groups').get() as
+    | { next_sort: number }
+    | undefined;
+  return row?.next_sort ?? 0;
+}
+
+function holdingRows(db: Database.Database): HoldingDraftRow[] {
+  return db.prepare(`
+    SELECT
+      h.id,
+      h.security_id,
+      h.institution_value,
+      h.cost_basis AS provider_cost_basis,
+      h.manual_cost_basis,
+      COALESCE(h.manual_cost_basis, h.cost_basis) AS effective_cost_basis,
+      s.ticker,
+      s.name AS security_name,
+      s.sector
+    FROM holdings h
+    JOIN securities s ON s.id = h.security_id
+    ORDER BY h.institution_value DESC
+  `).all() as HoldingDraftRow[];
+}
+
+function holdingName(holding: HoldingDraftRow): string {
+  return holding.ticker ?? holding.security_name ?? holding.id;
+}
+
+function findHoldingMention(db: Database.Database, question: string): HoldingDraftRow | null {
+  const text = normalize(question);
+  const holdings = holdingRows(db);
+  return holdings.find((holding) => {
+    const ticker = holding.ticker ? normalize(holding.ticker) : '';
+    const name = holding.security_name ? normalize(holding.security_name) : '';
+    return Boolean((ticker && text.includes(ticker)) || (name && text.includes(name)));
+  }) ?? (holdings.length === 1 ? holdings[0] : null);
 }
 
 function findCategoryMention(db: Database.Database, question: string): CategoryRow | null {
@@ -307,14 +396,50 @@ function draftUpdateGoal(db: Database.Database, question: string): AdvisorDraftA
 
 function recurringCandidates(db: Database.Database): RecurringRow[] {
   return db.prepare(`
-    SELECT id, merchant_name, category_id, average_amount, frequency, next_expected, is_confirmed, transaction_count
-    FROM recurring_patterns
-    WHERE is_active = 1
-      AND is_confirmed = 0
-      AND transaction_count >= 3
-    ORDER BY transaction_count DESC, next_expected ASC
+    SELECT
+      rp.id,
+      rp.merchant_name,
+      rp.category_id,
+      COALESCE(c.is_income, 0) AS category_is_income,
+      rp.average_amount,
+      rp.frequency,
+      rp.next_expected,
+      rp.is_confirmed,
+      rp.transaction_count
+    FROM recurring_patterns rp
+    LEFT JOIN categories c ON c.id = rp.category_id
+    WHERE rp.is_active = 1
+      AND rp.is_confirmed = 0
+      AND rp.transaction_count >= 3
+    ORDER BY rp.transaction_count DESC, rp.next_expected ASC
     LIMIT 10
   `).all() as RecurringRow[];
+}
+
+function activeRecurringPatterns(db: Database.Database): RecurringRow[] {
+  return db.prepare(`
+    SELECT
+      rp.id,
+      rp.merchant_name,
+      rp.category_id,
+      COALESCE(c.is_income, 0) AS category_is_income,
+      rp.average_amount,
+      rp.frequency,
+      rp.next_expected,
+      rp.is_confirmed,
+      rp.transaction_count
+    FROM recurring_patterns rp
+    LEFT JOIN categories c ON c.id = rp.category_id
+    WHERE rp.is_active = 1
+    ORDER BY rp.next_expected ASC
+    LIMIT 25
+  `).all() as RecurringRow[];
+}
+
+function findRecurringMention(db: Database.Database, question: string): RecurringRow | null {
+  const text = normalize(question);
+  const rows = activeRecurringPatterns(db);
+  return rows.find((row) => text.includes(normalize(row.merchant_name))) ?? (rows.length === 1 ? rows[0] : null);
 }
 
 function draftConfirmRecurring(db: Database.Database, question: string): AdvisorDraftAction | null {
@@ -354,6 +479,263 @@ function draftConfirmRecurring(db: Database.Database, question: string): Advisor
   });
 }
 
+function draftCreateBudgetGroup(db: Database.Database, question: string): AdvisorDraftAction | null {
+  const text = normalize(question);
+  if (!/\b(create|add|new)\b/.test(text) || !text.includes('budget group')) return null;
+
+  const name = quotedName(question)
+    ?? afterKeywordName(question, 'called')
+    ?? afterKeywordName(question, 'named')
+    ?? afterKeywordName(question, 'group');
+  const cleanName = name?.replace(/\bbudget group\b/i, '').trim();
+  if (!cleanName || cleanName.length < 2) return null;
+
+  const payload: AdvisorDraftPayload = {
+    kind: 'create_budget_group',
+    name: cleanName,
+    color: null,
+  };
+
+  return draft({
+    kind: 'create_budget_group',
+    label: `Create ${cleanName} group`,
+    summary: `Create a personal budget rollup group named ${cleanName}. Category budgets remain the source of truth.`,
+    route: '/budget',
+    payload,
+    changes: [
+      { field: 'budget group', before: null, after: cleanName },
+    ],
+    citations: [
+      citation({
+        id: 'budget-groups:new',
+        kind: 'budget',
+        label: 'Budget groups',
+        detail: 'New group draft',
+        route: '/budget',
+      }),
+    ],
+  });
+}
+
+function draftRenameBudgetGroup(db: Database.Database, question: string): AdvisorDraftAction | null {
+  const text = normalize(question);
+  if (!text.includes('rename') || !text.includes('group')) return null;
+
+  const group = findBudgetGroupMention(db, question);
+  const nextName = afterKeywordName(question, 'to') ?? quotedName(question);
+  if (!group || !nextName || normalize(nextName) === normalize(group.name)) return null;
+
+  const payload: AdvisorDraftPayload = {
+    kind: 'rename_budget_group',
+    group_id: group.id,
+    name: nextName,
+  };
+
+  return draft({
+    kind: 'rename_budget_group',
+    label: `Rename ${group.name}`,
+    summary: `Rename the ${group.name} budget group to ${nextName}.`,
+    route: '/budget',
+    payload,
+    changes: [
+      { field: 'name', before: group.name, after: nextName },
+    ],
+    citations: [
+      citation({
+        id: `budget-group:${group.id}`,
+        kind: 'budget',
+        label: group.name,
+        detail: 'Budget group',
+        route: '/budget',
+        record_id: group.id,
+      }),
+    ],
+  });
+}
+
+function draftAssignCategoryToBudgetGroup(db: Database.Database, question: string): AdvisorDraftAction | null {
+  const text = normalize(question);
+  if (!/\b(assign|add|move|group)\b/.test(text) || !text.includes('group')) return null;
+
+  const category = findCategoryMention(db, question);
+  const group = findBudgetGroupMention(db, question);
+  if (!category || !group) return null;
+
+  const payload: AdvisorDraftPayload = {
+    kind: 'assign_category_to_budget_group',
+    group_id: group.id,
+    category_id: category.id,
+  };
+
+  return draft({
+    kind: 'assign_category_to_budget_group',
+    label: `Add ${category.name} to ${group.name}`,
+    summary: `Assign ${category.name} to the ${group.name} budget group. It will be removed from any other group first.`,
+    route: '/budget',
+    payload,
+    changes: [
+      { field: 'category group', before: null, after: group.name },
+    ],
+    citations: [
+      citation({
+        id: `budget-group:${group.id}:${category.id}`,
+        kind: 'budget',
+        label: group.name,
+        detail: `Assign ${category.name}`,
+        route: '/budget',
+        record_id: group.id,
+      }),
+    ],
+  });
+}
+
+function draftRecurringAdjustment(db: Database.Database, question: string): AdvisorDraftAction | null {
+  const text = normalize(question);
+  if (!/\b(skip|snooze|adjust)\b/.test(text) || !/\b(recurring|bill|subscription|occurrence)\b/.test(text)) {
+    return null;
+  }
+
+  const recurring = findRecurringMention(db, question);
+  if (!recurring) return null;
+
+  const dates = dateMentions(question);
+  const action = text.includes('skip') ? 'skip' : text.includes('snooze') ? 'snooze' : 'adjust';
+  const originalDate = action === 'snooze' && dates.length === 1
+    ? recurring.next_expected
+    : dates[0] ?? recurring.next_expected;
+  const amount = moneyAmount(question);
+  const adjustedAmount = action === 'adjust' && amount != null
+    ? recurring.category_is_income ? amount : -amount
+    : null;
+  const adjustedDate = action === 'snooze' ? dates[1] ?? dates[0] ?? null : null;
+  if (action === 'snooze' && !adjustedDate) return null;
+  if (action === 'adjust' && adjustedAmount == null) return null;
+
+  const payload: AdvisorDraftPayload = {
+    kind: 'create_recurring_adjustment',
+    recurring_id: recurring.id,
+    original_date: originalDate,
+    action,
+    adjusted_date: adjustedDate,
+    adjusted_amount: adjustedAmount,
+    note: 'Created from Advisor draft',
+  };
+  const after = action === 'skip'
+    ? 'skipped'
+    : action === 'snooze'
+      ? adjustedDate
+      : adjustedAmount;
+
+  return draft({
+    kind: 'create_recurring_adjustment',
+    label: `${action === 'adjust' ? 'Adjust' : action === 'snooze' ? 'Snooze' : 'Skip'} ${recurring.merchant_name}`,
+    summary: `Create a one-time ${action} adjustment for ${recurring.merchant_name} on ${originalDate}.`,
+    route: '/bills',
+    payload,
+    changes: [
+      { field: 'occurrence', before: originalDate, after },
+    ],
+    citations: [
+      citation({
+        id: `recurring:${recurring.id}:${originalDate}`,
+        kind: 'recurring',
+        label: recurring.merchant_name,
+        detail: `${recurring.frequency}, next expected ${recurring.next_expected}`,
+        route: '/bills',
+        record_id: recurring.id,
+        amount: recurring.average_amount,
+        date: originalDate,
+      }),
+    ],
+  });
+}
+
+function draftManualCostBasis(db: Database.Database, question: string): AdvisorDraftAction | null {
+  const text = normalize(question);
+  if (!text.includes('cost basis')) return null;
+
+  const holding = findHoldingMention(db, question);
+  if (!holding) return null;
+
+  const shouldClear = /\b(clear|remove|reset)\b/.test(text);
+  const amount = shouldClear ? null : moneyAmount(question);
+  if (!shouldClear && amount == null) return null;
+
+  const payload: AdvisorDraftPayload = {
+    kind: 'set_manual_cost_basis',
+    holding_id: holding.id,
+    manual_cost_basis: amount,
+    note: amount == null ? null : 'Set from Advisor draft',
+  };
+
+  return draft({
+    kind: 'set_manual_cost_basis',
+    label: `${amount == null ? 'Clear' : 'Set'} ${holdingName(holding)} cost basis`,
+    summary: amount == null
+      ? `Clear the manual cost basis override for ${holdingName(holding)}.`
+      : `Set ${holdingName(holding)} manual cost basis to $${amount.toFixed(2)} while preserving provider basis.`,
+    route: '/investments',
+    payload,
+    changes: [
+      { field: 'manual cost basis', before: holding.manual_cost_basis, after: amount },
+    ],
+    citations: [
+      citation({
+        id: `holding:${holding.id}:cost-basis`,
+        kind: 'investment',
+        label: holdingName(holding),
+        detail: holding.effective_cost_basis == null ? 'Missing effective cost basis' : `Effective $${holding.effective_cost_basis.toFixed(2)}`,
+        route: '/investments',
+        record_id: holding.id,
+        amount: holding.institution_value,
+      }),
+    ],
+  });
+}
+
+function draftSectorMetadata(db: Database.Database, question: string): AdvisorDraftAction | null {
+  const text = normalize(question);
+  if (!text.includes('sector')) return null;
+
+  const holding = findHoldingMention(db, question);
+  if (!holding) return null;
+
+  const shouldClear = /\b(clear|remove|reset)\b/.test(text);
+  const rawSector = shouldClear ? null : afterKeywordName(question, 'to') ?? quotedName(question);
+  const sector = rawSector?.replace(/\bsector\b/i, '').trim() || null;
+  if (!shouldClear && !sector) return null;
+
+  const payload: AdvisorDraftPayload = {
+    kind: 'set_sector_metadata',
+    security_id: holding.security_id,
+    sector,
+    sector_source: sector ? 'manual' : null,
+  };
+
+  return draft({
+    kind: 'set_sector_metadata',
+    label: `${sector ? 'Set' : 'Clear'} ${holdingName(holding)} sector`,
+    summary: sector
+      ? `Set ${holdingName(holding)} sector metadata to ${sector}.`
+      : `Clear sector metadata for ${holdingName(holding)}.`,
+    route: '/investments',
+    payload,
+    changes: [
+      { field: 'sector', before: holding.sector, after: sector },
+    ],
+    citations: [
+      citation({
+        id: `security:${holding.security_id}:sector`,
+        kind: 'investment',
+        label: holdingName(holding),
+        detail: holding.sector ?? 'Sector not available',
+        route: '/investments',
+        record_id: holding.security_id,
+      }),
+    ],
+  });
+}
+
 export function buildAdvisorDrafts(
   db: Database.Database,
   question: string
@@ -364,6 +746,12 @@ export function buildAdvisorDrafts(
     draftUpdateBudget(db, question),
     draftUpdateGoal(db, question),
     draftConfirmRecurring(db, question),
+    draftCreateBudgetGroup(db, question),
+    draftRenameBudgetGroup(db, question),
+    draftAssignCategoryToBudgetGroup(db, question),
+    draftRecurringAdjustment(db, question),
+    draftManualCostBasis(db, question),
+    draftSectorMetadata(db, question),
     text.includes('rule') || text.includes('review') ? draftFromRuleSuggestion(db) : null,
   ].filter((item): item is AdvisorDraftAction => Boolean(item));
 
@@ -485,6 +873,127 @@ function confirmRecurring(db: Database.Database, payload: Extract<AdvisorDraftPa
   return { changed: result.changes, result: { recurring_id: payload.recurring_id } };
 }
 
+function confirmCreateBudgetGroup(db: Database.Database, payload: Extract<AdvisorDraftPayload, { kind: 'create_budget_group' }>): {
+  changed: number;
+  result: unknown;
+} {
+  const name = payload.name.trim();
+  if (!name) throw new Error('Budget group name is required');
+
+  const now = new Date().toISOString();
+  const id = uuidv4();
+  db.prepare(`
+    INSERT INTO budget_groups (id, name, color, sort_order, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?)
+  `).run(id, name, payload.color ?? null, nextBudgetGroupSort(db), now, now);
+
+  return { changed: 1, result: { group_id: id } };
+}
+
+function confirmRenameBudgetGroup(db: Database.Database, payload: Extract<AdvisorDraftPayload, { kind: 'rename_budget_group' }>): {
+  changed: number;
+  result: unknown;
+} {
+  const name = payload.name.trim();
+  if (!name) throw new Error('Budget group name is required');
+
+  const existing = db.prepare('SELECT id FROM budget_groups WHERE id = ?').get(payload.group_id);
+  if (!existing) throw new Error('Budget group not found');
+
+  const result = db.prepare(`
+    UPDATE budget_groups
+    SET name = ?,
+        updated_at = ?
+    WHERE id = ?
+  `).run(name, new Date().toISOString(), payload.group_id);
+
+  return { changed: result.changes, result: { group_id: payload.group_id } };
+}
+
+function confirmAssignCategoryToBudgetGroup(
+  db: Database.Database,
+  payload: Extract<AdvisorDraftPayload, { kind: 'assign_category_to_budget_group' }>
+): {
+  changed: number;
+  result: unknown;
+} {
+  assertCategory(db, payload.category_id);
+  const group = db.prepare('SELECT id FROM budget_groups WHERE id = ?').get(payload.group_id);
+  if (!group) throw new Error('Budget group not found');
+
+  const now = new Date().toISOString();
+  const existing = db.prepare(`
+    SELECT group_id
+    FROM budget_group_members
+    WHERE category_id = ?
+  `).get(payload.category_id) as { group_id: string } | undefined;
+  const sortRow = db.prepare(`
+    SELECT COALESCE(MAX(sort_order), -1) + 1 AS next_sort
+    FROM budget_group_members
+    WHERE group_id = ?
+  `).get(payload.group_id) as { next_sort: number };
+
+  db.prepare('DELETE FROM budget_group_members WHERE category_id = ?').run(payload.category_id);
+  db.prepare(`
+    INSERT INTO budget_group_members (group_id, category_id, sort_order, created_at)
+    VALUES (?, ?, ?, ?)
+  `).run(payload.group_id, payload.category_id, sortRow.next_sort, now);
+  db.prepare('UPDATE budget_groups SET updated_at = ? WHERE id = ?').run(now, payload.group_id);
+
+  return {
+    changed: existing?.group_id === payload.group_id ? 0 : 1,
+    result: { group_id: payload.group_id, category_id: payload.category_id },
+  };
+}
+
+function confirmRecurringAdjustment(
+  db: Database.Database,
+  payload: Extract<AdvisorDraftPayload, { kind: 'create_recurring_adjustment' }>
+): {
+  changed: number;
+  result: unknown;
+} {
+  const adjustment = upsertRecurringAdjustment(db, payload.recurring_id, {
+    original_date: payload.original_date,
+    action: payload.action,
+    adjusted_date: payload.adjusted_date ?? null,
+    adjusted_amount: payload.adjusted_amount ?? null,
+    note: payload.note ?? null,
+  });
+
+  return { changed: 1, result: { adjustment_id: adjustment.id } };
+}
+
+function confirmManualCostBasis(
+  db: Database.Database,
+  payload: Extract<AdvisorDraftPayload, { kind: 'set_manual_cost_basis' }>
+): {
+  changed: number;
+  result: unknown;
+} {
+  const holding = setManualCostBasis(db, payload.holding_id, {
+    manual_cost_basis: payload.manual_cost_basis,
+    manual_cost_basis_note: payload.note ?? null,
+  });
+
+  return { changed: 1, result: { holding_id: holding.id, cost_basis_quality: holding.cost_basis_quality } };
+}
+
+function confirmSectorMetadata(
+  db: Database.Database,
+  payload: Extract<AdvisorDraftPayload, { kind: 'set_sector_metadata' }>
+): {
+  changed: number;
+  result: unknown;
+} {
+  const security = setSecurityMetadata(db, payload.security_id, {
+    sector: payload.sector,
+    sector_source: payload.sector_source ?? null,
+  });
+
+  return { changed: 1, result: { security_id: security.id, sector: security.sector } };
+}
+
 export function confirmAdvisorDraft(
   db: Database.Database,
   draftAction: AdvisorDraftAction,
@@ -506,6 +1015,18 @@ export function confirmAdvisorDraft(
         return confirmGoalTarget(db, draftAction.payload);
       case 'confirm_recurring':
         return confirmRecurring(db, draftAction.payload);
+      case 'create_budget_group':
+        return confirmCreateBudgetGroup(db, draftAction.payload);
+      case 'rename_budget_group':
+        return confirmRenameBudgetGroup(db, draftAction.payload);
+      case 'assign_category_to_budget_group':
+        return confirmAssignCategoryToBudgetGroup(db, draftAction.payload);
+      case 'create_recurring_adjustment':
+        return confirmRecurringAdjustment(db, draftAction.payload);
+      case 'set_manual_cost_basis':
+        return confirmManualCostBasis(db, draftAction.payload);
+      case 'set_sector_metadata':
+        return confirmSectorMetadata(db, draftAction.payload);
     }
   });
   const result = apply();

@@ -10,7 +10,11 @@ import { useAppStore } from '../store';
 import { invalidateFinancialData } from '../lib/queryInvalidation';
 import { parseDecimalInput } from '../lib/numberInput';
 import { advisorRouteState } from '../lib/advisorRouteState';
-import { buildBudgetAdvisorPrompt } from '../lib/advisorPrompts';
+import {
+  buildBudgetAdvisorPrompt,
+  buildBudgetGroupAdvisorPrompt,
+  buildRolloverLedgerAdvisorPrompt,
+} from '../lib/advisorPrompts';
 import {
   availableBudgetAmount,
   budgetProjectedPercent,
@@ -21,7 +25,12 @@ import { Modal } from '../components/Modal';
 import { CategoryBadge } from '../components/CategoryBadge';
 import { EmptyState } from '../components/EmptyState';
 import { PageLoader } from '../components/LoadingSpinner';
-import type { Budget as BudgetModel, Category } from '@shared/types';
+import type {
+  Budget as BudgetModel,
+  BudgetGroup,
+  BudgetRolloverLedgerEntry,
+  Category,
+} from '@shared/types';
 
 // ─── Budget Progress Bar ─────────────────────────────────────────────────────
 
@@ -192,8 +201,9 @@ function BudgetGroupSection({
   onRename,
   onDeleteGroup,
   onSetMembers,
+  onAskGroup,
 }: {
-  group: import('@shared/types').BudgetGroup;
+  group: BudgetGroup;
   budgets: BudgetModel[];
   availableBudgets: BudgetModel[];
   month: string;
@@ -204,6 +214,7 @@ function BudgetGroupSection({
   onRename: (id: string, name: string) => void;
   onDeleteGroup: (id: string) => void;
   onSetMembers: (id: string, categoryIds: string[]) => void;
+  onAskGroup: (group: BudgetGroup, month: string) => void;
 }) {
   const [name, setName] = useState(group.name);
   const memberIds = group.members.map((member) => member.category_id);
@@ -238,6 +249,13 @@ function BudgetGroupSection({
             }}
           />
           <span className="text-xs text-muted font-mono">{group.totals.budget_count} budgets</span>
+          <button
+            className="text-muted hover:text-blue transition-colors"
+            onClick={() => onAskGroup(group, month)}
+            title="Ask advisor"
+          >
+            <Sparkles size={12} />
+          </button>
         </div>
         <div className="flex items-center gap-4 text-xs">
           <span className="font-mono text-muted">{formatCurrency(group.totals.projected_spend)} projected</span>
@@ -300,10 +318,12 @@ function RolloverLedgerModal({
   budget,
   month,
   onClose,
+  onAskRow,
 }: {
   budget: BudgetModel | null;
   month: string;
   onClose: () => void;
+  onAskRow: (row: BudgetRolloverLedgerEntry) => void;
 }) {
   const { data: ledger = [] } = useQuery({
     queryKey: ['budgets', 'rollover-ledger', budget?.id, month],
@@ -331,7 +351,18 @@ function RolloverLedgerModal({
                   <td className="px-3 py-2 font-mono text-muted">{formatCurrency(row.starting_rollover)}</td>
                   <td className="px-3 py-2 font-mono text-muted">{formatCurrency(row.budget_amount)}</td>
                   <td className="px-3 py-2 font-mono text-rose">{formatCurrency(row.actual_spend)}</td>
-                  <td className="px-3 py-2 font-mono text-text">{formatCurrency(row.ending_rollover)}</td>
+                  <td className="px-3 py-2 font-mono text-text">
+                    <div className="flex items-center justify-between gap-2">
+                      <span>{formatCurrency(row.ending_rollover)}</span>
+                      <button
+                        className="text-muted hover:text-blue transition-colors"
+                        onClick={() => onAskRow(row)}
+                        title="Ask advisor"
+                      >
+                        <Sparkles size={11} />
+                      </button>
+                    </div>
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -700,6 +731,16 @@ export function Budget() {
       state: advisorRouteState(buildBudgetAdvisorPrompt(budget, month)),
     });
   };
+  const askAdvisorAboutBudgetGroup = (group: BudgetGroup, month: string) => {
+    navigate('/advisor', {
+      state: advisorRouteState(buildBudgetGroupAdvisorPrompt(group, month)),
+    });
+  };
+  const askAdvisorAboutRolloverLedger = (row: BudgetRolloverLedgerEntry) => {
+    navigate('/advisor', {
+      state: advisorRouteState(buildRolloverLedgerAdvisorPrompt(row)),
+    });
+  };
 
   return (
     <div className="p-6 space-y-6">
@@ -828,6 +869,7 @@ export function Budget() {
                     onRename={(id, name) => renameGroupMutation.mutate({ id, name })}
                     onDeleteGroup={(id) => deleteGroupMutation.mutate(id)}
                     onSetMembers={(id, categoryIds) => groupMembersMutation.mutate({ id, categoryIds })}
+                    onAskGroup={askAdvisorAboutBudgetGroup}
                   />
                 ))}
 
@@ -877,6 +919,7 @@ export function Budget() {
         budget={ledgerBudget}
         month={currentMonth}
         onClose={() => setLedgerBudget(null)}
+        onAskRow={askAdvisorAboutRolloverLedger}
       />
     </div>
   );
