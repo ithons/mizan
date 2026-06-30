@@ -167,6 +167,7 @@ export interface Category {
   is_income: boolean;
   is_system: boolean;
   is_investment: boolean;
+  taxable: boolean;
   sort_order: number;
   children?: Category[];
 }
@@ -750,6 +751,18 @@ export type AdvisorDraftPayload =
       kind: 'update_goal_target';
       goal_id: string;
       target_amount: number;
+    }
+  | {
+      kind: 'allocate_goal_funds';
+      goal_id: string;
+      amount_to_add: number;
+    }
+  | {
+      kind: 'create_goal';
+      name: string;
+      type: GoalType;
+      target_amount: number;
+      account_id?: string | null;
     }
   | {
       kind: 'confirm_recurring';

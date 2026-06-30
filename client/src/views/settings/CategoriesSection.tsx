@@ -61,7 +61,7 @@ export function CategoryRow({
   depth,
 }: {
   category: Category;
-  onEdit: (id: string, name: string, color: string, icon: string) => void;
+  onEdit: (id: string, name: string, color: string, icon: string, taxable: boolean) => void;
   onDelete: (id: string) => void;
   onAddChild: (parentId: string) => void;
   depth: number;
@@ -70,9 +70,10 @@ export function CategoryRow({
   const [editName, setEditName] = useState(category.name);
   const [editColor, setEditColor] = useState(category.color || CATEGORY_PRESET_COLORS[0]);
   const [editIcon, setEditIcon] = useState(category.icon || '');
+  const [editTaxable, setEditTaxable] = useState(category.taxable || false);
 
   const handleSave = () => {
-    onEdit(category.id, editName, editColor, editIcon);
+    onEdit(category.id, editName, editColor, editIcon, editTaxable);
     setEditing(false);
   };
 
@@ -112,27 +113,41 @@ export function CategoryRow({
                 <X size={12} className="text-muted" />
               </button>
             </div>
-            <div className="flex flex-wrap gap-1">
-              {CATEGORY_PRESET_COLORS.map((color) => (
-                <button
-                  key={color}
-                  onClick={() => setEditColor(color)}
-                  className="w-4 h-4 rounded-full transition-transform hover:scale-110"
-                  style={{
-                    backgroundColor: color,
-                    outline: editColor === color ? `2px solid white` : '2px solid transparent',
-                    outlineOffset: '1px',
-                  }}
-                  title={color}
-                />
-              ))}
+            <div className="flex items-center justify-between">
+              <div className="flex flex-wrap gap-1">
+                {CATEGORY_PRESET_COLORS.map((color) => (
+                  <button
+                    key={color}
+                    onClick={() => setEditColor(color)}
+                    className="w-4 h-4 rounded-full transition-transform hover:scale-110"
+                    style={{
+                      backgroundColor: color,
+                      outline: editColor === color ? `2px solid white` : '2px solid transparent',
+                      outlineOffset: '1px',
+                    }}
+                    title={color}
+                  />
+                ))}
+              </div>
+              {category.is_income && (
+                <label className="flex items-center gap-1.5 text-[11px] text-muted cursor-pointer">
+                  <input
+                    type="checkbox"
+                    className="accent-green"
+                    checked={editTaxable}
+                    onChange={(e) => setEditTaxable(e.target.checked)}
+                  />
+                  Subject to estimated tax
+                </label>
+              )}
             </div>
           </div>
         ) : (
           <>
             <span className="text-sm text-text flex-1">{category.name}</span>
-            {category.is_income && <span className="text-xs text-green bg-green-10 px-1.5 py-0.5 rounded">income</span>}
-            {category.is_system && <span className="text-xs text-muted bg-border/50 px-1.5 py-0.5 rounded">system</span>}
+            {category.is_income && <span className="text-xs text-green bg-green-10 px-1.5 py-0.5 rounded flex-shrink-0">income</span>}
+            {category.taxable && <span className="text-xs text-rose bg-rose/10 px-1.5 py-0.5 rounded flex-shrink-0">taxable</span>}
+            {category.is_system && <span className="text-xs text-muted bg-border/50 px-1.5 py-0.5 rounded flex-shrink-0">system</span>}
           </>
         )}
         {!editing && (
@@ -196,8 +211,8 @@ export function CategoriesSection() {
   });
 
   const editMutation = useMutation({
-    mutationFn: ({ id, name, color, icon }: { id: string; name: string; color: string; icon: string }) =>
-      categoriesApi.update(id, { name, color, icon }),
+    mutationFn: ({ id, name, color, icon, taxable }: { id: string; name: string; color: string; icon: string; taxable: boolean }) =>
+      categoriesApi.update(id, { name, color, icon, taxable }),
     onSuccess: () => invalidateCategoryData(qc),
   });
 
@@ -250,7 +265,7 @@ export function CategoriesSection() {
           <CategoryRow
             key={cat.id}
             category={cat}
-            onEdit={(id, name, color, icon) => editMutation.mutate({ id, name, color, icon })}
+            onEdit={(id, name, color, icon, taxable) => editMutation.mutate({ id, name, color, icon, taxable })}
             onDelete={(id) => deleteMutation.mutate(id)}
             onAddChild={(parentId) => { setAddParentId(parentId); setShowAddModal(true); }}
             depth={0}

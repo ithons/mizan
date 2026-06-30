@@ -927,7 +927,10 @@ export function Dashboard() {
     const projectedRemaining = b.projected_remaining ?? 0;
     return sum + Math.max(0, projectedRemaining);
   }, 0);
-  const safeToSpend = Math.max(0, liquid - upcomingBills - allocatedBudgets);
+  const allocatedGoals = (goals ?? []).reduce((sum, g) => {
+    return g.type === 'savings' ? sum + g.current_amount : sum;
+  }, 0);
+  const safeToSpend = Math.max(0, liquid - upcomingBills - allocatedBudgets - allocatedGoals);
 
   // Spending donut data
   const donutData = categories.slice(0, 8).map((c, i) => ({

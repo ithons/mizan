@@ -53,13 +53,15 @@ import { CoinbaseSection } from './CoinbaseSection';
 import { CategoriesSection } from './CategoriesSection';
 import { RulesSection } from './RulesSection';
 import { DataSection } from './DataSection';
+import { TaxesSection } from './TaxesSection';
 import { AboutSection } from './AboutSection';
-type SettingsSection = "plaid" | "coinbase" | "categories" | "rules" | "data" | "about";
+type SettingsSection = "plaid" | "coinbase" | "categories" | "rules" | "taxes" | "data" | "about";
 const sectionItems: { key: SettingsSection; label: string; icon: any }[] = [
   { key: "plaid", label: "Plaid", icon: Link2 },
   { key: "coinbase", label: "Coinbase", icon: Wallet },
   { key: "categories", label: "Categories", icon: Tag },
   { key: "rules", label: "Rules", icon: CheckCircle },
+  { key: "taxes", label: "Taxes", icon: Sparkles },
   { key: "data", label: "Data", icon: Database },
   { key: "about", label: "About", icon: Info },
 ];
@@ -132,6 +134,7 @@ export function Settings() {
           {activeSection === 'coinbase' && <CoinbaseSection />}
           {activeSection === 'categories' && <CategoriesSection />}
           {activeSection === 'rules' && <RulesSection />}
+          {activeSection === 'taxes' && <TaxesSection />}
           {activeSection === 'data' && <DataSection />}
           {activeSection === 'about' && <AboutSection />}
         </div>

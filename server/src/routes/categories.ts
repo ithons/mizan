@@ -55,6 +55,7 @@ router.post(
         parent_id?: string | null;
         is_income: boolean;
         is_investment: boolean;
+        taxable: boolean;
         sort_order: number;
       };
 
@@ -62,8 +63,8 @@ router.post(
 
       db.prepare(`
         INSERT INTO categories
-          (id, name, icon, color, parent_id, is_income, is_system, is_investment, sort_order)
-        VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?)
+          (id, name, icon, color, parent_id, is_income, is_system, is_investment, taxable, sort_order)
+        VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?)
       `).run(
         id,
         body.name,
@@ -72,6 +73,7 @@ router.post(
         body.parent_id || null,
         body.is_income ? 1 : 0,
         body.is_investment ? 1 : 0,
+        body.taxable ? 1 : 0,
         body.sort_order
       );
 
@@ -95,6 +97,7 @@ router.patch(
         name?: string;
         icon?: string | null;
         color?: string | null;
+        taxable?: boolean;
         sort_order?: number;
       };
 
@@ -118,6 +121,10 @@ router.patch(
       if (body.color !== undefined) {
         updates.push('color = ?');
         values.push(body.color);
+      }
+      if (body.taxable !== undefined) {
+        updates.push('taxable = ?');
+        values.push(body.taxable ? 1 : 0);
       }
       if (body.sort_order !== undefined) {
         updates.push('sort_order = ?');
