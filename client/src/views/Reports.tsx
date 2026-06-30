@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import {
@@ -19,7 +19,7 @@ import {
 } from 'recharts';
 import { ChevronRight, Save, Sparkles, X } from 'lucide-react';
 import { format, subMonths, startOfMonth, endOfMonth, startOfYear } from 'date-fns';
-import { reportsApi, networthApi, investmentsApi, categoriesApi } from '../lib/api';
+import { accountsApi, reportsApi, networthApi, investmentsApi, categoriesApi } from '../lib/api';
 import { advisorRouteState } from '../lib/advisorRouteState';
 import {
   buildNetWorthEvidenceAdvisorPrompt,
@@ -37,6 +37,12 @@ import {
   type ReportDatePreset,
   type ReportTab,
 } from '../lib/reportViews';
+import {
+  buildNetWorthAttribution,
+  type NetWorthAccountAttribution,
+  type NetWorthAttribution,
+  type NetWorthClassAttribution,
+} from '../lib/netWorthAttribution';
 import { formatCurrency, formatMonth, formatDate, formatPercent } from '../lib/formatters';
 import { PageLoader } from '../components/LoadingSpinner';
 import { EmptyState } from '../components/EmptyState';
@@ -44,6 +50,7 @@ import { AmountBadge } from '../components/AmountBadge';
 import { CategoryBadge } from '../components/CategoryBadge';
 import { Modal } from '../components/Modal';
 import type {
+  Account,
   Category,
   NetWorthSnapshot,
   ReportComparisonMode,
@@ -1203,6 +1210,111 @@ function AssetPieChart({ data, title }: { data: Array<{ name: string; value: num
   );
 }
 
+function signedTone(value: number) {
+  if (value > 0) return '#32bfa3';
+  if (value < 0) return '#ef6f8a';
+  return '#6b6b7a';
+}
+
+function NetWorthClassRow({ item }: { item: NetWorthClassAttribution }) {
+  return (
+    <div className="grid grid-cols-[1fr_auto] gap-3 px-3 py-2 text-xs border-b border-border last:border-b-0">
+      <div className="min-w-0">
+        <div className="flex items-center gap-2">
+          <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: item.color }} />
+          <p className="text-text truncate">{item.label}</p>
+        </div>
+        <p className="text-[11px] text-muted mt-0.5">
+          {formatCurrency(item.previous)} to {formatCurrency(item.current)}
+        </p>
+      </div>
+      <div className="text-right">
+        <p className="font-mono" style={{ color: signedTone(item.net_worth_delta) }}>
+          {formatCurrency(item.net_worth_delta, { showSign: true })}
+        </p>
+        <p className="text-[11px] text-muted">net impact</p>
+      </div>
+    </div>
+  );
+}
+
+function NetWorthAccountRow({ item }: { item: NetWorthAccountAttribution }) {
+  return (
+    <div className="grid grid-cols-[1fr_auto] gap-3 px-3 py-2 text-xs border-b border-border last:border-b-0">
+      <div className="min-w-0">
+        <p className="text-text truncate">{item.account_name}</p>
+        <p className="text-[11px] text-muted truncate">
+          {item.institution_name ?? 'Missing account record'}{item.type ? ` · ${item.type}` : ''}
+        </p>
+      </div>
+      <div className="text-right">
+        <p className="font-mono" style={{ color: signedTone(item.net_worth_delta) }}>
+          {formatCurrency(item.net_worth_delta, { showSign: true })}
+        </p>
+        <p className="text-[11px] text-muted">
+          {item.is_liability ? 'liability impact' : 'asset impact'}
+        </p>
+      </div>
+    </div>
+  );
+}
+
+function NetWorthAttributionPanel({ attribution }: { attribution: NetWorthAttribution | null }) {
+  if (!attribution) {
+    return (
+      <div className="bg-surface shadow-sm border border-border rounded p-4">
+        <h2 className="text-sm font-medium text-text">Change Attribution</h2>
+        <p className="text-xs text-muted mt-2">At least two snapshots are needed to attribute net worth changes.</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="bg-surface shadow-sm border border-border rounded p-4">
+      <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between mb-4">
+        <div>
+          <h2 className="text-sm font-medium text-text">Change Attribution</h2>
+          <p className="text-xs text-muted mt-1">
+            {formatDate(attribution.previous_snapshot.date)} to {formatDate(attribution.current_snapshot.date)}
+          </p>
+        </div>
+        <div className="text-left md:text-right">
+          <p className="text-xs text-muted mb-1">Net change</p>
+          <p className="font-mono text-lg" style={{ color: signedTone(attribution.net_worth_delta) }}>
+            {formatCurrency(attribution.net_worth_delta, { showSign: true })}
+          </p>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+        <div className="border border-border rounded bg-background/40 overflow-hidden">
+          <div className="px-3 py-2 border-b border-border">
+            <p className="text-xs font-medium text-text">By class</p>
+          </div>
+          {attribution.class_deltas.length > 0 ? (
+            attribution.class_deltas.map((item) => <NetWorthClassRow key={item.id} item={item} />)
+          ) : (
+            <div className="px-3 py-8 text-xs text-muted text-center">No class movement</div>
+          )}
+        </div>
+
+        <div className="border border-border rounded bg-background/40 overflow-hidden">
+          <div className="px-3 py-2 border-b border-border">
+            <p className="text-xs font-medium text-text">By account</p>
+          </div>
+          {attribution.account_deltas.length > 0 ? (
+            attribution.account_deltas.slice(0, 6).map((item) => (
+              <NetWorthAccountRow key={item.account_id} item={item} />
+            ))
+          ) : (
+            <div className="px-3 py-8 text-xs text-muted text-center">No account movement</div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function NetWorthTab() {
   const [showAssets, setShowAssets] = useState(true);
   const [showLiabilities, setShowLiabilities] = useState(true);
@@ -1217,6 +1329,13 @@ function NetWorthTab() {
     queryKey: ['networth', 'snapshot'],
     queryFn: () => networthApi.snapshot(),
   });
+
+  const { data: accounts = [] } = useQuery<Account[]>({
+    queryKey: ['accounts', 'networth-attribution'],
+    queryFn: accountsApi.list,
+  });
+
+  const attribution = useMemo(() => buildNetWorthAttribution({ snapshots, accounts }), [snapshots, accounts]);
 
   if (isLoading) return <PageLoader />;
 
@@ -1257,6 +1376,8 @@ function NetWorthTab() {
           <AssetPieChart data={netPieData} title="Net Assets (after debt)" />
         </div>
       )}
+
+      <NetWorthAttributionPanel attribution={attribution} />
 
       {/* Toggles */}
       <div className="flex gap-2">
