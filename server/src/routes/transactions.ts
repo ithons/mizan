@@ -8,6 +8,7 @@ import { takeSnapshot } from '../services/snapshot';
 import { detectRecurring } from '../services/recurring';
 import { upsertMerchantRule } from '../services/rules';
 import { getTransactionReviewSummary } from '../services/transactionReview';
+import { refreshTransactionIntegrity } from '../services/transactionIntegrity';
 import {
   CreateManualTransactionSchema,
   UpdateTransactionSchema,
@@ -351,8 +352,8 @@ router.post(
         db.prepare(`
           INSERT INTO transactions
             (id, account_id, date, amount, merchant_name, original_name,
-             category_id, pending, notes, is_manual, created_at, updated_at)
-          VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, 1, ?, ?)
+             category_id, pending, notes, is_manual, source_type, created_at, updated_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, 1, 'manual', ?, ?)
         `).run(
           id,
           body.account_id,
@@ -375,6 +376,7 @@ router.post(
         takeSnapshot();
       }
       detectRecurring();
+      refreshTransactionIntegrity(db);
 
       const txn = db.prepare('SELECT * FROM transactions WHERE id = ?').get(id);
       res.status(201).json({ data: txn });
@@ -479,6 +481,7 @@ router.patch(
         takeSnapshot();
       }
       detectRecurring();
+      refreshTransactionIntegrity(db);
 
       const updated = db.prepare('SELECT * FROM transactions WHERE id = ?').get(id);
       res.json({ data: updated });
@@ -520,6 +523,7 @@ router.delete('/:id', (req: Request, res: Response, next: NextFunction): void =>
       takeSnapshot();
     }
     detectRecurring();
+    refreshTransactionIntegrity(db);
 
     res.json({ data: { success: true } });
   } catch (err) {
@@ -585,6 +589,7 @@ router.post(
         throw err;
       }
 
+      refreshTransactionIntegrity(db);
       res.json({ data: { updated: transactionIds.length } });
     } catch (err) {
       next(err);

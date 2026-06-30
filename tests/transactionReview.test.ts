@@ -16,10 +16,22 @@ function setupReviewDb(): Database.Database {
 
     CREATE TABLE transactions (
       id TEXT PRIMARY KEY,
+      account_id TEXT NOT NULL,
+      date TEXT NOT NULL,
+      amount REAL NOT NULL,
       merchant_name TEXT,
       original_name TEXT NOT NULL DEFAULT '',
       category_id TEXT,
-      pending INTEGER NOT NULL DEFAULT 0
+      pending INTEGER NOT NULL DEFAULT 0,
+      duplicate_group_id TEXT,
+      duplicate_status TEXT NOT NULL DEFAULT 'none',
+      transfer_pair_id TEXT,
+      transfer_status TEXT NOT NULL DEFAULT 'none'
+    );
+
+    CREATE TABLE accounts (
+      id TEXT PRIMARY KEY,
+      account_name TEXT NOT NULL
     );
 
     CREATE TABLE recurring_patterns (
@@ -53,14 +65,19 @@ function setupReviewDb(): Database.Database {
   `).run();
 
   db.prepare(`
-    INSERT INTO transactions (id, merchant_name, original_name, category_id, pending)
+    INSERT INTO accounts (id, account_name)
+    VALUES ('acct_checking', 'Checking')
+  `).run();
+
+  db.prepare(`
+    INSERT INTO transactions (id, account_id, date, amount, merchant_name, original_name, category_id, pending)
     VALUES
-      ('target_1', 'Target', 'TARGET STORE', 'cat_food', 0),
-      ('target_2', 'Target', 'TARGET STORE', 'cat_food', 0),
-      ('target_3', 'Target', 'TARGET STORE', NULL, 0),
-      ('unknown_1', 'Unknown Shop', 'UNKNOWN', NULL, 0),
-      ('pending_1', 'Coffee', 'COFFEE', NULL, 1),
-      ('pending_2', 'Grocery', 'GROCERY', 'cat_food', 1)
+      ('target_1', 'acct_checking', '2026-06-01', -40, 'Target', 'TARGET STORE', 'cat_food', 0),
+      ('target_2', 'acct_checking', '2026-06-02', -42, 'Target', 'TARGET STORE', 'cat_food', 0),
+      ('target_3', 'acct_checking', '2026-06-03', -44, 'Target', 'TARGET STORE', NULL, 0),
+      ('unknown_1', 'acct_checking', '2026-06-04', -20, 'Unknown Shop', 'UNKNOWN', NULL, 0),
+      ('pending_1', 'acct_checking', '2026-06-05', -5, 'Coffee', 'COFFEE', NULL, 1),
+      ('pending_2', 'acct_checking', '2026-06-06', -60, 'Grocery', 'GROCERY', 'cat_food', 1)
   `).run();
 
   db.prepare(`

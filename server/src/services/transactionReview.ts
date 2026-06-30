@@ -5,17 +5,25 @@ import type {
   TransactionReviewSummary,
 } from '../../../shared/types';
 import { suggestMerchantRules } from './rules';
+import {
+  getDuplicateCandidateGroups,
+  getTransferCandidatePairs,
+} from './transactionIntegrity';
 
 interface ReviewCounts {
   uncategorized_count: number;
   pending_count: number;
+  duplicate_candidate_count: number;
+  transfer_candidate_count: number;
 }
 
 function getCounts(db: Database.Database): ReviewCounts {
   return db.prepare(`
     SELECT
       SUM(CASE WHEN pending = 0 AND category_id IS NULL THEN 1 ELSE 0 END) AS uncategorized_count,
-      SUM(CASE WHEN pending = 1 THEN 1 ELSE 0 END) AS pending_count
+      SUM(CASE WHEN pending = 1 THEN 1 ELSE 0 END) AS pending_count,
+      SUM(CASE WHEN duplicate_status = 'candidate' THEN 1 ELSE 0 END) AS duplicate_candidate_count,
+      SUM(CASE WHEN transfer_status = 'candidate' AND amount < 0 THEN 1 ELSE 0 END) AS transfer_candidate_count
     FROM transactions
   `).get() as ReviewCounts;
 }
@@ -40,6 +48,8 @@ export function getTransactionReviewSummary(db: Database.Database): TransactionR
   const counts = getCounts(db);
   const ruleSuggestions = suggestMerchantRules(db);
   const recurringCandidates = getRecurringCandidates(db);
+  const duplicateCandidates = getDuplicateCandidateGroups(db);
+  const transferCandidates = getTransferCandidatePairs(db);
 
   const queues: TransactionReviewQueueSummary[] = [
     {
@@ -81,6 +91,24 @@ export function getTransactionReviewSummary(db: Database.Database): TransactionR
       action_label: 'Confirm',
       severity: 'info',
     },
+    {
+      id: 'duplicate_candidates',
+      label: 'Possible duplicates',
+      count: counts.duplicate_candidate_count ?? 0,
+      action_label: 'Review',
+      severity: 'warning',
+    },
+    {
+      id: 'transfer_candidates',
+      label: 'Detected transfers',
+      count: counts.transfer_candidate_count ?? 0,
+      action_label: 'Review',
+      severity: 'info',
+      filters: {
+        startDate: '',
+        endDate: '',
+      },
+    },
   ];
 
   return {
@@ -88,5 +116,7 @@ export function getTransactionReviewSummary(db: Database.Database): TransactionR
     queues,
     rule_suggestions: ruleSuggestions,
     recurring_candidates: recurringCandidates,
+    duplicate_candidates: duplicateCandidates,
+    transfer_candidates: transferCandidates,
   };
 }

@@ -131,10 +131,14 @@ export function summarizeDataQuality({
     const uncategorized = reviewSummary.queues.find((queue) => queue.id === 'uncategorized')?.count ?? 0;
     const rules = reviewSummary.queues.find((queue) => queue.id === 'rule_suggestions')?.count ?? 0;
     const recurring = reviewSummary.queues.find((queue) => queue.id === 'recurring_candidates')?.count ?? 0;
+    const duplicates = reviewSummary.queues.find((queue) => queue.id === 'duplicate_candidates')?.count ?? 0;
+    const transfers = reviewSummary.queues.find((queue) => queue.id === 'transfer_candidates')?.count ?? 0;
     const reviewParts = [
       uncategorized > 0 ? plural(uncategorized, 'uncategorized transaction') : null,
       rules > 0 ? plural(rules, 'rule suggestion') : null,
       recurring > 0 ? plural(recurring, 'recurring candidate') : null,
+      duplicates > 0 ? plural(duplicates, 'possible duplicate') : null,
+      transfers > 0 ? plural(transfers, 'detected transfer') : null,
     ].filter((part): part is string => Boolean(part));
 
     issues.push(issue(

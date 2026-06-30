@@ -14,6 +14,8 @@ import type {
   Insight,
   DataQualitySummary,
   SyncHealth,
+  SyncRun,
+  SyncRunDetail,
   CashflowReport,
   ReportSummary,
   SpendingReport,
@@ -366,6 +368,9 @@ export const networthApi = {
 export const syncApi = {
   run: () => apiFetch<{ success: boolean }>('/api/sync/run', { method: 'POST' }),
   health: () => apiFetch<SyncHealth>('/api/sync/health'),
+  history: (limit?: number) =>
+    apiFetch<SyncRun[]>(`/api/sync/history${limit ? `?limit=${limit}` : ''}`),
+  historyDetail: (id: string) => apiFetch<SyncRunDetail>(`/api/sync/history/${id}`),
 };
 
 // ─── Plaid ───────────────────────────────────────────────────────────────────

@@ -12,6 +12,12 @@ import {
   syncCoinbase,
 } from '../services/coinbase';
 import { takeSnapshot } from '../services/snapshot';
+import {
+  finishSyncRun,
+  recordSyncRunItem,
+  startSyncRun,
+} from '../services/syncHistory';
+import { refreshTransactionIntegrity } from '../services/transactionIntegrity';
 
 const router = Router();
 
@@ -73,8 +79,36 @@ router.post(
       }
 
       // Sync accounts
-      const syncResult = await syncCoinbase();
-      if (syncChangedFinancialData(syncResult)) takeSnapshot();
+      const run = startSyncRun(db, 'coinbase', 'Coinbase connection sync started');
+      let syncResult: Awaited<ReturnType<typeof syncCoinbase>>;
+      try {
+        syncResult = await syncCoinbase();
+        recordSyncRunItem(db, run.id, {
+          provider: 'coinbase',
+          connection_id: connectionId,
+          institution_name: 'Coinbase',
+          status: 'succeeded',
+          accounts_seen: syncResult.accountCount,
+          transactions_added: syncResult.transactionCount,
+          transactions_modified: syncResult.staleAccountCount,
+        });
+        if (syncChangedFinancialData(syncResult)) takeSnapshot();
+        const integrity = refreshTransactionIntegrity(db);
+        finishSyncRun(db, run.id, {
+          status: 'succeeded',
+          message: 'Coinbase sync complete',
+          duplicate_candidates: integrity.duplicates.groupCount,
+          transfer_candidates: integrity.transfers.pairCount,
+        });
+      } catch (err) {
+        finishSyncRun(db, run.id, {
+          status: 'failed',
+          message: 'Coinbase initial sync failed',
+          error_message: (err as Error).message || 'Coinbase sync failed',
+          recovery_action: 'Retry sync. If it continues failing, check Coinbase credentials.',
+        });
+        throw err;
+      }
 
       res.json({
         data: {
@@ -90,11 +124,38 @@ router.post(
 
 // POST /sync
 router.post('/sync', async (_req: Request, res: Response, next: NextFunction): Promise<void> => {
+  const db = getDb();
+  const run = startSyncRun(db, 'coinbase', 'Coinbase sync started');
   try {
     const syncResult = await syncCoinbase();
+    const activeConnection = db.prepare(
+      "SELECT id FROM coinbase_connections WHERE status = 'active'"
+    ).get() as { id: string } | undefined;
+    recordSyncRunItem(db, run.id, {
+      provider: 'coinbase',
+      connection_id: activeConnection?.id ?? 'coinbase',
+      institution_name: 'Coinbase',
+      status: 'succeeded',
+      accounts_seen: syncResult.accountCount,
+      transactions_added: syncResult.transactionCount,
+      transactions_modified: syncResult.staleAccountCount,
+    });
     if (syncChangedFinancialData(syncResult)) takeSnapshot();
+    const integrity = refreshTransactionIntegrity(db);
+    finishSyncRun(db, run.id, {
+      status: 'succeeded',
+      message: 'Coinbase sync complete',
+      duplicate_candidates: integrity.duplicates.groupCount,
+      transfer_candidates: integrity.transfers.pairCount,
+    });
     res.json({ data: syncResult });
   } catch (err) {
+    finishSyncRun(db, run.id, {
+      status: 'failed',
+      message: 'Coinbase sync failed',
+      error_message: (err as Error).message || 'Coinbase sync failed',
+      recovery_action: 'Retry sync. If it continues failing, check Coinbase credentials.',
+    });
     next(err);
   }
 });

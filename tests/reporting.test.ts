@@ -44,7 +44,8 @@ function setupReportingDb(): Database.Database {
       date TEXT NOT NULL,
       amount REAL NOT NULL,
       category_id TEXT,
-      pending INTEGER NOT NULL DEFAULT 0
+      pending INTEGER NOT NULL DEFAULT 0,
+      transfer_status TEXT NOT NULL DEFAULT 'none'
     );
   `);
 
@@ -84,8 +85,8 @@ function setupReportingDb(): Database.Database {
   }
 
   const insertTransaction = db.prepare(`
-    INSERT INTO transactions (id, date, amount, category_id, pending)
-    VALUES (@id, @date, @amount, @category_id, @pending)
+    INSERT INTO transactions (id, date, amount, category_id, pending, transfer_status)
+    VALUES (@id, @date, @amount, @category_id, @pending, @transfer_status)
   `);
 
   const transactions: TransactionFixture[] = [
@@ -109,6 +110,7 @@ function setupReportingDb(): Database.Database {
       amount: transaction.amount,
       category_id: transaction.category_id ?? null,
       pending: transaction.pending ?? 0,
+      transfer_status: 'none',
     });
   }
 

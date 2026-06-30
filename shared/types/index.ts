@@ -51,6 +51,13 @@ export interface Transaction {
   notes?: string | null;
   is_manual: boolean;
   recurring_id?: string | null;
+  source_type: 'plaid' | 'coinbase' | 'manual' | 'import';
+  source_detail?: string | null;
+  duplicate_group_id?: string | null;
+  duplicate_status: 'none' | 'candidate' | 'dismissed';
+  transfer_pair_id?: string | null;
+  transfer_status: 'none' | 'candidate' | 'confirmed' | 'dismissed';
+  review_status: 'open' | 'reviewed' | 'dismissed';
   created_at: string;
   updated_at: string;
   // joined
@@ -213,7 +220,9 @@ export type TransactionReviewQueueId =
   | 'uncategorized'
   | 'rule_suggestions'
   | 'pending'
-  | 'recurring_candidates';
+  | 'recurring_candidates'
+  | 'duplicate_candidates'
+  | 'transfer_candidates';
 
 export interface TransactionReviewQueueSummary {
   id: TransactionReviewQueueId;
@@ -229,6 +238,8 @@ export interface TransactionReviewSummary {
   queues: TransactionReviewQueueSummary[];
   rule_suggestions: MerchantRuleSuggestion[];
   recurring_candidates: RecurringPattern[];
+  duplicate_candidates: DuplicateCandidateGroup[];
+  transfer_candidates: TransferCandidatePair[];
 }
 
 export type GoalType = 'savings' | 'debt';
@@ -331,6 +342,84 @@ export interface SyncHealth {
   never_synced_count: number;
   last_synced_at?: string | null;
   connections: SyncHealthConnection[];
+}
+
+export type SyncRunScope = 'full' | 'plaid_item' | 'plaid_all' | 'coinbase';
+export type SyncRunStatus = 'running' | 'succeeded' | 'partial' | 'failed';
+export type SyncRunItemProvider = 'plaid' | 'coinbase' | 'system';
+export type SyncRunItemStatus = 'running' | 'succeeded' | 'skipped' | 'reauth_required' | 'failed';
+
+export interface SyncRun {
+  id: string;
+  scope: SyncRunScope;
+  status: SyncRunStatus;
+  started_at: string;
+  completed_at?: string | null;
+  message?: string | null;
+  error_code?: string | null;
+  error_message?: string | null;
+  recovery_action?: string | null;
+  accounts_seen: number;
+  transactions_added: number;
+  transactions_modified: number;
+  transactions_removed: number;
+  transactions_skipped: number;
+  duplicate_candidates: number;
+  transfer_candidates: number;
+}
+
+export interface SyncRunItem {
+  id: string;
+  run_id: string;
+  provider: SyncRunItemProvider;
+  connection_id?: string | null;
+  institution_name: string;
+  status: SyncRunItemStatus;
+  started_at: string;
+  completed_at?: string | null;
+  accounts_seen: number;
+  transactions_added: number;
+  transactions_modified: number;
+  transactions_removed: number;
+  transactions_skipped: number;
+  error_code?: string | null;
+  error_message?: string | null;
+  recovery_action?: string | null;
+}
+
+export interface SyncChange {
+  id: string;
+  run_item_id: string;
+  entity_type: 'account' | 'transaction' | 'investment' | 'recurring' | 'snapshot' | 'integrity';
+  entity_id?: string | null;
+  change_type: 'inserted' | 'updated' | 'deleted' | 'skipped' | 'detected';
+  description: string;
+  created_at: string;
+}
+
+export interface SyncRunDetail extends SyncRun {
+  items: SyncRunItem[];
+  changes: SyncChange[];
+}
+
+export interface DuplicateCandidateGroup {
+  group_id: string;
+  count: number;
+  amount: number;
+  date: string;
+  merchant_name: string;
+  account_name: string;
+  transaction_ids: string[];
+}
+
+export interface TransferCandidatePair {
+  pair_id: string;
+  amount: number;
+  date: string;
+  from_account_name: string;
+  to_account_name: string;
+  outflow_transaction_id: string;
+  inflow_transaction_id: string;
 }
 
 export interface ChatMessage {

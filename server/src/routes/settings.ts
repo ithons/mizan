@@ -20,6 +20,7 @@ import type { PlaidCredentials } from '../services/credentials';
 import { resetPlaidClient } from '../services/plaid';
 import { takeSnapshot } from '../services/snapshot';
 import { detectRecurring } from '../services/recurring';
+import { refreshTransactionIntegrity } from '../services/transactionIntegrity';
 import type { z } from 'zod';
 
 const router = Router();
@@ -249,8 +250,8 @@ router.post('/import-csv', (req: Request, res: Response, next: NextFunction): vo
           db.prepare(`
             INSERT INTO transactions
               (id, account_id, date, amount, merchant_name, original_name,
-               category_id, pending, notes, is_manual, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, 1, ?, ?)
+               category_id, pending, notes, is_manual, source_type, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, 1, 'import', ?, ?)
           `).run(
             uuidv4(),
             accountId,
@@ -282,6 +283,7 @@ router.post('/import-csv', (req: Request, res: Response, next: NextFunction): vo
     }
     if (imported > 0) {
       detectRecurring();
+      refreshTransactionIntegrity(db);
     }
 
     res.json({ data: { imported, errors } });
@@ -312,6 +314,9 @@ router.delete(
         DELETE FROM net_worth_snapshots;
         DELETE FROM plaid_items;
         DELETE FROM coinbase_connections;
+        DELETE FROM sync_changes;
+        DELETE FROM sync_run_items;
+        DELETE FROM sync_runs;
       `);
 
       res.json({ data: { success: true } });

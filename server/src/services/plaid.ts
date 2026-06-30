@@ -29,6 +29,20 @@ export interface PlaidSyncSummary {
   synced: number;
   reauthRequired: PlaidSyncIssue[];
   failed: PlaidSyncIssue[];
+  items: PlaidSyncItemResult[];
+}
+
+export interface PlaidSyncItemResult {
+  itemId: string;
+  institutionName: string;
+  status: PlaidSyncItemStatus | 'failed';
+  accountCount: number;
+  added: number;
+  modified: number;
+  removed: number;
+  skipped: number;
+  errorMessage?: string;
+  recoveryAction?: string;
 }
 
 export interface PlaidExchangeResult {
@@ -231,6 +245,14 @@ export async function exchangeToken(
 }
 
 export async function syncItem(dbItemId: string): Promise<PlaidSyncItemStatus> {
+  const result = await syncItemDetailed(dbItemId);
+  if (result.status === 'failed') {
+    throw new Error(result.errorMessage ?? 'Plaid sync failed');
+  }
+  return result.status;
+}
+
+export async function syncItemDetailed(dbItemId: string): Promise<PlaidSyncItemResult> {
   const db = getDb();
   const plaid = getPlaidClient();
   const creds = getCredentials();
@@ -240,6 +262,7 @@ export async function syncItem(dbItemId: string): Promise<PlaidSyncItemStatus> {
   ).get(dbItemId) as {
     id: string;
     item_id: string;
+    institution_name: string;
     cursor: string | null;
     status: string;
   } | undefined;
@@ -251,6 +274,16 @@ export async function syncItem(dbItemId: string): Promise<PlaidSyncItemStatus> {
 
   let cursor = item.cursor || undefined;
   let hasMore = true;
+  const result: PlaidSyncItemResult = {
+    itemId: dbItemId,
+    institutionName: item.institution_name,
+    status: 'synced',
+    accountCount: 0,
+    added: 0,
+    modified: 0,
+    removed: 0,
+    skipped: 0,
+  };
 
   while (hasMore) {
     let syncResponse;
@@ -266,7 +299,12 @@ export async function syncItem(dbItemId: string): Promise<PlaidSyncItemStatus> {
         db.prepare(
           "UPDATE plaid_items SET status = 'reauth_required' WHERE id = ?"
         ).run(dbItemId);
-        return 'reauth_required';
+        return {
+          ...result,
+          status: 'reauth_required',
+          errorMessage: 'Institution login expired',
+          recoveryAction: 'Reconnect this institution with Plaid update mode.',
+        };
       }
       throw err;
     }
@@ -284,7 +322,10 @@ export async function syncItem(dbItemId: string): Promise<PlaidSyncItemStatus> {
         'SELECT id FROM accounts WHERE plaid_account_id = ?'
       ).get(txn.account_id) as { id: string } | undefined;
 
-      if (!acct) continue;
+      if (!acct) {
+        result.skipped++;
+        continue;
+      }
 
       const existing = db.prepare(
         'SELECT id FROM transactions WHERE plaid_transaction_id = ?'
@@ -295,8 +336,8 @@ export async function syncItem(dbItemId: string): Promise<PlaidSyncItemStatus> {
         db.prepare(`
           INSERT INTO transactions
             (id, plaid_transaction_id, account_id, date, amount, merchant_name,
-             original_name, category_id, pending, is_manual, created_at, updated_at)
-          VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, 0, ?, ?)
+             original_name, category_id, pending, is_manual, source_type, created_at, updated_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, 0, 'plaid', ?, ?)
         `).run(
           txnId,
           txn.transaction_id,
@@ -310,6 +351,9 @@ export async function syncItem(dbItemId: string): Promise<PlaidSyncItemStatus> {
           now
         );
         applyMerchantRulesToTransaction(db, txnId, txn.merchant_name || txn.name);
+        result.added++;
+      } else {
+        result.skipped++;
       }
     }
 
@@ -319,12 +363,15 @@ export async function syncItem(dbItemId: string): Promise<PlaidSyncItemStatus> {
         'SELECT id FROM accounts WHERE plaid_account_id = ?'
       ).get(txn.account_id) as { id: string } | undefined;
 
-      if (!acct) continue;
+      if (!acct) {
+        result.skipped++;
+        continue;
+      }
 
       db.prepare(`
         UPDATE transactions
         SET date = ?, amount = ?, merchant_name = ?, original_name = ?,
-            pending = ?, updated_at = ?
+            pending = ?, source_type = 'plaid', updated_at = ?
         WHERE plaid_transaction_id = ?
       `).run(
         txn.date,
@@ -335,13 +382,15 @@ export async function syncItem(dbItemId: string): Promise<PlaidSyncItemStatus> {
         now,
         txn.transaction_id
       );
+      result.modified++;
     }
 
     // Process removed transactions
     for (const txn of removed) {
-      db.prepare(
+      const deleteResult = db.prepare(
         'DELETE FROM transactions WHERE plaid_transaction_id = ?'
       ).run(txn.transaction_id);
+      result.removed += deleteResult.changes;
     }
 
     // Update cursor
@@ -362,7 +411,15 @@ export async function syncItem(dbItemId: string): Promise<PlaidSyncItemStatus> {
     "UPDATE plaid_items SET last_synced_at = ?, status = 'active' WHERE id = ?"
   ).run(new Date().toISOString(), dbItemId);
 
-  return 'synced';
+  result.accountCount = (db.prepare(`
+    SELECT COUNT(*) AS count
+    FROM accounts
+    WHERE connection_type = 'plaid'
+      AND connection_id = ?
+      AND is_hidden = 0
+  `).get(dbItemId) as { count: number }).count;
+
+  return result;
 }
 
 export async function syncInvestments(dbItemId: string): Promise<void> {
@@ -566,16 +623,18 @@ export async function syncAllItems(): Promise<PlaidSyncSummary> {
     synced: 0,
     reauthRequired: [],
     failed: [],
+    items: [],
   };
 
   for (const item of items) {
     try {
-      const status = await syncItem(item.id);
-      if (status === 'reauth_required') {
+      const result = await syncItemDetailed(item.id);
+      summary.items.push(result);
+      if (result.status === 'reauth_required') {
         summary.reauthRequired.push({
           itemId: item.id,
           institutionName: item.institution_name,
-          message: 'Reconnect required',
+          message: result.errorMessage ?? 'Reconnect required',
         });
       } else {
         summary.synced++;
@@ -583,6 +642,18 @@ export async function syncAllItems(): Promise<PlaidSyncSummary> {
     } catch (err) {
       const message = (err as Error).message || 'Unknown sync error';
       db.prepare("UPDATE plaid_items SET status = 'sync_error' WHERE id = ?").run(item.id);
+      summary.items.push({
+        itemId: item.id,
+        institutionName: item.institution_name,
+        status: 'failed',
+        accountCount: 0,
+        added: 0,
+        modified: 0,
+        removed: 0,
+        skipped: 0,
+        errorMessage: message,
+        recoveryAction: 'Retry sync. If it continues failing, reconnect the institution.',
+      });
       summary.failed.push({
         itemId: item.id,
         institutionName: item.institution_name,

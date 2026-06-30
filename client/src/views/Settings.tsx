@@ -27,6 +27,7 @@ import {
   coinbaseApi,
   categoriesApi,
   rulesApi,
+  syncApi,
   flattenCategories,
 } from '../lib/api';
 import { formatRelativeTime } from '../lib/formatters';
@@ -34,8 +35,9 @@ import { useAppStore } from '../store';
 import { invalidateFinancialData } from '../lib/queryInvalidation';
 import { Modal } from '../components/Modal';
 import { ConfirmRemoveModal } from '../components/ConfirmRemoveModal';
+import { SyncActivityPanel } from '../components/SyncActivityPanel';
 import { PageLoader } from '../components/LoadingSpinner';
-import type { Category, MerchantRule, MerchantRuleSuggestion } from '@shared/types';
+import type { Category, MerchantRule, MerchantRuleSuggestion, SyncRun } from '@shared/types';
 
 const CATEGORY_PRESET_COLORS = [
   '#4ecba3', '#5b8dee', '#e07070', '#f0c040', '#9b8dee',
@@ -923,6 +925,11 @@ function DataSection() {
   const [showDangerModal, setShowDangerModal] = useState(false);
   const [deleteConfirm, setDeleteConfirm] = useState('');
 
+  const { data: syncRuns } = useQuery<SyncRun[]>({
+    queryKey: ['sync', 'history', 'settings'],
+    queryFn: () => syncApi.history(10),
+  });
+
   const deleteAllMutation = useMutation({
     mutationFn: settingsApi.deleteAllData,
     onSuccess: () => {
@@ -956,6 +963,8 @@ function DataSection() {
         </div>
       </div>
 
+      <SyncActivityPanel runs={syncRuns} showDetail />
+
       <div className="border border-[#e07070]/30 rounded p-4 space-y-3">
         <div className="flex items-center gap-2 mb-2">
           <AlertTriangle size={14} className="text-[#e07070]" />
@@ -964,7 +973,7 @@ function DataSection() {
         <div className="flex items-center justify-between py-2 border-b border-border">
           <div>
             <p className="text-sm text-text">Clear All Data</p>
-            <p className="text-xs text-muted">Permanently delete all transactions, accounts, and settings.</p>
+            <p className="text-xs text-muted">Permanently delete accounts, transactions, budgets, goals, rules, snapshots, and sync history. Encrypted credentials stay on disk.</p>
           </div>
           <button
             className="px-3 py-1.5 text-xs border border-[#e07070]/40 text-[#e07070] rounded hover:bg-[#e07070]/10"
@@ -1005,7 +1014,7 @@ function DataSection() {
           <div className="flex items-start gap-2 p-3 bg-[#e07070]/10 border border-[#e07070]/30 rounded">
             <AlertTriangle size={14} className="text-[#e07070] mt-0.5 flex-shrink-0" />
             <p className="text-xs text-muted">
-              This will permanently delete all your data including transactions, accounts, budgets, and settings. This action cannot be undone.
+              This permanently deletes local finance data from the database. Encrypted provider credentials are not deleted, so disconnect providers separately if needed.
             </p>
           </div>
           <div>

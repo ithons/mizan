@@ -345,8 +345,8 @@ export async function syncTradeHistory(connectionId: string): Promise<number> {
       db.prepare(`
         INSERT INTO transactions
           (id, coinbase_transaction_id, account_id, date, amount, merchant_name,
-           original_name, category_id, pending, is_manual, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, 'Coinbase', ?, ?, 0, 0, ?, ?)
+           original_name, category_id, pending, is_manual, source_type, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, 'Coinbase', ?, ?, 0, 0, 'coinbase', ?, ?)
       `).run(
         uuidv4(),
         order.order_id,

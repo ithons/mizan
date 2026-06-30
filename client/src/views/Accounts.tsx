@@ -32,10 +32,11 @@ import { AmountBadge } from '../components/AmountBadge';
 import { CategoryBadge } from '../components/CategoryBadge';
 import { SkeletonList } from '../components/SkeletonLoader';
 import { ConfirmRemoveModal } from '../components/ConfirmRemoveModal';
+import { SyncActivityPanel } from '../components/SyncActivityPanel';
 import { loadPlaidLink } from '../lib/plaidLink';
 import { invalidateFinancialData } from '../lib/queryInvalidation';
 import { parseDecimalInput } from '../lib/numberInput';
-import type { Account, PlaidItem, Holding, SyncHealth, SyncHealthConnection } from '@shared/types';
+import type { Account, PlaidItem, Holding, SyncHealth, SyncHealthConnection, SyncRun } from '@shared/types';
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -1093,6 +1094,11 @@ export function Accounts() {
     queryFn: syncApi.health,
   });
 
+  const { data: syncRuns } = useQuery<SyncRun[]>({
+    queryKey: ['sync', 'history', 'accounts'],
+    queryFn: () => syncApi.history(2),
+  });
+
   const { data: allHoldings = [] } = useQuery({
     queryKey: ['holdings'],
     queryFn: investmentsApi.holdings,
@@ -1346,6 +1352,10 @@ export function Accounts() {
           isSyncingAll={syncAllMutation.isPending}
           busyConnectionId={busyConnectionId}
         />
+
+        <div className="px-3 pb-2">
+          <SyncActivityPanel runs={syncRuns} title="Recent Sync" />
+        </div>
 
         <div className="flex-1 overflow-y-auto py-2 min-h-0">
           {isLoading ? (

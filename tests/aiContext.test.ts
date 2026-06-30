@@ -74,9 +74,25 @@ function baseReviewSummary(overrides: Partial<TransactionReviewSummary> = {}): T
         action_label: 'Confirm',
         severity: 'info',
       },
+      {
+        id: 'duplicate_candidates',
+        label: 'Possible duplicates',
+        count: 0,
+        action_label: 'Review',
+        severity: 'warning',
+      },
+      {
+        id: 'transfer_candidates',
+        label: 'Detected transfers',
+        count: 0,
+        action_label: 'Review',
+        severity: 'info',
+      },
     ],
     rule_suggestions: [],
     recurring_candidates: [],
+    duplicate_candidates: [],
+    transfer_candidates: [],
     ...overrides,
   };
 }

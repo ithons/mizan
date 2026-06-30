@@ -56,7 +56,10 @@ function excludedCategoriesWithRootCte(): string {
 }
 
 function reportableCategoryCondition(): string {
-  return 't.category_id IS NULL OR t.category_id NOT IN (SELECT id FROM excluded_report_categories)';
+  return `(
+    (t.category_id IS NULL OR t.category_id NOT IN (SELECT id FROM excluded_report_categories))
+    AND COALESCE(t.transfer_status, 'none') NOT IN ('candidate','confirmed')
+  )`;
 }
 
 function incomeCategoryCondition(): string {

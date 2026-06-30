@@ -7,12 +7,18 @@ import {
 import {
   createLinkToken,
   exchangeToken,
-  syncItem,
+  syncItemDetailed,
   syncAllItems,
   createUpdateToken,
 } from '../services/plaid';
 import { removePlaidItemToken } from '../services/credentials';
 import { takeSnapshot } from '../services/snapshot';
+import {
+  finishSyncRun,
+  recordSyncRunItem,
+  startSyncRun,
+} from '../services/syncHistory';
+import { refreshTransactionIntegrity } from '../services/transactionIntegrity';
 
 const router = Router();
 
@@ -53,27 +59,103 @@ router.post(
 
 // POST /sync/all - must be registered before /sync/:itemId to avoid "all" matching as itemId
 router.post('/sync/all', async (_req: Request, res: Response, next: NextFunction): Promise<void> => {
+  const db = getDb();
+  const run = startSyncRun(db, 'plaid_all', 'Plaid sync started');
   try {
     const summary = await syncAllItems();
+    for (const item of summary.items) {
+      recordSyncRunItem(db, run.id, {
+        provider: 'plaid',
+        connection_id: item.itemId,
+        institution_name: item.institutionName,
+        status: item.status === 'synced'
+          ? 'succeeded'
+          : item.status === 'reauth_required'
+            ? 'reauth_required'
+            : 'failed',
+        accounts_seen: item.accountCount,
+        transactions_added: item.added,
+        transactions_modified: item.modified,
+        transactions_removed: item.removed,
+        transactions_skipped: item.skipped,
+        error_message: item.errorMessage,
+        recovery_action: item.recoveryAction,
+      });
+    }
+
     if (summary.synced > 0) takeSnapshot();
+    const integrity = refreshTransactionIntegrity(db);
+    const success = summary.failed.length === 0 && summary.reauthRequired.length === 0;
+    finishSyncRun(db, run.id, {
+      status: success ? 'succeeded' : 'partial',
+      message: success ? 'Plaid sync complete' : 'Plaid sync finished with issues',
+      error_message: success ? null : 'One or more Plaid institutions need attention',
+      recovery_action: success ? null : 'Open Accounts to reconnect or retry affected institutions.',
+      duplicate_candidates: integrity.duplicates.groupCount,
+      transfer_candidates: integrity.transfers.pairCount,
+    });
+
     res.json({
       data: {
-        success: summary.failed.length === 0 && summary.reauthRequired.length === 0,
+        success,
         ...summary,
       },
     });
   } catch (err) {
+    finishSyncRun(db, run.id, {
+      status: 'failed',
+      message: 'Plaid sync failed',
+      error_message: (err as Error).message || 'Plaid sync failed',
+      recovery_action: 'Retry sync. If it continues failing, check Plaid settings.',
+    });
     next(err);
   }
 });
 
 // POST /sync/:itemId
 router.post('/sync/:itemId', async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  const db = getDb();
+  const run = startSyncRun(db, 'plaid_item', 'Plaid institution sync started');
   try {
-    const status = await syncItem(req.params['itemId'] as string);
-    if (status === 'synced') takeSnapshot();
+    const result = await syncItemDetailed(req.params['itemId'] as string);
+    recordSyncRunItem(db, run.id, {
+      provider: 'plaid',
+      connection_id: result.itemId,
+      institution_name: result.institutionName,
+      status: result.status === 'synced'
+        ? 'succeeded'
+        : result.status === 'reauth_required'
+          ? 'reauth_required'
+          : 'failed',
+      accounts_seen: result.accountCount,
+      transactions_added: result.added,
+      transactions_modified: result.modified,
+      transactions_removed: result.removed,
+      transactions_skipped: result.skipped,
+      error_message: result.errorMessage,
+      recovery_action: result.recoveryAction,
+    });
+
+    if (result.status === 'synced') takeSnapshot();
+    const integrity = refreshTransactionIntegrity(db);
+    finishSyncRun(db, run.id, {
+      status: result.status === 'synced' ? 'succeeded' : 'partial',
+      message: result.status === 'synced' ? 'Plaid institution sync complete' : 'Plaid institution needs attention',
+      error_message: result.errorMessage,
+      recovery_action: result.recoveryAction,
+      duplicate_candidates: integrity.duplicates.groupCount,
+      transfer_candidates: integrity.transfers.pairCount,
+    });
+
+    const status = result.status;
     res.json({ data: { success: status === 'synced', status } });
   } catch (err) {
+    finishSyncRun(db, run.id, {
+      status: 'failed',
+      message: 'Plaid institution sync failed',
+      error_message: (err as Error).message || 'Plaid institution sync failed',
+      recovery_action: 'Retry sync. If it continues failing, reconnect the institution.',
+    });
     next(err);
   }
 });

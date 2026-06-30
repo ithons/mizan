@@ -23,12 +23,13 @@ import {
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { format, startOfMonth, endOfMonth, subMonths, parseISO } from 'date-fns';
-import type { DataQualitySummary, Goal, Insight, SyncHealth } from '@shared/types';
+import type { DataQualitySummary, Goal, Insight, SyncHealth, SyncRun } from '@shared/types';
 import { networthApi, reportsApi, recurringApi, budgetsApi, transactionsApi, investmentsApi, insightsApi, goalsApi, syncApi } from '../lib/api';
 import { formatCurrency, formatDate, formatDateShort, formatMonth, formatRelativeTime } from '../lib/formatters';
 import { AmountBadge } from '../components/AmountBadge';
 import { CategoryBadge } from '../components/CategoryBadge';
 import { SkeletonCard } from '../components/SkeletonLoader';
+import { SyncActivityPanel } from '../components/SyncActivityPanel';
 
 const CHART_COLORS = [
   '#4ecba3', '#5b8dee', '#d4a44c', '#e07070', '#a78bfa',
@@ -445,6 +446,11 @@ export function Dashboard() {
     queryFn: () => syncApi.health(),
   });
 
+  const { data: syncRuns } = useQuery<SyncRun[]>({
+    queryKey: ['sync', 'history', 'dashboard'],
+    queryFn: () => syncApi.history(3),
+  });
+
   const { data: dataQuality } = useQuery({
     queryKey: ['insights', 'quality', 'dashboard'],
     queryFn: () => insightsApi.quality(),
@@ -564,6 +570,8 @@ export function Dashboard() {
         <DataQualityPanel quality={dataQuality} onNavigate={navigate} />
         <SyncHealthPanel health={syncHealth} onNavigate={navigate} />
       </div>
+
+      <SyncActivityPanel runs={syncRuns} />
 
       {/* Row 2: Asset Breakdown */}
       <div className="bg-surface border border-border rounded p-4">
