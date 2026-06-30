@@ -5,6 +5,7 @@ import { calculateGoalProgress } from '../services/goalProgress';
 import { getDataQualitySummary } from '../services/dataQuality';
 import { buildRecurringForecast } from '../services/recurringForecast';
 import { suggestMerchantRules } from '../services/rules';
+import { getAnomalyInsights } from '../services/anomalyInsights';
 import type { Insight, InsightSeverity } from '../../../shared/types';
 
 const router = Router();
@@ -249,6 +250,11 @@ router.get('/', (_req: Request, res: Response, next: NextFunction): void => {
     const monthStart = format(new Date(now.getFullYear(), now.getMonth(), 1), 'yyyy-MM-dd');
     const monthEnd = format(new Date(now.getFullYear(), now.getMonth() + 1, 0), 'yyyy-MM-dd');
     const currentMonth = format(now, 'yyyy-MM');
+
+    for (const anomaly of getAnomalyInsights(db, now)) {
+      addInsight(insights, anomaly);
+    }
+
     const budgetRows = db.prepare(`
       WITH RECURSIVE budget_categories(root_id, category_id) AS (
         SELECT id, id FROM categories
