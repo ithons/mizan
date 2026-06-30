@@ -1,6 +1,7 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import { addDays, addMonths, differenceInCalendarDays, format, parseISO } from 'date-fns';
 import { getDb } from '../db/index';
+import { suggestMerchantRules } from '../services/rules';
 import type { Insight, InsightSeverity } from '../../../shared/types';
 
 const router = Router();
@@ -310,6 +311,24 @@ router.get('/', (_req: Request, res: Response, next: NextFunction): void => {
         metric: `${reviewQueue.detected_recurring} pending`,
         action_label: 'Confirm',
         action_route: '/bills',
+      });
+    }
+
+    const ruleSuggestions = suggestMerchantRules(db);
+    if (ruleSuggestions.length > 0) {
+      const uncategorizedMatches = ruleSuggestions.reduce(
+        (sum, suggestion) => sum + suggestion.uncategorized_count,
+        0
+      );
+      addInsight(insights, {
+        id: 'rule-suggestions',
+        severity: 'info',
+        rank: 35,
+        title: 'Categorization rules are ready',
+        message: `${ruleSuggestions.length} suggested rule${ruleSuggestions.length === 1 ? '' : 's'} could clean up ${uncategorizedMatches} uncategorized transaction${uncategorizedMatches === 1 ? '' : 's'}.`,
+        metric: `${ruleSuggestions.length} ready`,
+        action_label: 'Review',
+        action_route: '/settings',
       });
     }
 
