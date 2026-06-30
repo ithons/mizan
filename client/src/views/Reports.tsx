@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
+import { useNavigate } from 'react-router-dom';
 import {
   AreaChart,
   Area,
@@ -394,6 +395,7 @@ function ReportDrilldownModal({
 // ─── Spending Tab ─────────────────────────────────────────────────────────────
 
 function SpendingTab({ startDate, endDate }: { startDate: string; endDate: string }) {
+  const navigate = useNavigate();
   const [drillId, setDrillId] = useState<string | null>(null);
   const [drillName, setDrillName] = useState<string | null>(null);
   const [detailTarget, setDetailTarget] = useState<DrilldownTarget | null>(null);
@@ -454,7 +456,15 @@ function SpendingTab({ startDate, endDate }: { startDate: string; endDate: strin
           </ResponsiveContainer>
         </div>
       ) : (
-        <EmptyState icon={ChevronRight} title="No spending data for the selected period" />
+        <EmptyState
+          icon={ChevronRight}
+          title="No spending data for the selected period"
+          description="Spending reports populate from categorized expense transactions."
+          action={() => navigate('/transactions')}
+          actionLabel="Review Transactions"
+          secondaryAction={() => navigate('/accounts?connect=bank')}
+          secondaryActionLabel="Connect Account"
+        />
       )}
 
       {/* Data table */}
@@ -513,6 +523,7 @@ function SpendingTab({ startDate, endDate }: { startDate: string; endDate: strin
 // ─── Income Tab ───────────────────────────────────────────────────────────────
 
 function IncomeTab({ startDate, endDate }: { startDate: string; endDate: string }) {
+  const navigate = useNavigate();
   const [detailTarget, setDetailTarget] = useState<DrilldownTarget | null>(null);
   const { data: income, isLoading } = useQuery({
     queryKey: ['income', startDate, endDate],
@@ -541,7 +552,15 @@ function IncomeTab({ startDate, endDate }: { startDate: string; endDate: string 
           </ResponsiveContainer>
         </div>
       ) : (
-        <EmptyState icon={ChevronRight} title="No income data for the selected period" />
+        <EmptyState
+          icon={ChevronRight}
+          title="No income data for the selected period"
+          description="Income reports populate from categorized deposits and income transactions."
+          action={() => navigate('/transactions')}
+          actionLabel="Review Transactions"
+          secondaryAction={() => navigate('/accounts?connect=bank')}
+          secondaryActionLabel="Connect Account"
+        />
       )}
       <div className="bg-surface border border-border rounded overflow-hidden">
         <table className="w-full text-xs">
@@ -871,6 +890,7 @@ function NetWorthTab() {
 // ─── Investments Tab ──────────────────────────────────────────────────────────
 
 function InvestmentsTab() {
+  const navigate = useNavigate();
   const { data: holdings = [], isLoading } = useQuery({
     queryKey: ['holdings'],
     queryFn: investmentsApi.holdings,
@@ -904,7 +924,17 @@ function InvestmentsTab() {
   }));
 
   if (holdings.length === 0) {
-    return <EmptyState icon={ChevronRight} title="No investment accounts connected" />;
+    return (
+      <EmptyState
+        icon={ChevronRight}
+        title="No investment accounts connected"
+        description="Connect a brokerage account or configure Coinbase before investment reports can be calculated."
+        action={() => navigate('/accounts?connect=bank')}
+        actionLabel="Connect Account"
+        secondaryAction={() => navigate('/settings?section=coinbase')}
+        secondaryActionLabel="Configure Coinbase"
+      />
+    );
   }
 
   return (

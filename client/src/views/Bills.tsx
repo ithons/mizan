@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useNavigate } from 'react-router-dom';
 import {
   ArrowDownCircle,
   ArrowUpCircle,
@@ -175,6 +176,7 @@ function ScheduleRow({
 }
 
 export function Bills() {
+  const navigate = useNavigate();
   const qc = useQueryClient();
   const { addToast } = useAppStore();
   const [days, setDays] = useState(60);
@@ -371,7 +373,15 @@ export function Bills() {
           <span className="text-xs text-muted font-mono">{days} days</span>
         </div>
         {occurrences.length === 0 ? (
-          <EmptyState icon={RefreshCw} title="No recurring activity scheduled" />
+          <EmptyState
+            icon={RefreshCw}
+            title="No recurring activity scheduled"
+            description="Confirm recurring candidates from review, or inspect transactions for missing bills and income."
+            action={() => navigate('/review?queue=recurring_candidates')}
+            actionLabel="Review Candidates"
+            secondaryAction={() => navigate('/transactions')}
+            secondaryActionLabel="View Transactions"
+          />
         ) : (
           <div>
             {grouped.map(([date, items]) => (

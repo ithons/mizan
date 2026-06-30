@@ -11,6 +11,7 @@ import {
   Trash2,
   SlidersHorizontal,
   Sparkles,
+  FileText,
 } from 'lucide-react';
 import { format, subMonths } from 'date-fns';
 import { transactionsApi, accountsApi, categoriesApi, settingsApi, flattenCategories, rulesApi } from '../lib/api';
@@ -18,6 +19,7 @@ import { formatDate, formatCurrency } from '../lib/formatters';
 import { useAppStore } from '../store';
 import { Modal } from '../components/Modal';
 import { AmountBadge } from '../components/AmountBadge';
+import { EmptyState } from '../components/EmptyState';
 import { InlineEdit } from '../components/InlineEdit';
 import { SkeletonList } from '../components/SkeletonLoader';
 import { invalidateFinancialData } from '../lib/queryInvalidation';
@@ -329,6 +331,19 @@ export function Transactions() {
     setPage(1);
   };
 
+  const resetFilters = () => {
+    setFilters({
+      startDate: DEFAULT_START,
+      endDate: DEFAULT_END,
+      search: '',
+      type: '',
+      pending: undefined,
+      recurring: undefined,
+      uncategorized: undefined,
+    });
+    setPage(1);
+  };
+
   const reviewUncategorized = () => {
     setFilters({
       startDate: '',
@@ -368,7 +383,39 @@ export function Transactions() {
   const hasUncategorized = filters.uncategorized !== undefined;
   const isDefaultDateRange = filters.startDate === DEFAULT_START && filters.endDate === DEFAULT_END;
   const hasDateRange = !isDefaultDateRange;
+  const hasActiveFilters = hasSearch || hasType || hasPending || hasRecurring || hasUncategorized || hasDateRange;
   const dateRangeLabel = `${filters.startDate || 'Any'} → ${filters.endDate || 'Any'}`;
+  const hasNoAccountSetup = accounts.length === 0 && !hasActiveFilters;
+  const emptyTitle = hasNoAccountSetup
+    ? 'No accounts connected'
+    : hasActiveFilters
+      ? 'No transactions match these filters'
+      : 'No transactions yet';
+  const emptyDescription = hasNoAccountSetup
+    ? 'Connect a bank account or create a manual account before reviewing transactions.'
+    : hasActiveFilters
+      ? 'Clear the filters to return to the full ledger.'
+      : 'Add a manual transaction or connect another account to start building reports.';
+  const emptyAction = hasNoAccountSetup
+    ? () => navigate('/accounts?connect=bank')
+    : hasActiveFilters
+      ? resetFilters
+      : () => setShowAddModal(true);
+  const emptyActionLabel = hasNoAccountSetup
+    ? 'Connect Account'
+    : hasActiveFilters
+      ? 'Clear Filters'
+      : 'Add Transaction';
+  const emptySecondaryAction = hasNoAccountSetup
+    ? () => navigate('/accounts?manual=1')
+    : hasActiveFilters
+      ? () => setShowAddModal(true)
+      : () => navigate('/accounts?connect=bank');
+  const emptySecondaryActionLabel = hasNoAccountSetup
+    ? 'Add Manual Account'
+    : hasActiveFilters
+      ? 'Add Transaction'
+      : 'Connect Account';
 
   return (
     <div className="p-6 flex flex-col h-full">
@@ -487,21 +534,10 @@ export function Transactions() {
             <option value="true">Needs Category</option>
             <option value="false">Categorized</option>
           </select>
-          {(hasSearch || hasType || hasPending || hasRecurring || hasUncategorized || hasDateRange) && (
+          {hasActiveFilters && (
             <button
               className="flex items-center gap-1 text-xs text-muted hover:text-text"
-              onClick={() => {
-                setFilters({
-                  startDate: DEFAULT_START,
-                  endDate: DEFAULT_END,
-                  search: '',
-                  type: '',
-                  pending: undefined,
-                  recurring: undefined,
-                  uncategorized: undefined,
-                });
-                setPage(1);
-              }}
+              onClick={resetFilters}
             >
               <X size={12} /> Clear All
             </button>
@@ -649,9 +685,15 @@ export function Transactions() {
             </tbody>
           </table>
           {!isLoading && !isError && txs.length === 0 && (
-            <div className="py-16 text-center text-muted text-sm">
-              No transactions found
-            </div>
+            <EmptyState
+              icon={FileText}
+              title={emptyTitle}
+              description={emptyDescription}
+              action={emptyAction}
+              actionLabel={emptyActionLabel}
+              secondaryAction={emptySecondaryAction}
+              secondaryActionLabel={emptySecondaryActionLabel}
+            />
           )}
         </div>
 

@@ -237,6 +237,10 @@ export function CashFlow() {
               icon={ArrowRight}
               title={`No transactions for ${formatMonth(currentMonth)}`}
               description={filterCategoryId ? 'Try clearing the category filter.' : undefined}
+              action={filterCategoryId ? () => setFilterCategoryId('') : () => navigate('/transactions')}
+              actionLabel={filterCategoryId ? 'Clear Filter' : 'Review Transactions'}
+              secondaryAction={filterCategoryId ? () => navigate('/transactions') : () => navigate('/accounts?connect=bank')}
+              secondaryActionLabel={filterCategoryId ? 'View Ledger' : 'Connect Account'}
             />
           ) : (
             <>

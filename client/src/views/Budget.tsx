@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query';
-import { ChevronLeft, ChevronRight, Plus, Check, X, Trash2 } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Plus, Check, X, Trash2, WalletCards } from 'lucide-react';
 import { format, subMonths, addMonths } from 'date-fns';
 import { budgetsApi, recurringApi, categoriesApi, flattenCategories } from '../lib/api';
 import { formatCurrency, formatDate, formatMonth, formatPercent } from '../lib/formatters';
@@ -10,6 +10,7 @@ import { invalidateFinancialData } from '../lib/queryInvalidation';
 import { parseDecimalInput } from '../lib/numberInput';
 import { Modal } from '../components/Modal';
 import { CategoryBadge } from '../components/CategoryBadge';
+import { EmptyState } from '../components/EmptyState';
 import { PageLoader } from '../components/LoadingSpinner';
 import type { Budget as BudgetModel, Category } from '@shared/types';
 
@@ -544,15 +545,15 @@ export function Budget() {
                 />
               ))
             ) : (
-              <div className="py-12 text-center text-muted text-sm">
-                <p className="mb-2">No budgets set for {formatMonth(currentMonth)}</p>
-                <button
-                  className="text-[#4ecba3] text-xs hover:opacity-80"
-                  onClick={() => setShowAddModal(true)}
-                >
-                  + Add your first budget
-                </button>
-              </div>
+              <EmptyState
+                icon={WalletCards}
+                title={`No budgets set for ${formatMonth(currentMonth)}`}
+                description="Create category limits, then compare them against projected recurring activity."
+                action={() => setShowAddModal(true)}
+                actionLabel="Add Budget"
+                secondaryAction={() => setTab('recurring')}
+                secondaryActionLabel="Review Recurring"
+              />
             )}
           </div>
         </>

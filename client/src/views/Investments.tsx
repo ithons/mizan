@@ -1,5 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
+import { useNavigate } from 'react-router-dom';
 import {
   AreaChart,
   Area,
@@ -107,6 +108,7 @@ function ChartTooltip({ active, payload, label }: { active?: boolean; payload?: 
 // ─── Main view ────────────────────────────────────────────────────────────────
 
 export function Investments() {
+  const navigate = useNavigate();
   const [selectedAccountId, setSelectedAccountId] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<ActiveTab>('holdings');
   const [sortBy, setSortBy] = useState<SortCol>('value');
@@ -203,6 +205,38 @@ export function Investments() {
     if (txTypeFilter) result = result.filter((t) => t.type === txTypeFilter);
     return result;
   }, [txs, selectedAccountId, txTypeFilter]);
+  const hasInvestmentFilter = selectedAccountId !== null || txTypeFilter !== '';
+  const clearInvestmentFilters = () => {
+    setSelectedAccountId(null);
+    setTxTypeFilter('');
+  };
+  const hasNoInvestmentSource = invAccounts.length === 0;
+  const holdingEmptyTitle = hasNoInvestmentSource
+    ? 'No investment accounts connected'
+    : selectedAccountId
+      ? 'No holdings for this account'
+      : 'No holdings found';
+  const holdingEmptyDescription = hasNoInvestmentSource
+    ? 'Connect a brokerage account or configure Coinbase before holdings can be tracked.'
+    : selectedAccountId
+      ? 'Clear the account filter to return to the full portfolio.'
+      : 'Sync a connected brokerage account or Coinbase to import holdings.';
+  const holdingEmptyAction = hasNoInvestmentSource
+    ? () => navigate('/accounts?connect=bank')
+    : selectedAccountId
+      ? () => setSelectedAccountId(null)
+      : () => navigate('/accounts');
+  const holdingEmptyActionLabel = hasNoInvestmentSource
+    ? 'Connect Account'
+    : selectedAccountId
+      ? 'Clear Account'
+      : 'View Accounts';
+  const holdingEmptySecondaryAction = hasNoInvestmentSource || !selectedAccountId
+    ? () => navigate('/settings?section=coinbase')
+    : undefined;
+  const holdingEmptySecondaryActionLabel = hasNoInvestmentSource || !selectedAccountId
+    ? 'Configure Coinbase'
+    : undefined;
 
   // Chart data
   const chartData = useMemo(
@@ -523,7 +557,15 @@ export function Investments() {
               </tbody>
             </table>
             {!holdingsLoading && sortedHoldings.length === 0 && (
-              <div className="py-12 text-center text-sm text-muted">No holdings found</div>
+              <EmptyState
+                icon={ChevronDown}
+                title={holdingEmptyTitle}
+                description={holdingEmptyDescription}
+                action={holdingEmptyAction}
+                actionLabel={holdingEmptyActionLabel}
+                secondaryAction={holdingEmptySecondaryAction}
+                secondaryActionLabel={holdingEmptySecondaryActionLabel}
+              />
             )}
           </div>
         )}
@@ -609,7 +651,17 @@ export function Investments() {
                 </tbody>
               </table>
               {!txsLoading && filteredTxs.length === 0 && (
-                <div className="py-12 text-center text-sm text-muted">No transactions found</div>
+                <EmptyState
+                  icon={ChevronDown}
+                  title={hasInvestmentFilter ? 'No investment transactions match these filters' : 'No investment transactions imported'}
+                  description={hasInvestmentFilter
+                    ? 'Clear the account or type filters to inspect all imported investment activity.'
+                    : 'Investment transactions appear after brokerage or Coinbase sync data is available.'}
+                  action={hasInvestmentFilter ? clearInvestmentFilters : () => navigate('/accounts?connect=bank')}
+                  actionLabel={hasInvestmentFilter ? 'Clear Filters' : 'Connect Account'}
+                  secondaryAction={hasInvestmentFilter ? undefined : () => navigate('/settings?section=coinbase')}
+                  secondaryActionLabel={hasInvestmentFilter ? undefined : 'Configure Coinbase'}
+                />
               )}
             </div>
           </div>
