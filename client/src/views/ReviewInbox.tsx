@@ -45,6 +45,15 @@ const queueTone = {
   transfer_candidates: { color: '#5b8dee', icon: ArrowLeftRight },
 } satisfies Record<TransactionReviewQueueId, { color: string; icon: LucideIcon }>;
 
+const queueOrder: TransactionReviewQueueId[] = [
+  'uncategorized',
+  'rule_suggestions',
+  'pending',
+  'recurring_candidates',
+  'duplicate_candidates',
+  'transfer_candidates',
+];
+
 function isQueueId(value: string | null): value is TransactionReviewQueueId {
   return value === 'uncategorized' ||
     value === 'rule_suggestions' ||
@@ -139,15 +148,19 @@ function TransactionRow({
 
 function RuleSuggestionRow({
   suggestion,
+  selected,
   onApply,
   applying,
 }: {
   suggestion: MerchantRuleSuggestion;
+  selected: boolean;
   onApply: (suggestion: MerchantRuleSuggestion) => void;
   applying: boolean;
 }) {
   return (
-    <div className="flex items-center gap-3 px-3 py-3 border-b border-border last:border-0">
+    <div className={`flex items-center gap-3 px-3 py-3 border-b border-border last:border-0 ${
+      selected ? 'bg-[#4ecba3]/5' : ''
+    }`}>
       <Sparkles size={14} className="text-[#5b8dee] flex-shrink-0" />
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-2 mb-1">
@@ -176,17 +189,21 @@ function RuleSuggestionRow({
 
 function RecurringRow({
   pattern,
+  selected,
   onConfirm,
   onDismiss,
   busy,
 }: {
   pattern: RecurringPattern;
+  selected: boolean;
   onConfirm: (id: string) => void;
   onDismiss: (id: string) => void;
   busy: boolean;
 }) {
   return (
-    <div className="flex items-center gap-3 px-3 py-3 border-b border-border last:border-0">
+    <div className={`flex items-center gap-3 px-3 py-3 border-b border-border last:border-0 ${
+      selected ? 'bg-[#4ecba3]/5' : ''
+    }`}>
       <RefreshCw size={14} className="text-[#4ecba3] flex-shrink-0" />
       <div className="min-w-0 flex-1">
         <p className="text-sm text-text truncate">{pattern.merchant_name}</p>
@@ -215,15 +232,19 @@ function RecurringRow({
 
 function DuplicateRow({
   group,
+  selected,
   onDismiss,
   busy,
 }: {
   group: DuplicateCandidateGroup;
+  selected: boolean;
   onDismiss: (groupId: string) => void;
   busy: boolean;
 }) {
   return (
-    <div className="flex items-center gap-3 px-3 py-3 border-b border-border last:border-0">
+    <div className={`flex items-center gap-3 px-3 py-3 border-b border-border last:border-0 ${
+      selected ? 'bg-[#4ecba3]/5' : ''
+    }`}>
       <AlertTriangle size={14} className="text-[#e07070] flex-shrink-0" />
       <div className="min-w-0 flex-1">
         <p className="text-sm text-text truncate">{group.merchant_name}</p>
@@ -244,17 +265,21 @@ function DuplicateRow({
 
 function TransferRow({
   pair,
+  selected,
   onConfirm,
   onDismiss,
   busy,
 }: {
   pair: TransferCandidatePair;
+  selected: boolean;
   onConfirm: (pairId: string) => void;
   onDismiss: (pairId: string) => void;
   busy: boolean;
 }) {
   return (
-    <div className="flex items-center gap-3 px-3 py-3 border-b border-border last:border-0">
+    <div className={`flex items-center gap-3 px-3 py-3 border-b border-border last:border-0 ${
+      selected ? 'bg-[#4ecba3]/5' : ''
+    }`}>
       <ArrowLeftRight size={14} className="text-[#5b8dee] flex-shrink-0" />
       <div className="min-w-0 flex-1">
         <p className="text-sm text-text truncate">
@@ -410,38 +435,125 @@ export function ReviewInbox() {
     : activeQueue === 'pending'
       ? pending?.data ?? []
       : [];
+  const ruleSuggestions = summary?.rule_suggestions ?? [];
+  const recurringCandidates = summary?.recurring_candidates ?? [];
+  const duplicateCandidates = summary?.duplicate_candidates ?? [];
+  const transferCandidates = summary?.transfer_candidates ?? [];
+  const activeItemCount = activeQueue === 'uncategorized' || activeQueue === 'pending'
+    ? activeItems.length
+    : activeQueue === 'rule_suggestions'
+      ? ruleSuggestions.length
+      : activeQueue === 'recurring_candidates'
+        ? recurringCandidates.length
+        : activeQueue === 'duplicate_candidates'
+          ? duplicateCandidates.length
+          : transferCandidates.length;
 
   useEffect(() => {
     setSelectedIndex(0);
   }, [activeQueue]);
 
   useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement || event.target instanceof HTMLSelectElement) return;
-      if (activeItems.length === 0) return;
+    setSelectedIndex((index) => Math.min(index, Math.max(activeItemCount - 1, 0)));
+  }, [activeItemCount]);
 
-      if (event.key === 'ArrowDown') {
+  const setActiveQueue = (queueId: TransactionReviewQueueId) => {
+    setParams({ queue: queueId });
+  };
+
+  const runPrimaryAction = () => {
+    if (activeQueue === 'pending') {
+      const transaction = activeItems[selectedIndex];
+      if (transaction && !markReviewMutation.isPending) markReviewMutation.mutate(transaction.id);
+      return;
+    }
+
+    if (activeQueue === 'rule_suggestions') {
+      const suggestion = ruleSuggestions[selectedIndex];
+      if (suggestion && !applyRuleMutation.isPending) applyRuleMutation.mutate(suggestion);
+      return;
+    }
+
+    if (activeQueue === 'recurring_candidates') {
+      const pattern = recurringCandidates[selectedIndex];
+      if (pattern && !confirmRecurringMutation.isPending) confirmRecurringMutation.mutate(pattern.id);
+      return;
+    }
+
+    if (activeQueue === 'transfer_candidates') {
+      const pair = transferCandidates[selectedIndex];
+      if (pair && !confirmTransferMutation.isPending) confirmTransferMutation.mutate(pair.pair_id);
+    }
+  };
+
+  const runDismissAction = () => {
+    if (activeQueue === 'recurring_candidates') {
+      const pattern = recurringCandidates[selectedIndex];
+      if (pattern && !dismissRecurringMutation.isPending) dismissRecurringMutation.mutate(pattern.id);
+      return;
+    }
+
+    if (activeQueue === 'duplicate_candidates') {
+      const group = duplicateCandidates[selectedIndex];
+      if (group && !dismissDuplicateMutation.isPending) dismissDuplicateMutation.mutate(group.group_id);
+      return;
+    }
+
+    if (activeQueue === 'transfer_candidates') {
+      const pair = transferCandidates[selectedIndex];
+      if (pair && !dismissTransferMutation.isPending) dismissTransferMutation.mutate(pair.pair_id);
+    }
+  };
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      const target = event.target;
+      if (
+        event.metaKey ||
+        event.ctrlKey ||
+        event.altKey ||
+        target instanceof HTMLInputElement ||
+        target instanceof HTMLTextAreaElement ||
+        target instanceof HTMLSelectElement ||
+        (target instanceof HTMLElement && target.isContentEditable)
+      ) return;
+
+      const key = event.key.toLowerCase();
+
+      if (/^[1-6]$/.test(event.key)) {
+        const queueId = queueOrder[Number(event.key) - 1];
+        if (!queueId) return;
         event.preventDefault();
-        setSelectedIndex((index) => Math.min(index + 1, activeItems.length - 1));
+        setActiveQueue(queueId);
+        return;
       }
-      if (event.key === 'ArrowUp') {
+
+      if (activeItemCount === 0) return;
+
+      if (event.key === 'ArrowDown' || key === 'j') {
+        event.preventDefault();
+        setSelectedIndex((index) => Math.min(index + 1, activeItemCount - 1));
+        return;
+      }
+      if (event.key === 'ArrowUp' || key === 'k') {
         event.preventDefault();
         setSelectedIndex((index) => Math.max(index - 1, 0));
+        return;
       }
-      if (event.key === 'Enter' && activeQueue === 'pending') {
+      if (event.key === 'Enter' || key === 'a') {
         event.preventDefault();
-        const transaction = activeItems[selectedIndex];
-        if (transaction) markReviewMutation.mutate(transaction.id);
+        runPrimaryAction();
+        return;
+      }
+      if (key === 'd') {
+        event.preventDefault();
+        runDismissAction();
       }
     };
 
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [activeItems, activeQueue, markReviewMutation, selectedIndex]);
-
-  const setActiveQueue = (queueId: TransactionReviewQueueId) => {
-    setParams({ queue: queueId });
-  };
+  }, [activeItemCount, runDismissAction, runPrimaryAction, setActiveQueue]);
 
   const queues = summary?.queues ?? [];
   const totalOpen = summary?.total_open ?? 0;
@@ -505,22 +617,24 @@ export function ReviewInbox() {
             ))
           ) : <EmptyQueue />
         ) : activeQueue === 'rule_suggestions' ? (
-          (summary?.rule_suggestions.length ?? 0) > 0 ? (
-            summary!.rule_suggestions.map((suggestion) => (
+          ruleSuggestions.length > 0 ? (
+            ruleSuggestions.map((suggestion, index) => (
               <RuleSuggestionRow
                 key={`${suggestion.pattern}:${suggestion.category_id}`}
                 suggestion={suggestion}
+                selected={index === selectedIndex}
                 onApply={(item) => applyRuleMutation.mutate(item)}
                 applying={applyRuleMutation.isPending && applyRuleMutation.variables?.pattern === suggestion.pattern}
               />
             ))
           ) : <EmptyQueue />
         ) : activeQueue === 'recurring_candidates' ? (
-          (summary?.recurring_candidates.length ?? 0) > 0 ? (
-            summary!.recurring_candidates.map((pattern) => (
+          recurringCandidates.length > 0 ? (
+            recurringCandidates.map((pattern, index) => (
               <RecurringRow
                 key={pattern.id}
                 pattern={pattern}
+                selected={index === selectedIndex}
                 onConfirm={(id) => confirmRecurringMutation.mutate(id)}
                 onDismiss={(id) => dismissRecurringMutation.mutate(id)}
                 busy={
@@ -531,22 +645,24 @@ export function ReviewInbox() {
             ))
           ) : <EmptyQueue />
         ) : activeQueue === 'duplicate_candidates' ? (
-          (summary?.duplicate_candidates.length ?? 0) > 0 ? (
-            summary!.duplicate_candidates.map((group) => (
+          duplicateCandidates.length > 0 ? (
+            duplicateCandidates.map((group, index) => (
               <DuplicateRow
                 key={group.group_id}
                 group={group}
+                selected={index === selectedIndex}
                 onDismiss={(groupId) => dismissDuplicateMutation.mutate(groupId)}
                 busy={dismissDuplicateMutation.isPending && dismissDuplicateMutation.variables === group.group_id}
               />
             ))
           ) : <EmptyQueue />
         ) : (
-          (summary?.transfer_candidates.length ?? 0) > 0 ? (
-            summary!.transfer_candidates.map((pair) => (
+          transferCandidates.length > 0 ? (
+            transferCandidates.map((pair, index) => (
               <TransferRow
                 key={pair.pair_id}
                 pair={pair}
+                selected={index === selectedIndex}
                 onConfirm={(pairId) => confirmTransferMutation.mutate(pairId)}
                 onDismiss={(pairId) => dismissTransferMutation.mutate(pairId)}
                 busy={
