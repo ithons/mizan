@@ -38,7 +38,14 @@ import { Modal } from '../../components/Modal';
 import { ConfirmRemoveModal } from '../../components/ConfirmRemoveModal';
 import { SyncActivityPanel } from '../../components/SyncActivityPanel';
 import { PageLoader } from '../../components/LoadingSpinner';
-import type { Category, CsvImportPreview, MerchantRule, MerchantRuleSuggestion, SyncRun } from '@shared/types';
+import type {
+  Category,
+  CsvImportPreview,
+  LocalBackupRestorePreview,
+  MerchantRule,
+  MerchantRuleSuggestion,
+  SyncRun,
+} from '@shared/types';
 
 const CATEGORY_PRESET_COLORS = [
   '#32bfa3', '#6487f0', '#ef6f8a', '#e2a53f', '#9b8dee',
@@ -98,6 +105,19 @@ function parseCsvText(text: string): { rows: Array<Record<string, string>>; head
   return { rows, headers };
 }
 
+function parseBackupJsonText(text: string): unknown {
+  if (text.trim().length === 0) {
+    throw new Error('Paste a Mizan backup JSON file first.');
+  }
+
+  try {
+    const parsed: unknown = JSON.parse(text);
+    return parsed;
+  } catch {
+    throw new Error('Backup JSON is not valid JSON.');
+  }
+}
+
 const DEFAULT_CSV_MAPPING = {
   date: 'date',
   amount: 'amount',
@@ -118,6 +138,10 @@ export function DataSection() {
   const [csvMapping, setCsvMapping] = useState(DEFAULT_CSV_MAPPING);
   const [csvPreview, setCsvPreview] = useState<CsvImportPreview | null>(null);
   const [csvParseError, setCsvParseError] = useState<string | null>(null);
+  const [backupText, setBackupText] = useState('');
+  const [backupPreview, setBackupPreview] = useState<LocalBackupRestorePreview | null>(null);
+  const [backupParseError, setBackupParseError] = useState<string | null>(null);
+  const [backupConfirm, setBackupConfirm] = useState('');
 
   const { data: syncRuns } = useQuery<SyncRun[]>({
     queryKey: ['sync', 'history', 'settings'],
@@ -170,6 +194,49 @@ export function DataSection() {
       });
     },
     onError: (err: Error) => addToast({ type: 'error', message: err.message }),
+  });
+
+  const previewBackupMutation = useMutation({
+    mutationFn: () => {
+      const backup = parseBackupJsonText(backupText);
+      setBackupParseError(null);
+      return settingsApi.previewBackupRestore({ backup });
+    },
+    onSuccess: (preview) => {
+      setBackupPreview(preview);
+      addToast({
+        type: preview.valid ? 'success' : 'error',
+        message: preview.valid ? 'Backup preview ready' : 'Backup preview has errors',
+      });
+    },
+    onError: (err: Error) => {
+      setBackupParseError(err.message);
+      addToast({ type: 'error', message: err.message });
+    },
+  });
+
+  const restoreBackupMutation = useMutation({
+    mutationFn: () => {
+      if (backupConfirm !== 'restore') {
+        throw new Error('Type restore to confirm backup restore.');
+      }
+      const backup = parseBackupJsonText(backupText);
+      setBackupParseError(null);
+      return settingsApi.restoreBackup({ backup, confirm: 'restore' });
+    },
+    onSuccess: (result) => {
+      qc.invalidateQueries();
+      setBackupPreview(null);
+      setBackupConfirm('');
+      addToast({
+        type: result.warnings.length > 0 ? 'info' : 'success',
+        message: `Restored ${result.restored_rows} row${result.restored_rows === 1 ? '' : 's'} from backup`,
+      });
+    },
+    onError: (err: Error) => {
+      setBackupParseError(err.message);
+      addToast({ type: 'error', message: err.message });
+    },
   });
 
   const handleCsvExport = async () => {
@@ -320,11 +387,11 @@ export function DataSection() {
             </button>
           </div>
 
-          <div className="border border-border bg-background rounded p-3 space-y-3">
+          <div className="border border-border bg-background rounded p-3 space-y-3 md:col-span-2">
             <div>
               <p className="text-sm text-text">Full Local Backup</p>
               <p className="text-xs text-muted mt-1">
-                Download accounts, transactions, categories, budgets, goals, investments, snapshots, and sync history. Provider credentials are not included.
+                Download or restore accounts, transactions, categories, budgets, goals, investments, snapshots, and sync history. Provider credentials are not included.
               </p>
             </div>
             <button
@@ -333,6 +400,127 @@ export function DataSection() {
             >
               <Download size={14} /> Export Backup
             </button>
+
+            <div className="border-t border-border pt-3 space-y-3">
+              <div>
+                <p className="text-sm text-text">Restore Backup</p>
+                <p className="text-xs text-muted mt-1">
+                  Preview first. Restore replaces local data tables, keeps encrypted credentials, and preserves the current migration state.
+                </p>
+              </div>
+
+              <textarea
+                className="w-full min-h-28 bg-surface border border-border rounded px-3 py-2 text-xs text-text font-mono resize-y focus:outline-none focus:ring-1 focus:ring-green-50"
+                value={backupText}
+                onChange={(event) => {
+                  setBackupText(event.target.value);
+                  setBackupPreview(null);
+                  setBackupParseError(null);
+                  setBackupConfirm('');
+                }}
+                placeholder='{"app":"mizan","version":1,"exported_at":"...","tables":{...}}'
+              />
+
+              {backupParseError && (
+                <p className="text-xs text-rose">{backupParseError}</p>
+              )}
+
+              {backupPreview && (
+                <div className="border border-border rounded p-3 bg-surface space-y-3">
+                  <div className="grid grid-cols-2 md:grid-cols-5 gap-3 text-xs">
+                    <div>
+                      <p className="text-muted mb-0.5">Status</p>
+                      <p className={backupPreview.valid ? 'font-mono text-green' : 'font-mono text-rose'}>
+                        {backupPreview.valid ? 'Ready' : 'Blocked'}
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-muted mb-0.5">Exported</p>
+                      <p className="font-mono text-text">
+                        {backupPreview.exported_at ? formatRelativeTime(backupPreview.exported_at) : '-'}
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-muted mb-0.5">Rows</p>
+                      <p className="font-mono text-text">{backupPreview.restorable_rows}</p>
+                    </div>
+                    <div>
+                      <p className="text-muted mb-0.5">Tables</p>
+                      <p className="font-mono text-text">
+                        {backupPreview.restorable_table_count}/{backupPreview.table_count}
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-muted mb-0.5">Issues</p>
+                      <p className="font-mono text-text">
+                        {backupPreview.errors.length + backupPreview.warnings.length}
+                      </p>
+                    </div>
+                  </div>
+
+                  {(backupPreview.errors.length > 0 || backupPreview.warnings.length > 0) && (
+                    <div className="max-h-28 overflow-y-auto space-y-1">
+                      {[...backupPreview.errors, ...backupPreview.warnings].slice(0, 8).map((issue, index) => (
+                        <p
+                          key={`${index}:${issue}`}
+                          className={`text-xs ${backupPreview.errors.includes(issue) ? 'text-rose' : 'text-muted'}`}
+                        >
+                          {issue}
+                        </p>
+                      ))}
+                    </div>
+                  )}
+
+                  <div className="max-h-36 overflow-y-auto divide-y divide-border rounded border border-border">
+                    {backupPreview.tables
+                      .filter((table) => table.restorable || table.backup_rows > 0)
+                      .slice(0, 12)
+                      .map((table) => (
+                        <div key={table.table} className="grid grid-cols-[1fr_auto_auto] gap-3 px-2 py-1.5 text-xs">
+                          <span className="text-text truncate">{table.table}</span>
+                          <span className="font-mono text-muted">{table.backup_rows} backup</span>
+                          <span className="font-mono text-muted">{table.current_rows} current</span>
+                        </div>
+                      ))}
+                  </div>
+
+                  {backupPreview.valid && (
+                    <label className="block space-y-1">
+                      <span className="text-xs text-muted">
+                        Type <span className="font-mono text-rose">restore</span> to replace local data tables
+                      </span>
+                      <input
+                        className="w-full bg-background border border-border rounded px-3 py-2 text-sm text-text font-mono focus:outline-none focus:ring-1 focus:ring-rose/50"
+                        value={backupConfirm}
+                        onChange={(event) => setBackupConfirm(event.target.value)}
+                        placeholder="restore"
+                      />
+                    </label>
+                  )}
+                </div>
+              )}
+
+              <div className="flex flex-wrap gap-2">
+                <button
+                  className="flex items-center gap-2 px-4 py-2 text-sm border border-border rounded text-muted hover:text-text disabled:opacity-40"
+                  onClick={() => previewBackupMutation.mutate()}
+                  disabled={previewBackupMutation.isPending || backupText.trim().length === 0}
+                >
+                  Preview Backup
+                </button>
+                <button
+                  className="flex items-center gap-2 px-4 py-2 text-sm border border-rose/40 text-rose rounded hover:bg-rose/10 disabled:opacity-40"
+                  onClick={() => restoreBackupMutation.mutate()}
+                  disabled={
+                    restoreBackupMutation.isPending ||
+                    !backupPreview?.valid ||
+                    backupConfirm !== 'restore'
+                  }
+                >
+                  Restore Backup
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       </div>

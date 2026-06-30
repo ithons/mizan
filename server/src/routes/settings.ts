@@ -6,6 +6,8 @@ import {
   CoinbaseCredentialsSchema,
   CsvImportMappingSchema,
   DeleteDataSchema,
+  BackupRestorePreviewSchema,
+  BackupRestoreSchema,
 } from '../../../shared/schemas';
 import {
   getCredentials,
@@ -18,7 +20,12 @@ import { resetPlaidClient } from '../services/plaid';
 import { takeSnapshot } from '../services/snapshot';
 import { detectRecurring } from '../services/recurring';
 import { refreshTransactionIntegrity } from '../services/transactionIntegrity';
-import { buildLocalBackup } from '../services/localBackup';
+import {
+  buildLocalBackup,
+  buildLocalBackupRestorePreview,
+  restoreLocalBackup,
+  LocalBackupValidationError,
+} from '../services/localBackup';
 import { buildCsvImportPreview, commitCsvImport } from '../services/csvImport';
 import type { z } from 'zod';
 
@@ -162,6 +169,36 @@ router.get('/backup-json', (_req: Request, res: Response, next: NextFunction): v
     next(err);
   }
 });
+
+// POST /backup-json/preview
+router.post(
+  '/backup-json/preview',
+  validate(BackupRestorePreviewSchema),
+  (req: Request, res: Response, next: NextFunction): void => {
+    try {
+      res.json({ data: buildLocalBackupRestorePreview(getDb(), req.body.backup) });
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
+// POST /backup-json/restore
+router.post(
+  '/backup-json/restore',
+  validate(BackupRestoreSchema),
+  (req: Request, res: Response, next: NextFunction): void => {
+    try {
+      res.json({ data: restoreLocalBackup(getDb(), req.body.backup) });
+    } catch (err) {
+      if (err instanceof LocalBackupValidationError) {
+        res.status(400).json({ error: err.message, details: err.errors });
+        return;
+      }
+      next(err);
+    }
+  }
+);
 
 // POST /import-csv/preview
 router.post('/import-csv/preview', (req: Request, res: Response, next: NextFunction): void => {

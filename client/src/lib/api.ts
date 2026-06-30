@@ -37,6 +37,8 @@ import type {
   AdvisorDraftAction,
   AdvisorContextResponse,
   CsvImportPreview,
+  LocalBackupRestorePreview,
+  LocalBackupRestoreResult,
 } from '@shared/types';
 
 type PlaidSyncStatus = 'synced' | 'reauth_required';
@@ -542,6 +544,16 @@ export const settingsApi = {
     };
   }) =>
     apiFetch<CsvImportPreview>('/api/settings/import-csv/preview', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+  previewBackupRestore: (body: { backup: unknown }) =>
+    apiFetch<LocalBackupRestorePreview>('/api/settings/backup-json/preview', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+  restoreBackup: (body: { backup: unknown; confirm: 'restore' }) =>
+    apiFetch<LocalBackupRestoreResult>('/api/settings/backup-json/restore', {
       method: 'POST',
       body: JSON.stringify(body),
     }),

@@ -136,6 +136,14 @@ export const DeleteDataSchema = z.object({
   confirm: z.literal('delete'),
 });
 
+export const BackupRestorePreviewSchema = z.object({
+  backup: z.unknown(),
+});
+
+export const BackupRestoreSchema = BackupRestorePreviewSchema.extend({
+  confirm: z.literal('restore'),
+});
+
 export const CsvImportMappingSchema = z.object({
   date: z.string(),
   amount: z.string(),

@@ -781,3 +781,33 @@ export interface CsvImportPreview {
   errors: CsvImportPreviewIssue[];
   warnings: CsvImportPreviewIssue[];
 }
+
+export interface LocalBackupRestorePreviewTable {
+  table: string;
+  backup_rows: number;
+  current_rows: number;
+  restorable: boolean;
+  missing_columns: string[];
+  extra_columns: string[];
+}
+
+export interface LocalBackupRestorePreview {
+  valid: boolean;
+  app?: string;
+  version?: number;
+  exported_at?: string;
+  table_count: number;
+  restorable_table_count: number;
+  total_rows: number;
+  restorable_rows: number;
+  tables: LocalBackupRestorePreviewTable[];
+  errors: string[];
+  warnings: string[];
+}
+
+export interface LocalBackupRestoreResult {
+  restored_tables: number;
+  restored_rows: number;
+  skipped_tables: string[];
+  warnings: string[];
+}
