@@ -5,8 +5,9 @@ import type { Budget, RecurringPattern } from '../../../shared/types';
 type Frequency = RecurringPattern['frequency'];
 type ForecastConfidence = NonNullable<Budget['forecast_confidence']>;
 
-interface BudgetRow extends Budget {
+interface BudgetRow extends Omit<Budget, 'rollover'> {
   spent: number;
+  rollover: boolean | number;
 }
 
 interface CategoryRow {
@@ -79,6 +80,62 @@ function categoryDescendants(db: Database.Database): Map<string, Set<string>> {
   };
 
   return new Map(rows.map((row) => [row.id, expand(row.id)]));
+}
+
+function nextMonthKey(monthKey: string): string {
+  return format(addMonths(parseISO(`${monthKey}-01`), 1), 'yyyy-MM');
+}
+
+function spendingByMonth(
+  db: Database.Database,
+  categoryIds: Set<string>,
+  startMonth: string,
+  endMonthExclusive: string
+): Map<string, number> {
+  if (categoryIds.size === 0 || startMonth >= endMonthExclusive) return new Map();
+
+  const ids = Array.from(categoryIds);
+  const placeholders = ids.map(() => '?').join(', ');
+  const rows = db.prepare(`
+    SELECT substr(date, 1, 7) AS month, COALESCE(SUM(ABS(amount)), 0) AS spent
+    FROM transactions
+    WHERE category_id IN (${placeholders})
+      AND date >= ?
+      AND date < ?
+      AND amount < 0
+      AND pending = 0
+    GROUP BY substr(date, 1, 7)
+  `).all(
+    ...ids,
+    `${startMonth}-01`,
+    `${endMonthExclusive}-01`
+  ) as Array<{ month: string; spent: number }>;
+
+  return new Map(rows.map((row) => [row.month, row.spent]));
+}
+
+function rolloverBalanceForBudget(
+  db: Database.Database,
+  budget: BudgetRow,
+  categoryIds: Set<string>,
+  selectedMonth: string
+): number {
+  if (!budget.rollover) return 0;
+
+  const createdMonth = budget.created_at.slice(0, 7);
+  const seed = Number(budget.rollover_balance ?? 0);
+  if (createdMonth >= selectedMonth) return seed;
+
+  const spending = spendingByMonth(db, categoryIds, createdMonth, selectedMonth);
+  let balance = seed;
+  let monthKey = createdMonth;
+
+  while (monthKey < selectedMonth) {
+    balance += budget.amount - (spending.get(monthKey) ?? 0);
+    monthKey = nextMonthKey(monthKey);
+  }
+
+  return balance;
 }
 
 function recurringRows(db: Database.Database, endDate: string): RecurringRow[] {
@@ -203,15 +260,19 @@ export function getMonthlyBudgetsWithProjection(
       confidence = combineConfidence(confidence, occurrence.confidence);
     }
 
+    const rolloverBalance = rolloverBalanceForBudget(db, budget, categoryIds, `${year}-${monthPart}`);
+    const availableAmount = budget.amount + rolloverBalance;
     const projectedSpend = (budget.spent ?? 0) + expectedRecurring;
-    const projectedRemaining = budget.amount - projectedSpend;
+    const projectedRemaining = availableAmount - projectedSpend;
 
     return {
       ...budget,
+      rollover: Boolean(budget.rollover),
+      rollover_balance: rolloverBalance,
       expected_recurring: expectedRecurring,
       projected_spend: projectedSpend,
       projected_remaining: projectedRemaining,
-      projected_percent: budget.amount > 0 ? (projectedSpend / budget.amount) * 100 : 0,
+      projected_percent: availableAmount > 0 ? (projectedSpend / availableAmount) * 100 : 0,
       forecast_confidence: confidence,
     };
   });

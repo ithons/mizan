@@ -144,3 +144,31 @@ test('past month budgets keep actuals without adding future recurring projection
   assert.equal(home?.expected_recurring, 0);
   assert.equal(home?.projected_spend, 700);
 });
+
+test('rollover budgets use prior posted spending as current month carryover', (t) => {
+  const db = setupBudgetDb();
+  t.after(() => db.close());
+
+  db.prepare(`
+    UPDATE budgets
+    SET rollover = 1, created_at = '2026-04-01'
+    WHERE id = 'budget_food'
+  `).run();
+
+  db.prepare(`
+    INSERT INTO transactions (id, category_id, recurring_id, date, amount, pending)
+    VALUES
+      ('april_food', 'cat_food', NULL, '2026-04-10', -450, 0),
+      ('may_food', 'cat_food', NULL, '2026-05-11', -300, 0)
+  `).run();
+
+  const budgets = getMonthlyBudgetsWithProjection(db, 2026, 6, new Date('2026-06-15T12:00:00.000Z'));
+  const food = budgets.find((budget) => budget.category_id === 'cat_food');
+
+  assert.equal(food?.rollover, true);
+  assert.equal(food?.rollover_balance, 250);
+  assert.equal(food?.spent, 100);
+  assert.equal(food?.projected_spend, 100);
+  assert.equal(food?.projected_remaining, 650);
+  assert.equal(food?.projected_percent, 100 / 750 * 100);
+});

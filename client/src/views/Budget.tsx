@@ -16,6 +16,10 @@ import type { Budget as BudgetModel, Category } from '@shared/types';
 
 // ─── Budget Progress Bar ─────────────────────────────────────────────────────
 
+function availableBudgetAmount(budget: BudgetModel): number {
+  return budget.amount + (budget.rollover ? budget.rollover_balance : 0);
+}
+
 function BudgetRow({
   budget,
   onEdit,
@@ -26,12 +30,14 @@ function BudgetRow({
   onDelete: (id: string) => void;
 }) {
   const spent = budget.spent ?? 0;
+  const rolloverBalance = budget.rollover ? budget.rollover_balance : 0;
+  const availableAmount = availableBudgetAmount(budget);
   const projectedSpend = budget.projected_spend ?? spent;
   const expectedRecurring = budget.expected_recurring ?? 0;
-  const projectedPct = budget.projected_percent ?? (budget.amount > 0 ? (projectedSpend / budget.amount) * 100 : 0);
-  const actualPct = budget.amount > 0 ? (spent / budget.amount) * 100 : 0;
+  const projectedPct = budget.projected_percent ?? (availableAmount > 0 ? (projectedSpend / availableAmount) * 100 : 0);
+  const actualPct = availableAmount > 0 ? (spent / availableAmount) * 100 : 0;
   const barColor = projectedPct >= 100 ? '#e07070' : projectedPct >= 80 ? '#d4a44c' : '#4ecba3';
-  const remaining = budget.amount - spent;
+  const remaining = availableAmount - spent;
   const projectedRemaining = budget.projected_remaining ?? remaining;
 
   const [editing, setEditing] = useState(false);
@@ -53,9 +59,9 @@ function BudgetRow({
             icon={budget.category_icon}
             size="md"
           />
-          {budget.rollover && budget.rollover_balance !== 0 && (
+          {rolloverBalance !== 0 && (
             <span className="text-xs text-muted font-mono">
-              (+{formatCurrency(budget.rollover_balance)} rollover)
+              ({rolloverBalance > 0 ? '+' : ''}{formatCurrency(rolloverBalance)} rollover)
             </span>
           )}
         </div>
@@ -86,7 +92,7 @@ function BudgetRow({
               className="font-mono text-xs text-muted hover:text-text"
               onClick={() => { setEditing(true); setEditVal(String(budget.amount)); }}
             >
-              {formatCurrency(projectedSpend)} / {formatCurrency(budget.amount)}
+              {formatCurrency(projectedSpend)} / {formatCurrency(availableAmount)}
             </button>
           )}
           <button
@@ -434,7 +440,7 @@ export function Budget() {
   });
 
   // Summary stats
-  const budgeted = budgets.reduce((sum, b) => sum + b.amount, 0);
+  const budgeted = budgets.reduce((sum, b) => sum + availableBudgetAmount(b), 0);
   const spent = budgets.reduce((sum, b) => sum + (b.spent ?? 0), 0);
   const expectedRecurring = budgets.reduce((sum, b) => sum + (b.expected_recurring ?? 0), 0);
   const projectedSpend = budgets.reduce((sum, b) => sum + (b.projected_spend ?? b.spent ?? 0), 0);
