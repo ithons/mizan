@@ -729,14 +729,15 @@ export function Dashboard() {
             <div className="space-y-3">
               {budgets.slice(0, 6).map((budget) => {
                 const spent = budget.spent ?? 0;
-                const pct = budget.amount > 0 ? (spent / budget.amount) * 100 : 0;
+                const projected = budget.projected_spend ?? spent;
+                const pct = budget.amount > 0 ? (projected / budget.amount) * 100 : 0;
                 const barColor = pct >= 100 ? '#e07070' : pct >= 80 ? '#d4a44c' : '#4ecba3';
                 return (
                   <div key={budget.id}>
                     <div className="flex items-center justify-between text-xs mb-1">
                       <span className="text-text">{budget.category_name}</span>
                       <span className="font-mono text-muted">
-                        {formatCurrency(spent)} / {formatCurrency(budget.amount)}
+                        {formatCurrency(projected)} / {formatCurrency(budget.amount)}
                       </span>
                     </div>
                     <div className="h-1.5 bg-border rounded-full overflow-hidden">

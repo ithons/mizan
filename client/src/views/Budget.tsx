@@ -25,9 +25,13 @@ function BudgetRow({
   onDelete: (id: string) => void;
 }) {
   const spent = budget.spent ?? 0;
-  const pct = budget.amount > 0 ? (spent / budget.amount) * 100 : 0;
-  const barColor = pct >= 100 ? '#e07070' : pct >= 80 ? '#d4a44c' : '#4ecba3';
+  const projectedSpend = budget.projected_spend ?? spent;
+  const expectedRecurring = budget.expected_recurring ?? 0;
+  const projectedPct = budget.projected_percent ?? (budget.amount > 0 ? (projectedSpend / budget.amount) * 100 : 0);
+  const actualPct = budget.amount > 0 ? (spent / budget.amount) * 100 : 0;
+  const barColor = projectedPct >= 100 ? '#e07070' : projectedPct >= 80 ? '#d4a44c' : '#4ecba3';
   const remaining = budget.amount - spent;
+  const projectedRemaining = budget.projected_remaining ?? remaining;
 
   const [editing, setEditing] = useState(false);
   const [editVal, setEditVal] = useState(String(budget.amount));
@@ -55,7 +59,7 @@ function BudgetRow({
           )}
         </div>
         <div className="flex items-center gap-3">
-          <span className="text-xs text-muted">{formatPercent(pct)}</span>
+          <span className="text-xs text-muted">{formatPercent(projectedPct)}</span>
           {editing ? (
             <div className="flex items-center gap-1">
               <input
@@ -81,7 +85,7 @@ function BudgetRow({
               className="font-mono text-xs text-muted hover:text-text"
               onClick={() => { setEditing(true); setEditVal(String(budget.amount)); }}
             >
-              {formatCurrency(spent)} / {formatCurrency(budget.amount)}
+              {formatCurrency(projectedSpend)} / {formatCurrency(budget.amount)}
             </button>
           )}
           <button
@@ -94,16 +98,38 @@ function BudgetRow({
       </div>
       <div className="h-2 bg-border rounded-full overflow-hidden">
         <div
-          className="h-full rounded-full transition-all"
-          style={{ width: `${Math.min(pct, 100)}%`, backgroundColor: barColor }}
+          className="h-full rounded-full transition-all relative"
+          style={{ width: `${Math.min(projectedPct, 100)}%`, backgroundColor: barColor }}
         />
       </div>
-      <div className="flex justify-between mt-1">
+      {expectedRecurring > 0 && actualPct < projectedPct && (
+        <div className="h-2 -mt-2 pointer-events-none">
+          <div
+            className="h-full bg-white/20 rounded-full"
+            style={{ width: `${Math.min(actualPct, 100)}%` }}
+          />
+        </div>
+      )}
+      <div className="flex justify-between mt-1 gap-3">
         <span className="text-xs text-muted">
           {remaining >= 0 ? (
             <span className="text-[#4ecba3]">{formatCurrency(remaining)} remaining</span>
           ) : (
             <span className="text-[#e07070]">{formatCurrency(Math.abs(remaining))} over budget</span>
+          )}
+        </span>
+        <span className="text-xs text-muted text-right">
+          {expectedRecurring > 0 ? (
+            <>
+              {formatCurrency(expectedRecurring)} expected,{' '}
+              <span style={{ color: projectedRemaining >= 0 ? '#4ecba3' : '#e07070' }}>
+                {projectedRemaining >= 0
+                  ? `${formatCurrency(projectedRemaining)} projected left`
+                  : `${formatCurrency(Math.abs(projectedRemaining))} projected over`}
+              </span>
+            </>
+          ) : (
+            <span>No recurring forecast</span>
           )}
         </span>
       </div>
@@ -409,7 +435,10 @@ export function Budget() {
   // Summary stats
   const budgeted = budgets.reduce((sum, b) => sum + b.amount, 0);
   const spent = budgets.reduce((sum, b) => sum + (b.spent ?? 0), 0);
+  const expectedRecurring = budgets.reduce((sum, b) => sum + (b.expected_recurring ?? 0), 0);
+  const projectedSpend = budgets.reduce((sum, b) => sum + (b.projected_spend ?? b.spent ?? 0), 0);
   const remaining = budgeted - spent;
+  const projectedRemaining = budgeted - projectedSpend;
 
   // Unbudgeted: categories with spending but no budget
   const budgetedCatIds = new Set(budgets.map((b) => b.category_id));
@@ -457,7 +486,7 @@ export function Budget() {
           </div>
 
           {/* Summary bar */}
-          <div className="grid grid-cols-3 gap-4">
+          <div className="grid grid-cols-4 gap-4">
             <div className="bg-surface border border-border rounded p-4">
               <p className="text-xs text-muted mb-1">Budgeted</p>
               <p className="font-mono text-lg text-text">{formatCurrency(budgeted)}</p>
@@ -474,6 +503,20 @@ export function Budget() {
               >
                 {formatCurrency(remaining)}
               </p>
+            </div>
+            <div className="bg-surface border border-border rounded p-4">
+              <p className="text-xs text-muted mb-1">Projected</p>
+              <p
+                className="font-mono text-lg"
+                style={{ color: projectedRemaining >= 0 ? '#4ecba3' : '#e07070' }}
+              >
+                {formatCurrency(projectedSpend)}
+              </p>
+              {expectedRecurring > 0 && (
+                <p className="text-xs text-muted mt-1">
+                  {formatCurrency(expectedRecurring)} expected
+                </p>
+              )}
             </div>
           </div>
 

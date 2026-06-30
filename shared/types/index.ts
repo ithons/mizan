@@ -138,6 +138,11 @@ export interface Budget {
   category_color?: string | null;
   category_icon?: string | null;
   spent?: number;
+  expected_recurring?: number;
+  projected_spend?: number;
+  projected_remaining?: number;
+  projected_percent?: number;
+  forecast_confidence?: 'none' | 'confirmed' | 'likely' | 'uncertain';
 }
 
 export interface RecurringPattern {
