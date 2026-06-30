@@ -31,14 +31,14 @@ import {
   syncApi,
   flattenCategories,
 } from '../../lib/api';
-import { formatRelativeTime } from '../../lib/formatters';
+import { formatCurrency, formatRelativeTime } from '../../lib/formatters';
 import { useAppStore } from '../../store';
 import { invalidateFinancialData } from '../../lib/queryInvalidation';
 import { Modal } from '../../components/Modal';
 import { ConfirmRemoveModal } from '../../components/ConfirmRemoveModal';
 import { SyncActivityPanel } from '../../components/SyncActivityPanel';
 import { PageLoader } from '../../components/LoadingSpinner';
-import type { Category, MerchantRule, MerchantRuleSuggestion, SyncRun } from '@shared/types';
+import type { Category, CsvImportPreview, MerchantRule, MerchantRuleSuggestion, SyncRun } from '@shared/types';
 
 const CATEGORY_PRESET_COLORS = [
   '#32bfa3', '#6487f0', '#ef6f8a', '#e2a53f', '#9b8dee',
@@ -46,11 +46,78 @@ const CATEGORY_PRESET_COLORS = [
   '#c4a86e', '#6e8ec4',
 ];
 
+function parseCsvLine(line: string): string[] {
+  const values: string[] = [];
+  let current = '';
+  let inQuotes = false;
+
+  for (let index = 0; index < line.length; index++) {
+    const char = line[index];
+    const next = line[index + 1];
+
+    if (char === '"' && inQuotes && next === '"') {
+      current += '"';
+      index++;
+      continue;
+    }
+
+    if (char === '"') {
+      inQuotes = !inQuotes;
+      continue;
+    }
+
+    if (char === ',' && !inQuotes) {
+      values.push(current.trim());
+      current = '';
+      continue;
+    }
+
+    current += char;
+  }
+
+  values.push(current.trim());
+  return values;
+}
+
+function parseCsvText(text: string): { rows: Array<Record<string, string>>; headers: string[]; error?: string } {
+  const lines = text.split(/\r?\n/).filter((line) => line.trim().length > 0);
+  if (lines.length < 2) {
+    return { rows: [], headers: [], error: 'Paste a header row and at least one transaction row.' };
+  }
+
+  const headers = parseCsvLine(lines[0]);
+  if (headers.length === 0 || headers.some((header) => header.length === 0)) {
+    return { rows: [], headers: [], error: 'CSV headers cannot be blank.' };
+  }
+
+  const rows = lines.slice(1).map((line) => {
+    const values = parseCsvLine(line);
+    return Object.fromEntries(headers.map((header, index) => [header, values[index] ?? '']));
+  });
+
+  return { rows, headers };
+}
+
+const DEFAULT_CSV_MAPPING = {
+  date: 'date',
+  amount: 'amount',
+  merchant: 'merchant_name',
+  category: 'category_name',
+  account: 'account_name',
+  notes: 'notes',
+  dateFormat: 'yyyy-MM-dd',
+  amountNegate: false,
+};
+
 export function DataSection() {
   const { addToast } = useAppStore();
   const qc = useQueryClient();
   const [showDangerModal, setShowDangerModal] = useState(false);
   const [deleteConfirm, setDeleteConfirm] = useState('');
+  const [csvText, setCsvText] = useState('');
+  const [csvMapping, setCsvMapping] = useState(DEFAULT_CSV_MAPPING);
+  const [csvPreview, setCsvPreview] = useState<CsvImportPreview | null>(null);
+  const [csvParseError, setCsvParseError] = useState<string | null>(null);
 
   const { data: syncRuns } = useQuery<SyncRun[]>({
     queryKey: ['sync', 'history', 'settings'],
@@ -63,6 +130,44 @@ export function DataSection() {
       addToast({ type: 'success', message: 'All data deleted' });
       qc.invalidateQueries();
       setShowDangerModal(false);
+    },
+    onError: (err: Error) => addToast({ type: 'error', message: err.message }),
+  });
+
+  const previewCsvMutation = useMutation({
+    mutationFn: () => {
+      const parsed = parseCsvText(csvText);
+      if (parsed.error) {
+        setCsvParseError(parsed.error);
+        throw new Error(parsed.error);
+      }
+      setCsvParseError(null);
+      return settingsApi.previewCsvImport({ rows: parsed.rows, mapping: csvMapping });
+    },
+    onSuccess: (preview) => {
+      setCsvPreview(preview);
+      addToast({ type: 'success', message: 'CSV preview ready' });
+    },
+    onError: (err: Error) => addToast({ type: 'error', message: err.message }),
+  });
+
+  const importCsvMutation = useMutation({
+    mutationFn: () => {
+      const parsed = parseCsvText(csvText);
+      if (parsed.error) {
+        setCsvParseError(parsed.error);
+        throw new Error(parsed.error);
+      }
+      setCsvParseError(null);
+      return settingsApi.importCsv({ rows: parsed.rows, mapping: csvMapping });
+    },
+    onSuccess: (result) => {
+      invalidateFinancialData(qc);
+      setCsvPreview(null);
+      addToast({
+        type: result.errors.length > 0 ? 'info' : 'success',
+        message: `Imported ${result.imported} transaction${result.imported === 1 ? '' : 's'}`,
+      });
     },
     onError: (err: Error) => addToast({ type: 'error', message: err.message }),
   });
@@ -90,6 +195,118 @@ export function DataSection() {
       <div>
         <h3 className="text-sm font-medium text-text mb-3">Data Management</h3>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+          <div className="border border-border bg-background rounded p-3 space-y-3 md:col-span-2">
+            <div>
+              <p className="text-sm text-text">CSV Import Preview</p>
+              <p className="text-xs text-muted mt-1">Preview normalized rows, invalid rows, duplicate warnings, and manual-account balance impact before importing.</p>
+            </div>
+
+            <textarea
+              className="w-full min-h-28 bg-surface border border-border rounded px-3 py-2 text-xs text-text font-mono resize-y focus:outline-none focus:ring-1 focus:ring-green-50"
+              value={csvText}
+              onChange={(event) => {
+                setCsvText(event.target.value);
+                setCsvPreview(null);
+                setCsvParseError(null);
+              }}
+              placeholder="date,amount,merchant_name,category_name,account_name,notes"
+            />
+
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+              {[
+                ['date', 'Date column'],
+                ['amount', 'Amount column'],
+                ['merchant', 'Merchant column'],
+                ['category', 'Category column'],
+                ['account', 'Account column'],
+                ['notes', 'Notes column'],
+                ['dateFormat', 'Date format'],
+              ].map(([key, label]) => (
+                <label key={key} className="space-y-1">
+                  <span className="text-[11px] text-muted">{label}</span>
+                  <input
+                    className="w-full bg-surface border border-border rounded px-2 py-1.5 text-xs text-text font-mono focus:outline-none focus:ring-1 focus:ring-green-50"
+                    value={String(csvMapping[key as keyof typeof csvMapping] ?? '')}
+                    onChange={(event) => {
+                      setCsvMapping((mapping) => ({ ...mapping, [key]: event.target.value }));
+                      setCsvPreview(null);
+                    }}
+                  />
+                </label>
+              ))}
+              <label className="flex items-center gap-2 pt-5 text-xs text-muted">
+                <input
+                  type="checkbox"
+                  className="accent-green"
+                  checked={csvMapping.amountNegate}
+                  onChange={(event) => {
+                    setCsvMapping((mapping) => ({ ...mapping, amountNegate: event.target.checked }));
+                    setCsvPreview(null);
+                  }}
+                />
+                Flip amount signs
+              </label>
+            </div>
+
+            {csvParseError && (
+              <p className="text-xs text-rose">{csvParseError}</p>
+            )}
+
+            {csvPreview && (
+              <div className="border border-border rounded p-3 bg-surface space-y-3">
+                <div className="grid grid-cols-2 md:grid-cols-5 gap-3 text-xs">
+                  <div>
+                    <p className="text-muted mb-0.5">Valid</p>
+                    <p className="font-mono text-green">{csvPreview.valid_count}</p>
+                  </div>
+                  <div>
+                    <p className="text-muted mb-0.5">Invalid</p>
+                    <p className="font-mono text-rose">{csvPreview.invalid_count}</p>
+                  </div>
+                  <div>
+                    <p className="text-muted mb-0.5">Duplicates</p>
+                    <p className="font-mono text-amber">{csvPreview.duplicate_candidate_count}</p>
+                  </div>
+                  <div>
+                    <p className="text-muted mb-0.5">Balance impact</p>
+                    <p className="font-mono text-text">{formatCurrency(csvPreview.balance_delta, { showSign: true })}</p>
+                  </div>
+                  <div>
+                    <p className="text-muted mb-0.5">Warnings</p>
+                    <p className="font-mono text-blue">{csvPreview.warnings.length}</p>
+                  </div>
+                </div>
+
+                {(csvPreview.errors.length > 0 || csvPreview.warnings.length > 0) && (
+                  <div className="max-h-28 overflow-y-auto space-y-1">
+                    {[...csvPreview.errors, ...csvPreview.warnings].slice(0, 8).map((issue) => (
+                      <p key={`${issue.row_number}:${issue.message}`} className={`text-xs ${issue.severity === 'error' ? 'text-rose' : 'text-muted'}`}>
+                        Row {issue.row_number}: {issue.message}
+                      </p>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+
+            <div className="flex flex-wrap gap-2">
+              <button
+                className="flex items-center gap-2 px-4 py-2 text-sm border border-border rounded text-muted hover:text-text disabled:opacity-40"
+                onClick={() => previewCsvMutation.mutate()}
+                disabled={previewCsvMutation.isPending || csvText.trim().length === 0}
+              >
+                Preview Import
+              </button>
+              <button
+                className="flex items-center gap-2 px-4 py-2 text-sm bg-text text-surface font-medium rounded hover:opacity-90 disabled:opacity-40"
+                onClick={() => importCsvMutation.mutate()}
+                disabled={importCsvMutation.isPending || !csvPreview || csvPreview.valid_count === 0}
+              >
+                Import Valid Rows
+              </button>
+            </div>
+          </div>
+
           <div className="border border-border bg-background rounded p-3 space-y-3">
             <div>
               <p className="text-sm text-text">Transactions CSV</p>

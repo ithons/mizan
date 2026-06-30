@@ -730,3 +730,37 @@ export interface CredentialStatus {
   coinbase: boolean;
   coinbaseFromEnv: boolean;
 }
+
+export interface CsvImportPreviewIssue {
+  row_number: number;
+  severity: 'error' | 'warning';
+  field?: string;
+  message: string;
+}
+
+export interface CsvImportPreviewRow {
+  row_number: number;
+  valid: boolean;
+  date?: string;
+  amount?: number;
+  merchant_name?: string | null;
+  original_name?: string;
+  account_id?: string;
+  account_name?: string;
+  category_id?: string | null;
+  category_name?: string | null;
+  notes?: string | null;
+  duplicate_candidate_count: number;
+  balance_delta: number;
+  issues: CsvImportPreviewIssue[];
+}
+
+export interface CsvImportPreview {
+  rows: CsvImportPreviewRow[];
+  valid_count: number;
+  invalid_count: number;
+  duplicate_candidate_count: number;
+  balance_delta: number;
+  errors: CsvImportPreviewIssue[];
+  warnings: CsvImportPreviewIssue[];
+}

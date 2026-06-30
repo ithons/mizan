@@ -33,6 +33,7 @@ import type {
   AdvisorConfirmResponse,
   AdvisorDraftAction,
   AdvisorContextResponse,
+  CsvImportPreview,
 } from '@shared/types';
 
 type PlaidSyncStatus = 'synced' | 'reauth_required';
@@ -508,6 +509,23 @@ export const settingsApi = {
     };
   }) =>
     apiFetch<{ imported: number; errors: string[] }>('/api/settings/import-csv', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+  previewCsvImport: (body: {
+    rows: Array<Record<string, string>>;
+    mapping: {
+      date: string;
+      amount: string;
+      merchant?: string;
+      category?: string;
+      account?: string;
+      notes?: string;
+      dateFormat?: string;
+      amountNegate?: boolean;
+    };
+  }) =>
+    apiFetch<CsvImportPreview>('/api/settings/import-csv/preview', {
       method: 'POST',
       body: JSON.stringify(body),
     }),

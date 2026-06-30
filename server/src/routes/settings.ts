@@ -1,6 +1,4 @@
 import { Router, Request, Response, NextFunction } from 'express';
-import { v4 as uuidv4 } from 'uuid';
-import { format, parse, isValid } from 'date-fns';
 import { getDb } from '../db/index';
 import { validate } from '../middleware/validate';
 import {
@@ -15,31 +13,16 @@ import {
   updatePlaidCredentials,
   updateCoinbaseCredentials,
 } from '../services/credentials';
-import { adjustManualAccountBalance } from '../services/manualAccountBalance';
 import type { PlaidCredentials } from '../services/credentials';
 import { resetPlaidClient } from '../services/plaid';
 import { takeSnapshot } from '../services/snapshot';
 import { detectRecurring } from '../services/recurring';
 import { refreshTransactionIntegrity } from '../services/transactionIntegrity';
 import { buildLocalBackup } from '../services/localBackup';
+import { buildCsvImportPreview, commitCsvImport } from '../services/csvImport';
 import type { z } from 'zod';
 
 const router = Router();
-
-function parseCsvAmount(rawAmount: string | undefined): number | null {
-  const trimmed = rawAmount?.trim();
-  if (!trimmed) return null;
-
-  const isParenthesized = trimmed.startsWith('(') && trimmed.endsWith(')');
-  const normalized = trimmed
-    .replace(/^\((.*)\)$/, '-$1')
-    .replace(/[$,\s]/g, '');
-
-  const parsed = Number(normalized);
-  if (!Number.isFinite(parsed)) return null;
-
-  return isParenthesized ? -Math.abs(parsed) : parsed;
-}
 
 // GET /credentials
 router.get('/credentials', (_req: Request, res: Response, next: NextFunction): void => {
@@ -180,6 +163,32 @@ router.get('/backup-json', (_req: Request, res: Response, next: NextFunction): v
   }
 });
 
+// POST /import-csv/preview
+router.post('/import-csv/preview', (req: Request, res: Response, next: NextFunction): void => {
+  try {
+    const db = getDb();
+    const body = req.body as {
+      rows: Array<Record<string, string>>;
+      mapping: z.infer<typeof CsvImportMappingSchema>;
+    };
+
+    const mappingResult = CsvImportMappingSchema.safeParse(body.mapping);
+    if (!mappingResult.success) {
+      res.status(400).json({ error: 'Invalid mapping', details: mappingResult.error.issues });
+      return;
+    }
+
+    res.json({
+      data: buildCsvImportPreview(db, {
+        rows: body.rows || [],
+        mapping: mappingResult.data,
+      }),
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
 // POST /import-csv
 router.post('/import-csv', (req: Request, res: Response, next: NextFunction): void => {
   try {
@@ -197,114 +206,17 @@ router.post('/import-csv', (req: Request, res: Response, next: NextFunction): vo
 
     const mapping = mappingResult.data;
     const rows = body.rows || [];
-    const now = new Date().toISOString();
-    let imported = 0;
-    let balanceChanged = false;
-    const errors: string[] = [];
+    const result = commitCsvImport(db, { rows, mapping });
 
-    for (let i = 0; i < rows.length; i++) {
-      const row = rows[i];
-
-      try {
-        // Parse date
-        let dateStr = (row[mapping.date] || '').trim();
-        const dateFormat = mapping.dateFormat || 'yyyy-MM-dd';
-        let parsedDate: Date;
-
-        parsedDate = parse(dateStr, dateFormat, new Date());
-
-        if (!isValid(parsedDate)) {
-          errors.push(`Row ${i + 1}: Invalid date "${dateStr}"`);
-          continue;
-        }
-
-        dateStr = format(parsedDate, 'yyyy-MM-dd');
-
-        // Parse amount
-        let amount = parseCsvAmount(row[mapping.amount]);
-        if (amount === null) {
-          errors.push(`Row ${i + 1}: Invalid amount "${row[mapping.amount]}"`);
-          continue;
-        }
-        if (mapping.amountNegate) {
-          amount = -amount;
-        }
-
-        // Find account by name if provided
-        let accountId: string | null = null;
-        if (mapping.account && row[mapping.account]) {
-          const acct = db.prepare(
-            'SELECT id FROM accounts WHERE account_name = ? OR institution_name = ? LIMIT 1'
-          ).get(row[mapping.account], row[mapping.account]) as { id: string } | undefined;
-          accountId = acct?.id || null;
-        }
-
-        if (!accountId) {
-          // Use first manual account or skip
-          const fallback = db.prepare(
-            "SELECT id FROM accounts WHERE is_manual = 1 LIMIT 1"
-          ).get() as { id: string } | undefined;
-          if (!fallback) {
-            errors.push(`Row ${i + 1}: No account found`);
-            continue;
-          }
-          accountId = fallback.id;
-        }
-
-        // Find category if provided
-        let categoryId: string | null = null;
-        if (mapping.category && row[mapping.category]) {
-          const cat = db.prepare(
-            'SELECT id FROM categories WHERE name = ? LIMIT 1'
-          ).get(row[mapping.category]) as { id: string } | undefined;
-          categoryId = cat?.id || null;
-        }
-
-        const merchantName = mapping.merchant ? (row[mapping.merchant] || null) : null;
-        const originalName = merchantName || `Imported transaction`;
-        const notes = mapping.notes ? (row[mapping.notes] || null) : null;
-
-        const importRow = db.transaction(() => {
-          db.prepare(`
-            INSERT INTO transactions
-              (id, account_id, date, amount, merchant_name, original_name,
-               category_id, pending, notes, is_manual, source_type, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, 1, 'import', ?, ?)
-          `).run(
-            uuidv4(),
-            accountId,
-            dateStr,
-            amount,
-            merchantName,
-            originalName,
-            categoryId,
-            notes,
-            now,
-            now
-          );
-
-          return adjustManualAccountBalance(db, accountId, amount, now);
-        });
-
-        if (importRow()) {
-          balanceChanged = true;
-        }
-
-        imported++;
-      } catch (rowErr) {
-        errors.push(`Row ${i + 1}: ${(rowErr as Error).message}`);
-      }
-    }
-
-    if (balanceChanged) {
+    if (result.balanceChanged) {
       takeSnapshot();
     }
-    if (imported > 0) {
+    if (result.imported > 0) {
       detectRecurring();
       refreshTransactionIntegrity(db);
     }
 
-    res.json({ data: { imported, errors } });
+    res.json({ data: { imported: result.imported, errors: result.errors } });
   } catch (err) {
     next(err);
   }
