@@ -6,7 +6,7 @@ import { validate } from '../middleware/validate';
 import { adjustManualAccountBalance } from '../services/manualAccountBalance';
 import { takeSnapshot } from '../services/snapshot';
 import { detectRecurring } from '../services/recurring';
-import { upsertMerchantRule } from '../services/rules';
+import { applyMerchantRuleToMatchingTransactions, upsertMerchantRule } from '../services/rules';
 import { getTransactionReviewSummary } from '../services/transactionReview';
 import {
   confirmTransferPair,
@@ -490,9 +490,21 @@ router.patch(
       }
 
       // If category changed, upsert merchant_rule
+      let categorization: {
+        rule_id: string | null;
+        pattern: string | null;
+        applied: number;
+      } = { rule_id: null, pattern: null, applied: 0 };
+
       if (body.category_id !== undefined && categoryId) {
         const merchantName = existing.merchant_name || existing.original_name;
-        upsertMerchantRule(db, merchantName, categoryId, now);
+        const ruleId = upsertMerchantRule(db, merchantName, categoryId, now);
+        const result = applyMerchantRuleToMatchingTransactions(db, merchantName, categoryId, now);
+        categorization = {
+          rule_id: ruleId,
+          pattern: merchantName,
+          applied: result.updated,
+        };
       }
 
       if (balanceChanged) {
@@ -502,7 +514,7 @@ router.patch(
       refreshTransactionIntegrity(db);
 
       const updated = db.prepare('SELECT * FROM transactions WHERE id = ?').get(id);
-      res.json({ data: updated });
+      res.json({ data: { transaction: updated, categorization } });
     } catch (err) {
       next(err);
     }

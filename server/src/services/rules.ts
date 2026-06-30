@@ -1,5 +1,6 @@
 import { v4 as uuidv4 } from 'uuid';
 import type Database from 'better-sqlite3';
+import { compareTwoStrings } from 'string-similarity';
 import type { MerchantRuleSuggestion } from '../../../shared/types';
 
 export interface RuleApplicationResult {
@@ -11,11 +12,39 @@ interface MerchantRule {
   category_id: string;
 }
 
+interface TransactionRuleCandidate {
+  id: string;
+  merchant_name: string | null;
+  original_name: string;
+  category_id: string | null;
+}
+
 function transactionMerchantName(row: {
   merchant_name: string | null;
   original_name: string;
 }): string {
   return row.merchant_name || row.original_name;
+}
+
+function normalizeMerchantMatchValue(value: string | null | undefined): string {
+  return (value ?? '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ')
+    .replace(/\b(store|pos|purchase|debit|card|online|payment)\b/g, ' ')
+    .replace(/\b\d{2,}\b/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+export function merchantMatchesRulePattern(merchantName: string, pattern: string): boolean {
+  const merchant = normalizeMerchantMatchValue(merchantName);
+  const rule = normalizeMerchantMatchValue(pattern);
+  if (!merchant || !rule) return false;
+  if (merchant === rule) return true;
+  if (rule.length >= 4 && merchant.includes(rule)) return true;
+  if (merchant.length >= 4 && rule.includes(merchant)) return true;
+
+  return compareTwoStrings(merchant, rule) >= 0.86;
 }
 
 export function upsertMerchantRule(
@@ -54,10 +83,8 @@ export function applyMerchantRulesToTransaction(
     'SELECT pattern, category_id FROM merchant_rules ORDER BY created_at DESC'
   ).all() as MerchantRule[];
 
-  const lowerMerchant = merchantName.toLowerCase();
-
   for (const rule of rules) {
-    if (lowerMerchant.includes(rule.pattern.toLowerCase())) {
+    if (merchantMatchesRulePattern(merchantName, rule.pattern)) {
       db.prepare(
         'UPDATE transactions SET category_id = ?, updated_at = ? WHERE id = ?'
       ).run(rule.category_id, new Date().toISOString(), transactionId);
@@ -98,14 +125,48 @@ export function applyMerchantRulesToExistingTransactions(
   );
 
   for (const transaction of transactions) {
-    const merchantName = transactionMerchantName(transaction).toLowerCase();
+    const merchantName = transactionMerchantName(transaction);
     const rule = rules.find((candidate) =>
-      merchantName.includes(candidate.pattern.toLowerCase())
+      merchantMatchesRulePattern(merchantName, candidate.pattern)
     );
 
     if (!rule || rule.category_id === transaction.category_id) continue;
     update.run(rule.category_id, now, transaction.id);
     updated++;
+  }
+
+  return { updated };
+}
+
+export function applyMerchantRuleToMatchingTransactions(
+  db: Database.Database,
+  pattern: string,
+  categoryId: string,
+  now = new Date().toISOString()
+): RuleApplicationResult {
+  const normalizedPattern = pattern.trim();
+  if (!normalizedPattern) return { updated: 0 };
+
+  const transactions = db.prepare(`
+    SELECT id, merchant_name, original_name, category_id
+    FROM transactions
+    WHERE category_id IS NULL
+  `).all() as TransactionRuleCandidate[];
+
+  const update = db.prepare(`
+    UPDATE transactions
+    SET category_id = ?,
+        review_status = 'reviewed',
+        updated_at = ?
+    WHERE id = ?
+      AND category_id IS NULL
+  `);
+
+  let updated = 0;
+  for (const transaction of transactions) {
+    if (!merchantMatchesRulePattern(transactionMerchantName(transaction), normalizedPattern)) continue;
+    const result = update.run(categoryId, now, transaction.id);
+    updated += result.changes;
   }
 
   return { updated };

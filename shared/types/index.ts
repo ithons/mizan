@@ -68,6 +68,17 @@ export interface Transaction {
   institution_name?: string | null;
 }
 
+export interface TransactionCategorizationResult {
+  rule_id: string | null;
+  pattern: string | null;
+  applied: number;
+}
+
+export interface TransactionUpdateResult {
+  transaction: Transaction;
+  categorization: TransactionCategorizationResult;
+}
+
 export interface InvestmentTransaction {
   id: string;
   plaid_investment_transaction_id?: string | null;

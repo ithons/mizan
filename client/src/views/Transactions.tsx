@@ -45,6 +45,11 @@ import type {
 
 const PAGE_SIZE = 50;
 
+function categoryUpdateMessage(applied: number): string {
+  if (applied <= 0) return 'Transaction categorized';
+  return `Transaction categorized and applied to ${applied} similar transaction${applied === 1 ? '' : 's'}`;
+}
+
 // ─── Add Transaction Modal ────────────────────────────────────────────────────
 
 function AddTransactionModal({
@@ -228,7 +233,13 @@ export function Transactions() {
   const updateCatMutation = useMutation({
     mutationFn: ({ id, categoryId }: { id: string; categoryId: string }) =>
       transactionsApi.update(id, { category_id: categoryId }),
-    onSuccess: () => invalidateFinancialData(qc),
+    onSuccess: (result) => {
+      invalidateFinancialData(qc);
+      addToast({
+        type: 'success',
+        message: categoryUpdateMessage(result.categorization.applied),
+      });
+    },
     onError: (err: Error) => addToast({ type: 'error', message: err.message }),
   });
 

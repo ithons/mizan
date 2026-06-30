@@ -40,6 +40,7 @@ import type {
   CsvImportPreview,
   LocalBackupRestorePreview,
   LocalBackupRestoreResult,
+  TransactionUpdateResult,
 } from '@shared/types';
 
 type PlaidSyncStatus = 'synced' | 'reauth_required';
@@ -146,7 +147,7 @@ export const transactionsApi = {
       body: JSON.stringify(body),
     }),
   update: (id: string, body: Partial<Transaction>) =>
-    apiFetch<Transaction>(`/api/transactions/${id}`, {
+    apiFetch<TransactionUpdateResult>(`/api/transactions/${id}`, {
       method: 'PATCH',
       body: JSON.stringify(body),
     }),

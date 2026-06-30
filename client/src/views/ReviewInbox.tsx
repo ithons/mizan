@@ -56,6 +56,11 @@ const queueOrder: TransactionReviewQueueId[] = [
   'transfer_candidates',
 ];
 
+function categoryUpdateMessage(applied: number): string {
+  if (applied <= 0) return 'Transaction categorized';
+  return `Transaction categorized and applied to ${applied} similar transaction${applied === 1 ? '' : 's'}`;
+}
+
 function isQueueId(value: string | null): value is TransactionReviewQueueId {
   return value === 'uncategorized' ||
     value === 'rule_suggestions' ||
@@ -412,9 +417,12 @@ export function ReviewInbox() {
   const updateCategoryMutation = useMutation({
     mutationFn: ({ transactionId, categoryId }: { transactionId: string; categoryId: string }) =>
       transactionsApi.update(transactionId, { category_id: categoryId }),
-    onSuccess: () => {
+    onSuccess: (result) => {
       invalidateReview();
-      addToast({ type: 'success', message: 'Transaction categorized' });
+      addToast({
+        type: 'success',
+        message: categoryUpdateMessage(result.categorization.applied),
+      });
     },
     onError: (err: Error) => addToast({ type: 'error', message: err.message }),
   });
