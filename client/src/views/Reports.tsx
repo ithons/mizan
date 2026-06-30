@@ -29,11 +29,13 @@ import { CategoryBadge } from '../components/CategoryBadge';
 import { Modal } from '../components/Modal';
 import type {
   Category,
+  NetWorthSnapshot,
   ReportComparisonMode,
   ReportDrilldown,
   ReportEvidenceDrilldown,
   ReportExcludedFlowSummary,
   ReportMetricSummary,
+  ReportNetWorthEvidence,
   ReportSummary,
 } from '@shared/types';
 const COLORS = [
@@ -524,6 +526,108 @@ function ReportEvidenceModal({
             </div>
           ) : (
             <div className="py-12 text-center text-sm text-muted">No backing transactions</div>
+          )}
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+function NetWorthEvidenceModal({
+  snapshot,
+  onClose,
+}: {
+  snapshot: NetWorthSnapshot | null;
+  onClose: () => void;
+}) {
+  const { data, isLoading } = useQuery<ReportNetWorthEvidence>({
+    queryKey: ['reports', 'networth-evidence', snapshot?.id],
+    queryFn: () => reportsApi.netWorthEvidence(snapshot!.id),
+    enabled: !!snapshot,
+  });
+
+  return (
+    <Modal
+      open={!!snapshot}
+      onClose={onClose}
+      title={snapshot ? `Net worth on ${formatDate(snapshot.date)}` : 'Net Worth Evidence'}
+      maxWidth="820px"
+    >
+      <div className="space-y-4">
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs">
+          <div>
+            <p className="text-muted mb-1">Assets</p>
+            <p className="font-mono text-lg text-green">
+              {data ? formatCurrency(data.snapshot.total_assets) : '-'}
+            </p>
+          </div>
+          <div>
+            <p className="text-muted mb-1">Liabilities</p>
+            <p className="font-mono text-lg text-rose">
+              {data ? formatCurrency(data.snapshot.total_liabilities) : '-'}
+            </p>
+          </div>
+          <div>
+            <p className="text-muted mb-1">Net Worth</p>
+            <p className="font-mono text-lg text-text">
+              {data ? formatCurrency(data.snapshot.net_worth) : '-'}
+            </p>
+          </div>
+          <div>
+            <p className="text-muted mb-1">Change</p>
+            <p className="font-mono text-lg" style={{ color: (data?.delta ?? 0) >= 0 ? '#32bfa3' : '#ef6f8a' }}>
+              {data?.delta != null ? formatCurrency(data.delta, { showSign: true }) : '-'}
+            </p>
+          </div>
+        </div>
+
+        {data?.previous_snapshot && (
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-xs border border-border rounded p-3 bg-background/50">
+            <div>
+              <p className="text-muted mb-1">Compared with</p>
+              <p className="font-mono text-text">{formatDate(data.previous_snapshot.date)}</p>
+            </div>
+            <div>
+              <p className="text-muted mb-1">Asset change</p>
+              <p className="font-mono text-text">
+                {data.asset_delta != null ? formatCurrency(data.asset_delta, { showSign: true }) : '-'}
+              </p>
+            </div>
+            <div>
+              <p className="text-muted mb-1">Liability change</p>
+              <p className="font-mono text-text">
+                {data.liability_delta != null ? formatCurrency(data.liability_delta, { showSign: true }) : '-'}
+              </p>
+            </div>
+          </div>
+        )}
+
+        <div className="border border-border rounded overflow-hidden max-h-[440px] overflow-y-auto">
+          {isLoading ? (
+            <div className="py-12 text-center text-sm text-muted">Loading snapshot evidence...</div>
+          ) : data && data.accounts.length > 0 ? (
+            <div className="divide-y divide-border">
+              {data.accounts.map((account) => (
+                <div
+                  key={account.account_id}
+                  className="grid grid-cols-[1fr_92px] md:grid-cols-[1fr_130px_130px] gap-3 items-center px-3 py-2.5 text-xs"
+                >
+                  <div className="min-w-0">
+                    <p className="text-sm text-text truncate">{account.account_name ?? account.account_id}</p>
+                    <p className="text-xs text-muted truncate">{account.institution_name ?? 'Missing account record'}</p>
+                  </div>
+                  <span className="hidden md:block text-muted capitalize">{account.type ?? 'unknown'}</span>
+                  <span
+                    className="font-mono text-right"
+                    style={{ color: account.is_liability ? '#ef6f8a' : '#32bfa3' }}
+                  >
+                    {formatCurrency(account.balance)}
+                  </span>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="py-12 text-center text-sm text-muted">No account breakdown stored for this snapshot</div>
           )}
         </div>
       </div>
@@ -1032,6 +1136,7 @@ function AssetPieChart({ data, title }: { data: Array<{ name: string; value: num
 function NetWorthTab() {
   const [showAssets, setShowAssets] = useState(true);
   const [showLiabilities, setShowLiabilities] = useState(true);
+  const [evidenceSnapshot, setEvidenceSnapshot] = useState<NetWorthSnapshot | null>(null);
 
   const { data: snapshots = [], isLoading } = useQuery({
     queryKey: ['networth', 'history', 24],
@@ -1152,7 +1257,19 @@ function NetWorthTab() {
               const prev = arr[i + 1];
               const delta = prev ? s.net_worth - prev.net_worth : null;
               return (
-                <tr key={s.id} className="border-b border-border hover:bg-white/2">
+                <tr
+                  key={s.id}
+                  className="border-b border-border hover:bg-green/5 cursor-pointer focus:bg-green/5 focus:outline-none focus:ring-1 focus:ring-green/30"
+                  tabIndex={0}
+                  role="button"
+                  onClick={() => setEvidenceSnapshot(s)}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter' || event.key === ' ') {
+                      event.preventDefault();
+                      setEvidenceSnapshot(s);
+                    }
+                  }}
+                >
                   <td className="px-4 py-2 font-mono text-muted">{formatDate(s.date)}</td>
                   <td className="px-4 py-2 font-mono text-green">{formatCurrency(s.total_assets)}</td>
                   <td className="px-4 py-2 font-mono text-rose">{formatCurrency(s.total_liabilities)}</td>
@@ -1169,6 +1286,10 @@ function NetWorthTab() {
           <div className="py-10 text-center text-muted text-sm">No net worth history available</div>
         )}
       </div>
+      <NetWorthEvidenceModal
+        snapshot={evidenceSnapshot}
+        onClose={() => setEvidenceSnapshot(null)}
+      />
     </div>
   );
 }

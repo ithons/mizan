@@ -21,6 +21,7 @@ import type {
   ReportEvidenceDrilldown,
   ReportEvidenceKind,
   ReportExcludedFlowSummary,
+  ReportNetWorthEvidence,
   ReportComparisonMode,
   ReportSummary,
   SpendingReport,
@@ -396,6 +397,11 @@ export const reportsApi = {
     if (params.startDate) q.set('startDate', params.startDate);
     if (params.endDate) q.set('endDate', params.endDate);
     return apiFetch<ReportEvidenceDrilldown>(`/api/reports/evidence?${q.toString()}`);
+  },
+  netWorthEvidence: (snapshotId: string) => {
+    const q = new URLSearchParams();
+    q.set('snapshotId', snapshotId);
+    return apiFetch<ReportNetWorthEvidence>(`/api/reports/networth/evidence?${q.toString()}`);
   },
   networth: (params?: { months?: number }) =>
     apiFetch<NetWorthHistory>(`/api/reports/networth${params?.months ? `?months=${params.months}` : ''}`),

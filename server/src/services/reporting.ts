@@ -19,8 +19,10 @@ import type {
   ReportEvidenceKind,
   ReportExcludedFlowSummary,
   ReportMetricSummary,
+  ReportNetWorthEvidence,
   ReportSummary,
   SpendingReport,
+  NetWorthSnapshot,
 } from '../../../shared/types';
 
 interface ReportDateRange {
@@ -42,6 +44,14 @@ interface ReportEvidenceOptions extends ReportDateRange {
   kind: ReportEvidenceKind;
   month?: string;
   flowType?: ReportExcludedFlowSummary['flow_type'];
+}
+
+interface NetWorthEvidenceAccountRow {
+  id: string;
+  account_name: string | null;
+  institution_name: string | null;
+  type: string | null;
+  is_liability: number | null;
 }
 
 export interface TrendReport {
@@ -796,6 +806,87 @@ export function getReportEvidenceDrilldown(
   }
 
   return getExcludedFlowEvidence(db, options);
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function parseNetWorthBreakdown(value: string): Record<string, number> {
+  try {
+    const parsed: unknown = JSON.parse(value);
+    if (!isRecord(parsed)) return {};
+
+    return Object.fromEntries(
+      Object.entries(parsed).filter((entry): entry is [string, number] => typeof entry[1] === 'number')
+    );
+  } catch {
+    return {};
+  }
+}
+
+function getSnapshotAccounts(
+  db: Database.Database,
+  snapshot: NetWorthSnapshot
+): ReportNetWorthEvidence['accounts'] {
+  const breakdown = parseNetWorthBreakdown(snapshot.breakdown);
+  const accountIds = Object.keys(breakdown);
+  if (accountIds.length === 0) return [];
+
+  const rows = db.prepare(`
+    SELECT id, account_name, institution_name, type, is_liability
+    FROM accounts
+    WHERE id IN (${accountIds.map(() => '?').join(',')})
+  `).all(...accountIds) as NetWorthEvidenceAccountRow[];
+  const accountRows = new Map(rows.map((row) => [row.id, row]));
+
+  return accountIds
+    .map((accountId) => {
+      const account = accountRows.get(accountId);
+      return {
+        account_id: accountId,
+        account_name: account?.account_name ?? null,
+        institution_name: account?.institution_name ?? null,
+        type: account?.type ?? null,
+        is_liability: account?.is_liability == null ? null : account.is_liability === 1,
+        balance: breakdown[accountId] ?? 0,
+      };
+    })
+    .sort((a, b) => {
+      const liabilityRank = Number(a.is_liability ?? false) - Number(b.is_liability ?? false);
+      if (liabilityRank !== 0) return liabilityRank;
+      return Math.abs(b.balance) - Math.abs(a.balance);
+    });
+}
+
+export function getReportNetWorthEvidence(
+  db: Database.Database,
+  snapshotId: string
+): ReportNetWorthEvidence | null {
+  const snapshot = db.prepare(`
+    SELECT * FROM net_worth_snapshots
+    WHERE id = ?
+  `).get(snapshotId) as NetWorthSnapshot | undefined;
+
+  if (!snapshot) return null;
+
+  const previousSnapshot = db.prepare(`
+    SELECT * FROM net_worth_snapshots
+    WHERE date < ?
+    ORDER BY date DESC
+    LIMIT 1
+  `).get(snapshot.date) as NetWorthSnapshot | undefined;
+
+  return {
+    kind: 'networth_snapshot',
+    label: `Net worth on ${snapshot.date}`,
+    snapshot,
+    previous_snapshot: previousSnapshot ?? null,
+    delta: previousSnapshot ? snapshot.net_worth - previousSnapshot.net_worth : null,
+    asset_delta: previousSnapshot ? snapshot.total_assets - previousSnapshot.total_assets : null,
+    liability_delta: previousSnapshot ? snapshot.total_liabilities - previousSnapshot.total_liabilities : null,
+    accounts: getSnapshotAccounts(db, snapshot),
+  };
 }
 
 function getExcludedFlowSummary(

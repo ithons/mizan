@@ -6,6 +6,7 @@ import {
   getIncomeReport,
   getReportDrilldown,
   getReportEvidenceDrilldown,
+  getReportNetWorthEvidence,
   getReportSummary,
   getSpendingReport,
   getSpendingTrendsReport,
@@ -46,7 +47,9 @@ function setupReportingDb(): Database.Database {
     CREATE TABLE accounts (
       id TEXT PRIMARY KEY,
       account_name TEXT NOT NULL,
-      institution_name TEXT NOT NULL
+      institution_name TEXT NOT NULL,
+      type TEXT NOT NULL DEFAULT 'checking',
+      is_liability INTEGER NOT NULL DEFAULT 0
     );
 
     CREATE TABLE transactions (
@@ -63,8 +66,41 @@ function setupReportingDb(): Database.Database {
       updated_at TEXT NOT NULL DEFAULT '2026-06-30T00:00:00.000Z'
     );
 
+    CREATE TABLE net_worth_snapshots (
+      id TEXT PRIMARY KEY,
+      date TEXT NOT NULL,
+      total_assets REAL NOT NULL,
+      total_liabilities REAL NOT NULL,
+      net_worth REAL NOT NULL,
+      breakdown TEXT NOT NULL,
+      is_estimated INTEGER NOT NULL DEFAULT 0,
+      liquid_assets REAL,
+      investment_assets REAL,
+      crypto_assets REAL,
+      created_at TEXT NOT NULL
+    );
+
     INSERT INTO accounts (id, account_name, institution_name)
     VALUES ('acct_checking', 'Everyday Checking', 'Mizan Test Bank');
+
+    INSERT INTO accounts (id, account_name, institution_name, type, is_liability)
+    VALUES ('acct_credit', 'Rewards Card', 'Mizan Test Bank', 'credit', 1);
+
+    INSERT INTO net_worth_snapshots (
+      id, date, total_assets, total_liabilities, net_worth, breakdown, is_estimated,
+      liquid_assets, investment_assets, crypto_assets, created_at
+    )
+    VALUES
+      (
+        'nw_may', '2026-05-31', 1000, 300, 700,
+        '{"acct_checking":1000,"acct_credit":300}', 0, 1000, 0, 0,
+        '2026-05-31T00:00:00.000Z'
+      ),
+      (
+        'nw_jun', '2026-06-30', 1200, 200, 1000,
+        '{"acct_checking":1200,"acct_credit":200}', 0, 1200, 0, 0,
+        '2026-06-30T00:00:00.000Z'
+      );
   `);
 
   const insertCategory = db.prepare(`
@@ -429,4 +465,37 @@ test('excluded flow evidence returns omitted transfers, investments, and crypto'
 
   assert.equal(crypto.expenses, 50);
   assert.deepEqual(crypto.transactions.map((transaction) => transaction.id), ['crypto_buy']);
+});
+
+test('net worth evidence links a snapshot to prior values and account balances', (t) => {
+  const db = setupReportingDb();
+  t.after(() => db.close());
+
+  const detail = getReportNetWorthEvidence(db, 'nw_jun');
+
+  assert.ok(detail);
+  assert.equal(detail.label, 'Net worth on 2026-06-30');
+  assert.equal(detail.snapshot.net_worth, 1000);
+  assert.equal(detail.previous_snapshot?.id, 'nw_may');
+  assert.equal(detail.delta, 300);
+  assert.equal(detail.asset_delta, 200);
+  assert.equal(detail.liability_delta, -100);
+  assert.deepEqual(detail.accounts, [
+    {
+      account_id: 'acct_checking',
+      account_name: 'Everyday Checking',
+      institution_name: 'Mizan Test Bank',
+      type: 'checking',
+      is_liability: false,
+      balance: 1200,
+    },
+    {
+      account_id: 'acct_credit',
+      account_name: 'Rewards Card',
+      institution_name: 'Mizan Test Bank',
+      type: 'credit',
+      is_liability: true,
+      balance: 200,
+    },
+  ]);
 });

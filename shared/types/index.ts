@@ -736,6 +736,26 @@ export interface ReportEvidenceDrilldown {
   transactions: Transaction[];
 }
 
+export interface ReportNetWorthEvidenceAccount {
+  account_id: string;
+  account_name: string | null;
+  institution_name: string | null;
+  type: string | null;
+  is_liability: boolean | null;
+  balance: number;
+}
+
+export interface ReportNetWorthEvidence {
+  kind: 'networth_snapshot';
+  label: string;
+  snapshot: NetWorthSnapshot;
+  previous_snapshot: NetWorthSnapshot | null;
+  delta: number | null;
+  asset_delta: number | null;
+  liability_delta: number | null;
+  accounts: ReportNetWorthEvidenceAccount[];
+}
+
 export interface NetWorthHistory {
   snapshots: NetWorthSnapshot[];
 }

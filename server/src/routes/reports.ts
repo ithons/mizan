@@ -4,6 +4,7 @@ import {
   getCashflowReport,
   getIncomeReport,
   getReportEvidenceDrilldown,
+  getReportNetWorthEvidence,
   getReportDrilldown,
   getReportSummary,
   getSpendingReport,
@@ -200,6 +201,29 @@ router.get('/evidence', (req: Request, res: Response, next: NextFunction): void 
         endDate,
       }),
     });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// GET /networth/evidence?snapshotId
+router.get('/networth/evidence', (req: Request, res: Response, next: NextFunction): void => {
+  try {
+    const db = getDb();
+    const snapshotId = firstQueryValue(req.query.snapshotId);
+
+    if (!snapshotId) {
+      res.status(400).json({ error: 'snapshotId is required' });
+      return;
+    }
+
+    const evidence = getReportNetWorthEvidence(db, snapshotId);
+    if (!evidence) {
+      res.status(404).json({ error: 'Net worth snapshot not found' });
+      return;
+    }
+
+    res.json({ data: evidence });
   } catch (err) {
     next(err);
   }
