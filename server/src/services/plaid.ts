@@ -12,6 +12,12 @@ import {
   savePlaidItemToken,
   removePlaidItemToken,
 } from './credentials';
+import {
+  applyKnownPlaidCategorizationToExistingTransactions,
+  plaidSourceDetail,
+  safePlaidCategoryId,
+  type PlaidCategorizationInput,
+} from './plaidCategorization';
 import { applyMerchantRulesToTransaction } from './rules';
 import type { Account, AccountType } from '../../../shared/types';
 
@@ -114,6 +120,22 @@ function mapAccountType(
 function normalizePlaidTransactionAmount(amount: number): number {
   // Plaid uses positive amounts for outflows. Mizān stores expenses as negative.
   return -amount;
+}
+
+function plaidCategorizationInput(txn: {
+  amount: number;
+  merchant_name?: string | null;
+  name: string;
+  personal_finance_category?: PlaidCategorizationInput['personalFinanceCategory'];
+  category?: string[] | null;
+}): PlaidCategorizationInput {
+  return {
+    amount: normalizePlaidTransactionAmount(txn.amount),
+    merchantName: txn.merchant_name ?? null,
+    originalName: txn.name,
+    personalFinanceCategory: txn.personal_finance_category ?? null,
+    legacyCategories: txn.category ?? null,
+  };
 }
 
 export async function createLinkToken(redirectUri?: string | null): Promise<string> {
@@ -294,6 +316,9 @@ export async function syncItemDetailed(dbItemId: string): Promise<PlaidSyncItemR
         access_token: accessToken,
         cursor,
         count: 500,
+        options: {
+          include_personal_finance_category: true,
+        },
       });
     } catch (err: unknown) {
       const plaidErr = err as { response?: { data?: { error_code?: string } } };
@@ -335,20 +360,25 @@ export async function syncItemDetailed(dbItemId: string): Promise<PlaidSyncItemR
 
       if (!existing) {
         const txnId = uuidv4();
+        const categorization = plaidCategorizationInput(txn);
+        const categoryId = safePlaidCategoryId(db, categorization);
+        const sourceDetail = plaidSourceDetail(categorization);
         db.prepare(`
           INSERT INTO transactions
             (id, plaid_transaction_id, account_id, date, amount, merchant_name,
-             original_name, category_id, pending, is_manual, source_type, created_at, updated_at)
-          VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, 0, 'plaid', ?, ?)
+             original_name, category_id, pending, is_manual, source_type, source_detail, created_at, updated_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 'plaid', ?, ?, ?)
         `).run(
           txnId,
           txn.transaction_id,
           acct.id,
           txn.date,
-          normalizePlaidTransactionAmount(txn.amount),
+          categorization.amount,
           txn.merchant_name || null,
           txn.name,
+          categoryId,
           txn.pending ? 1 : 0,
+          sourceDetail,
           now,
           now
         );
@@ -370,17 +400,24 @@ export async function syncItemDetailed(dbItemId: string): Promise<PlaidSyncItemR
         continue;
       }
 
+      const categorization = plaidCategorizationInput(txn);
+      const categoryId = safePlaidCategoryId(db, categorization);
+      const sourceDetail = plaidSourceDetail(categorization);
+
       db.prepare(`
         UPDATE transactions
         SET date = ?, amount = ?, merchant_name = ?, original_name = ?,
-            pending = ?, source_type = 'plaid', updated_at = ?
+            category_id = COALESCE(category_id, ?),
+            pending = ?, source_type = 'plaid', source_detail = COALESCE(?, source_detail), updated_at = ?
         WHERE plaid_transaction_id = ?
       `).run(
         txn.date,
-        normalizePlaidTransactionAmount(txn.amount),
+        categorization.amount,
         txn.merchant_name || null,
         txn.name,
+        categoryId,
         txn.pending ? 1 : 0,
+        sourceDetail,
         now,
         txn.transaction_id
       );
@@ -400,6 +437,8 @@ export async function syncItemDetailed(dbItemId: string): Promise<PlaidSyncItemR
       'UPDATE plaid_items SET cursor = ? WHERE id = ?'
     ).run(cursor, dbItemId);
   }
+
+  applyKnownPlaidCategorizationToExistingTransactions(db);
 
   // Sync investments
   try {
