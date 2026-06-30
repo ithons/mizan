@@ -497,14 +497,17 @@ export const settingsApi = {
       method: 'POST',
       body: JSON.stringify(body),
     }),
-  exportCsv: async () => {
-    const res = await fetch('/api/settings/export-csv');
+  exportCsv: async (format: 'mizan' | 'monarch' = 'mizan') => {
+    const query = format === 'monarch' ? '?format=monarch' : '';
+    const res = await fetch(`/api/settings/export-csv${query}`);
     if (!res.ok) throw new Error('Export failed');
     const blob = await res.blob();
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `mizan-export-${new Date().toISOString().split('T')[0]}.csv`;
+    a.download = format === 'monarch'
+      ? `mizan-monarch-transactions-${new Date().toISOString().split('T')[0]}.csv`
+      : `mizan-export-${new Date().toISOString().split('T')[0]}.csv`;
     a.click();
     URL.revokeObjectURL(url);
   },

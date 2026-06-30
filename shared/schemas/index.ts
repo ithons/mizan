@@ -130,6 +130,7 @@ export const ExportCsvSchema = z.object({
   startDate: z.string().optional(),
   endDate: z.string().optional(),
   accountIds: z.array(z.string()).optional(),
+  format: z.enum(['mizan', 'monarch']).optional(),
 });
 
 export const DeleteDataSchema = z.object({

@@ -27,6 +27,11 @@ import {
   LocalBackupValidationError,
 } from '../services/localBackup';
 import { buildCsvImportPreview, commitCsvImport } from '../services/csvImport';
+import {
+  buildTransactionsCsv,
+  transactionCsvFilename,
+  type TransactionCsvFormat,
+} from '../services/csvExport';
 import type { z } from 'zod';
 
 const router = Router();
@@ -84,70 +89,30 @@ router.post(
 router.get('/export-csv', (req: Request, res: Response, next: NextFunction): void => {
   try {
     const db = getDb();
-    const body = req.query as { startDate?: string; endDate?: string; accountIds?: string | string[] };
+    const body = req.query as {
+      startDate?: string;
+      endDate?: string;
+      accountIds?: string | string[];
+      format?: string;
+    };
     const accountIds = body.accountIds
       ? Array.isArray(body.accountIds) ? body.accountIds : [body.accountIds]
       : undefined;
+    const format: TransactionCsvFormat = body.format === 'monarch' ? 'monarch' : 'mizan';
+    const exportedAt = new Date();
+    const csv = buildTransactionsCsv(db, {
+      startDate: body.startDate,
+      endDate: body.endDate,
+      accountIds,
+      format,
+    });
 
-    const conditions: string[] = [];
-    const params: unknown[] = [];
-
-    if (body.startDate) {
-      conditions.push('t.date >= ?');
-      params.push(body.startDate);
-    }
-    if (body.endDate) {
-      conditions.push('t.date <= ?');
-      params.push(body.endDate);
-    }
-    if (accountIds && accountIds.length > 0) {
-      conditions.push(`t.account_id IN (${accountIds.map(() => '?').join(',')})`);
-      params.push(...accountIds);
-    }
-
-    const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
-
-    const transactions = db.prepare(`
-      SELECT
-        t.date,
-        t.amount,
-        t.merchant_name,
-        t.original_name,
-        t.notes,
-        c.name AS category_name,
-        a.account_name,
-        a.institution_name
-      FROM transactions t
-      LEFT JOIN categories c ON c.id = t.category_id
-      LEFT JOIN accounts a ON a.id = t.account_id
-      ${where}
-      ORDER BY t.date DESC
-    `).all(...params) as Array<Record<string, unknown>>;
-
-    res.setHeader('Content-Type', 'text/csv');
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
     res.setHeader(
       'Content-Disposition',
-      `attachment; filename="mizan-transactions-${new Date().toISOString().split('T')[0]}.csv"`
+      `attachment; filename="${transactionCsvFilename(format, exportedAt)}"`
     );
-
-    const headers = ['date', 'amount', 'merchant_name', 'original_name', 'category_name', 'account_name', 'institution_name', 'notes'];
-    res.write(headers.join(',') + '\n');
-
-    for (const txn of transactions) {
-      const row = headers.map(h => {
-        const val = txn[h];
-        if (val === null || val === undefined) return '';
-        const str = String(val);
-        // Escape CSV: wrap in quotes if contains comma, quote, or newline
-        if (str.includes(',') || str.includes('"') || str.includes('\n')) {
-          return `"${str.replace(/"/g, '""')}"`;
-        }
-        return str;
-      });
-      res.write(row.join(',') + '\n');
-    }
-
-    res.end();
+    res.send(csv);
   } catch (err) {
     next(err);
   }

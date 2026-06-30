@@ -248,6 +248,15 @@ export function DataSection() {
     }
   };
 
+  const handleMonarchCsvExport = async () => {
+    try {
+      await settingsApi.exportCsv('monarch');
+      addToast({ type: 'success', message: 'Monarch CSV export complete' });
+    } catch (err: unknown) {
+      addToast({ type: 'error', message: err instanceof Error ? err.message : 'Export failed' });
+    }
+  };
+
   const handleBackupExport = async () => {
     try {
       await settingsApi.exportBackupJson();
@@ -377,14 +386,22 @@ export function DataSection() {
           <div className="border border-border bg-background rounded p-3 space-y-3">
             <div>
               <p className="text-sm text-text">Transactions CSV</p>
-              <p className="text-xs text-muted mt-1">Download transactions for spreadsheets and external analysis.</p>
+              <p className="text-xs text-muted mt-1">Download transactions for spreadsheets, external analysis, or a Monarch-friendly import file.</p>
             </div>
-            <button
-              className="flex items-center gap-2 px-4 py-2 text-sm border border-border rounded text-muted hover:text-text"
-              onClick={handleCsvExport}
-            >
-              <Download size={14} /> Export CSV
-            </button>
+            <div className="flex flex-wrap gap-2">
+              <button
+                className="flex items-center gap-2 px-4 py-2 text-sm border border-border rounded text-muted hover:text-text"
+                onClick={handleCsvExport}
+              >
+                <Download size={14} /> Export CSV
+              </button>
+              <button
+                className="flex items-center gap-2 px-4 py-2 text-sm border border-border rounded text-muted hover:text-text"
+                onClick={handleMonarchCsvExport}
+              >
+                <Download size={14} /> Export Monarch CSV
+              </button>
+            </div>
           </div>
 
           <div className="border border-border bg-background rounded p-3 space-y-3 md:col-span-2">
