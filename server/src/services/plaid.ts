@@ -19,6 +19,7 @@ import {
   type PlaidCategorizationInput,
 } from './plaidCategorization';
 import { applyMerchantRulesToTransaction } from './rules';
+import { balancesDiffer, type AccountBalanceChange } from './balanceChanges';
 import type { Account, AccountType } from '../../../shared/types';
 
 let _client: PlaidApi | null = null;
@@ -47,6 +48,7 @@ export interface PlaidSyncItemResult {
   modified: number;
   removed: number;
   skipped: number;
+  balanceChanges: AccountBalanceChange[];
   errorMessage?: string;
   recoveryAction?: string;
 }
@@ -138,6 +140,130 @@ function plaidCategorizationInput(txn: {
   };
 }
 
+async function refreshPlaidAccountBalances(
+  plaid: PlaidApi,
+  db: ReturnType<typeof getDb>,
+  accessToken: string,
+  dbItemId: string,
+  institutionName: string,
+  now: string
+): Promise<AccountBalanceChange[]> {
+  const accountsResponse = await plaid.accountsGet({ access_token: accessToken });
+  const changes: AccountBalanceChange[] = [];
+
+  for (const acct of accountsResponse.data.accounts) {
+    const acctType = mapAccountType(acct.type, acct.subtype);
+    const isLiability = acct.type === 'credit' || acct.type === 'loan' ? 1 : 0;
+    const currentBalance = acct.balances.current ?? 0;
+    const availableBalance = acct.balances.available ?? null;
+    const creditLimit = acct.balances.limit ?? null;
+    const currency = acct.balances.iso_currency_code || 'USD';
+
+    const existingAcct = db.prepare(`
+      SELECT id, account_name, current_balance, is_liability, currency
+      FROM accounts
+      WHERE plaid_account_id = ?
+    `).get(acct.account_id) as
+      | {
+          id: string;
+          account_name: string;
+          current_balance: number;
+          is_liability: number;
+          currency: string | null;
+        }
+      | undefined;
+
+    if (existingAcct) {
+      if (balancesDiffer(existingAcct.current_balance, currentBalance)) {
+        changes.push({
+          accountId: existingAcct.id,
+          accountName: existingAcct.account_name,
+          provider: 'plaid',
+          previousBalance: existingAcct.current_balance,
+          newBalance: currentBalance,
+          isLiability: Boolean(existingAcct.is_liability),
+          currency: existingAcct.currency ?? currency,
+        });
+      }
+
+      db.prepare(`
+        UPDATE accounts
+        SET connection_id = ?,
+            institution_name = ?,
+            account_name = ?,
+            type = ?,
+            subtype = ?,
+            mask = ?,
+            current_balance = ?,
+            available_balance = ?,
+            credit_limit = ?,
+            currency = ?,
+            is_liability = ?,
+            updated_at = ?
+        WHERE id = ?
+      `).run(
+        dbItemId,
+        institutionName,
+        acct.name,
+        acctType,
+        acct.subtype || null,
+        acct.mask || null,
+        currentBalance,
+        availableBalance,
+        creditLimit,
+        currency,
+        isLiability,
+        now,
+        existingAcct.id
+      );
+    } else {
+      db.prepare(`
+        INSERT INTO accounts
+          (id, plaid_account_id, connection_id, connection_type, institution_name,
+           account_name, type, subtype, mask, current_balance, available_balance, credit_limit,
+           currency, is_manual, is_hidden, is_liability, sort_order, created_at, updated_at)
+        VALUES (?, ?, ?, 'plaid', ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, ?, 0, ?, ?)
+      `).run(
+        uuidv4(),
+        acct.account_id,
+        dbItemId,
+        institutionName,
+        acct.name,
+        acctType,
+        acct.subtype || null,
+        acct.mask || null,
+        currentBalance,
+        availableBalance,
+        creditLimit,
+        currency,
+        isLiability,
+        now,
+        now
+      );
+    }
+  }
+
+  return changes;
+}
+
+function mergeBalanceChanges(changes: AccountBalanceChange[]): AccountBalanceChange[] {
+  const merged = new Map<string, AccountBalanceChange>();
+
+  for (const change of changes) {
+    const existing = merged.get(change.accountId);
+    if (!existing) {
+      merged.set(change.accountId, change);
+      continue;
+    }
+
+    existing.newBalance = change.newBalance;
+  }
+
+  return Array.from(merged.values()).filter((change) =>
+    balancesDiffer(change.previousBalance, change.newBalance)
+  );
+}
+
 export async function createLinkToken(redirectUri?: string | null): Promise<string> {
   const plaid = getPlaidClient();
   const creds = getCredentials();
@@ -200,53 +326,7 @@ export async function exchangeToken(
     now
   );
 
-  // Fetch accounts
-  const accountsResponse = await plaid.accountsGet({ access_token });
-  const plaidAccounts = accountsResponse.data.accounts;
-
-  for (const acct of plaidAccounts) {
-    const acctType = mapAccountType(acct.type, acct.subtype);
-    const isLiability = acct.type === 'credit' || acct.type === 'loan' ? 1 : 0;
-    const currentBalance = acct.balances.current ?? 0;
-    const availableBalance = acct.balances.available ?? null;
-    const creditLimit = acct.balances.limit ?? null;
-
-    const existingAcct = db.prepare(
-      'SELECT id FROM accounts WHERE plaid_account_id = ?'
-    ).get(acct.account_id) as { id: string } | undefined;
-
-    if (existingAcct) {
-      db.prepare(`
-        UPDATE accounts
-        SET current_balance = ?, available_balance = ?, credit_limit = ?, updated_at = ?
-        WHERE id = ?
-      `).run(currentBalance, availableBalance, creditLimit, now, existingAcct.id);
-    } else {
-      db.prepare(`
-        INSERT INTO accounts
-          (id, plaid_account_id, connection_id, connection_type, institution_name,
-           account_name, type, subtype, mask, current_balance, available_balance, credit_limit,
-           currency, is_manual, is_hidden, is_liability, sort_order, created_at, updated_at)
-        VALUES (?, ?, ?, 'plaid', ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, ?, 0, ?, ?)
-      `).run(
-        uuidv4(),
-        acct.account_id,
-        dbItemId,
-        institutionName,
-        acct.name,
-        acctType,
-        acct.subtype || null,
-        acct.mask || null,
-        currentBalance,
-        availableBalance,
-        creditLimit,
-        acct.balances.iso_currency_code || 'USD',
-        isLiability,
-        now,
-        now
-      );
-    }
-  }
+  await refreshPlaidAccountBalances(plaid, db, access_token, dbItemId, institutionName, now);
 
   let initialSyncStatus: PlaidExchangeResult['initialSyncStatus'] = 'synced';
   let initialSyncError: string | undefined;
@@ -307,7 +387,18 @@ export async function syncItemDetailed(dbItemId: string): Promise<PlaidSyncItemR
     modified: 0,
     removed: 0,
     skipped: 0,
+    balanceChanges: [],
   };
+
+  const accountBalanceChanges = await refreshPlaidAccountBalances(
+    plaid,
+    db,
+    accessToken,
+    dbItemId,
+    item.institution_name,
+    new Date().toISOString()
+  );
+  result.balanceChanges.push(...accountBalanceChanges);
 
   while (hasMore) {
     let syncResponse;
@@ -442,7 +533,8 @@ export async function syncItemDetailed(dbItemId: string): Promise<PlaidSyncItemR
 
   // Sync investments
   try {
-    await syncInvestments(dbItemId);
+    const investmentBalanceChanges = await syncInvestments(dbItemId);
+    result.balanceChanges.push(...investmentBalanceChanges);
   } catch (err) {
     console.error('[plaid] Investment sync failed:', (err as Error).message);
   }
@@ -460,10 +552,12 @@ export async function syncItemDetailed(dbItemId: string): Promise<PlaidSyncItemR
       AND is_hidden = 0
   `).get(dbItemId) as { count: number }).count;
 
+  result.balanceChanges = mergeBalanceChanges(result.balanceChanges);
+
   return result;
 }
 
-export async function syncInvestments(dbItemId: string): Promise<void> {
+export async function syncInvestments(dbItemId: string): Promise<AccountBalanceChange[]> {
   const db = getDb();
   const plaid = getPlaidClient();
   const creds = getCredentials();
@@ -472,12 +566,13 @@ export async function syncInvestments(dbItemId: string): Promise<void> {
     'SELECT item_id FROM plaid_items WHERE id = ?'
   ).get(dbItemId) as { item_id: string } | undefined;
 
-  if (!item) return;
+  if (!item) return [];
 
   const accessToken = creds.plaidItems?.[item.item_id]?.accessToken;
-  if (!accessToken) return;
+  if (!accessToken) return [];
 
   const now = new Date().toISOString();
+  const balanceChanges: AccountBalanceChange[] = [];
 
   try {
     // Sync holdings
@@ -577,6 +672,32 @@ export async function syncInvestments(dbItemId: string): Promise<void> {
 
     // Update account balances from holdings
     for (const [acctId, totalValue] of Object.entries(acctHoldingValues)) {
+      const existing = db.prepare(`
+        SELECT id, account_name, current_balance, is_liability, currency
+        FROM accounts
+        WHERE id = ?
+      `).get(acctId) as
+        | {
+            id: string;
+            account_name: string;
+            current_balance: number;
+            is_liability: number;
+            currency: string | null;
+          }
+        | undefined;
+
+      if (existing && balancesDiffer(existing.current_balance, totalValue)) {
+        balanceChanges.push({
+          accountId: existing.id,
+          accountName: existing.account_name,
+          provider: 'plaid',
+          previousBalance: existing.current_balance,
+          newBalance: totalValue,
+          isLiability: Boolean(existing.is_liability),
+          currency: existing.currency ?? 'USD',
+        });
+      }
+
       db.prepare(
         'UPDATE accounts SET current_balance = ?, updated_at = ? WHERE id = ?'
       ).run(totalValue, now, acctId);
@@ -647,10 +768,12 @@ export async function syncInvestments(dbItemId: string): Promise<void> {
     const plaidErr = err as { response?: { data?: { error_code?: string } } };
     if (plaidErr?.response?.data?.error_code === 'PRODUCTS_NOT_SUPPORTED') {
       // Account doesn't support investments, skip
-      return;
+      return [];
     }
     throw err;
   }
+
+  return balanceChanges;
 }
 
 export async function syncAllItems(): Promise<PlaidSyncSummary> {
@@ -692,6 +815,7 @@ export async function syncAllItems(): Promise<PlaidSyncSummary> {
         modified: 0,
         removed: 0,
         skipped: 0,
+        balanceChanges: [],
         errorMessage: message,
         recoveryAction: 'Retry sync. If it continues failing, reconnect the institution.',
       });

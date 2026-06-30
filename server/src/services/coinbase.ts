@@ -3,11 +3,13 @@ import axios from 'axios';
 import { v4 as uuidv4 } from 'uuid';
 import { getCredentials } from './credentials';
 import { getDb } from '../db/index';
+import { balancesDiffer, type AccountBalanceChange } from './balanceChanges';
 
 export interface CoinbaseSyncResult {
   accountCount: number;
   transactionCount: number;
   staleAccountCount: number;
+  balanceChanges: AccountBalanceChange[];
 }
 
 interface CoinbaseConnectionRow {
@@ -17,6 +19,10 @@ interface CoinbaseConnectionRow {
 interface CoinbaseAccountRow {
   id: string;
   coinbase_account_id: string;
+  account_name?: string;
+  current_balance?: number;
+  is_liability?: number;
+  currency?: string | null;
 }
 
 function parseCoinbaseNumber(value: string | undefined, label: string): number {
@@ -162,6 +168,7 @@ export async function syncCoinbase(): Promise<CoinbaseSyncResult> {
   let cursor: string | undefined;
   let hasNext = true;
   let syncedCount = 0;
+  const balanceChanges: AccountBalanceChange[] = [];
   const seenAccountIds = new Set<string>();
   const activeConnection = db.prepare(
     "SELECT id FROM coinbase_connections WHERE status = 'active'"
@@ -186,8 +193,16 @@ export async function syncCoinbase(): Promise<CoinbaseSyncResult> {
         `${currency} available balance`
       );
       const existing = db.prepare(
-        'SELECT id FROM accounts WHERE coinbase_account_id = ?'
-      ).get(account.uuid) as { id: string } | undefined;
+        'SELECT id, account_name, current_balance, is_liability, currency FROM accounts WHERE coinbase_account_id = ?'
+      ).get(account.uuid) as
+        | {
+            id: string;
+            account_name: string;
+            current_balance: number;
+            is_liability: number;
+            currency: string | null;
+          }
+        | undefined;
 
       if (balanceValue <= 0 && !existing) continue;
 
@@ -195,6 +210,18 @@ export async function syncCoinbase(): Promise<CoinbaseSyncResult> {
       const currentBalance = balanceValue * spotPrice;
 
       if (existing) {
+        if (balancesDiffer(existing.current_balance, currentBalance)) {
+          balanceChanges.push({
+            accountId: existing.id,
+            accountName: existing.account_name,
+            provider: 'coinbase',
+            previousBalance: existing.current_balance,
+            newBalance: currentBalance,
+            isLiability: Boolean(existing.is_liability),
+            currency: existing.currency ?? 'USD',
+          });
+        }
+
         db.prepare(`
           UPDATE accounts
           SET connection_id = COALESCE(?, connection_id),
@@ -231,7 +258,7 @@ export async function syncCoinbase(): Promise<CoinbaseSyncResult> {
   }
 
   const staleAccounts = db.prepare(`
-    SELECT id, coinbase_account_id
+    SELECT id, coinbase_account_id, account_name, current_balance, is_liability, currency
     FROM accounts
     WHERE connection_type = 'coinbase'
       AND coinbase_account_id IS NOT NULL
@@ -240,6 +267,18 @@ export async function syncCoinbase(): Promise<CoinbaseSyncResult> {
   let staleAccountCount = 0;
   for (const account of staleAccounts) {
     if (seenAccountIds.has(account.coinbase_account_id)) continue;
+
+    if (balancesDiffer(account.current_balance ?? 0, 0)) {
+      balanceChanges.push({
+        accountId: account.id,
+        accountName: account.account_name ?? 'Coinbase account',
+        provider: 'coinbase',
+        previousBalance: account.current_balance ?? 0,
+        newBalance: 0,
+        isLiability: Boolean(account.is_liability),
+        currency: account.currency ?? 'USD',
+      });
+    }
 
     db.prepare(`
       UPDATE accounts
@@ -261,6 +300,7 @@ export async function syncCoinbase(): Promise<CoinbaseSyncResult> {
     accountCount: syncedCount,
     transactionCount,
     staleAccountCount,
+    balanceChanges,
   };
 }
 

@@ -13,6 +13,7 @@ import {
   startSyncRun,
 } from './syncHistory';
 import { refreshTransactionIntegrity } from './transactionIntegrity';
+import { describeBalanceChange } from './balanceChanges';
 
 // SSE clients registry
 const sseClients = new Set<Response>();
@@ -82,7 +83,7 @@ async function _runFullSyncInternal(): Promise<void> {
     emitSyncEvent({ type: 'sync_progress', message: 'Syncing bank accounts...', progress: 10 });
     const plaidSummary = await syncAllItems();
     for (const item of plaidSummary.items) {
-      recordSyncRunItem(db, run.id, {
+      const runItem = recordSyncRunItem(db, run.id, {
         provider: 'plaid',
         connection_id: item.itemId,
         institution_name: item.institutionName,
@@ -99,6 +100,15 @@ async function _runFullSyncInternal(): Promise<void> {
         error_message: item.errorMessage,
         recovery_action: item.recoveryAction,
       });
+
+      for (const change of item.balanceChanges) {
+        recordSyncChange(db, runItem.id, {
+          entity_type: 'account',
+          entity_id: change.accountId,
+          change_type: 'updated',
+          description: describeBalanceChange(change),
+        });
+      }
     }
 
     const plaidIssues = [...plaidSummary.failed, ...plaidSummary.reauthRequired];
@@ -113,7 +123,7 @@ async function _runFullSyncInternal(): Promise<void> {
       emitSyncEvent({ type: 'sync_progress', message: 'Syncing Coinbase...', progress: 50 });
       try {
         const coinbaseResult = await syncCoinbase();
-        recordSyncRunItem(db, run.id, {
+        const runItem = recordSyncRunItem(db, run.id, {
           provider: 'coinbase',
           connection_id: 'coinbase',
           institution_name: 'Coinbase',
@@ -122,6 +132,15 @@ async function _runFullSyncInternal(): Promise<void> {
           transactions_added: coinbaseResult.transactionCount,
           transactions_modified: coinbaseResult.staleAccountCount,
         });
+
+        for (const change of coinbaseResult.balanceChanges) {
+          recordSyncChange(db, runItem.id, {
+            entity_type: 'account',
+            entity_id: change.accountId,
+            change_type: 'updated',
+            description: describeBalanceChange(change),
+          });
+        }
       } catch (err) {
         const message = (err as Error).message || 'Coinbase sync failed';
         recordSyncRunItem(db, run.id, {
