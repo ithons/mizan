@@ -257,6 +257,34 @@ test('advisor review analysis cites the Review Inbox queues', (t) => {
   assert.ok(analysis.citations.some((citation) => citation.id === 'review:uncategorized'));
 });
 
+test('advisor budget analysis uses rollover-adjusted available amount', (t) => {
+  const db = setupAdvisorDb();
+  t.after(() => db.close());
+
+  db.prepare(`
+    UPDATE budgets
+    SET rollover = 1, created_at = '2026-05-01'
+    WHERE id = 'budget_food'
+  `).run();
+  insertTransaction(db, {
+    id: 'may_food',
+    date: '2026-05-12',
+    amount: -20,
+    merchant: 'May Restaurant',
+    categoryId: 'cat_food_restaurants',
+  });
+
+  const analysis = analyzeAdvisorQuestion(
+    db,
+    'How am I doing against budget?',
+    new Date(TEST_NOW)
+  );
+
+  assert.equal(analysis.intent, 'budget');
+  assert.match(analysis.answer, /Food: projected \$100\.00 of \$220\.00, \$120\.00 remaining\./);
+  assert.ok(analysis.citations.some((citation) => citation.id === 'budget:budget_food'));
+});
+
 test('advisor drafts and confirms a transaction category change', (t) => {
   const db = setupAdvisorDb();
   t.after(() => db.close());

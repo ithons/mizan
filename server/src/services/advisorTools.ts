@@ -41,6 +41,10 @@ function fmt(amount: number | null | undefined): string {
   return `${sign}$${abs.toFixed(2)}`;
 }
 
+function availableBudgetAmount(budget: { amount: number; rollover: boolean; rollover_balance: number }): number {
+  return budget.amount + (budget.rollover ? budget.rollover_balance : 0);
+}
+
 function count(db: Database.Database, sql: string, ...params: unknown[]): number {
   const row = db.prepare(sql).get(...params) as CountRow | undefined;
   return row?.count ?? 0;
@@ -196,9 +200,10 @@ function analyzeBudget(
       ? `${overBudget.length} budget ${overBudget.length === 1 ? 'category is' : 'categories are'} projected over budget this month.`
       : 'No configured category is projected over budget right now.',
     watched
-      .map((budget) =>
-        `${budget.category_name ?? 'Uncategorized'}: projected ${fmt(budget.projected_spend)} of ${fmt(budget.amount)}, ${fmt(budget.projected_remaining)} remaining.`
-      )
+      .map((budget) => {
+        const availableAmount = availableBudgetAmount(budget);
+        return `${budget.category_name ?? 'Uncategorized'}: projected ${fmt(budget.projected_spend)} of ${fmt(availableAmount)}, ${fmt(budget.projected_remaining)} remaining.`;
+      })
       .join('\n'),
   ];
 
