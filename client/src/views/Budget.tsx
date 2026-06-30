@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query';
-import { ChevronLeft, ChevronRight, Plus, Check, X, Trash2, WalletCards } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
+import { ChevronLeft, ChevronRight, Plus, Check, X, Trash2, WalletCards, Sparkles } from 'lucide-react';
 import { format, subMonths, addMonths } from 'date-fns';
 import { budgetsApi, recurringApi, categoriesApi, flattenCategories } from '../lib/api';
 import { formatCurrency, formatDate, formatMonth, formatPercent } from '../lib/formatters';
@@ -8,6 +9,8 @@ import { FREQUENCY_LABELS } from '../lib/constants';
 import { useAppStore } from '../store';
 import { invalidateFinancialData } from '../lib/queryInvalidation';
 import { parseDecimalInput } from '../lib/numberInput';
+import { advisorRouteState } from '../lib/advisorRouteState';
+import { buildBudgetAdvisorPrompt } from '../lib/advisorPrompts';
 import { Modal } from '../components/Modal';
 import { CategoryBadge } from '../components/CategoryBadge';
 import { EmptyState } from '../components/EmptyState';
@@ -22,12 +25,16 @@ function availableBudgetAmount(budget: BudgetModel): number {
 
 function BudgetRow({
   budget,
+  month,
   onEdit,
   onDelete,
+  onAsk,
 }: {
   budget: BudgetModel;
+  month: string;
   onEdit: (categoryId: string, amount: number) => void;
   onDelete: (id: string) => void;
+  onAsk: (budget: BudgetModel, month: string) => void;
 }) {
   const spent = budget.spent ?? 0;
   const rolloverBalance = budget.rollover ? budget.rollover_balance : 0;
@@ -67,6 +74,13 @@ function BudgetRow({
         </div>
         <div className="flex items-center gap-3">
           <span className="text-xs text-muted">{formatPercent(projectedPct)}</span>
+          <button
+            className="text-muted hover:text-blue transition-colors"
+            onClick={() => onAsk(budget, month)}
+            title="Ask advisor"
+          >
+            <Sparkles size={12} />
+          </button>
           {editing ? (
             <div className="flex items-center gap-1">
               <input
@@ -406,6 +420,7 @@ function RecurringTab() {
 // ─── Main Budget View ─────────────────────────────────────────────────────────
 
 export function Budget() {
+  const navigate = useNavigate();
   const now = new Date();
   const [tab, setTab] = useState<'monthly' | 'recurring'>('monthly');
   const [currentMonth, setCurrentMonth] = useState(format(now, 'yyyy-MM'));
@@ -449,6 +464,11 @@ export function Budget() {
 
   // Unbudgeted: categories with spending but no budget
   const budgetedCatIds = new Set(budgets.map((b) => b.category_id));
+  const askAdvisorAboutBudget = (budget: BudgetModel, month: string) => {
+    navigate('/advisor', {
+      state: advisorRouteState(buildBudgetAdvisorPrompt(budget, month)),
+    });
+  };
 
   return (
     <div className="p-6 space-y-6">
@@ -546,8 +566,10 @@ export function Budget() {
                 <BudgetRow
                   key={budget.id}
                   budget={budget}
+                  month={currentMonth}
                   onEdit={(categoryId, amount) => editMutation.mutate({ categoryId, amount })}
                   onDelete={(id) => deleteMutation.mutate(id)}
+                  onAsk={askAdvisorAboutBudget}
                 />
               ))
             ) : (
