@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Group, Panel, Separator } from 'react-resizable-panels';
 import type { PanelImperativeHandle, PanelSize } from 'react-resizable-panels';
 import {
@@ -1032,12 +1032,14 @@ function AddManualAccountModal({ open, onClose }: { open: boolean; onClose: () =
 export function Accounts() {
   const qc = useQueryClient();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const { addToast } = useAppStore();
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [showHidden, setShowHidden] = useState(false);
   const [showManualModal, setShowManualModal] = useState(false);
   const [addMenuOpen, setAddMenuOpen] = useState(false);
   const addMenuRef = useRef<HTMLDivElement>(null);
+  const handledSetupActionRef = useRef(false);
   useOutsideClick(addMenuRef, addMenuOpen, () => setAddMenuOpen(false));
 
   // Left panel collapse state (persisted)
@@ -1243,6 +1245,24 @@ export function Accounts() {
       addToast({ type: 'error', message: errorMessage(err, 'Failed to open Plaid') });
     }
   };
+
+  useEffect(() => {
+    if (handledSetupActionRef.current) return;
+
+    const connect = searchParams.get('connect');
+    const manual = searchParams.get('manual');
+    if (connect !== 'bank' && manual !== '1') return;
+
+    handledSetupActionRef.current = true;
+    navigate('/accounts', { replace: true });
+
+    if (connect === 'bank') {
+      void connectPlaid();
+      return;
+    }
+
+    setShowManualModal(true);
+  }, [navigate, searchParams]);
 
   const handleConnectionAction = (connection: SyncHealthConnection) => {
     if (connection.provider === 'coinbase') {

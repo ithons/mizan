@@ -13,18 +13,23 @@ import {
   ArrowRight,
   CheckCircle2,
   CircleAlert,
+  CreditCard,
+  FileInput,
   Info,
   Lightbulb,
+  Plus,
   RefreshCw,
   ShieldCheck,
+  Wallet,
   Target,
   TrendingDown,
   TrendingUp,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { format, startOfMonth, endOfMonth, subMonths, parseISO } from 'date-fns';
-import type { DataQualitySummary, Goal, Insight, SyncHealth, SyncRun } from '@shared/types';
-import { networthApi, reportsApi, recurringApi, budgetsApi, transactionsApi, investmentsApi, insightsApi, goalsApi, syncApi } from '../lib/api';
+import type { DataQualitySummary, Goal, Insight, RecurringForecast, SyncHealth, SyncRun, TransactionReviewSummary } from '@shared/types';
+import { accountsApi, networthApi, reportsApi, recurringApi, budgetsApi, transactionsApi, investmentsApi, insightsApi, goalsApi, syncApi } from '../lib/api';
+import { getDashboardMode, type DashboardMode } from '../lib/dashboardState';
 import { formatCurrency, formatDate, formatDateShort, formatMonth, formatRelativeTime } from '../lib/formatters';
 import { AmountBadge } from '../components/AmountBadge';
 import { CategoryBadge } from '../components/CategoryBadge';
@@ -389,6 +394,156 @@ function SyncHealthPanel({
   );
 }
 
+function DashboardFocusPanel({
+  mode,
+  syncHealth,
+  reviewSummary,
+  forecast,
+  onNavigate,
+}: {
+  mode: DashboardMode;
+  syncHealth?: SyncHealth;
+  reviewSummary?: TransactionReviewSummary;
+  forecast?: RecurringForecast;
+  onNavigate: (route: string) => void;
+}) {
+  if (mode === 'first_run') {
+    const setupSteps = [
+      { label: 'Source', active: true },
+      { label: 'Sync', active: false },
+      { label: 'Review', active: false },
+      { label: 'Dashboard', active: false },
+    ];
+
+    return (
+      <div className="bg-surface border border-border rounded p-5">
+        <div className="grid grid-cols-1 xl:grid-cols-[1fr_380px] gap-6">
+          <div>
+            <div className="flex items-center gap-2 mb-3">
+              <CreditCard size={16} className="text-[#4ecba3]" />
+              <h2 className="text-base font-medium text-text">Connect your first money source</h2>
+            </div>
+            <p className="text-sm text-muted max-w-2xl leading-relaxed mb-5">
+              Live bank sync gives Mizān the cleanest first dashboard.
+            </p>
+            <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-2">
+              <button
+                onClick={() => onNavigate('/accounts?connect=bank')}
+                className="flex items-center justify-center gap-2 rounded border border-[#4ecba3]/35 bg-[#4ecba3]/15 text-[#4ecba3] px-3 py-2.5 text-sm hover:bg-[#4ecba3]/20"
+              >
+                <CreditCard size={15} /> Bank or card
+              </button>
+              <button
+                onClick={() => onNavigate('/accounts?manual=1')}
+                className="flex items-center justify-center gap-2 rounded border border-border text-text px-3 py-2.5 text-sm hover:bg-white/5"
+              >
+                <Plus size={15} /> Manual account
+              </button>
+              <button
+                onClick={() => onNavigate('/settings')}
+                className="flex items-center justify-center gap-2 rounded border border-border text-text px-3 py-2.5 text-sm hover:bg-white/5"
+              >
+                <Wallet size={15} /> Coinbase
+              </button>
+              <button
+                onClick={() => onNavigate('/settings')}
+                className="flex items-center justify-center gap-2 rounded border border-border text-text px-3 py-2.5 text-sm hover:bg-white/5"
+              >
+                <FileInput size={15} /> Import CSV
+              </button>
+            </div>
+          </div>
+          <div className="border border-border rounded p-4 bg-background/40">
+            <p className="text-xs text-muted mb-3">Setup path</p>
+            <div className="grid grid-cols-4 gap-2">
+              {setupSteps.map((step, index) => (
+                <div key={step.label} className="min-w-0">
+                  <div
+                    className="h-1.5 rounded-full mb-2"
+                    style={{ backgroundColor: step.active ? '#4ecba3' : '#2a2a2f' }}
+                  />
+                  <p className="text-[11px] text-text truncate">{index + 1}. {step.label}</p>
+                </div>
+              ))}
+            </div>
+            <p className="text-xs text-muted leading-relaxed mt-4">
+              After the first source syncs, Mizān will route open cleanup into Review Inbox.
+            </p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  const config = {
+    sync_repair: {
+      icon: AlertTriangle,
+      color: '#d4a44c',
+      title: 'Sync needs attention',
+      detail: syncHealth?.status_detail ?? 'A connected source needs sync review.',
+      action: 'Open Accounts',
+      route: '/accounts',
+    },
+    review_backlog: {
+      icon: CircleAlert,
+      color: '#5b8dee',
+      title: 'Review Inbox is open',
+      detail: `${reviewSummary?.total_open ?? 0} item${(reviewSummary?.total_open ?? 0) === 1 ? '' : 's'} need confirmation before the dashboard is fully trusted.`,
+      action: 'Open Review',
+      route: '/review',
+    },
+    forecast_warning: {
+      icon: TrendingDown,
+      color: '#e07070',
+      title: 'Upcoming cash flow is negative',
+      detail: `The next 30 days project ${formatCurrency(forecast?.net ?? 0)} after expected income and bills.`,
+      action: 'Open Bills',
+      route: '/bills',
+    },
+    clean_overview: {
+      icon: CheckCircle2,
+      color: '#4ecba3',
+      title: 'Review complete',
+      detail: 'No open review blockers are affecting the dashboard right now.',
+      action: 'Open Reports',
+      route: '/reports',
+    },
+  } satisfies Record<Exclude<DashboardMode, 'first_run'>, {
+    icon: LucideIcon;
+    color: string;
+    title: string;
+    detail: string;
+    action: string;
+    route: string;
+  }>;
+
+  const item = config[mode];
+  const Icon = item.icon;
+
+  return (
+    <div className="bg-surface border border-border rounded px-4 py-3 flex items-center justify-between gap-4">
+      <div className="flex items-start gap-3 min-w-0">
+        <div
+          className="w-8 h-8 rounded flex items-center justify-center flex-shrink-0"
+          style={{ backgroundColor: `${item.color}18` }}
+        >
+          <Icon size={16} style={{ color: item.color }} />
+        </div>
+        <div className="min-w-0">
+          <p className="text-sm font-medium text-text">{item.title}</p>
+          <p className="text-xs text-muted leading-relaxed mt-0.5">{item.detail}</p>
+        </div>
+      </div>
+      <button
+        onClick={() => onNavigate(item.route)}
+        className="flex items-center gap-1.5 text-xs text-muted hover:text-[#4ecba3] flex-shrink-0"
+      >
+        {item.action} <ArrowRight size={11} />
+      </button>
+    </div>
+  );
+}
+
 export function Dashboard() {
   const navigate = useNavigate();
   const now = new Date();
@@ -426,6 +581,16 @@ export function Dashboard() {
     queryFn: () => transactionsApi.list({ limit: 10, page: 1, startDate, endDate }),
   });
 
+  const { data: reviewSummary } = useQuery({
+    queryKey: ['transactions', 'review', 'dashboard'],
+    queryFn: transactionsApi.review,
+  });
+
+  const { data: accounts = [], isLoading: accountsLoading } = useQuery({
+    queryKey: ['accounts', 'dashboard'],
+    queryFn: accountsApi.list,
+  });
+
   const { data: holdings } = useQuery({
     queryKey: ['holdings'],
     queryFn: () => investmentsApi.holdings(),
@@ -456,7 +621,7 @@ export function Dashboard() {
     queryFn: () => insightsApi.quality(),
   });
 
-  if (nwLoading) {
+  if (nwLoading || accountsLoading) {
     return (
       <div className="p-6 space-y-6">
         <div className="flex items-center justify-between">
@@ -514,12 +679,47 @@ export function Dashboard() {
     color: c.color || CHART_COLORS[i % CHART_COLORS.length],
   }));
 
+  const dashboardMode = getDashboardMode({
+    accountCount: accounts.filter((account) => !account.is_hidden).length,
+    syncHealth,
+    reviewSummary,
+    forecast,
+    dataQuality,
+  });
+
+  if (dashboardMode === 'first_run') {
+    return (
+      <div className="p-6 space-y-6">
+        <div className="flex items-center justify-between">
+          <h1 className="text-xl font-semibold text-text">Dashboard</h1>
+          <span className="text-sm text-muted font-mono">{formatMonth(currentMonth)}</span>
+        </div>
+        <DashboardFocusPanel
+          mode={dashboardMode}
+          syncHealth={syncHealth}
+          reviewSummary={reviewSummary}
+          forecast={forecast}
+          onNavigate={navigate}
+        />
+        <SyncActivityPanel runs={syncRuns} />
+      </div>
+    );
+  }
+
   return (
     <div className="p-6 space-y-6">
       <div className="flex items-center justify-between">
         <h1 className="text-xl font-semibold text-text">Dashboard</h1>
         <span className="text-sm text-muted font-mono">{formatMonth(currentMonth)}</span>
       </div>
+
+      <DashboardFocusPanel
+        mode={dashboardMode}
+        syncHealth={syncHealth}
+        reviewSummary={reviewSummary}
+        forecast={forecast}
+        onNavigate={navigate}
+      />
 
       {/* Row 1: Stat cards */}
       <div className="grid grid-cols-4 gap-4">
