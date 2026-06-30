@@ -1,4 +1,4 @@
-import type { Account, Holding } from '@shared/types';
+import type { Account, Holding, InvestmentTransaction } from '@shared/types';
 
 export type AllocationLens = 'asset_type' | 'account_type' | 'tax_treatment' | 'symbol';
 
@@ -52,6 +52,21 @@ export interface ConcentrationSummary {
   largestAccount: AllocationSlice | null;
   label: 'No holdings' | 'Broad' | 'Moderate' | 'Concentrated';
   detail: string;
+}
+
+export interface InvestmentActivitySummary {
+  transactionCount: number;
+  buyAmount: number;
+  sellAmount: number;
+  dividendAmount: number;
+  feeAmount: number;
+  transferAmount: number;
+  otherAmount: number;
+  netAmount: number;
+  saleCount: number;
+  realizedGain: number | null;
+  realizedGainLabel: 'Not available';
+  realizedGainDetail: string;
 }
 
 const ACCOUNT_TYPE_LABELS: Record<string, string> = {
@@ -266,4 +281,51 @@ export function getConcentrationSummary(
     label,
     detail: `Top 5 positions are ${topFivePct.toFixed(1)}% of visible holdings.`,
   };
+}
+
+function absAmount(value: number | null | undefined): number {
+  return Math.abs(value ?? 0);
+}
+
+export function getInvestmentActivitySummary(
+  transactions: InvestmentTransaction[]
+): InvestmentActivitySummary {
+  const saleCount = transactions.filter((transaction) => transaction.type === 'sell').length;
+
+  const summary = transactions.reduce(
+    (activity, transaction) => {
+      activity.netAmount += transaction.amount;
+
+      if (transaction.type === 'buy') activity.buyAmount += absAmount(transaction.amount);
+      else if (transaction.type === 'sell') activity.sellAmount += absAmount(transaction.amount);
+      else if (transaction.type === 'dividend') activity.dividendAmount += absAmount(transaction.amount);
+      else if (transaction.type === 'transfer') activity.transferAmount += absAmount(transaction.amount);
+      else if (transaction.type === 'fee') activity.feeAmount += absAmount(transaction.fees ?? transaction.amount);
+      else activity.otherAmount += absAmount(transaction.amount);
+
+      if (transaction.fees != null && transaction.type !== 'fee') {
+        activity.feeAmount += absAmount(transaction.fees);
+      }
+
+      return activity;
+    },
+    {
+      transactionCount: transactions.length,
+      buyAmount: 0,
+      sellAmount: 0,
+      dividendAmount: 0,
+      feeAmount: 0,
+      transferAmount: 0,
+      otherAmount: 0,
+      netAmount: 0,
+      saleCount,
+      realizedGain: null,
+      realizedGainLabel: 'Not available' as const,
+      realizedGainDetail: saleCount > 0
+        ? 'Sale transactions are imported, but realized gain needs lot-level sale cost basis.'
+        : 'No sale transactions are imported for this period.',
+    }
+  );
+
+  return summary;
 }

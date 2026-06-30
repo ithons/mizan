@@ -5,8 +5,9 @@ import {
   getAllocationSlices,
   getConcentrationSummary,
   getCostBasisStats,
+  getInvestmentActivitySummary,
 } from '../client/src/lib/investmentAnalytics';
-import type { Account, Holding } from '../shared/types';
+import type { Account, Holding, InvestmentTransaction } from '../shared/types';
 
 function account(id: string, type: Account['type']): Account {
   return {
@@ -50,6 +51,25 @@ function holding(overrides: Partial<Holding>): Holding {
     ticker: overrides.ticker ?? null,
     security_name: overrides.security_name ?? null,
     security_type: overrides.security_type ?? null,
+  };
+}
+
+function investmentTransaction(overrides: Partial<InvestmentTransaction>): InvestmentTransaction {
+  return {
+    id: overrides.id ?? 'tx',
+    plaid_investment_transaction_id: null,
+    account_id: overrides.account_id ?? 'acct_taxable',
+    date: overrides.date ?? '2026-06-30',
+    type: overrides.type ?? 'buy',
+    security_id: overrides.security_id ?? null,
+    quantity: overrides.quantity ?? null,
+    price: overrides.price ?? null,
+    amount: overrides.amount ?? 0,
+    fees: overrides.fees ?? null,
+    name: overrides.name ?? 'Investment transaction',
+    created_at: '2026-06-30T00:00:00.000Z',
+    ticker: overrides.ticker ?? null,
+    security_name: overrides.security_name ?? null,
   };
 }
 
@@ -123,4 +143,28 @@ test('concentration summary groups positions before calculating top exposure', (
   assert.equal(summary.topFivePct, 95);
   assert.equal(summary.largestAccount?.label, 'Brokerage');
   assert.equal(summary.largestAccount?.value, 600);
+});
+
+test('investment activity summarizes imported transaction flow without inventing realized gains', () => {
+  const summary = getInvestmentActivitySummary([
+    investmentTransaction({ id: 'buy', type: 'buy', amount: -1000, fees: 1 }),
+    investmentTransaction({ id: 'sell', type: 'sell', amount: 700, fees: 2 }),
+    investmentTransaction({ id: 'dividend', type: 'dividend', amount: 25 }),
+    investmentTransaction({ id: 'fee', type: 'fee', amount: -4 }),
+    investmentTransaction({ id: 'transfer', type: 'transfer', amount: 300 }),
+    investmentTransaction({ id: 'other', type: 'other', amount: -10 }),
+  ]);
+
+  assert.equal(summary.transactionCount, 6);
+  assert.equal(summary.buyAmount, 1000);
+  assert.equal(summary.sellAmount, 700);
+  assert.equal(summary.dividendAmount, 25);
+  assert.equal(summary.feeAmount, 7);
+  assert.equal(summary.transferAmount, 300);
+  assert.equal(summary.otherAmount, 10);
+  assert.equal(summary.netAmount, 11);
+  assert.equal(summary.saleCount, 1);
+  assert.equal(summary.realizedGain, null);
+  assert.equal(summary.realizedGainLabel, 'Not available');
+  assert.match(summary.realizedGainDetail, /lot-level sale cost basis/);
 });

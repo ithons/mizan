@@ -21,6 +21,7 @@ import {
   getAllocationSlices,
   getConcentrationSummary,
   getCostBasisStats,
+  getInvestmentActivitySummary,
   type AllocationLens,
 } from '../lib/investmentAnalytics';
 import { AmountBadge } from '../components/AmountBadge';
@@ -55,6 +56,10 @@ const ACCOUNT_TYPE_LABELS: Record<string, string> = {
 function formatPct(n: number | null): string {
   if (n == null) return '-';
   return `${n >= 0 ? '+' : ''}${n.toFixed(1)}%`;
+}
+
+function formatSignedCurrency(n: number): string {
+  return `${n > 0 ? '+' : ''}${formatCurrency(n)}`;
 }
 
 function PnlCell({ value, pct }: { value: number | null; pct: number | null }) {
@@ -280,6 +285,10 @@ export function Investments() {
   const concentrationSummary = useMemo(
     () => getConcentrationSummary(filteredHoldings, accountById),
     [filteredHoldings, accountById]
+  );
+  const investmentActivity = useMemo(
+    () => getInvestmentActivitySummary(txs),
+    [txs]
   );
 
   return (
@@ -509,6 +518,44 @@ export function Investments() {
               <p className="text-text mt-1">{allocationQuality}</p>
             </div>
           </div>
+        </div>
+      )}
+
+      {/* Investment activity */}
+      {!txsLoading && investmentActivity.transactionCount > 0 && (
+        <div className="bg-surface border border-border rounded p-4 space-y-4">
+          <div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
+            <div>
+              <p className="text-xs text-muted font-medium uppercase tracking-wider">Investment Activity</p>
+              <p className="text-xs text-muted mt-1">
+                Last 12 months{selectedAccountId ? ' for selected account' : ' across investment accounts'}
+              </p>
+            </div>
+            <p className="text-xs text-muted">
+              {investmentActivity.transactionCount} imported transaction{investmentActivity.transactionCount === 1 ? '' : 's'}
+            </p>
+          </div>
+
+          <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-7 gap-3">
+            {[
+              ['Buys', formatCurrency(investmentActivity.buyAmount)],
+              ['Sells', formatCurrency(investmentActivity.sellAmount)],
+              ['Dividends', formatCurrency(investmentActivity.dividendAmount)],
+              ['Fees', formatCurrency(investmentActivity.feeAmount)],
+              ['Transfers', formatCurrency(investmentActivity.transferAmount)],
+              ['Net Imported', formatSignedCurrency(investmentActivity.netAmount)],
+              ['Realized Gain', investmentActivity.realizedGainLabel],
+            ].map(([label, value]) => (
+              <div key={label} className="rounded border border-border bg-background px-3 py-2">
+                <p className="text-[11px] text-muted">{label}</p>
+                <p className="font-mono text-sm text-text mt-1">{value}</p>
+              </div>
+            ))}
+          </div>
+
+          <p className="text-xs text-muted">
+            {investmentActivity.realizedGainDetail}
+          </p>
         </div>
       )}
 
