@@ -23,6 +23,7 @@ import {
   CreditCard,
   PanelLeftClose,
   PanelLeftOpen,
+  Sparkles,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { accountsApi, plaidApi, coinbaseApi, transactionsApi, investmentsApi, syncApi } from '../../lib/api';
@@ -54,6 +55,7 @@ export function AccountRow({
   selected,
   onSelect,
   onHide,
+  onAsk,
   onDelete,
   onEdit,
   holdingsByAccount,
@@ -63,6 +65,7 @@ export function AccountRow({
   selected: boolean;
   onSelect: () => void;
   onHide: () => void;
+  onAsk: () => void;
   onDelete?: () => void;
   onEdit?: () => void;
   holdingsByAccount: Record<string, Holding[]>;
@@ -123,6 +126,13 @@ export function AccountRow({
       >
         {formatCurrency(account.current_balance)}
       </span>
+      <button
+        className="opacity-0 group-hover:opacity-100 p-1 text-muted hover:text-blue transition-all"
+        onClick={(e) => { e.stopPropagation(); onAsk(); }}
+        title="Ask advisor"
+      >
+        <Sparkles size={13} />
+      </button>
 
       {/* Kebab */}
       <div className="relative" ref={menuRef} onClick={(e) => e.stopPropagation()}>

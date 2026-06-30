@@ -37,6 +37,8 @@ import { SyncActivityPanel } from '../../components/SyncActivityPanel';
 import { loadPlaidLink } from '../../lib/plaidLink';
 import { invalidateFinancialData } from '../../lib/queryInvalidation';
 import { parseDecimalInput } from '../../lib/numberInput';
+import { advisorRouteState } from '../../lib/advisorRouteState';
+import { buildAccountAdvisorPrompt } from '../../lib/advisorPrompts';
 import type { Account, PlaidItem, Holding, SyncHealth, SyncHealthConnection, SyncRun } from '@shared/types';
 
 import { useOutsideClick, errorMessage } from "./utils";
@@ -300,6 +302,12 @@ export function Accounts() {
     }
   };
 
+  const askAdvisorAboutAccount = (account: Account) => {
+    navigate('/advisor', {
+      state: advisorRouteState(buildAccountAdvisorPrompt(account)),
+    });
+  };
+
   const selectedAccount = accounts.find((a) => a.id === selectedId) ?? null;
   const syncingCoinbaseConnection = syncHealth?.connections.find((connection) => connection.provider === 'coinbase');
   const busyConnectionId = syncItemMutation.isPending && syncItemMutation.variables
@@ -413,6 +421,7 @@ export function Accounts() {
                   selectedId={selectedId}
                   onSelect={setSelectedId}
                   onHide={(id) => hideMutation.mutate(id)}
+                  onAsk={askAdvisorAboutAccount}
                   holdingsByAccount={holdingsByAccount}
                   groupType="plaid"
                   plaidItem={item}
@@ -431,6 +440,7 @@ export function Accounts() {
                   selectedId={selectedId}
                   onSelect={setSelectedId}
                   onHide={(id) => hideMutation.mutate(id)}
+                  onAsk={askAdvisorAboutAccount}
                   holdingsByAccount={holdingsByAccount}
                   groupType="coinbase"
                   onSyncCoinbase={() => syncCoinbaseMutation.mutate()}
@@ -447,6 +457,7 @@ export function Accounts() {
                   selectedId={selectedId}
                   onSelect={setSelectedId}
                   onHide={(id) => hideMutation.mutate(id)}
+                  onAsk={askAdvisorAboutAccount}
                   onDelete={(id) => {
                     const acc = accounts.find((a) => a.id === id);
                     if (acc) setConfirmDeleteAccount(acc);

@@ -24,6 +24,8 @@ import { InlineEdit } from '../components/InlineEdit';
 import { SkeletonList } from '../components/SkeletonLoader';
 import { invalidateFinancialData } from '../lib/queryInvalidation';
 import { parseDecimalInput } from '../lib/numberInput';
+import { advisorRouteState } from '../lib/advisorRouteState';
+import { buildTransactionAdvisorPrompt } from '../lib/advisorPrompts';
 import {
   BulkCategoryDropdown,
   CategoryDropdown,
@@ -38,6 +40,7 @@ import type {
   TransactionFilters,
   TransactionReviewQueueId,
   Category,
+  Transaction,
 } from '@shared/types';
 
 const PAGE_SIZE = 50;
@@ -291,6 +294,12 @@ export function Transactions() {
     createRuleMutation.mutate({
       pattern: suggestion.pattern,
       categoryId: suggestion.category_id,
+    });
+  };
+
+  const askAdvisorAboutTransaction = (transaction: Transaction) => {
+    navigate('/advisor', {
+      state: advisorRouteState(buildTransactionAdvisorPrompt(transaction)),
     });
   };
 
@@ -670,14 +679,23 @@ export function Transactions() {
                       />
                     </td>
                     <td className="px-2 py-2.5">
-                      {tx.is_manual && (
+                      <div className="flex items-center justify-end gap-1">
                         <button
-                          className="text-muted hover:text-rose transition-colors opacity-0 group-hover:opacity-100"
-                          onClick={() => deleteMutation.mutate(tx.id)}
+                          className="text-muted hover:text-blue transition-colors opacity-0 group-hover:opacity-100"
+                          onClick={() => askAdvisorAboutTransaction(tx)}
+                          title="Ask advisor"
                         >
-                          <Trash2 size={12} />
+                          <Sparkles size={12} />
                         </button>
-                      )}
+                        {tx.is_manual && (
+                          <button
+                            className="text-muted hover:text-rose transition-colors opacity-0 group-hover:opacity-100"
+                            onClick={() => deleteMutation.mutate(tx.id)}
+                          >
+                            <Trash2 size={12} />
+                          </button>
+                        )}
+                      </div>
                     </td>
                   </tr>
                 ))

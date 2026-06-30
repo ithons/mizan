@@ -51,6 +51,7 @@ export function InstitutionGroup({
   selectedId,
   onSelect,
   onHide,
+  onAsk,
   onDelete,
   onEdit,
   holdingsByAccount,
@@ -69,6 +70,7 @@ export function InstitutionGroup({
   selectedId: string | null;
   onSelect: (id: string) => void;
   onHide: (id: string) => void;
+  onAsk: (account: Account) => void;
   onDelete?: (id: string) => void;
   onEdit?: (id: string) => void;
   holdingsByAccount: Record<string, Holding[]>;
@@ -182,6 +184,7 @@ export function InstitutionGroup({
               selected={selectedId === acc.id}
               onSelect={() => onSelect(acc.id)}
               onHide={() => onHide(acc.id)}
+              onAsk={() => onAsk(acc)}
               onDelete={onDelete ? () => onDelete(acc.id) : undefined}
               onEdit={onEdit ? () => onEdit(acc.id) : undefined}
               holdingsByAccount={holdingsByAccount}
