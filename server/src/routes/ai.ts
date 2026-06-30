@@ -30,6 +30,9 @@ router.get('/context', (_req: Request, res: Response, next: NextFunction): void 
 });
 
 // POST /api/ai/analyze - local read-tool analysis with provenance
+// Note: Unlike `/chat`, this endpoint is purely a local, heuristic-based regex/DB resolver.
+// It does NOT hit Anthropic or any LLM. It is designed to be sub-millisecond fast for
+// real-time keystroke evaluation (e.g. in the Command Palette).
 router.post('/analyze', (req: Request, res: Response, next: NextFunction): void => {
   try {
     const question = typeof req.body?.question === 'string' ? req.body.question.trim() : '';

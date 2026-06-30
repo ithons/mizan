@@ -84,12 +84,19 @@ In production, replace `http://localhost:3001` with your actual domain.
 > Coinbase re-enables OAuth client creation.
 > Track: [portal.cdp.coinbase.com/projects/api-keys/oauth](https://portal.cdp.coinbase.com/projects/api-keys/oauth)
 
+## AI Architecture
+
+Mizān relies on Anthropic's Claude 3.5 Sonnet / Haiku to perform background sync reviews and exploratory chat.
+- **Local Heuristics (`/api/ai/analyze`):** The Command Palette (Cmd+K) and context generation rely on completely local, regex/DB-based heuristics. They execute in sub-milliseconds without network overhead.
+- **Cloud LLM (`/api/ai/chat` & background worker):** Explicit chat queries and asynchronous background sync reviews send structured data context to Anthropic APIs. Data ONLY leaves your machine when explicitly initiating a chat or when sync updates trigger a background review.
+
 ## Privacy
 
 No data leaves your machine except for direct API calls to:
 - Plaid (transaction syncing)
 - Coinbase (balance syncing)
 - `api.coinbase.com/v2/prices` (public spot price endpoint, no auth)
+- Anthropic (explicit AI chat and background sync reviews)
 
 ## License
 
