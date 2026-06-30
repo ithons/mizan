@@ -8,11 +8,17 @@ import { takeSnapshot } from '../services/snapshot';
 import { detectRecurring } from '../services/recurring';
 import { upsertMerchantRule } from '../services/rules';
 import { getTransactionReviewSummary } from '../services/transactionReview';
-import { refreshTransactionIntegrity } from '../services/transactionIntegrity';
+import {
+  confirmTransferPair,
+  dismissDuplicateGroup,
+  dismissTransferPair,
+  refreshTransactionIntegrity,
+} from '../services/transactionIntegrity';
 import {
   CreateManualTransactionSchema,
   UpdateTransactionSchema,
   BulkCategorySchema,
+  TransactionReviewStatusSchema,
 } from '../../../shared/schemas';
 
 const router = Router();
@@ -235,6 +241,15 @@ router.get('/', (req: Request, res: Response, next: NextFunction): void => {
       }
       conditions.push(uncategorized ? 't.category_id IS NULL' : 't.category_id IS NOT NULL');
     }
+    if (query.reviewStatus !== undefined) {
+      const reviewStatus = Array.isArray(query.reviewStatus) ? query.reviewStatus[0] : query.reviewStatus;
+      if (!['open', 'reviewed', 'dismissed'].includes(reviewStatus)) {
+        res.status(400).json({ error: 'Invalid reviewStatus filter' });
+        return;
+      }
+      conditions.push('t.review_status = ?');
+      params.push(reviewStatus);
+    }
     if (query.type !== undefined) {
       const type = Array.isArray(query.type) ? query.type[0] : query.type;
       if (type === 'income') {
@@ -430,6 +445,9 @@ router.patch(
       if (body.category_id !== undefined) {
         updates.push('category_id = ?');
         values.push(categoryId);
+        if (categoryId) {
+          updates.push("review_status = 'reviewed'");
+        }
       }
       if (body.notes !== undefined) {
         updates.push('notes = ?');
@@ -526,6 +544,74 @@ router.delete('/:id', (req: Request, res: Response, next: NextFunction): void =>
     refreshTransactionIntegrity(db);
 
     res.json({ data: { success: true } });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// PATCH /:id/review - mark a transaction review state without changing money data
+router.patch(
+  '/:id/review',
+  validate(TransactionReviewStatusSchema),
+  (req: Request, res: Response, next: NextFunction): void => {
+    try {
+      const db = getDb();
+      const { id } = req.params;
+      const { status } = req.body as { status: 'open' | 'reviewed' | 'dismissed' };
+      const now = new Date().toISOString();
+
+      const result = db.prepare(`
+        UPDATE transactions
+        SET review_status = ?,
+            updated_at = ?
+        WHERE id = ?
+      `).run(status, now, id);
+
+      if (result.changes === 0) {
+        res.status(404).json({ error: 'Transaction not found' });
+        return;
+      }
+
+      res.json({ data: db.prepare('SELECT * FROM transactions WHERE id = ?').get(id) });
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
+// POST /duplicates/:groupId/dismiss - dismiss a duplicate candidate group
+router.post('/duplicates/:groupId/dismiss', (req: Request, res: Response, next: NextFunction): void => {
+  try {
+    const db = getDb();
+    const groupId = Array.isArray(req.params.groupId) ? req.params.groupId[0] : req.params.groupId;
+    const changed = dismissDuplicateGroup(db, groupId);
+    refreshTransactionIntegrity(db);
+    res.json({ data: { updated: changed } });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// POST /transfers/:pairId/confirm - confirm an automatically detected transfer pair
+router.post('/transfers/:pairId/confirm', (req: Request, res: Response, next: NextFunction): void => {
+  try {
+    const db = getDb();
+    const pairId = Array.isArray(req.params.pairId) ? req.params.pairId[0] : req.params.pairId;
+    const changed = confirmTransferPair(db, pairId);
+    res.json({ data: { updated: changed } });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// POST /transfers/:pairId/dismiss - dismiss an automatically detected transfer pair
+router.post('/transfers/:pairId/dismiss', (req: Request, res: Response, next: NextFunction): void => {
+  try {
+    const db = getDb();
+    const pairId = Array.isArray(req.params.pairId) ? req.params.pairId[0] : req.params.pairId;
+    const changed = dismissTransferPair(db, pairId);
+    refreshTransactionIntegrity(db);
+    res.json({ data: { updated: changed } });
   } catch (err) {
     next(err);
   }

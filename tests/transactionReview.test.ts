@@ -26,7 +26,8 @@ function setupReviewDb(): Database.Database {
       duplicate_group_id TEXT,
       duplicate_status TEXT NOT NULL DEFAULT 'none',
       transfer_pair_id TEXT,
-      transfer_status TEXT NOT NULL DEFAULT 'none'
+      transfer_status TEXT NOT NULL DEFAULT 'none',
+      review_status TEXT NOT NULL DEFAULT 'open'
     );
 
     CREATE TABLE accounts (

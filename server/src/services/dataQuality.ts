@@ -147,7 +147,7 @@ export function summarizeDataQuality({
       reviewParts.length > 0
         ? `${reviewParts.join(', ')} need review before reports can be fully trusted.`
         : `${plural(reviewSummary.total_open, 'review item')} need attention.`,
-      '/transactions',
+      '/review',
       reviewSummary.total_open > 10 || uncategorized > 5 ? 'warning' : 'info',
       Math.min(25, Math.ceil(reviewSummary.total_open * 1.5))
     ));

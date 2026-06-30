@@ -306,6 +306,48 @@ export function getTransferCandidatePairs(
   return rows;
 }
 
+export function dismissDuplicateGroup(db: Database.Database, groupId: string): number {
+  const result = db.prepare(`
+    UPDATE transactions
+    SET duplicate_status = 'dismissed',
+        duplicate_group_id = NULL
+    WHERE duplicate_group_id = ?
+      AND duplicate_status = 'candidate'
+  `).run(groupId);
+
+  return result.changes;
+}
+
+export function confirmTransferPair(db: Database.Database, pairId: string): number {
+  const result = db.prepare(`
+    UPDATE transactions
+    SET transfer_status = 'confirmed',
+        review_status = 'reviewed',
+        updated_at = ?
+    WHERE transfer_pair_id = ?
+      AND transfer_status = 'candidate'
+  `).run(new Date().toISOString(), pairId);
+
+  return result.changes;
+}
+
+export function dismissTransferPair(db: Database.Database, pairId: string): number {
+  const result = db.prepare(`
+    UPDATE transactions
+    SET transfer_status = 'dismissed',
+        transfer_pair_id = NULL,
+        category_id = CASE
+          WHEN category_id IN ('cat_xfer_in', 'cat_xfer_out') THEN NULL
+          ELSE category_id
+        END,
+        updated_at = ?
+    WHERE transfer_pair_id = ?
+      AND transfer_status = 'candidate'
+  `).run(new Date().toISOString(), pairId);
+
+  return result.changes;
+}
+
 export function refreshTransactionIntegrity(db: Database.Database): TransactionIntegrityResult {
   const refresh = db.transaction(() => {
     const duplicates = refreshDuplicateCandidates(db);

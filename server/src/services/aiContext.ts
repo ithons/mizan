@@ -102,7 +102,7 @@ export function buildAdvisorActions({
     actions.push(action(
       'review-transactions',
       'Review transactions',
-      '/transactions',
+      '/review',
       'Help me prioritize my transaction review queue and explain what reports these issues affect.',
       `${uncategorized} uncategorized transactions and ${ruleSuggestions} rule suggestions are open.`,
       uncategorized > 10 ? 'warning' : 'info'

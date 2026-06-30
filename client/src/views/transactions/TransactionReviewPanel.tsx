@@ -1,5 +1,5 @@
 import React from 'react';
-import { ArrowRight, CheckCircle2, Clock, Sparkles, Tag, RefreshCw } from 'lucide-react';
+import { ArrowLeftRight, ArrowRight, CheckCircle2, Clock, Sparkles, Tag, RefreshCw, Trash2 } from 'lucide-react';
 import type {
   MerchantRuleSuggestion,
   TransactionReviewQueueId,
@@ -12,6 +12,8 @@ const queueTone: Record<TransactionReviewQueueId, { color: string; icon: React.E
   rule_suggestions: { color: '#5b8dee', icon: Sparkles },
   pending: { color: '#f0c040', icon: Clock },
   recurring_candidates: { color: '#4ecba3', icon: RefreshCw },
+  duplicate_candidates: { color: '#e07070', icon: Trash2 },
+  transfer_candidates: { color: '#5b8dee', icon: ArrowLeftRight },
 };
 
 export function TransactionReviewPanel({
@@ -44,7 +46,7 @@ export function TransactionReviewPanel({
         )}
       </div>
 
-      <div className="grid grid-cols-4 gap-2">
+      <div className="grid grid-cols-2 lg:grid-cols-6 gap-2">
         {queues.map((queue) => {
           const tone = queueTone[queue.id];
           const Icon = tone.icon;

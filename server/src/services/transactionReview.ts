@@ -20,8 +20,8 @@ interface ReviewCounts {
 function getCounts(db: Database.Database): ReviewCounts {
   return db.prepare(`
     SELECT
-      SUM(CASE WHEN pending = 0 AND category_id IS NULL THEN 1 ELSE 0 END) AS uncategorized_count,
-      SUM(CASE WHEN pending = 1 THEN 1 ELSE 0 END) AS pending_count,
+      SUM(CASE WHEN pending = 0 AND category_id IS NULL AND review_status = 'open' THEN 1 ELSE 0 END) AS uncategorized_count,
+      SUM(CASE WHEN pending = 1 AND review_status = 'open' THEN 1 ELSE 0 END) AS pending_count,
       SUM(CASE WHEN duplicate_status = 'candidate' THEN 1 ELSE 0 END) AS duplicate_candidate_count,
       SUM(CASE WHEN transfer_status = 'candidate' AND amount < 0 THEN 1 ELSE 0 END) AS transfer_candidate_count
     FROM transactions

@@ -212,7 +212,7 @@ test('data quality combines transaction and cash flow review penalties', () => {
     'cash-flow-review',
   ]);
   assert.deepEqual(summary.issues.map((issue) => issue.route), [
-    '/transactions',
+    '/review',
     '/bills',
   ]);
 });

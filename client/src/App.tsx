@@ -12,6 +12,7 @@ import { invalidateFinancialData } from './lib/queryInvalidation';
 const Dashboard = lazy(() => import('./views/Dashboard').then((module) => ({ default: module.Dashboard })));
 const Accounts = lazy(() => import('./views/Accounts').then((module) => ({ default: module.Accounts })));
 const Transactions = lazy(() => import('./views/Transactions').then((module) => ({ default: module.Transactions })));
+const ReviewInbox = lazy(() => import('./views/ReviewInbox').then((module) => ({ default: module.ReviewInbox })));
 const CashFlow = lazy(() => import('./views/CashFlow').then((module) => ({ default: module.CashFlow })));
 const Bills = lazy(() => import('./views/Bills').then((module) => ({ default: module.Bills })));
 const Budget = lazy(() => import('./views/Budget').then((module) => ({ default: module.Budget })));
@@ -99,6 +100,7 @@ function AppRoutes() {
         <Route element={<Layout />}>
           <Route path="/" element={lazyView(<Dashboard />)} />
           <Route path="/accounts" element={lazyView(<Accounts />)} />
+          <Route path="/review" element={lazyView(<ReviewInbox />)} />
           <Route path="/transactions" element={lazyView(<Transactions />)} />
           <Route path="/cashflow" element={lazyView(<CashFlow />)} />
           <Route path="/bills" element={lazyView(<Bills />)} />

@@ -118,6 +118,7 @@ export const transactionsApi = {
     if (params.pending != null) q.set('pending', String(params.pending));
     if (params.recurring != null) q.set('recurring', String(params.recurring));
     if (params.uncategorized != null) q.set('uncategorized', String(params.uncategorized));
+    if (params.reviewStatus) q.set('reviewStatus', params.reviewStatus);
     if (params.type) q.set('type', params.type);
     if (params.sortBy) q.set('sortBy', params.sortBy);
     if (params.sortDir) q.set('sortDir', params.sortDir);
@@ -136,6 +137,23 @@ export const transactionsApi = {
     apiFetch<Transaction>(`/api/transactions/${id}`, {
       method: 'PATCH',
       body: JSON.stringify(body),
+    }),
+  markReview: (id: string, status: 'open' | 'reviewed' | 'dismissed') =>
+    apiFetch<Transaction>(`/api/transactions/${id}/review`, {
+      method: 'PATCH',
+      body: JSON.stringify({ status }),
+    }),
+  dismissDuplicateGroup: (groupId: string) =>
+    apiFetch<{ updated: number }>(`/api/transactions/duplicates/${encodeURIComponent(groupId)}/dismiss`, {
+      method: 'POST',
+    }),
+  confirmTransferPair: (pairId: string) =>
+    apiFetch<{ updated: number }>(`/api/transactions/transfers/${encodeURIComponent(pairId)}/confirm`, {
+      method: 'POST',
+    }),
+  dismissTransferPair: (pairId: string) =>
+    apiFetch<{ updated: number }>(`/api/transactions/transfers/${encodeURIComponent(pairId)}/dismiss`, {
+      method: 'POST',
     }),
   delete: (id: string) =>
     apiFetch<void>(`/api/transactions/${id}`, { method: 'DELETE' }),

@@ -2,6 +2,9 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import Database from 'better-sqlite3';
 import {
+  confirmTransferPair,
+  dismissDuplicateGroup,
+  dismissTransferPair,
   getDuplicateCandidateGroups,
   getTransferCandidatePairs,
   refreshTransactionIntegrity,
@@ -39,6 +42,7 @@ function setupIntegrityDb(): Database.Database {
       duplicate_status TEXT NOT NULL DEFAULT 'none',
       transfer_pair_id TEXT,
       transfer_status TEXT NOT NULL DEFAULT 'none',
+      review_status TEXT NOT NULL DEFAULT 'open',
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
     );
@@ -188,4 +192,41 @@ test('candidate transfer pairs are excluded from cashflow reports', (t) => {
       net: 950.32,
     },
   ]);
+});
+
+test('duplicate groups and transfer pairs can be dismissed or confirmed', (t) => {
+  const db = setupIntegrityDb();
+  t.after(() => db.close());
+
+  refreshTransactionIntegrity(db);
+  const duplicateGroup = getDuplicateCandidateGroups(db)[0];
+  const transferPair = getTransferCandidatePairs(db)[0];
+
+  assert.equal(dismissDuplicateGroup(db, duplicateGroup.group_id), 2);
+  assert.equal(getDuplicateCandidateGroups(db).length, 0);
+
+  assert.equal(confirmTransferPair(db, transferPair.pair_id), 2);
+  assert.equal(getTransferCandidatePairs(db).length, 0);
+
+  const confirmed = db.prepare(`
+    SELECT COUNT(*) AS count
+    FROM transactions
+    WHERE transfer_status = 'confirmed'
+      AND review_status = 'reviewed'
+  `).get() as { count: number };
+  assert.equal(confirmed.count, 2);
+});
+
+test('dismissed transfer pairs are not immediately rediscovered', (t) => {
+  const db = setupIntegrityDb();
+  t.after(() => db.close());
+
+  refreshTransactionIntegrity(db);
+  const transferPair = getTransferCandidatePairs(db)[0];
+
+  assert.equal(dismissTransferPair(db, transferPair.pair_id), 2);
+  assert.equal(getTransferCandidatePairs(db).length, 0);
+
+  refreshTransactionIntegrity(db);
+  assert.equal(getTransferCandidatePairs(db).length, 0);
 });

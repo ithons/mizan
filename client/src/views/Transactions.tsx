@@ -358,17 +358,7 @@ export function Transactions() {
   };
 
   const selectReviewQueue = (queueId: TransactionReviewQueueId) => {
-    if (queueId === 'recurring_candidates') {
-      navigate('/bills');
-      return;
-    }
-
-    if (queueId === 'pending') {
-      reviewPending();
-      return;
-    }
-
-    reviewUncategorized();
+    navigate(`/review?queue=${queueId}`);
   };
 
   const hasSearch = !!filters.search;

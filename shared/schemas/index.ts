@@ -45,6 +45,10 @@ export const BulkCategorySchema = z.object({
   categoryId: z.string().min(1),
 });
 
+export const TransactionReviewStatusSchema = z.object({
+  status: z.enum(['open', 'reviewed', 'dismissed']),
+});
+
 export const CreateCategorySchema = z.object({
   name: z.string().min(1),
   icon: z.string().optional(),
