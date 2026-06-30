@@ -582,6 +582,7 @@ export async function syncAllItems(): Promise<PlaidSyncSummary> {
       }
     } catch (err) {
       const message = (err as Error).message || 'Unknown sync error';
+      db.prepare("UPDATE plaid_items SET status = 'sync_error' WHERE id = ?").run(item.id);
       summary.failed.push({
         itemId: item.id,
         institutionName: item.institution_name,

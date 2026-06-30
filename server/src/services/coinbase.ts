@@ -166,6 +166,7 @@ export async function syncCoinbase(): Promise<CoinbaseSyncResult> {
   const activeConnection = db.prepare(
     "SELECT id FROM coinbase_connections WHERE status = 'active'"
   ).get() as CoinbaseConnectionRow | undefined;
+  const activeConnectionId = activeConnection?.id ?? null;
 
   while (hasNext) {
     const params = new URLSearchParams({ limit: '250' });
@@ -196,20 +197,22 @@ export async function syncCoinbase(): Promise<CoinbaseSyncResult> {
       if (existing) {
         db.prepare(`
           UPDATE accounts
-          SET native_currency = ?, native_balance = ?, current_balance = ?,
+          SET connection_id = COALESCE(?, connection_id),
+              native_currency = ?, native_balance = ?, current_balance = ?,
               updated_at = ?
           WHERE id = ?
-        `).run(currency, balanceValue, currentBalance, now, existing.id);
+        `).run(activeConnectionId, currency, balanceValue, currentBalance, now, existing.id);
       } else {
         db.prepare(`
           INSERT INTO accounts
-            (id, coinbase_account_id, connection_type, institution_name,
+            (id, coinbase_account_id, connection_id, connection_type, institution_name,
              account_name, type, current_balance, native_currency, native_balance,
              currency, is_manual, is_hidden, is_liability, sort_order, created_at, updated_at)
-          VALUES (?, ?, 'coinbase', 'Coinbase', ?, 'crypto_wallet', ?, ?, ?, 'USD', 0, 0, 0, 0, ?, ?)
+          VALUES (?, ?, ?, 'coinbase', 'Coinbase', ?, 'crypto_wallet', ?, ?, ?, 'USD', 0, 0, 0, 0, ?, ?)
         `).run(
           uuidv4(),
           account.uuid,
+          activeConnectionId,
           account.name || currency,
           currentBalance,
           currency,

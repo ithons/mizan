@@ -4,6 +4,7 @@ import type Database from 'better-sqlite3';
 import { getDb } from '../db/index';
 import { validate } from '../middleware/validate';
 import { CreateGoalSchema, UpdateGoalSchema } from '../../../shared/schemas';
+import { calculateGoalProgress } from '../services/goalProgress';
 import type { Goal, GoalType } from '../../../shared/types';
 
 const router = Router();
@@ -54,30 +55,14 @@ function getParamId(value: string | string[] | undefined): string | null {
 }
 
 function toGoal(row: GoalRow): Goal {
-  const linkedBalance = row.account_balance ?? null;
-  let progressAmount = row.current_amount;
-
-  if (linkedBalance !== null) {
-    if (row.type === 'savings') {
-      progressAmount = Math.max(linkedBalance, 0);
-    } else {
-      const startingAmount = row.starting_amount ?? row.target_amount;
-      progressAmount = Math.max(startingAmount - linkedBalance, 0);
-    }
-  }
-
-  const cappedProgress = Math.min(progressAmount, row.target_amount);
-  const remainingAmount = Math.max(row.target_amount - cappedProgress, 0);
-  const progressPercent = row.target_amount > 0
-    ? Math.min((cappedProgress / row.target_amount) * 100, 100)
-    : 0;
+  const progress = calculateGoalProgress(row);
 
   return {
     id: row.id,
     name: row.name,
     type: row.type,
     target_amount: row.target_amount,
-    current_amount: progressAmount,
+    current_amount: progress.current_amount,
     starting_amount: row.starting_amount,
     account_id: row.account_id,
     target_date: row.target_date,
@@ -85,9 +70,9 @@ function toGoal(row: GoalRow): Goal {
     is_archived: Boolean(row.is_archived),
     created_at: row.created_at,
     updated_at: row.updated_at,
-    progress_amount: cappedProgress,
-    remaining_amount: remainingAmount,
-    progress_percent: progressPercent,
+    progress_amount: progress.progress_amount,
+    remaining_amount: progress.remaining_amount,
+    progress_percent: progress.progress_percent,
     account_name: row.account_name,
     institution_name: row.institution_name,
     account_balance: row.account_balance,

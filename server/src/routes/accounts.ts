@@ -53,7 +53,7 @@ router.post(
         institution_name?: string;
         current_balance: number;
         currency: string;
-        is_liability: boolean;
+        is_liability?: boolean;
         color?: string;
       };
 

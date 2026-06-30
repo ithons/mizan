@@ -1,17 +1,15 @@
 import React, { useState } from 'react';
 import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query';
+import { useNavigate } from 'react-router-dom';
 import {
   Plus,
   Download,
   RefreshCw,
   ChevronLeft,
   ChevronRight,
-  ChevronUp,
-  ChevronDown,
   X,
   Trash2,
   SlidersHorizontal,
-  AlertCircle,
   Sparkles,
 } from 'lucide-react';
 import { format, subMonths } from 'date-fns';
@@ -20,129 +18,27 @@ import { formatDate, formatCurrency } from '../lib/formatters';
 import { useAppStore } from '../store';
 import { Modal } from '../components/Modal';
 import { AmountBadge } from '../components/AmountBadge';
-import { CategoryBadge } from '../components/CategoryBadge';
 import { InlineEdit } from '../components/InlineEdit';
 import { SkeletonList } from '../components/SkeletonLoader';
 import { invalidateFinancialData } from '../lib/queryInvalidation';
 import { parseDecimalInput } from '../lib/numberInput';
-import type { TransactionFilters, Category } from '@shared/types';
+import {
+  BulkCategoryDropdown,
+  CategoryDropdown,
+  FilterChip,
+  SortableHeader,
+  type SortCol,
+  type SortDir,
+} from './transactions/TransactionControls';
+import { TransactionReviewPanel } from './transactions/TransactionReviewPanel';
+import type {
+  MerchantRuleSuggestion,
+  TransactionFilters,
+  TransactionReviewQueueId,
+  Category,
+} from '@shared/types';
 
 const PAGE_SIZE = 50;
-
-type SortCol = 'date' | 'amount' | 'merchant';
-type SortDir = 'asc' | 'desc';
-
-// ─── Sortable header ──────────────────────────────────────────────────────────
-
-function SortableHeader({
-  label,
-  col,
-  sortBy,
-  sortDir,
-  onSort,
-}: {
-  label: string;
-  col: SortCol;
-  sortBy: SortCol;
-  sortDir: SortDir;
-  onSort: (col: SortCol) => void;
-}) {
-  const active = sortBy === col;
-  return (
-    <th
-      className="text-left px-3 py-2.5 text-xs text-muted font-medium uppercase tracking-wider cursor-pointer select-none hover:text-text"
-      onClick={() => onSort(col)}
-    >
-      <span className="flex items-center gap-1">
-        {label}
-        {active ? (
-          sortDir === 'asc' ? <ChevronUp size={11} /> : <ChevronDown size={11} />
-        ) : (
-          <ChevronDown size={11} className="opacity-0 group-hover:opacity-30" />
-        )}
-      </span>
-    </th>
-  );
-}
-
-// ─── Category dropdown ────────────────────────────────────────────────────────
-
-function CategoryDropdown({
-  value,
-  categories,
-  onChange,
-}: {
-  value: string | null | undefined;
-  categories: Category[];
-  onChange: (id: string) => void;
-}) {
-  const [open, setOpen] = useState(false);
-  const selected = categories.find((c) => c.id === value);
-
-  return (
-    <div className="relative">
-      <button
-        className="flex items-center gap-1 hover:opacity-80"
-        onClick={() => setOpen(!open)}
-      >
-        {selected ? (
-          <CategoryBadge name={selected.name} color={selected.color} icon={selected.icon} />
-        ) : (
-          <span className="text-xs text-muted">Uncategorized</span>
-        )}
-      </button>
-      {open && (
-        <div className="absolute left-0 top-6 bg-surface border border-border rounded shadow-xl z-30 w-52 max-h-64 overflow-y-auto">
-          {categories.map((cat) => (
-            <button
-              key={cat.id}
-              className="flex items-center gap-2 w-full px-3 py-1.5 text-xs hover:bg-white/5 text-left"
-              onClick={() => { onChange(cat.id); setOpen(false); }}
-            >
-              <CategoryBadge name={cat.name} color={cat.color} icon={cat.icon} />
-            </button>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
-
-// ─── Bulk category dropdown ───────────────────────────────────────────────────
-
-function BulkCategoryDropdown({
-  categories,
-  onSelect,
-}: {
-  categories: Category[];
-  onSelect: (id: string) => void;
-}) {
-  const [open, setOpen] = useState(false);
-
-  return (
-    <div className="relative">
-      <button
-        className="flex items-center gap-1 text-xs border border-border rounded px-2 py-1 text-text hover:bg-white/5"
-        onClick={() => setOpen(!open)}
-      >
-        Assign Category <ChevronDown size={11} />
-      </button>
-      {open && (
-        <div className="absolute left-0 top-7 bg-surface border border-border rounded shadow-xl z-30 w-52 max-h-64 overflow-y-auto">
-          {categories.map((cat) => (
-            <button
-              key={cat.id}
-              className="flex items-center gap-2 w-full px-3 py-1.5 text-xs hover:bg-white/5 text-left"
-              onClick={() => { onSelect(cat.id); setOpen(false); }}
-            >
-              <CategoryBadge name={cat.name} color={cat.color} icon={cat.icon} />
-            </button>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
 
 // ─── Add Transaction Modal ────────────────────────────────────────────────────
 
@@ -277,23 +173,9 @@ function AddTransactionModal({
   );
 }
 
-// ─── Filter chip ──────────────────────────────────────────────────────────────
-
-function FilterChip({ label, onRemove }: { label: string; onRemove: () => void }) {
-  return (
-    <span className="flex items-center gap-1 text-xs bg-border/60 text-text px-2 py-0.5 rounded-full">
-      {label}
-      <button onClick={onRemove} className="text-muted hover:text-text">
-        <X size={10} />
-      </button>
-    </span>
-  );
-}
-
-// ─── Main view ────────────────────────────────────────────────────────────────
-
 export function Transactions() {
   const qc = useQueryClient();
+  const navigate = useNavigate();
   const { addToast } = useAppStore();
   const [page, setPage] = useState(1);
   const [showAddModal, setShowAddModal] = useState(false);
@@ -315,21 +197,16 @@ export function Transactions() {
     uncategorized: undefined,
   });
 
-  const queryFilters = { ...filters, page, limit: PAGE_SIZE };
+  const queryFilters = { ...filters, page, limit: PAGE_SIZE, sortBy, sortDir };
 
   const { data: txData, isLoading, isError } = useQuery({
     queryKey: ['transactions', queryFilters],
     queryFn: () => transactionsApi.list(queryFilters),
   });
 
-  const { data: uncategorizedData } = useQuery({
-    queryKey: ['transactions', 'uncategorized-count'],
-    queryFn: () => transactionsApi.list({
-      page: 1,
-      limit: 1,
-      uncategorized: true,
-      pending: false,
-    }),
+  const { data: reviewSummary } = useQuery({
+    queryKey: ['transactions', 'review'],
+    queryFn: transactionsApi.review,
   });
 
   const { data: accounts = [] } = useQuery({
@@ -408,24 +285,16 @@ export function Transactions() {
     createRuleMutation.mutate({ pattern, categoryId });
   };
 
-  const rawTxs = txData?.data ?? [];
+  const applyRuleSuggestion = (suggestion: MerchantRuleSuggestion) => {
+    createRuleMutation.mutate({
+      pattern: suggestion.pattern,
+      categoryId: suggestion.category_id,
+    });
+  };
+
+  const txs = txData?.data ?? [];
   const total = txData?.total ?? 0;
   const totalPages = Math.ceil(total / PAGE_SIZE);
-
-  // Client-side sort on current page
-  const txs = [...rawTxs].sort((a, b) => {
-    let cmp = 0;
-    if (sortBy === 'date') {
-      cmp = a.date < b.date ? -1 : a.date > b.date ? 1 : 0;
-    } else if (sortBy === 'amount') {
-      cmp = a.amount - b.amount;
-    } else if (sortBy === 'merchant') {
-      const am = (a.merchant_name || a.original_name || '').toLowerCase();
-      const bm = (b.merchant_name || b.original_name || '').toLowerCase();
-      cmp = am < bm ? -1 : am > bm ? 1 : 0;
-    }
-    return sortDir === 'asc' ? cmp : -cmp;
-  });
 
   const toggleSelect = (id: string) => {
     setSelectedIds((prev) => {
@@ -474,6 +343,34 @@ export function Transactions() {
     setSelectedIds(new Set());
   };
 
+  const reviewPending = () => {
+    setFilters({
+      startDate: '',
+      endDate: '',
+      search: '',
+      type: '',
+      pending: true,
+      recurring: undefined,
+      uncategorized: undefined,
+    });
+    setPage(1);
+    setSelectedIds(new Set());
+  };
+
+  const selectReviewQueue = (queueId: TransactionReviewQueueId) => {
+    if (queueId === 'recurring_candidates') {
+      navigate('/bills');
+      return;
+    }
+
+    if (queueId === 'pending') {
+      reviewPending();
+      return;
+    }
+
+    reviewUncategorized();
+  };
+
   const hasSearch = !!filters.search;
   const hasType = !!filters.type;
   const hasPending = filters.pending !== undefined;
@@ -482,7 +379,6 @@ export function Transactions() {
   const isDefaultDateRange = filters.startDate === DEFAULT_START && filters.endDate === DEFAULT_END;
   const hasDateRange = !isDefaultDateRange;
   const dateRangeLabel = `${filters.startDate || 'Any'} → ${filters.endDate || 'Any'}`;
-  const uncategorizedTotal = uncategorizedData?.total ?? 0;
 
   return (
     <div className="p-6 flex flex-col h-full">
@@ -623,20 +519,12 @@ export function Transactions() {
         </div>
       )}
 
-      {uncategorizedTotal > 0 && !filters.uncategorized && (
-        <div className="flex items-center gap-3 mb-3 px-3 py-2 bg-[#f0c040]/10 border border-[#f0c040]/30 rounded">
-          <AlertCircle size={14} className="text-[#f0c040] flex-shrink-0" />
-          <span className="text-xs text-text">
-            <span className="font-mono">{uncategorizedTotal}</span> posted transactions need categories
-          </span>
-          <button
-            className="ml-auto text-xs text-[#f0c040] hover:opacity-80"
-            onClick={reviewUncategorized}
-          >
-            Review
-          </button>
-        </div>
-      )}
+      <TransactionReviewPanel
+        summary={reviewSummary}
+        onQueueSelect={selectReviewQueue}
+        onApplySuggestion={applyRuleSuggestion}
+        applyingPattern={createRuleMutation.variables?.pattern ?? null}
+      />
 
       {/* Bulk Action Bar */}
       {selectedIds.size > 0 && (

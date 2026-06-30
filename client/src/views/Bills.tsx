@@ -6,10 +6,12 @@ import {
   CalendarDays,
   CheckCircle2,
   Clock3,
+  CircleAlert,
   RefreshCw,
   Wallet,
   XCircle,
 } from 'lucide-react';
+import { format } from 'date-fns';
 import type { Account, RecurringForecastOccurrence } from '@shared/types';
 import { accountsApi, recurringApi } from '../lib/api';
 import { formatCurrency, formatDate } from '../lib/formatters';
@@ -27,6 +29,11 @@ const FREQUENCY_LABELS: Record<RecurringForecastOccurrence['frequency'], string>
 };
 
 const LIQUID_ACCOUNT_TYPES = new Set(['checking', 'savings', 'cash']);
+const confidenceColor: Record<RecurringForecastOccurrence['confidence_label'], string> = {
+  confirmed: '#4ecba3',
+  likely: '#5b8dee',
+  uncertain: '#d4a44c',
+};
 
 interface ProjectionPoint {
   date: string;
@@ -43,11 +50,13 @@ function buildProjection(
   occurrences: RecurringForecastOccurrence[]
 ): ProjectionPoint[] {
   const deltaByDate = new Map<string, number>();
+  const today = format(new Date(), 'yyyy-MM-dd');
 
   for (const occurrence of occurrences) {
+    const projectionDate = occurrence.status === 'overdue' ? today : occurrence.expected_date;
     deltaByDate.set(
-      occurrence.expected_date,
-      (deltaByDate.get(occurrence.expected_date) ?? 0) + occurrence.amount
+      projectionDate,
+      (deltaByDate.get(projectionDate) ?? 0) + occurrence.amount
     );
   }
 
@@ -94,6 +103,8 @@ function ScheduleRow({
 }) {
   const Icon = occurrence.is_income ? ArrowUpCircle : ArrowDownCircle;
   const color = occurrence.is_income ? '#4ecba3' : '#e07070';
+  const confidenceTone = confidenceColor[occurrence.confidence_label];
+  const needsAction = occurrence.needs_review || occurrence.status === 'overdue';
 
   return (
     <div className="grid grid-cols-[120px_1fr_auto] gap-4 px-4 py-3 border-b border-border last:border-b-0 items-center">
@@ -105,14 +116,24 @@ function ScheduleRow({
         <div className="min-w-0">
           <div className="flex items-center gap-2">
             <p className="text-sm text-text truncate">{occurrence.merchant_name}</p>
+            {occurrence.status === 'overdue' && (
+              <span className="text-[10px] text-[#e07070] border border-[#e07070]/40 rounded px-1.5 py-0.5">
+                overdue
+              </span>
+            )}
             {!occurrence.is_confirmed && (
-              <span className="text-[10px] text-muted border border-border rounded px-1.5 py-0.5">
-                detected
+              <span
+                className="text-[10px] border rounded px-1.5 py-0.5"
+                style={{ color: confidenceTone, borderColor: `${confidenceTone}66` }}
+              >
+                {occurrence.confidence_label}
               </span>
             )}
           </div>
           <div className="flex items-center gap-2 text-xs text-muted mt-0.5">
             <span>{FREQUENCY_LABELS[occurrence.frequency]}</span>
+            <span>·</span>
+            <span>{Math.round(occurrence.confidence * 100)}%</span>
             {occurrence.category_name && (
               <>
                 <span>·</span>
@@ -126,16 +147,18 @@ function ScheduleRow({
         <p className="font-mono text-sm text-right" style={{ color }}>
           {formatCurrency(occurrence.amount)}
         </p>
-        {!occurrence.is_confirmed && (
+        {needsAction && (
           <div className="flex items-center gap-1">
-            <button
-              className="p-1 text-muted hover:text-[#4ecba3] disabled:opacity-30"
-              onClick={() => onConfirm(occurrence.pattern_id)}
-              disabled={isMutating}
-              title="Confirm recurring pattern"
-            >
-              <CheckCircle2 size={13} />
-            </button>
+            {!occurrence.is_confirmed && (
+              <button
+                className="p-1 text-muted hover:text-[#4ecba3] disabled:opacity-30"
+                onClick={() => onConfirm(occurrence.pattern_id)}
+                disabled={isMutating}
+                title="Confirm recurring pattern"
+              >
+                <CheckCircle2 size={13} />
+              </button>
+            )}
             <button
               className="p-1 text-muted hover:text-[#e07070] disabled:opacity-30"
               onClick={() => onDismiss(occurrence.pattern_id)}
@@ -186,7 +209,8 @@ export function Bills() {
 
   const occurrences = forecast?.occurrences ?? [];
   const confirmedCount = occurrences.filter((occurrence) => occurrence.is_confirmed).length;
-  const detectedCount = occurrences.length - confirmedCount;
+  const likelyCount = occurrences.filter((occurrence) => occurrence.confidence_label === 'likely').length;
+  const reviewCount = forecast?.review_count ?? 0;
   const liquidAccounts = accounts.filter(isLiquidAccount);
   const startingBalance = liquidAccounts.reduce((sum, account) => sum + account.current_balance, 0);
   const projection = useMemo(
@@ -246,6 +270,18 @@ export function Bills() {
         <Stat label="Bills" value={-(forecast?.bills ?? 0)} tone="bill" />
         <Stat label="Net Impact" value={forecast?.net ?? 0} tone="net" />
       </div>
+
+      {reviewCount > 0 && (
+        <div className="border border-[#d4a44c]/30 bg-[#d4a44c]/10 rounded p-4 flex items-start gap-3">
+          <CircleAlert size={16} className="text-[#d4a44c] flex-shrink-0 mt-0.5" />
+          <div>
+            <p className="text-sm text-text mb-1">Cash flow needs review</p>
+            <p className="text-xs text-muted leading-relaxed">
+              {forecast?.overdue_count ?? 0} overdue and {reviewCount} recurring items need review before this projection is fully reliable.
+            </p>
+          </div>
+        </div>
+      )}
 
       <div className="border border-border bg-surface rounded p-4">
         <div className="flex items-center justify-between gap-3 mb-4">
@@ -312,13 +348,19 @@ export function Bills() {
           <div>
             <p className="text-xs text-muted">Confirmed</p>
             <p className="font-mono text-lg text-text">{confirmedCount}</p>
+            <p className="text-[11px] text-muted">
+              {formatCurrency((forecast?.confirmed_income ?? 0) - (forecast?.confirmed_bills ?? 0))}
+            </p>
           </div>
         </div>
         <div className="border border-border bg-surface rounded p-4 flex items-center gap-3">
-          <Clock3 size={18} className="text-[#f0c040]" />
+          <Clock3 size={18} className="text-[#5b8dee]" />
           <div>
-            <p className="text-xs text-muted">Detected</p>
-            <p className="font-mono text-lg text-text">{detectedCount}</p>
+            <p className="text-xs text-muted">Likely</p>
+            <p className="font-mono text-lg text-text">{likelyCount}</p>
+            <p className="text-[11px] text-muted">
+              {formatCurrency((forecast?.likely_income ?? 0) - (forecast?.likely_bills ?? 0))}
+            </p>
           </div>
         </div>
       </div>

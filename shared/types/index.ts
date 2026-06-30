@@ -164,6 +164,11 @@ export interface RecurringForecastOccurrence {
   amount: number;
   is_income: boolean;
   is_confirmed: boolean;
+  confidence: number;
+  confidence_label: 'confirmed' | 'likely' | 'uncertain';
+  status: 'overdue' | 'upcoming';
+  days_until: number;
+  needs_review: boolean;
 }
 
 export interface RecurringForecast {
@@ -171,6 +176,14 @@ export interface RecurringForecast {
   income: number;
   bills: number;
   net: number;
+  confirmed_income: number;
+  confirmed_bills: number;
+  likely_income: number;
+  likely_bills: number;
+  uncertain_income: number;
+  uncertain_bills: number;
+  overdue_count: number;
+  review_count: number;
   occurrences: RecurringForecastOccurrence[];
 }
 
@@ -194,6 +207,28 @@ export interface MerchantRuleSuggestion {
   categorized_count: number;
   uncategorized_count: number;
   confidence: number;
+}
+
+export type TransactionReviewQueueId =
+  | 'uncategorized'
+  | 'rule_suggestions'
+  | 'pending'
+  | 'recurring_candidates';
+
+export interface TransactionReviewQueueSummary {
+  id: TransactionReviewQueueId;
+  label: string;
+  count: number;
+  action_label: string;
+  severity: 'attention' | 'warning' | 'info';
+  filters?: TransactionFilters;
+}
+
+export interface TransactionReviewSummary {
+  total_open: number;
+  queues: TransactionReviewQueueSummary[];
+  rule_suggestions: MerchantRuleSuggestion[];
+  recurring_candidates: RecurringPattern[];
 }
 
 export type GoalType = 'savings' | 'debt';
@@ -263,6 +298,8 @@ export interface SyncEvent {
 }
 
 export type SyncHealthStatus = 'empty' | 'healthy' | 'stale' | 'attention';
+export type SyncHealthRecommendedAction = 'connect' | 'none' | 'sync' | 'reconnect' | 'retry';
+export type SyncHealthFreshness = 'fresh' | 'stale' | 'never' | 'attention';
 
 export interface SyncHealthConnection {
   id: string;
@@ -270,16 +307,28 @@ export interface SyncHealthConnection {
   institution_name: string;
   status: string;
   last_synced_at?: string | null;
+  last_success_at?: string | null;
+  last_attempted_at?: string | null;
+  age_days?: number | null;
   account_count: number;
   is_stale: boolean;
   needs_attention: boolean;
+  freshness: SyncHealthFreshness;
+  status_label: string;
+  status_detail: string;
+  failure_reason?: string | null;
+  recommended_action: SyncHealthRecommendedAction;
 }
 
 export interface SyncHealth {
   status: SyncHealthStatus;
+  status_label: string;
+  status_detail: string;
   connection_count: number;
   stale_count: number;
   attention_count: number;
+  fresh_count: number;
+  never_synced_count: number;
   last_synced_at?: string | null;
   connections: SyncHealthConnection[];
 }
@@ -305,6 +354,41 @@ export interface Insight {
   metric?: string;
   action_label?: string;
   action_route?: string;
+}
+
+export type DataQualityStatus = 'healthy' | 'review' | 'stale' | 'attention';
+
+export interface DataQualityIssue {
+  id: string;
+  label: string;
+  message: string;
+  route: string;
+  severity: InsightSeverity;
+}
+
+export interface DataQualitySummary {
+  status: DataQualityStatus;
+  status_label: string;
+  status_detail: string;
+  score: number;
+  issues: DataQualityIssue[];
+}
+
+export interface AdvisorAction {
+  id: string;
+  label: string;
+  route: string;
+  prompt: string;
+  reason: string;
+  severity: InsightSeverity;
+}
+
+export interface AdvisorContextResponse {
+  context: string;
+  configured: boolean;
+  generated_at: string;
+  sync_health: SyncHealth;
+  actions: AdvisorAction[];
 }
 
 export interface ApiResponse<T> {
@@ -337,6 +421,8 @@ export interface TransactionFilters {
   recurring?: boolean;
   uncategorized?: boolean;
   type?: string;
+  sortBy?: 'date' | 'amount' | 'merchant';
+  sortDir?: 'asc' | 'desc';
 }
 
 export interface CashflowReport {
@@ -358,6 +444,46 @@ export interface SpendingReport {
     children?: SpendingReport['categories'];
   }>;
   total: number;
+}
+
+export interface ReportMetricSummary {
+  current: number;
+  previous: number;
+  delta: number;
+  delta_percent: number | null;
+}
+
+export interface ReportCategoryChange {
+  category_id: string;
+  category_name: string;
+  color?: string | null;
+  current: number;
+  previous: number;
+  delta: number;
+  delta_percent: number | null;
+}
+
+export interface ReportExcludedFlowSummary {
+  flow_type: 'transfers' | 'investments' | 'crypto';
+  count: number;
+  inflows: number;
+  outflows: number;
+  net: number;
+}
+
+export interface ReportSummary {
+  start_date?: string;
+  end_date?: string;
+  previous_start_date?: string;
+  previous_end_date?: string;
+  income: ReportMetricSummary;
+  expenses: ReportMetricSummary;
+  net: ReportMetricSummary;
+  savings_rate: ReportMetricSummary;
+  top_spending: ReportCategoryChange[];
+  top_income: ReportCategoryChange[];
+  spending_movers: ReportCategoryChange[];
+  excluded_flows: ReportExcludedFlowSummary[];
 }
 
 export interface NetWorthHistory {

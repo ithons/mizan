@@ -1,7 +1,18 @@
-import { addDays, addMonths, differenceInCalendarDays, format, parseISO, startOfMonth, subMonths } from 'date-fns';
-import type Database from 'better-sqlite3';
+import { format, startOfMonth, subMonths } from 'date-fns';
+import type {
+  AdvisorAction,
+  AdvisorContextResponse,
+  RecurringForecast,
+  ReportSummary,
+  SyncHealth,
+  TransactionReviewSummary,
+} from '../../../shared/types';
 import { getDb } from '../db/index';
-import { suggestMerchantRules } from './rules';
+import { calculateGoalProgress } from './goalProgress';
+import { buildRecurringForecast } from './recurringForecast';
+import { getCashflowReport, getReportSummary } from './reporting';
+import { getTransactionReviewSummary } from './transactionReview';
+import { getSyncHealth } from './syncHealth';
 
 export const ADVISOR_SYSTEM_PROMPT = `You are a sharp, honest personal financial advisor with access to the user's complete financial picture. Their real balances, transactions, portfolio, goals, recurring bills, and cash-flow forecast are provided below.
 
@@ -27,8 +38,6 @@ function pct(n: number | null | undefined): string {
   return `${n >= 0 ? '+' : ''}${n.toFixed(1)}%`;
 }
 
-type Frequency = 'weekly' | 'biweekly' | 'monthly' | 'quarterly' | 'annual';
-
 interface GoalContextRow {
   name: string;
   type: 'savings' | 'debt';
@@ -41,159 +50,137 @@ interface GoalContextRow {
   account_balance: number | null;
 }
 
-interface RecurringContextRow {
-  id: string;
-  merchant_name: string;
-  category_name: string | null;
-  frequency: Frequency;
-  next_expected: string;
-  is_confirmed: number;
-  average_signed_amount: number;
+interface AdvisorActionInputs {
+  syncHealth: SyncHealth;
+  reportSummary: ReportSummary;
+  reviewSummary: TransactionReviewSummary;
+  forecast: RecurringForecast;
 }
 
-interface ForecastOccurrence {
-  merchant_name: string;
-  category_name: string | null;
-  frequency: Frequency;
-  expected_date: string;
-  amount: number;
-  is_confirmed: boolean;
+function action(
+  id: string,
+  label: string,
+  route: string,
+  prompt: string,
+  reason: string,
+  severity: AdvisorAction['severity']
+): AdvisorAction {
+  return { id, label, route, prompt, reason, severity };
 }
 
-interface RecurringForecastContext {
-  income: number;
-  bills: number;
-  net: number;
-  occurrences: ForecastOccurrence[];
-}
+export function buildAdvisorActions({
+  syncHealth,
+  reportSummary,
+  reviewSummary,
+  forecast,
+}: AdvisorActionInputs): AdvisorAction[] {
+  const actions: AdvisorAction[] = [];
 
-interface ConnectionContextRow {
-  provider: 'plaid' | 'coinbase';
-  institution_name: string | null;
-  status: string;
-  last_synced_at: string | null;
-  account_count: number;
-}
-
-function ageInDays(iso: string | null): number | null {
-  if (!iso) return null;
-
-  const parsed = parseISO(iso);
-  if (Number.isNaN(parsed.getTime())) return null;
-
-  return differenceInCalendarDays(new Date(), parsed);
-}
-
-function nextOccurrenceDate(date: Date, frequency: Frequency): Date {
-  switch (frequency) {
-    case 'weekly':
-      return addDays(date, 7);
-    case 'biweekly':
-      return addDays(date, 14);
-    case 'monthly':
-      return addMonths(date, 1);
-    case 'quarterly':
-      return addMonths(date, 3);
-    case 'annual':
-      return addMonths(date, 12);
-  }
-}
-
-function buildRecurringForecastContext(
-  db: Database.Database,
-  days: number
-): RecurringForecastContext {
-  const today = format(new Date(), 'yyyy-MM-dd');
-  const endDate = format(addDays(new Date(), days), 'yyyy-MM-dd');
-  const patterns = db.prepare(`
-    SELECT
-      rp.id,
-      rp.merchant_name,
-      rp.frequency,
-      rp.next_expected,
-      rp.is_confirmed,
-      c.name AS category_name,
-      COALESCE(
-        (
-          SELECT AVG(t.amount)
-          FROM transactions t
-          WHERE t.recurring_id = rp.id
-        ),
-        CASE WHEN COALESCE(c.is_income, 0) = 1 THEN rp.average_amount ELSE -rp.average_amount END
-      ) AS average_signed_amount
-    FROM recurring_patterns rp
-    LEFT JOIN categories c ON c.id = rp.category_id
-    WHERE rp.is_active = 1
-      AND rp.next_expected <= ?
-      AND (rp.is_confirmed = 1 OR rp.transaction_count >= 3)
-    ORDER BY rp.next_expected ASC
-  `).all(endDate) as RecurringContextRow[];
-
-  const occurrences: ForecastOccurrence[] = [];
-
-  for (const pattern of patterns) {
-    let expected = parseISO(pattern.next_expected);
-    let guard = 0;
-
-    while (format(expected, 'yyyy-MM-dd') < today && guard < 500) {
-      expected = nextOccurrenceDate(expected, pattern.frequency);
-      guard++;
-    }
-
-    while (format(expected, 'yyyy-MM-dd') <= endDate && guard < 500) {
-      const expectedDate = format(expected, 'yyyy-MM-dd');
-      occurrences.push({
-        merchant_name: pattern.merchant_name,
-        category_name: pattern.category_name,
-        frequency: pattern.frequency,
-        expected_date: expectedDate,
-        amount: pattern.average_signed_amount,
-        is_confirmed: Boolean(pattern.is_confirmed),
-      });
-
-      expected = nextOccurrenceDate(expected, pattern.frequency);
-      guard++;
-    }
+  if (syncHealth.status === 'attention' || syncHealth.status === 'stale') {
+    actions.push(action(
+      'fix-sync',
+      'Fix sync health',
+      '/accounts',
+      'Which data is least trustworthy until sync health is fixed, and what should I do first?',
+      syncHealth.status_detail,
+      syncHealth.status === 'attention' ? 'critical' : 'warning'
+    ));
+  } else if (syncHealth.status === 'empty') {
+    actions.push(action(
+      'connect-accounts',
+      'Connect accounts',
+      '/accounts',
+      'What accounts should I connect first to get a complete financial picture?',
+      syncHealth.status_detail,
+      'warning'
+    ));
   }
 
-  occurrences.sort((a, b) => a.expected_date.localeCompare(b.expected_date));
+  const uncategorized = reviewSummary.queues.find((queue) => queue.id === 'uncategorized')?.count ?? 0;
+  const ruleSuggestions = reviewSummary.queues.find((queue) => queue.id === 'rule_suggestions')?.count ?? 0;
+  if (uncategorized > 0 || ruleSuggestions > 0) {
+    actions.push(action(
+      'review-transactions',
+      'Review transactions',
+      '/transactions',
+      'Help me prioritize my transaction review queue and explain what reports these issues affect.',
+      `${uncategorized} uncategorized transactions and ${ruleSuggestions} rule suggestions are open.`,
+      uncategorized > 10 ? 'warning' : 'info'
+    ));
+  }
 
-  const income = occurrences.reduce((sum, occurrence) =>
-    occurrence.amount > 0 ? sum + occurrence.amount : sum, 0);
-  const bills = occurrences.reduce((sum, occurrence) =>
-    occurrence.amount < 0 ? sum + Math.abs(occurrence.amount) : sum, 0);
+  if (forecast.review_count > 0) {
+    actions.push(action(
+      'review-cash-flow',
+      'Review cash flow',
+      '/bills',
+      'Explain my recurring cash flow items that need review and how they affect the next 60 days.',
+      `${forecast.review_count} recurring items need review, including ${forecast.overdue_count} overdue.`,
+      forecast.overdue_count > 0 ? 'warning' : 'info'
+    ));
+  }
+
+  if (reportSummary.expenses.delta > 0) {
+    actions.push(action(
+      'explain-spending-change',
+      'Explain spending change',
+      '/reports',
+      'What drove the increase in my spending this period, and which categories should I inspect first?',
+      `Spending is up ${fmt(reportSummary.expenses.delta)} versus the prior comparable period.`,
+      reportSummary.expenses.delta_percent !== null && reportSummary.expenses.delta_percent > 20 ? 'warning' : 'info'
+    ));
+  }
+
+  if (reportSummary.savings_rate.current < 10 && reportSummary.income.current > 0) {
+    actions.push(action(
+      'improve-savings-rate',
+      'Improve savings rate',
+      '/reports',
+      'What practical changes would improve my savings rate based on this period?',
+      `Savings rate is ${reportSummary.savings_rate.current.toFixed(1)}% for the selected period.`,
+      'warning'
+    ));
+  }
+
+  if (actions.length === 0) {
+    actions.push(action(
+      'financial-health-review',
+      'Review financial health',
+      '/reports',
+      'Give me a concise overview of my financial health and what I should watch next.',
+      'No urgent workflow issues are open.',
+      'positive'
+    ));
+  }
+
+  return actions.slice(0, 6);
+}
+
+export function buildAdvisorContextSnapshot(): Omit<AdvisorContextResponse, 'configured'> {
+  const db = getDb();
+  const today = new Date();
+  const thisMonthStart = format(startOfMonth(today), 'yyyy-MM-dd');
+  const todayDate = format(today, 'yyyy-MM-dd');
+  const syncHealth = getSyncHealth(db);
+  const reportSummary = getReportSummary(db, { startDate: thisMonthStart, endDate: todayDate });
+  const reviewSummary = getTransactionReviewSummary(db);
+  const forecast = buildRecurringForecast(db, 60);
+  const actions = buildAdvisorActions({
+    syncHealth,
+    reportSummary,
+    reviewSummary,
+    forecast,
+  });
+  const context = buildFinancialContext();
+  const actionLines = actions.map((item) =>
+    `  ${item.id}: ${item.label} -> ${item.route}. Reason: ${item.reason}. Suggested prompt: "${item.prompt}"`
+  );
 
   return {
-    income,
-    bills,
-    net: income - bills,
-    occurrences,
-  };
-}
-
-function goalProgress(row: GoalContextRow): {
-  progress: number;
-  remaining: number;
-  percent: number;
-} {
-  let progress = row.current_amount;
-
-  if (row.account_balance !== null) {
-    if (row.type === 'savings') {
-      progress = Math.max(row.account_balance, 0);
-    } else {
-      const startingAmount = row.starting_amount ?? row.target_amount;
-      progress = Math.max(startingAmount - row.account_balance, 0);
-    }
-  }
-
-  const cappedProgress = Math.min(progress, row.target_amount);
-  return {
-    progress: cappedProgress,
-    remaining: Math.max(row.target_amount - cappedProgress, 0),
-    percent: row.target_amount > 0
-      ? Math.min((cappedProgress / row.target_amount) * 100, 100)
-      : 0,
+    context: `${context}\n\n### Advisor Workflow Actions\n${actionLines.join('\n')}`,
+    generated_at: new Date().toISOString(),
+    sync_health: syncHealth,
+    actions,
   };
 }
 
@@ -206,65 +193,21 @@ export function buildFinancialContext(): string {
 
   const lines: string[] = [`## Financial Snapshot - ${format(today, 'MMMM d, yyyy')}`];
 
-  const plaidConnections = db.prepare(`
-    SELECT
-      'plaid' AS provider,
-      institution_name,
-      status,
-      last_synced_at,
-      (
-        SELECT COUNT(*)
-        FROM accounts a
-        WHERE a.connection_id = pi.id
-          AND a.connection_type = 'plaid'
-          AND a.is_hidden = 0
-      ) AS account_count
-    FROM plaid_items pi
-    WHERE status != 'removed'
-  `).all() as ConnectionContextRow[];
-
-  const coinbaseConnections = db.prepare(`
-    SELECT
-      'coinbase' AS provider,
-      display_name AS institution_name,
-      status,
-      last_synced_at,
-      (
-        SELECT COUNT(*)
-        FROM accounts a
-        WHERE a.connection_id = cc.id
-          AND a.connection_type = 'coinbase'
-          AND a.is_hidden = 0
-      ) AS account_count
-    FROM coinbase_connections cc
-    WHERE status != 'disconnected'
-  `).all() as ConnectionContextRow[];
-
-  const connections = [...plaidConnections, ...coinbaseConnections];
-  const staleConnections = connections.filter((connection) => {
-    if (connection.status !== 'active') return false;
-    return (ageInDays(connection.last_synced_at) ?? 999) >= 3;
-  });
-  const attentionConnections = connections.filter((connection) => connection.status !== 'active');
-  const syncedDates = connections
-    .map((connection) => connection.last_synced_at)
-    .filter((date): date is string => Boolean(date))
-    .sort();
+  const syncHealth = getSyncHealth(db);
 
   lines.push('');
   lines.push('### Data Freshness');
-  if (connections.length === 0) {
+  lines.push(`  Overall: ${syncHealth.status_label}. ${syncHealth.status_detail}`);
+  if (syncHealth.connections.length === 0) {
     lines.push('  No live institution connections. Balances and transactions may be manual or empty.');
   } else {
-    lines.push(`  Connections: ${connections.length}`);
-    lines.push(`  Last successful sync: ${syncedDates.at(-1) ?? 'Never'}`);
-    lines.push(`  Stale connections: ${staleConnections.length}`);
-    lines.push(`  Connections needing attention: ${attentionConnections.length}`);
-    for (const connection of connections.slice(0, 6)) {
-      const age = ageInDays(connection.last_synced_at);
-      const name = connection.institution_name || (connection.provider === 'plaid' ? 'Bank connection' : 'Coinbase');
-      const ageLabel = age === null ? 'never synced' : `${age}d ago`;
-      lines.push(`  ${name}: ${connection.status}, ${ageLabel}, ${connection.account_count} accounts`);
+    lines.push(`  Connections: ${syncHealth.connection_count}`);
+    lines.push(`  Last successful sync: ${syncHealth.last_synced_at ?? 'Never'}`);
+    lines.push(`  Stale connections: ${syncHealth.stale_count}`);
+    lines.push(`  Connections needing attention: ${syncHealth.attention_count}`);
+    for (const connection of syncHealth.connections.slice(0, 6)) {
+      const ageLabel = connection.age_days === null ? 'never synced' : `${connection.age_days}d ago`;
+      lines.push(`  ${connection.institution_name}: ${connection.status_label}, ${ageLabel}, ${connection.account_count} accounts`);
     }
   }
 
@@ -329,17 +272,20 @@ export function buildFinancialContext(): string {
   lines.push(...acctLines);
 
   // ── Cash Flow (3-month average) ──────────────────────────────────────────
-  const cashflow = db.prepare(`
-    SELECT
-      SUM(CASE WHEN t.amount > 0 AND COALESCE(c.is_investment, 0) = 0 THEN t.amount ELSE 0 END) AS total_income,
-      SUM(CASE WHEN t.amount < 0 AND COALESCE(c.is_investment, 0) = 0 THEN ABS(t.amount) ELSE 0 END) AS total_expenses
-    FROM transactions t
-    LEFT JOIN categories c ON c.id = t.category_id
-    WHERE t.date >= ? AND t.pending = 0
-  `).get(threeMonthsAgo) as { total_income: number; total_expenses: number };
+  const cashflow = getCashflowReport(db, {
+    startDate: threeMonthsAgo,
+    endDate: format(today, 'yyyy-MM-dd'),
+  });
+  const cashflowTotals = cashflow.months.reduce(
+    (totals, month) => ({
+      income: totals.income + month.income,
+      expenses: totals.expenses + month.expenses,
+    }),
+    { income: 0, expenses: 0 }
+  );
 
-  const avgIncome = (cashflow?.total_income ?? 0) / 3;
-  const avgExpenses = (cashflow?.total_expenses ?? 0) / 3;
+  const avgIncome = cashflowTotals.income / 3;
+  const avgExpenses = cashflowTotals.expenses / 3;
   const avgNet = avgIncome - avgExpenses;
 
   lines.push('');
@@ -348,8 +294,25 @@ export function buildFinancialContext(): string {
   lines.push(`  Expenses: ${fmt(avgExpenses)}/mo`);
   lines.push(`  Net:      ${fmt(avgNet)}/mo`);
 
+  const reportSummary = getReportSummary(db, {
+    startDate: thisMonthStart,
+    endDate: format(today, 'yyyy-MM-dd'),
+  });
+  lines.push('');
+  lines.push(`### Report Summary - ${format(today, 'MMMM')}`);
+  lines.push(`  Income: ${fmt(reportSummary.income.current)} (${fmt(reportSummary.income.delta)} vs prior period)`);
+  lines.push(`  Spending: ${fmt(reportSummary.expenses.current)} (${fmt(reportSummary.expenses.delta)} vs prior period)`);
+  lines.push(`  Net cash flow: ${fmt(reportSummary.net.current)} (${fmt(reportSummary.net.delta)} vs prior period)`);
+  lines.push(`  Savings rate: ${reportSummary.savings_rate.current.toFixed(1)}% (${reportSummary.savings_rate.delta >= 0 ? '+' : ''}${reportSummary.savings_rate.delta.toFixed(1)} pp)`);
+  if (reportSummary.excluded_flows.length > 0) {
+    lines.push('  Excluded from income and spending reports:');
+    for (const flow of reportSummary.excluded_flows) {
+      lines.push(`    ${flow.flow_type}: ${flow.count} transactions, net ${fmt(flow.net)}`);
+    }
+  }
+
   const forecastDays = 60;
-  const forecast = buildRecurringForecastContext(db, forecastDays);
+  const forecast = buildRecurringForecast(db, forecastDays);
   if (forecast.occurrences.length > 0) {
     lines.push('');
     lines.push(`### Forward Cash Flow - next ${forecastDays} days`);
@@ -430,54 +393,30 @@ export function buildFinancialContext(): string {
     lines.push('');
     lines.push('### Goals');
     for (const goal of goals) {
-      const progress = goalProgress(goal);
+      const progress = calculateGoalProgress(goal);
       const verb = goal.type === 'debt' ? 'paid down' : 'saved';
       const linked = goal.account_name
         ? ` | linked to ${goal.account_name}${goal.institution_name ? ` at ${goal.institution_name}` : ''}`
         : '';
       const targetDate = goal.target_date ? ` | target: ${goal.target_date}` : '';
       lines.push(
-        `  ${goal.name}: ${fmt(progress.progress)} ${verb} of ${fmt(goal.target_amount)} (${Math.round(progress.percent)}%), ${fmt(progress.remaining)} remaining${targetDate}${linked}`
+        `  ${goal.name}: ${fmt(progress.progress_amount)} ${verb} of ${fmt(goal.target_amount)} (${Math.round(progress.progress_percent)}%), ${fmt(progress.remaining_amount)} remaining${targetDate}${linked}`
       );
     }
   }
 
-  const reviewQueue = db.prepare(`
-    SELECT
-      (SELECT COUNT(*) FROM transactions WHERE pending = 0) AS posted_transactions,
-      (SELECT COUNT(*) FROM transactions WHERE pending = 0 AND category_id IS NULL) AS uncategorized_transactions,
-      (SELECT COUNT(*) FROM merchant_rules) AS merchant_rules,
-      (
-        SELECT COUNT(*)
-        FROM recurring_patterns
-        WHERE is_active = 1 AND is_confirmed = 0 AND transaction_count >= 3
-      ) AS detected_recurring
-  `).get() as {
-    posted_transactions: number;
-    uncategorized_transactions: number;
-    merchant_rules: number;
-    detected_recurring: number;
-  };
+  const reviewSummary = getTransactionReviewSummary(db);
 
-  if (
-    reviewQueue.posted_transactions > 0 ||
-    reviewQueue.merchant_rules > 0 ||
-    reviewQueue.detected_recurring > 0
-  ) {
-    const uncategorizedPct = reviewQueue.posted_transactions > 0
-      ? (reviewQueue.uncategorized_transactions / reviewQueue.posted_transactions) * 100
-      : 0;
+  if (reviewSummary.total_open > 0) {
     lines.push('');
     lines.push('### Review Queue');
-    lines.push(`  Posted transactions: ${reviewQueue.posted_transactions}`);
-    lines.push(
-      `  Uncategorized: ${reviewQueue.uncategorized_transactions} (${uncategorizedPct.toFixed(1)}%)`
-    );
-    lines.push(`  Categorization rules: ${reviewQueue.merchant_rules}`);
-    lines.push(`  Detected recurring patterns needing confirmation: ${reviewQueue.detected_recurring}`);
+    lines.push(`  Open review items: ${reviewSummary.total_open}`);
+    for (const queue of reviewSummary.queues) {
+      lines.push(`  ${queue.label}: ${queue.count}`);
+    }
   }
 
-  const ruleSuggestions = suggestMerchantRules(db);
+  const ruleSuggestions = reviewSummary.rule_suggestions;
   if (ruleSuggestions.length > 0) {
     const uncategorizedMatches = ruleSuggestions.reduce(
       (sum, suggestion) => sum + suggestion.uncategorized_count,

@@ -1,6 +1,8 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { useQuery } from '@tanstack/react-query';
+import { useNavigate } from 'react-router-dom';
 import {
+  ArrowRight,
   Send,
   Square,
   Trash2,
@@ -10,9 +12,10 @@ import {
   RefreshCw,
   AlertTriangle,
 } from 'lucide-react';
-import type { Insight } from '@shared/types';
+import type { AdvisorAction, DataQualitySummary, Insight } from '@shared/types';
 import { aiApi, insightsApi } from '../lib/api';
 import { useAiChat } from '../hooks/useAiChat';
+import { formatRelativeTime } from '../lib/formatters';
 
 // ── Simple inline markdown renderer ──────────────────────────────────────────
 
@@ -89,6 +92,138 @@ function ContextPanel() {
         <pre className="px-3 py-2 text-[11px] font-mono text-muted whitespace-pre-wrap border-t border-border bg-surface/50 max-h-64 overflow-y-auto leading-relaxed">
           {isLoading ? 'Loading...' : (data?.context ?? 'No context available')}
         </pre>
+      )}
+    </div>
+  );
+}
+
+const actionTone: Record<AdvisorAction['severity'], string> = {
+  critical: '#e07070',
+  warning: '#d4a44c',
+  positive: '#4ecba3',
+  info: '#5b8dee',
+};
+
+const qualityTone: Record<DataQualitySummary['status'], string> = {
+  healthy: '#4ecba3',
+  review: '#5b8dee',
+  stale: '#d4a44c',
+  attention: '#e07070',
+};
+
+function AdvisorActionsPanel({
+  actions,
+  onAsk,
+}: {
+  actions?: AdvisorAction[];
+  onAsk: (prompt: string) => void;
+}) {
+  const navigate = useNavigate();
+  const visibleActions = actions ?? [];
+
+  if (visibleActions.length === 0) return null;
+
+  return (
+    <div className="border border-border rounded-lg overflow-hidden flex-shrink-0">
+      <div className="px-3 py-2.5 border-b border-border">
+        <p className="text-xs text-muted font-medium">Suggested Actions</p>
+      </div>
+      <div className="divide-y divide-border">
+        {visibleActions.map((action) => (
+          <div key={action.id} className="px-3 py-2.5">
+            <div className="flex items-center gap-2 mb-1">
+              <span className="w-1.5 h-1.5 rounded-full flex-shrink-0" style={{ backgroundColor: actionTone[action.severity] }} />
+              <p className="text-xs text-text font-medium">{action.label}</p>
+            </div>
+            <p className="text-[11px] text-muted leading-relaxed mb-2">{action.reason}</p>
+            <div className="flex gap-2">
+              <button
+                className="text-[11px] text-muted hover:text-[#4ecba3]"
+                onClick={() => onAsk(action.prompt)}
+              >
+                Ask
+              </button>
+              <button
+                className="text-[11px] text-muted hover:text-text flex items-center gap-1"
+                onClick={() => navigate(action.route)}
+              >
+                Open <ArrowRight size={10} />
+              </button>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function DataFreshnessPanel({
+  statusLabel,
+  statusDetail,
+  lastSyncedAt,
+}: {
+  statusLabel?: string;
+  statusDetail?: string;
+  lastSyncedAt?: string | null;
+}) {
+  return (
+    <div className="border border-border rounded-lg px-3 py-2.5">
+      <p className="text-xs text-muted font-medium mb-1">Data Freshness</p>
+      <p className="text-xs text-text">{statusLabel ?? 'Unknown'}</p>
+      <p className="text-[11px] text-muted leading-relaxed mt-1">{statusDetail ?? 'Context has not loaded yet.'}</p>
+      {lastSyncedAt && (
+        <p className="text-[11px] text-muted font-mono mt-2">Last sync {formatRelativeTime(lastSyncedAt)}</p>
+      )}
+    </div>
+  );
+}
+
+function AdvisorQualityPanel({
+  quality,
+  onAsk,
+}: {
+  quality?: DataQualitySummary;
+  onAsk: (prompt: string) => void;
+}) {
+  const navigate = useNavigate();
+  const tone = quality ? qualityTone[quality.status] : '#6b6b7a';
+  const visibleIssues = quality?.issues.slice(0, 2) ?? [];
+
+  return (
+    <div className="border border-border rounded-lg px-3 py-2.5">
+      <div className="flex items-center justify-between gap-3 mb-1">
+        <p className="text-xs text-muted font-medium">Data Quality</p>
+        <span className="font-mono text-xs" style={{ color: tone }}>
+          {quality ? quality.score : '--'}
+        </span>
+      </div>
+      <p className="text-xs text-text">{quality?.status_label ?? 'Checking'}</p>
+      <p className="text-[11px] text-muted leading-relaxed mt-1">
+        {quality?.status_detail ?? 'Checking the data behind advisor answers.'}
+      </p>
+      {visibleIssues.length > 0 && (
+        <div className="mt-2 space-y-2">
+          {visibleIssues.map((issue) => (
+            <div key={issue.id} className="border-t border-border pt-2">
+              <p className="text-[11px] text-text">{issue.label}</p>
+              <p className="text-[11px] text-muted leading-relaxed mt-0.5">{issue.message}</p>
+              <div className="flex gap-2 mt-1.5">
+                <button
+                  className="text-[11px] text-muted hover:text-[#4ecba3]"
+                  onClick={() => onAsk(`What should I do about this data quality issue: ${issue.label}?`)}
+                >
+                  Ask
+                </button>
+                <button
+                  className="text-[11px] text-muted hover:text-text flex items-center gap-1"
+                  onClick={() => navigate(issue.route)}
+                >
+                  Open <ArrowRight size={10} />
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
       )}
     </div>
   );
@@ -244,6 +379,12 @@ export function Advisor() {
     staleTime: 5 * 60 * 1000,
   });
 
+  const { data: dataQuality } = useQuery({
+    queryKey: ['insights', 'quality', 'advisor'],
+    queryFn: () => insightsApi.quality(),
+    staleTime: 5 * 60 * 1000,
+  });
+
   useEffect(() => {
     setApiError(contextError || contextStatus?.configured === false);
   }, [contextError, contextStatus?.configured]);
@@ -259,6 +400,11 @@ export function Advisor() {
     textareaRef.current?.focus();
     await sendMessage(text);
   }, [input, isStreaming, sendMessage]);
+
+  const askPrompt = useCallback((prompt: string) => {
+    if (isStreaming) return;
+    void sendMessage(prompt);
+  }, [isStreaming, sendMessage]);
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -297,7 +443,7 @@ export function Advisor() {
             {apiError ? (
               <NoApiKey />
             ) : messages.length === 0 ? (
-              <EmptyChat insights={insights} onSend={(text) => { setInput(''); sendMessage(text); }} />
+              <EmptyChat insights={insights} onSend={askPrompt} />
             ) : (
               <>
                 {messages.map((msg) => (
@@ -356,6 +502,13 @@ export function Advisor() {
         {/* Context sidebar */}
         <div className="w-72 border-l border-border p-4 overflow-y-auto flex-shrink-0 hidden lg:flex lg:flex-col gap-3">
           <p className="text-xs text-muted font-medium">Live Context</p>
+          <AdvisorQualityPanel quality={dataQuality} onAsk={askPrompt} />
+          <DataFreshnessPanel
+            statusLabel={contextStatus?.sync_health.status_label}
+            statusDetail={contextStatus?.sync_health.status_detail}
+            lastSyncedAt={contextStatus?.sync_health.last_synced_at}
+          />
+          <AdvisorActionsPanel actions={contextStatus?.actions} onAsk={askPrompt} />
           <ContextPanel />
         </div>
       </div>

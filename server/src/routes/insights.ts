@@ -1,12 +1,13 @@
 import { Router, Request, Response, NextFunction } from 'express';
-import { addDays, addMonths, differenceInCalendarDays, format, parseISO } from 'date-fns';
+import { differenceInCalendarDays, format, parseISO } from 'date-fns';
 import { getDb } from '../db/index';
+import { calculateGoalProgress } from '../services/goalProgress';
+import { getDataQualitySummary } from '../services/dataQuality';
+import { buildRecurringForecast } from '../services/recurringForecast';
 import { suggestMerchantRules } from '../services/rules';
 import type { Insight, InsightSeverity } from '../../../shared/types';
 
 const router = Router();
-
-type Frequency = 'weekly' | 'biweekly' | 'monthly' | 'quarterly' | 'annual';
 
 interface ScoredInsight extends Insight {
   rank: number;
@@ -45,22 +46,6 @@ interface GoalInsightRow {
   target_date: string | null;
   created_at: string;
   account_balance: number | null;
-}
-
-interface RecurringForecastRow {
-  id: string;
-  merchant_name: string;
-  frequency: Frequency;
-  next_expected: string;
-  is_confirmed: number;
-  average_signed_amount: number;
-}
-
-interface ForecastTotals {
-  income: number;
-  bills: number;
-  net: number;
-  count: number;
 }
 
 const severityRank: Record<InsightSeverity, number> = {
@@ -107,86 +92,14 @@ function ageInDays(iso: string | null): number | null {
   return differenceInCalendarDays(new Date(), parsed);
 }
 
-function nextOccurrenceDate(date: Date, frequency: Frequency): Date {
-  switch (frequency) {
-    case 'weekly':
-      return addDays(date, 7);
-    case 'biweekly':
-      return addDays(date, 14);
-    case 'monthly':
-      return addMonths(date, 1);
-    case 'quarterly':
-      return addMonths(date, 3);
-    case 'annual':
-      return addMonths(date, 12);
+router.get('/quality', (_req: Request, res: Response, next: NextFunction): void => {
+  try {
+    const db = getDb();
+    res.json({ data: getDataQualitySummary(db) });
+  } catch (err) {
+    next(err);
   }
-}
-
-function forecastRecurring(days: number): ForecastTotals {
-  const db = getDb();
-  const today = format(new Date(), 'yyyy-MM-dd');
-  const endDate = format(addDays(new Date(), days), 'yyyy-MM-dd');
-  const rows = db.prepare(`
-    SELECT
-      rp.id,
-      rp.merchant_name,
-      rp.frequency,
-      rp.next_expected,
-      rp.is_confirmed,
-      COALESCE(
-        (
-          SELECT AVG(t.amount)
-          FROM transactions t
-          WHERE t.recurring_id = rp.id
-        ),
-        CASE WHEN COALESCE(c.is_income, 0) = 1 THEN rp.average_amount ELSE -rp.average_amount END
-      ) AS average_signed_amount
-    FROM recurring_patterns rp
-    LEFT JOIN categories c ON c.id = rp.category_id
-    WHERE rp.is_active = 1
-      AND rp.next_expected <= ?
-      AND (rp.is_confirmed = 1 OR rp.transaction_count >= 3)
-  `).all(endDate) as RecurringForecastRow[];
-
-  let income = 0;
-  let bills = 0;
-  let count = 0;
-
-  for (const row of rows) {
-    let expected = parseISO(row.next_expected);
-    let guard = 0;
-
-    while (format(expected, 'yyyy-MM-dd') < today && guard < 500) {
-      expected = nextOccurrenceDate(expected, row.frequency);
-      guard++;
-    }
-
-    while (format(expected, 'yyyy-MM-dd') <= endDate && guard < 500) {
-      if (row.average_signed_amount >= 0) {
-        income += row.average_signed_amount;
-      } else {
-        bills += Math.abs(row.average_signed_amount);
-      }
-
-      count++;
-      expected = nextOccurrenceDate(expected, row.frequency);
-      guard++;
-    }
-  }
-
-  return { income, bills, net: income - bills, count };
-}
-
-function goalProgress(row: GoalInsightRow): number {
-  if (row.account_balance !== null) {
-    if (row.type === 'savings') return Math.max(row.account_balance, 0);
-
-    const startingAmount = row.starting_amount ?? row.target_amount;
-    return Math.max(startingAmount - row.account_balance, 0);
-  }
-
-  return row.current_amount;
-}
+});
 
 router.get('/', (_req: Request, res: Response, next: NextFunction): void => {
   try {
@@ -390,8 +303,8 @@ router.get('/', (_req: Request, res: Response, next: NextFunction): void => {
       }
     }
 
-    const forecast = forecastRecurring(30);
-    if (forecast.count > 0 && accountSummary.liquid_assets + forecast.net < 0) {
+    const forecast = buildRecurringForecast(db, 30);
+    if (forecast.occurrences.length > 0 && accountSummary.liquid_assets + forecast.net < 0) {
       addInsight(insights, {
         id: 'cash-projection-negative',
         severity: 'critical',
@@ -402,7 +315,7 @@ router.get('/', (_req: Request, res: Response, next: NextFunction): void => {
         action_label: 'Open bills',
         action_route: '/bills',
       });
-    } else if (forecast.count > 0 && forecast.net < 0) {
+    } else if (forecast.occurrences.length > 0 && forecast.net < 0) {
       addInsight(insights, {
         id: 'cash-projection-down',
         severity: 'info',
@@ -433,7 +346,7 @@ router.get('/', (_req: Request, res: Response, next: NextFunction): void => {
     `).all() as GoalInsightRow[];
     const soonestOpenGoal = goals
       .map((goal) => {
-        const progressAmount = Math.min(goalProgress(goal), goal.target_amount);
+        const progressAmount = calculateGoalProgress(goal).progress_amount;
         return {
           goal,
           progressAmount,
@@ -460,7 +373,7 @@ router.get('/', (_req: Request, res: Response, next: NextFunction): void => {
     } else {
       const almostDone = goals
         .map((goal) => {
-          const progressAmount = Math.min(goalProgress(goal), goal.target_amount);
+          const progressAmount = calculateGoalProgress(goal).progress_amount;
           return {
             goal,
             remaining: Math.max(goal.target_amount - progressAmount, 0),

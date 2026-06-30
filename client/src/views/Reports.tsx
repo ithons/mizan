@@ -22,7 +22,7 @@ import { reportsApi, networthApi, investmentsApi, categoriesApi } from '../lib/a
 import { formatCurrency, formatMonth, formatDate, formatPercent } from '../lib/formatters';
 import { PageLoader } from '../components/LoadingSpinner';
 import { EmptyState } from '../components/EmptyState';
-import type { Category } from '@shared/types';
+import type { Category, ReportMetricSummary, ReportSummary } from '@shared/types';
 const COLORS = [
   '#4ecba3', '#5b8dee', '#d4a44c', '#e07070', '#a78bfa',
   '#f472b6', '#34d399', '#fb923c', '#60a5fa', '#f87171',
@@ -195,6 +195,109 @@ function findDrillCategory(categories: DrillCategory[], categoryId: string): Dri
     if (child) return child;
   }
   return null;
+}
+
+function metricColor(metric: ReportMetricSummary, lowerIsBetter = false): string {
+  if (metric.delta === 0) return '#6b6b7a';
+  const good = lowerIsBetter ? metric.delta < 0 : metric.delta > 0;
+  return good ? '#4ecba3' : '#e07070';
+}
+
+function formatDelta(metric: ReportMetricSummary, isRate = false): string {
+  if (metric.delta === 0) return 'No change';
+  const sign = metric.delta > 0 ? '+' : '';
+  if (isRate) return `${sign}${metric.delta.toFixed(1)} pp`;
+  return `${sign}${formatCurrency(metric.delta)}`;
+}
+
+function ReportMetricCard({
+  label,
+  metric,
+  tone,
+  isRate,
+  lowerIsBetter,
+}: {
+  label: string;
+  metric: ReportMetricSummary;
+  tone: string;
+  isRate?: boolean;
+  lowerIsBetter?: boolean;
+}) {
+  return (
+    <div className="border border-border bg-surface rounded p-4">
+      <p className="text-xs text-muted mb-1">{label}</p>
+      <p className="font-mono text-xl" style={{ color: tone }}>
+        {isRate ? `${metric.current.toFixed(1)}%` : formatCurrency(metric.current)}
+      </p>
+      <p className="text-xs font-mono mt-2" style={{ color: metricColor(metric, lowerIsBetter) }}>
+        {formatDelta(metric, isRate)}
+      </p>
+    </div>
+  );
+}
+
+function ReportSummaryPanel({ summary }: { summary?: ReportSummary }) {
+  if (!summary) return null;
+
+  const topMover = summary.spending_movers[0];
+
+  return (
+    <div className="space-y-3">
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+        <ReportMetricCard label="Income" metric={summary.income} tone="#4ecba3" />
+        <ReportMetricCard label="Spending" metric={summary.expenses} tone="#e07070" lowerIsBetter />
+        <ReportMetricCard label="Net Cash Flow" metric={summary.net} tone={summary.net.current >= 0 ? '#4ecba3' : '#e07070'} />
+        <ReportMetricCard label="Savings Rate" metric={summary.savings_rate} tone="#5b8dee" isRate />
+      </div>
+
+      <div className="grid grid-cols-1 xl:grid-cols-3 gap-3">
+        <div className="border border-border bg-surface rounded p-4">
+          <p className="text-xs text-muted mb-2">Top spending mover</p>
+          {topMover ? (
+            <div>
+              <div className="flex items-center gap-2 mb-1">
+                <span className="w-2 h-2 rounded-full" style={{ backgroundColor: topMover.color ?? '#6b6b7a' }} />
+                <span className="text-sm text-text">{topMover.category_name}</span>
+              </div>
+              <p className="font-mono text-sm" style={{ color: metricColor(topMover) }}>
+                {formatDelta(topMover)}
+              </p>
+            </div>
+          ) : (
+            <p className="text-sm text-muted">No movement yet</p>
+          )}
+        </div>
+
+        <div className="border border-border bg-surface rounded p-4">
+          <p className="text-xs text-muted mb-2">Top spending</p>
+          <div className="space-y-1.5">
+            {summary.top_spending.slice(0, 3).map((category) => (
+              <div key={category.category_id} className="flex items-center justify-between gap-3 text-xs">
+                <span className="text-text truncate">{category.category_name}</span>
+                <span className="font-mono text-[#e07070]">{formatCurrency(category.current)}</span>
+              </div>
+            ))}
+            {summary.top_spending.length === 0 && <p className="text-sm text-muted">No spending</p>}
+          </div>
+        </div>
+
+        <div className="border border-border bg-surface rounded p-4">
+          <p className="text-xs text-muted mb-2">Excluded from reports</p>
+          <div className="space-y-1.5">
+            {summary.excluded_flows.map((flow) => (
+              <div key={flow.flow_type} className="flex items-center justify-between gap-3 text-xs">
+                <span className="text-text capitalize">{flow.flow_type}</span>
+                <span className="font-mono text-muted">
+                  {flow.count} tx, {formatCurrency(flow.net, { showSign: true })}
+                </span>
+              </div>
+            ))}
+            {summary.excluded_flows.length === 0 && <p className="text-sm text-muted">No excluded flows</p>}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 // ─── Spending Tab ─────────────────────────────────────────────────────────────
@@ -811,6 +914,10 @@ export function Reports() {
   const [tab, setTab] = useState<ReportTab>('spending');
 
   const { startDate, endDate } = getDateRange(preset, customStart, customEnd);
+  const { data: summary } = useQuery({
+    queryKey: ['reports', 'summary', startDate, endDate],
+    queryFn: () => reportsApi.summary({ startDate, endDate }),
+  });
 
   return (
     <div className="p-6 space-y-6">
@@ -851,6 +958,8 @@ export function Reports() {
           </div>
         )}
       </div>
+
+      <ReportSummaryPanel summary={summary} />
 
       {/* Tab selector */}
       <div className="flex gap-1 bg-surface border border-border rounded p-0.5 w-fit">

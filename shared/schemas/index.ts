@@ -6,7 +6,7 @@ export const CreateManualAccountSchema = z.object({
   institution_name: z.string().optional(),
   current_balance: z.number().default(0),
   currency: z.string().default('USD'),
-  is_liability: z.boolean().default(false),
+  is_liability: z.boolean().optional(),
   color: z.string().optional(),
 });
 

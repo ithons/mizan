@@ -1,6 +1,6 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import Anthropic from '@anthropic-ai/sdk';
-import { buildFinancialContext, ADVISOR_SYSTEM_PROMPT } from '../services/aiContext';
+import { buildAdvisorContextSnapshot, ADVISOR_SYSTEM_PROMPT } from '../services/aiContext';
 import type { ChatMessage } from '../../../shared/types';
 
 const router = Router();
@@ -14,8 +14,13 @@ function getClient(): Anthropic {
 // GET /api/ai/context - return the financial context snapshot (for the UI preview panel)
 router.get('/context', (_req: Request, res: Response, next: NextFunction): void => {
   try {
-    const context = buildFinancialContext();
-    res.json({ data: { context, configured: Boolean(process.env.ANTHROPIC_API_KEY) } });
+    const snapshot = buildAdvisorContextSnapshot();
+    res.json({
+      data: {
+        ...snapshot,
+        configured: Boolean(process.env.ANTHROPIC_API_KEY),
+      },
+    });
   } catch (err) {
     next(err);
   }
@@ -45,7 +50,7 @@ router.post('/chat', async (req: Request, res: Response, next: NextFunction): Pr
   res.flushHeaders();
 
   try {
-    const context = buildFinancialContext();
+    const snapshot = buildAdvisorContextSnapshot();
 
     const stream = anthropic.messages.stream({
       model: 'claude-opus-4-8',
@@ -53,7 +58,7 @@ router.post('/chat', async (req: Request, res: Response, next: NextFunction): Pr
       system: [
         {
           type: 'text',
-          text: `${ADVISOR_SYSTEM_PROMPT}\n\n${context}`,
+          text: `${ADVISOR_SYSTEM_PROMPT}\n\n${snapshot.context}`,
           cache_control: { type: 'ephemeral' },
         },
       ],

@@ -8,6 +8,7 @@
   },
   "scripts": {
     "dev": "tsx watch --env-file-if-exists=.env server/src/index.ts",
+    "test": "node --test --import tsx tests/**/*.test.ts",
     "build": "tsc -p tsconfig.server.json && cp -r server/src/db/migrations dist/server/src/db/ && vite build",
     "start": "node --env-file-if-exists=.env dist/server/src/index.js",
     "db:migrate": "tsx server/src/db/migrate.ts"

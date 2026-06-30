@@ -7,6 +7,7 @@ import { adjustManualAccountBalance } from '../services/manualAccountBalance';
 import { takeSnapshot } from '../services/snapshot';
 import { detectRecurring } from '../services/recurring';
 import { upsertMerchantRule } from '../services/rules';
+import { getTransactionReviewSummary } from '../services/transactionReview';
 import {
   CreateManualTransactionSchema,
   UpdateTransactionSchema,
@@ -86,6 +87,36 @@ function parseBooleanQuery(value: string | string[] | undefined): boolean | null
   return null;
 }
 
+type TransactionSortBy = 'date' | 'amount' | 'merchant';
+type TransactionSortDir = 'asc' | 'desc';
+
+function parseSortBy(value: string | string[] | undefined): TransactionSortBy | null {
+  if (value === undefined || value === '') return 'date';
+
+  const raw = Array.isArray(value) ? value[0] : value;
+  return raw === 'date' || raw === 'amount' || raw === 'merchant' ? raw : null;
+}
+
+function parseSortDir(value: string | string[] | undefined): TransactionSortDir | null {
+  if (value === undefined || value === '') return 'desc';
+
+  const raw = Array.isArray(value) ? value[0] : value;
+  return raw === 'asc' || raw === 'desc' ? raw : null;
+}
+
+function transactionOrderBy(sortBy: TransactionSortBy, sortDir: TransactionSortDir): string {
+  const direction = sortDir.toUpperCase();
+
+  switch (sortBy) {
+    case 'amount':
+      return `t.amount ${direction}, t.date DESC, t.created_at DESC`;
+    case 'merchant':
+      return `lower(COALESCE(t.merchant_name, t.original_name, '')) ${direction}, t.date DESC, t.created_at DESC`;
+    case 'date':
+      return `t.date ${direction}, t.created_at ${direction}`;
+  }
+}
+
 // GET / - list transactions with filters
 router.get('/', (req: Request, res: Response, next: NextFunction): void => {
   try {
@@ -100,6 +131,16 @@ router.get('/', (req: Request, res: Response, next: NextFunction): void => {
     }
     if (limit === null) {
       res.status(400).json({ error: 'Invalid limit filter' });
+      return;
+    }
+    const sortBy = parseSortBy(query.sortBy);
+    if (sortBy === null) {
+      res.status(400).json({ error: 'Invalid sortBy filter' });
+      return;
+    }
+    const sortDir = parseSortDir(query.sortDir);
+    if (sortDir === null) {
+      res.status(400).json({ error: 'Invalid sortDir filter' });
       return;
     }
 
@@ -225,11 +266,21 @@ router.get('/', (req: Request, res: Response, next: NextFunction): void => {
       LEFT JOIN categories c ON c.id = t.category_id
       LEFT JOIN accounts a ON a.id = t.account_id
       ${where}
-      ORDER BY t.date DESC, t.created_at DESC
+      ORDER BY ${transactionOrderBy(sortBy, sortDir)}
       LIMIT ? OFFSET ?
     `).all(...params, limit, offset);
 
     res.json({ data: { data, total: countRow.total, page, limit } });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// GET /review - summary of transaction review queues
+router.get('/review', (_req: Request, res: Response, next: NextFunction): void => {
+  try {
+    const db = getDb();
+    res.json({ data: getTransactionReviewSummary(db) });
   } catch (err) {
     next(err);
   }

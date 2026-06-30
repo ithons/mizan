@@ -12,16 +12,20 @@ import type {
   NetWorthSnapshot,
   PlaidItem,
   Insight,
+  DataQualitySummary,
   SyncHealth,
   CashflowReport,
+  ReportSummary,
   SpendingReport,
   NetWorthHistory,
   CredentialStatus,
   Holding,
   InvestmentTransaction,
+  TransactionReviewSummary,
   PaginatedResponse,
   ChatMessage,
   AiStreamEvent,
+  AdvisorContextResponse,
 } from '@shared/types';
 
 type PlaidSyncStatus = 'synced' | 'reauth_required';
@@ -82,6 +86,7 @@ export const accountsApi = {
     current_balance: number;
     currency?: string;
     institution_name?: string;
+    is_liability?: boolean;
   }) =>
     apiFetch<Account>('/api/accounts/manual', {
       method: 'POST',
@@ -112,10 +117,13 @@ export const transactionsApi = {
     if (params.recurring != null) q.set('recurring', String(params.recurring));
     if (params.uncategorized != null) q.set('uncategorized', String(params.uncategorized));
     if (params.type) q.set('type', params.type);
+    if (params.sortBy) q.set('sortBy', params.sortBy);
+    if (params.sortDir) q.set('sortDir', params.sortDir);
     params.accountId?.forEach((id) => q.append('accountId', id));
     params.categoryId?.forEach((id) => q.append('categoryId', id));
     return apiFetch<PaginatedResponse<Transaction>>(`/api/transactions?${q.toString()}`);
   },
+  review: () => apiFetch<TransactionReviewSummary>('/api/transactions/review'),
   get: (id: string) => apiFetch<Transaction>(`/api/transactions/${id}`),
   createManual: (body: Partial<Transaction>) =>
     apiFetch<Transaction>('/api/transactions/manual', {
@@ -290,6 +298,7 @@ export const goalsApi = {
 
 export const insightsApi = {
   list: () => apiFetch<Insight[]>('/api/insights'),
+  quality: () => apiFetch<DataQualitySummary>('/api/insights/quality'),
 };
 
 // ─── Reports ─────────────────────────────────────────────────────────────────
@@ -301,6 +310,12 @@ export interface ReportParams {
 }
 
 export const reportsApi = {
+  summary: (params?: ReportParams) => {
+    const q = new URLSearchParams();
+    if (params?.startDate) q.set('startDate', params.startDate);
+    if (params?.endDate) q.set('endDate', params.endDate);
+    return apiFetch<ReportSummary>(`/api/reports/summary?${q.toString()}`);
+  },
   cashflow: (params?: ReportParams) => {
     const q = new URLSearchParams();
     if (params?.startDate) q.set('startDate', params.startDate);
@@ -349,7 +364,7 @@ export const networthApi = {
 // ─── Sync ────────────────────────────────────────────────────────────────────
 
 export const syncApi = {
-  run: () => apiFetch<void>('/api/sync/run', { method: 'POST' }),
+  run: () => apiFetch<{ success: boolean }>('/api/sync/run', { method: 'POST' }),
   health: () => apiFetch<SyncHealth>('/api/sync/health'),
 };
 
@@ -457,7 +472,7 @@ export const settingsApi = {
 // ─── AI Advisor ──────────────────────────────────────────────────────────────
 
 export const aiApi = {
-  getContext: () => apiFetch<{ context: string; configured: boolean }>('/api/ai/context'),
+  getContext: () => apiFetch<AdvisorContextResponse>('/api/ai/context'),
 
   streamChat: async (
     messages: ChatMessage[],
