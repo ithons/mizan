@@ -121,6 +121,11 @@ export const accountsApi = {
     }),
   delete: (id: string) =>
     apiFetch<void>(`/api/accounts/${id}`, { method: 'DELETE' }),
+  merge: (body: { targetAccountId: string; sourceAccountId: string }) =>
+    apiFetch<void>('/api/accounts/merge', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
 };
 
 // ─── Transactions ────────────────────────────────────────────────────────────
@@ -534,7 +539,29 @@ export const plaidApi = {
     }),
 };
 
-// ─── Coinbase ────────────────────────────────────────────────────────────────
+// ─── SimpleFIN ───────────────────────────────────────────────────────────────
+
+export const simplefinApi = {
+  setup: (body: { setupToken: string }) =>
+    apiFetch<{ success: boolean }>('/api/simplefin/setup', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+  connection: () => apiFetch<{ id: string; status: string } | null>('/api/simplefin/connection'),
+  disconnect: () => apiFetch<void>('/api/simplefin/connection', { method: 'DELETE' }),
+};
+
+// ─── Teller ──────────────────────────────────────────────────────────────────
+
+export const tellerApi = {
+  exchangeToken: (body: { enrollmentId: string; accessToken: string }) =>
+    apiFetch<{ success: boolean }>('/api/teller/exchange-token', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+  listItems: () => apiFetch<Array<{ id: string; enrollment_id: string; institution_name: string; status: string; }>>('/api/teller/items'),
+  deleteItem: (id: string) => apiFetch<void>(`/api/teller/items/${id}`, { method: 'DELETE' }),
+};
 
 export const coinbaseApi = {
   connect: (body: { keyName: string; privateKey: string }) =>

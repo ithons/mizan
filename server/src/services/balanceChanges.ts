@@ -1,4 +1,4 @@
-export type BalanceChangeProvider = 'plaid' | 'coinbase' | 'manual';
+export type BalanceChangeProvider = 'plaid' | 'coinbase' | 'teller' | 'simplefin' | 'manual';
 
 export interface AccountBalanceChange {
   accountId: string;
@@ -44,7 +44,11 @@ export function describeBalanceChange(change: AccountBalanceChange): string {
     ? 'Plaid'
     : change.provider === 'coinbase'
       ? 'Coinbase'
-      : 'Manual';
+      : change.provider === 'teller'
+        ? 'Teller'
+        : change.provider === 'simplefin'
+          ? 'SimpleFIN'
+          : 'Manual';
 
   return [
     `${change.accountName} balance changed from ${formatMoney(change.previousBalance, change.currency)} to ${formatMoney(change.newBalance, change.currency)}`,

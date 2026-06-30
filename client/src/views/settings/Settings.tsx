@@ -47,6 +47,8 @@ const CATEGORY_PRESET_COLORS = [
 ];
 
 import { PlaidSection } from './PlaidSection';
+import { SimplefinSection } from './SimplefinSection';
+import { TellerSection } from './TellerSection';
 import { CoinbaseSection } from './CoinbaseSection';
 import { CategoriesSection } from './CategoriesSection';
 import { RulesSection } from './RulesSection';
@@ -117,7 +119,16 @@ export function Settings() {
           <h2 className="text-base font-semibold text-text mb-6">
             {sectionItems.find((s) => s.key === activeSection)?.label}
           </h2>
-          {activeSection === 'plaid' && <PlaidSection />}
+          {activeSection === 'plaid' && (
+            <div className="space-y-8">
+              <SimplefinSection />
+              <TellerSection />
+              <div className="pt-8 border-t border-border mt-8">
+                <h2 className="text-xl font-medium text-muted mb-4">Legacy Connections</h2>
+                <PlaidSection />
+              </div>
+            </div>
+          )}
           {activeSection === 'coinbase' && <CoinbaseSection />}
           {activeSection === 'categories' && <CategoriesSection />}
           {activeSection === 'rules' && <RulesSection />}

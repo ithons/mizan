@@ -24,6 +24,8 @@ import insightsRouter from './routes/insights';
 import reportsRouter from './routes/reports';
 import networthRouter from './routes/networth';
 import plaidRouter from './routes/plaid';
+import tellerRouter from './routes/teller';
+import simplefinRouter from './routes/simplefin';
 import coinbaseRouter from './routes/coinbase';
 import syncRouter from './routes/sync';
 import settingsRouter from './routes/settings';
@@ -79,6 +81,8 @@ async function main() {
   app.use('/api/reports', reportsRouter);
   app.use('/api/networth', networthRouter);
   app.use('/api/plaid', plaidRouter);
+  app.use('/api/teller', tellerRouter);
+  app.use('/api/simplefin', simplefinRouter);
   app.use('/api/coinbase', coinbaseRouter);
   app.use('/api/sync', syncRouter);
   app.use('/api/settings', settingsRouter);

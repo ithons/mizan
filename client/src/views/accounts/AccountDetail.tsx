@@ -33,6 +33,7 @@ import { CategoryBadge } from '../../components/CategoryBadge';
 import { EmptyState } from '../../components/EmptyState';
 import { SkeletonList } from '../../components/SkeletonLoader';
 import { ConfirmRemoveModal } from '../../components/ConfirmRemoveModal';
+import { MergeAccountModal } from './MergeAccountModal';
 import { SyncActivityPanel } from '../../components/SyncActivityPanel';
 import { loadPlaidLink } from '../../lib/plaidLink';
 import { invalidateFinancialData } from '../../lib/queryInvalidation';
@@ -91,18 +92,34 @@ export function AccountDetail({ account }: { account: Account }) {
     ira_roth: 'Roth IRA',
   }[account.type as string] ?? ACCOUNT_TYPE_LABELS[account.type] ?? account.type;
 
+  const [mergeModalOpen, setMergeModalOpen] = useState(false);
+
   return (
     <div className="flex flex-col h-full">
-      {/* Header */}
-      <div className="px-6 py-4 border-b border-border">
-        <div className="flex items-center gap-3 mb-2">
-          <span className="w-3 h-3 rounded-full flex-shrink-0" style={{ backgroundColor: account.color || '#6b6b7a' }} />
-          <h2 className="text-base font-semibold text-text">{account.account_name}</h2>
-          <AccountTypeBadge type={account.type} />
-          {(account.type === 'ira_traditional' || account.type === 'ira_roth') && (
-            <span className="text-xs bg-blue/20 text-blue px-2 py-0.5 rounded">Tax-Advantaged</span>
-          )}
-        </div>
+        {/* Header */}
+        <div className="px-6 py-4 border-b border-border">
+          <div className="flex items-center justify-between mb-2">
+            <div className="flex items-center gap-3">
+              <span className="w-3 h-3 rounded-full flex-shrink-0" style={{ backgroundColor: account.color || '#6b6b7a' }} />
+              <h2 className="text-base font-semibold text-text">{account.account_name}</h2>
+              <AccountTypeBadge type={account.type} />
+              {(account.type === 'ira_traditional' || account.type === 'ira_roth') && (
+                <span className="text-xs bg-blue/20 text-blue px-2 py-0.5 rounded">Tax-Advantaged</span>
+              )}
+            </div>
+            
+            {/* Merge Button */}
+            {!account.is_manual && (
+              <button
+                onClick={() => setMergeModalOpen(true)}
+                className="px-2 py-1 text-[11px] text-muted hover:text-text border border-border rounded flex items-center gap-1 transition-colors"
+                title="Merge another connection into this one"
+              >
+                <Link size={12} />
+                Merge
+              </button>
+            )}
+          </div>
 
         {/* Cash/Checking/Savings: just balance */}
         {!isCredit && !isInvestment && !isCrypto && (
@@ -299,7 +316,6 @@ export function AccountDetail({ account }: { account: Account }) {
           </table>
         )}
 
-        {/* Regular Transactions */}
         {tab === 'transactions' && (
           <table className="w-full text-xs">
             <thead className="sticky top-0 bg-surface border-b border-border z-10">
@@ -345,6 +361,12 @@ export function AccountDetail({ account }: { account: Account }) {
           </table>
         )}
       </div>
+
+      <MergeAccountModal 
+        isOpen={mergeModalOpen} 
+        onClose={() => setMergeModalOpen(false)} 
+        targetAccount={account} 
+      />
     </div>
   );
 }

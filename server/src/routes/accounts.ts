@@ -5,6 +5,7 @@ import { validate } from '../middleware/validate';
 import {
   CreateManualAccountSchema,
   UpdateAccountSchema,
+  MergeAccountSchema,
 } from '../../../shared/schemas';
 import { takeSnapshot } from '../services/snapshot';
 
@@ -207,7 +208,101 @@ router.patch(
   }
 );
 
-// DELETE /:id - hard delete if manual, else hide
+// POST /merge - merge two accounts
+router.post(
+  '/merge',
+  validate(MergeAccountSchema),
+  (req: Request, res: Response, next: NextFunction): void => {
+    try {
+      const db = getDb();
+      const { targetAccountId, sourceAccountId } = req.body as {
+        targetAccountId: string;
+        sourceAccountId: string;
+      };
+
+      if (targetAccountId === sourceAccountId) {
+        res.status(400).json({ error: 'Cannot merge an account into itself' });
+        return;
+      }
+
+      const target = db.prepare('SELECT * FROM accounts WHERE id = ?').get(targetAccountId) as any;
+      const source = db.prepare('SELECT * FROM accounts WHERE id = ?').get(sourceAccountId) as any;
+
+      if (!target || !source) {
+        res.status(404).json({ error: 'One or both accounts not found' });
+        return;
+      }
+
+      const now = new Date().toISOString();
+
+      db.transaction(() => {
+        // Move provider IDs from source to target
+        const providerFields: string[] = [];
+        const providerValues: any[] = [];
+
+        if (source.teller_account_id) {
+          providerFields.push('teller_account_id = ?');
+          providerValues.push(source.teller_account_id);
+        }
+        if (source.simplefin_account_id) {
+          providerFields.push('simplefin_account_id = ?');
+          providerValues.push(source.simplefin_account_id);
+        }
+        if (source.plaid_account_id) {
+          providerFields.push('plaid_account_id = ?');
+          providerValues.push(source.plaid_account_id);
+        }
+
+        // Update target account connection info to match source
+        db.prepare(`
+          UPDATE accounts
+          SET connection_type = ?,
+              connection_id = ?,
+              ${providerFields.length > 0 ? providerFields.join(', ') + ',' : ''}
+              current_balance = ?,
+              updated_at = ?
+          WHERE id = ?
+        `).run(
+          source.connection_type,
+          source.connection_id,
+          ...providerValues,
+          source.current_balance,
+          now,
+          targetAccountId
+        );
+
+        // Reassign all transactions
+        db.prepare(`
+          UPDATE transactions
+          SET account_id = ?, updated_at = ?
+          WHERE account_id = ?
+        `).run(targetAccountId, now, sourceAccountId);
+
+        // Reassign holdings and investment transactions
+        db.prepare(`
+          UPDATE holdings
+          SET account_id = ?, updated_at = ?
+          WHERE account_id = ?
+        `).run(targetAccountId, now, sourceAccountId);
+
+        db.prepare(`
+          UPDATE investment_transactions
+          SET account_id = ?
+          WHERE account_id = ?
+        `).run(targetAccountId, sourceAccountId);
+
+        // Remove the source account
+        db.prepare('DELETE FROM accounts WHERE id = ?').run(sourceAccountId);
+      })();
+
+      takeSnapshot();
+
+      res.json({ data: { success: true } });
+    } catch (err) {
+      next(err);
+    }
+  }
+);
 router.delete('/:id', (req: Request, res: Response, next: NextFunction): void => {
   try {
     const db = getDb();

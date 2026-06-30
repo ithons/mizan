@@ -27,6 +27,9 @@ export interface CredentialsStore {
   plaid?: PlaidCredentials;
   coinbase?: CoinbaseCredentials;
   plaidItems?: Record<string, { accessToken: string }>;
+  tellerCertificate?: { cert: string; privateKey: string };
+  tellerItems?: Record<string, { accessToken: string }>;
+  simplefin?: { setupToken?: string; accessUrl?: string };
 }
 
 let _key: Buffer | null = null;
@@ -128,6 +131,42 @@ export function updateCoinbaseCredentials(coinbase: CoinbaseCredentials): void {
   const store = loadCredentials();
   store.coinbase = coinbase;
   saveCredentials(store);
+}
+
+export function updateTellerCertificate(cert: string, privateKey: string): void {
+  const store = loadCredentials();
+  store.tellerCertificate = { cert, privateKey };
+  saveCredentials(store);
+}
+
+export function saveTellerItemToken(enrollmentId: string, accessToken: string): void {
+  const store = loadCredentials();
+  if (!store.tellerItems) store.tellerItems = {};
+  store.tellerItems[enrollmentId] = { accessToken };
+  saveCredentials(store);
+}
+
+export function removeTellerItemToken(enrollmentId: string): void {
+  const store = loadCredentials();
+  if (store.tellerItems) {
+    delete store.tellerItems[enrollmentId];
+    saveCredentials(store);
+  }
+}
+
+export function updateSimplefin(accessUrl: string): void {
+  const store = loadCredentials();
+  store.simplefin = { ...store.simplefin, accessUrl };
+  saveCredentials(store);
+}
+
+export function removeSimplefin(): void {
+  const store = loadCredentials();
+  if (store.simplefin) {
+    delete store.simplefin.accessUrl;
+    delete store.simplefin.setupToken;
+    saveCredentials(store);
+  }
 }
 
 export function savePlaidItemToken(itemId: string, accessToken: string): void {

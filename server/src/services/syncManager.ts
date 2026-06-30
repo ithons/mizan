@@ -2,6 +2,8 @@ import type { Response } from 'express';
 import type { SyncEvent } from '../../../shared/types';
 import { syncAllItems } from './plaid';
 import { syncCoinbase } from './coinbase';
+import { syncTellerItem } from './teller';
+import { syncSimplefin } from './simplefin';
 import { detectRecurring } from './recurring';
 import { takeSnapshot } from './snapshot';
 import { getCredentials } from './credentials';
@@ -79,6 +81,88 @@ async function _runFullSyncInternal(): Promise<void> {
   emitSyncEvent({ type: 'sync_start', message: 'Starting full sync...' });
 
   try {
+    const creds = getCredentials();
+
+    // Sync Teller items
+    if (creds.tellerItems) {
+      for (const [enrollmentId] of Object.entries(creds.tellerItems)) {
+        emitSyncEvent({ type: 'sync_progress', message: `Syncing Teller: ${enrollmentId}...`, progress: 20 });
+        try {
+          const tellerResult = await syncTellerItem(enrollmentId);
+          const runItem = recordSyncRunItem(db, run.id, {
+            provider: 'teller',
+            connection_id: enrollmentId,
+            institution_name: tellerResult.institutionName || 'Teller',
+            status: 'succeeded',
+            accounts_seen: tellerResult.accountCount,
+            transactions_added: tellerResult.added,
+            transactions_modified: tellerResult.modified,
+            transactions_removed: tellerResult.removed,
+            transactions_skipped: tellerResult.skipped,
+          });
+
+          for (const change of tellerResult.balanceChanges) {
+            recordSyncChange(db, runItem.id, {
+              entity_type: 'account',
+              entity_id: change.accountId,
+              change_type: 'updated',
+              description: describeBalanceChange(change),
+            });
+          }
+        } catch (err) {
+          const message = (err as Error).message || 'Teller sync failed';
+          recordSyncRunItem(db, run.id, {
+            provider: 'teller',
+            connection_id: enrollmentId,
+            institution_name: 'Teller',
+            status: 'failed',
+            error_message: message,
+            recovery_action: 'Retry sync. If it continues failing, reconnect Teller.',
+          });
+          deferredError = deferredError ?? new Error(message);
+        }
+      }
+    }
+
+    // Sync SimpleFIN
+    if (creds.simplefin?.accessUrl) {
+      emitSyncEvent({ type: 'sync_progress', message: 'Syncing SimpleFIN...', progress: 30 });
+      try {
+        const simplefinResult = await syncSimplefin();
+        const runItem = recordSyncRunItem(db, run.id, {
+          provider: 'simplefin',
+          connection_id: 'simplefin_primary',
+          institution_name: 'SimpleFIN',
+          status: 'succeeded',
+          accounts_seen: simplefinResult.accountCount,
+          transactions_added: simplefinResult.added,
+          transactions_modified: simplefinResult.modified,
+          transactions_removed: simplefinResult.removed,
+          transactions_skipped: simplefinResult.skipped,
+        });
+
+        for (const change of simplefinResult.balanceChanges) {
+          recordSyncChange(db, runItem.id, {
+            entity_type: 'account',
+            entity_id: change.accountId,
+            change_type: 'updated',
+            description: describeBalanceChange(change),
+          });
+        }
+      } catch (err) {
+        const message = (err as Error).message || 'SimpleFIN sync failed';
+        recordSyncRunItem(db, run.id, {
+          provider: 'simplefin',
+          connection_id: 'simplefin_primary',
+          institution_name: 'SimpleFIN',
+          status: 'failed',
+          error_message: message,
+          recovery_action: 'Retry sync. If it continues failing, check SimpleFIN setup token.',
+        });
+        deferredError = deferredError ?? new Error(message);
+      }
+    }
+
     // Sync Plaid items
     emitSyncEvent({ type: 'sync_progress', message: 'Syncing bank accounts...', progress: 10 });
     const plaidSummary = await syncAllItems();
@@ -118,7 +202,6 @@ async function _runFullSyncInternal(): Promise<void> {
     }
 
     // Sync Coinbase if connected
-    const creds = getCredentials();
     if (creds.coinbase) {
       emitSyncEvent({ type: 'sync_progress', message: 'Syncing Coinbase...', progress: 50 });
       try {

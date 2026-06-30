@@ -66,6 +66,10 @@ export const UpdateCategorySchema = z.object({
   sort_order: z.number().int().optional(),
 });
 
+export const MergeAccountSchema = z.object({
+  targetAccountId: z.string().min(1),
+  sourceAccountId: z.string().min(1),
+});
 export const MergeCategorySchema = z.object({
   targetId: z.string().min(1),
 });
@@ -145,6 +149,19 @@ export const PlaidExchangeTokenSchema = z.object({
   metadata: z.record(z.unknown()),
 });
 
+export const TellerCredentialsSchema = z.object({
+  cert: z.string().min(1),
+  privateKey: z.string().min(1),
+});
+
+export const TellerExchangeTokenSchema = z.object({
+  enrollmentId: z.string().min(1),
+  accessToken: z.string().min(1),
+});
+
+export const SimplefinCredentialsSchema = z.object({
+  setupToken: z.string().min(1),
+});
 export const CoinbaseCredentialsSchema = z.object({
   keyName: z.string().regex(/^organizations\/.+\/apiKeys\/.+$/, 'Key name must match organizations/xxx/apiKeys/yyy'),
   privateKey: z.string().min(1),
