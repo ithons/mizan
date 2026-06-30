@@ -5,6 +5,7 @@ import type {
   Goal,
   Holding,
   RecurringForecast,
+  RecurringForecastOccurrence,
   ReportCategoryChange,
   ReportExcludedFlowSummary,
   ReportMetricSummary,
@@ -225,6 +226,43 @@ export function buildRecurringForecastAdvisorPrompt(
       `Cash projection context: ${projectionContext}.`,
       `Next occurrences: ${nextOccurrences}.`,
       'Explain the cash-flow risk, which patterns need review, and what evidence I should inspect before changing bills or budgets.',
+    ].join(' '),
+  };
+}
+
+export function buildRecurringOccurrenceAdvisorPrompt(
+  occurrence: RecurringForecastOccurrence
+): AdvisorRoutePrompt {
+  const categoryName = occurrence.category_name ?? 'uncategorized';
+  const reviewState = occurrence.needs_review ? 'needs review' : 'does not need review';
+
+  return {
+    source: 'recurring',
+    recordKind: 'recurring_occurrence',
+    recordId: occurrence.id,
+    params: {
+      occurrenceId: occurrence.id,
+      patternId: occurrence.pattern_id,
+      merchantName: occurrence.merchant_name,
+      categoryId: occurrence.category_id ?? null,
+      categoryName,
+      frequency: occurrence.frequency,
+      expectedDate: occurrence.expected_date,
+      amount: occurrence.amount,
+      isIncome: occurrence.is_income,
+      isConfirmed: occurrence.is_confirmed,
+      confidence: occurrence.confidence,
+      confidenceLabel: occurrence.confidence_label,
+      status: occurrence.status,
+      daysUntil: occurrence.days_until,
+      needsReview: occurrence.needs_review,
+    },
+    prompt: [
+      `Analyze this recurring ${occurrence.is_income ? 'income' : 'bill'} item from ${occurrence.merchant_name}.`,
+      `It is expected on ${occurrence.expected_date} for ${formatSignedMoneyValue(occurrence.amount)} and repeats ${occurrence.frequency}.`,
+      `It is categorized as ${categoryName}, has ${occurrence.confidence_label} confidence (${Math.round(occurrence.confidence * 100)}%), and ${reviewState}.`,
+      `The pattern is ${occurrence.is_confirmed ? 'confirmed' : 'unconfirmed'} and the occurrence is ${occurrence.status}.`,
+      'Explain whether this recurring item should be trusted in my cash-flow forecast, what evidence supports it, and whether I should confirm, dismiss, recategorize, or inspect matching transactions.',
     ].join(' '),
   };
 }

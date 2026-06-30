@@ -7,6 +7,7 @@ import {
   buildGoalAdvisorPrompt,
   buildHoldingAdvisorPrompt,
   buildRecurringForecastAdvisorPrompt,
+  buildRecurringOccurrenceAdvisorPrompt,
   buildReportAdvisorPrompt,
   buildTransactionAdvisorPrompt,
 } from '../client/src/lib/advisorPrompts';
@@ -270,6 +271,40 @@ test('recurring forecast advisor prompt captures cash projection context', () =>
   assert.match(prompt.prompt, /Projected income is \$5000\.00, bills are \$2800\.00/);
   assert.match(prompt.prompt, /lowest projected cash \$1200\.00 on 2026-07-01/);
   assert.match(prompt.prompt, /2026-07-01 Rent -\$1800\.00/);
+});
+
+test('recurring occurrence advisor prompt captures row context', () => {
+  const [occurrence] = recurringForecast({
+    occurrences: [{
+      id: 'occ_payroll_2026_07_03',
+      pattern_id: 'rec_payroll',
+      merchant_name: 'Payroll',
+      category_id: 'cat_income',
+      category_name: 'Paycheck',
+      frequency: 'biweekly',
+      expected_date: '2026-07-03',
+      amount: 2500,
+      is_income: true,
+      is_confirmed: false,
+      confidence: 0.82,
+      confidence_label: 'likely',
+      status: 'upcoming',
+      days_until: 3,
+      needs_review: true,
+    }],
+  }).occurrences;
+
+  const prompt = buildRecurringOccurrenceAdvisorPrompt(occurrence);
+
+  assert.equal(prompt.source, 'recurring');
+  assert.equal(prompt.recordKind, 'recurring_occurrence');
+  assert.equal(prompt.recordId, 'occ_payroll_2026_07_03');
+  assert.equal(prompt.params?.patternId, 'rec_payroll');
+  assert.equal(prompt.params?.confidenceLabel, 'likely');
+  assert.equal(prompt.params?.needsReview, true);
+  assert.match(prompt.prompt, /recurring income item from Payroll/);
+  assert.match(prompt.prompt, /expected on 2026-07-03 for \+\$2500\.00/);
+  assert.match(prompt.prompt, /Paycheck, has likely confidence \(82%\)/);
 });
 
 test('goal advisor prompt captures progress and linked account context', () => {

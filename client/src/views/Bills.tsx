@@ -17,7 +17,10 @@ import { format } from 'date-fns';
 import type { Account, RecurringForecast, RecurringForecastOccurrence } from '@shared/types';
 import { accountsApi, recurringApi } from '../lib/api';
 import { advisorRouteState } from '../lib/advisorRouteState';
-import { buildRecurringForecastAdvisorPrompt } from '../lib/advisorPrompts';
+import {
+  buildRecurringForecastAdvisorPrompt,
+  buildRecurringOccurrenceAdvisorPrompt,
+} from '../lib/advisorPrompts';
 import { formatCurrency, formatDate } from '../lib/formatters';
 import { PageLoader } from '../components/LoadingSpinner';
 import { EmptyState } from '../components/EmptyState';
@@ -99,11 +102,13 @@ function ScheduleRow({
   isMutating,
   onConfirm,
   onDismiss,
+  onAsk,
 }: {
   occurrence: RecurringForecastOccurrence;
   isMutating: boolean;
   onConfirm: (patternId: string) => void;
   onDismiss: (patternId: string) => void;
+  onAsk: (occurrence: RecurringForecastOccurrence) => void;
 }) {
   const Icon = occurrence.is_income ? ArrowUpCircle : ArrowDownCircle;
   const color = occurrence.is_income ? '#32bfa3' : '#ef6f8a';
@@ -148,6 +153,14 @@ function ScheduleRow({
         </div>
       </div>
       <div className="flex items-center justify-end gap-2">
+        <button
+          type="button"
+          className="p-1 text-muted hover:text-green"
+          onClick={() => onAsk(occurrence)}
+          title="Ask advisor"
+        >
+          <Sparkles size={13} />
+        </button>
         <p className="font-mono text-sm text-right" style={{ color }}>
           {formatCurrency(occurrence.amount)}
         </p>
@@ -237,6 +250,11 @@ export function Bills() {
         lowestDate: lowestPoint?.date ?? null,
         liquidAccountCount: liquidAccounts.length,
       })),
+    });
+  };
+  const askAdvisorAboutOccurrence = (occurrence: RecurringForecastOccurrence) => {
+    navigate('/advisor', {
+      state: advisorRouteState(buildRecurringOccurrenceAdvisorPrompt(occurrence)),
     });
   };
 
@@ -417,6 +435,7 @@ export function Bills() {
                     isMutating={confirmMutation.isPending || dismissMutation.isPending}
                     onConfirm={(patternId) => confirmMutation.mutate(patternId)}
                     onDismiss={(patternId) => dismissMutation.mutate(patternId)}
+                    onAsk={askAdvisorAboutOccurrence}
                   />
                 ))}
               </div>
