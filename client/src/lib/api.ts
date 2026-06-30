@@ -7,6 +7,8 @@ import type {
   MerchantRule,
   MerchantRuleSuggestion,
   Budget,
+  BudgetGroup,
+  BudgetRolloverLedgerEntry,
   RecurringPattern,
   RecurringForecast,
   SubscriptionInsights,
@@ -277,6 +279,32 @@ export const budgetsApi = {
   getMonth: (month: string) => {
     const [year, m] = month.split('-');
     return apiFetch<Budget[]>(`/api/budgets/month/${year}/${parseInt(m, 10)}`);
+  },
+  groups: (month: string) =>
+    apiFetch<BudgetGroup[]>(`/api/budgets/groups?month=${encodeURIComponent(month)}`),
+  createGroup: (body: { name: string; color?: string | null; sort_order?: number }) =>
+    apiFetch<BudgetGroup>('/api/budgets/groups', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+  updateGroup: (id: string, body: { name?: string; color?: string | null; sort_order?: number }) =>
+    apiFetch<BudgetGroup>(`/api/budgets/groups/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(body),
+    }),
+  setGroupMembers: (id: string, categoryIds: string[]) =>
+    apiFetch<BudgetGroup>(`/api/budgets/groups/${id}/members`, {
+      method: 'PUT',
+      body: JSON.stringify({ category_ids: categoryIds }),
+    }),
+  deleteGroup: (id: string) =>
+    apiFetch<{ success: boolean }>(`/api/budgets/groups/${id}`, { method: 'DELETE' }),
+  rolloverLedger: (params: { budgetId?: string; month?: string; months?: number } = {}) => {
+    const q = new URLSearchParams();
+    if (params.budgetId) q.set('budgetId', params.budgetId);
+    if (params.month) q.set('month', params.month);
+    if (params.months) q.set('months', String(params.months));
+    return apiFetch<BudgetRolloverLedgerEntry[]>(`/api/budgets/rollover-ledger?${q.toString()}`);
   },
   upsert: (categoryId: string, body: { amount: number; period?: 'monthly'; rollover?: boolean }) =>
     apiFetch<Budget>(`/api/budgets/${categoryId}`, {

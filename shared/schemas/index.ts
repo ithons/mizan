@@ -76,6 +76,22 @@ export const UpsertBudgetSchema = z.object({
   rollover: z.boolean().default(false),
 });
 
+export const CreateBudgetGroupSchema = z.object({
+  name: z.string().min(1),
+  color: z.string().nullable().optional(),
+  sort_order: z.number().int().optional(),
+});
+
+export const UpdateBudgetGroupSchema = z.object({
+  name: z.string().min(1).optional(),
+  color: z.string().nullable().optional(),
+  sort_order: z.number().int().optional(),
+});
+
+export const BudgetGroupMembersSchema = z.object({
+  category_ids: z.array(z.string().min(1)),
+});
+
 export const UpdateRecurringSchema = z.object({
   category_id: z.string().nullable().optional(),
 });

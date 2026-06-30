@@ -2,8 +2,17 @@ import { Router, Request, Response, NextFunction } from 'express';
 import { v4 as uuidv4 } from 'uuid';
 import { getDb } from '../db/index';
 import { validate } from '../middleware/validate';
-import { UpsertBudgetSchema } from '../../../shared/schemas';
-import { getMonthlyBudgetsWithProjection } from '../services/budgetProjection';
+import {
+  BudgetGroupMembersSchema,
+  CreateBudgetGroupSchema,
+  UpdateBudgetGroupSchema,
+  UpsertBudgetSchema,
+} from '../../../shared/schemas';
+import {
+  getBudgetRolloverLedger,
+  getMonthlyBudgetsWithProjection,
+} from '../services/budgetProjection';
+import { getBudgetGroupsWithTotals } from '../services/budgetGroups';
 
 const router = Router();
 
@@ -12,6 +21,33 @@ function parsePositiveInteger(value: unknown): number | null {
 
   const parsed = Number(value);
   return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : null;
+}
+
+function parseMonthQuery(value: unknown): { year: number; month: number } | null {
+  if (typeof value !== 'string' || !/^\d{4}-\d{2}$/.test(value)) return null;
+  const [yearText, monthText] = value.split('-');
+  const year = Number(yearText);
+  const month = Number(monthText);
+  if (!Number.isSafeInteger(year) || !Number.isSafeInteger(month) || month < 1 || month > 12) return null;
+  return { year, month };
+}
+
+function currentMonthParts(): { year: number; month: number; monthKey: string } {
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = now.getMonth() + 1;
+  return {
+    year,
+    month,
+    monthKey: `${year}-${String(month).padStart(2, '0')}`,
+  };
+}
+
+function categoryIdsExist(db: ReturnType<typeof getDb>, ids: string[]): boolean {
+  if (ids.length === 0) return true;
+  const placeholders = ids.map(() => '?').join(', ');
+  const rows = db.prepare(`SELECT id FROM categories WHERE id IN (${placeholders})`).all(...ids) as { id: string }[];
+  return rows.length === ids.length;
 }
 
 // GET / - all budgets JOIN categories
@@ -30,6 +66,190 @@ router.get('/', (_req: Request, res: Response, next: NextFunction): void => {
     `).all();
 
     res.json({ data: budgets });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.get('/groups', (req: Request, res: Response, next: NextFunction): void => {
+  try {
+    const db = getDb();
+    const current = currentMonthParts();
+    const parsedMonth = req.query.month === undefined
+      ? { year: current.year, month: current.month }
+      : parseMonthQuery(req.query.month);
+
+    if (!parsedMonth) {
+      res.status(400).json({ error: 'Invalid month filter' });
+      return;
+    }
+
+    res.json({
+      data: getBudgetGroupsWithTotals(db, parsedMonth.year, parsedMonth.month),
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.post(
+  '/groups',
+  validate(CreateBudgetGroupSchema),
+  (req: Request, res: Response, next: NextFunction): void => {
+    try {
+      const db = getDb();
+      const body = req.body as { name: string; color?: string | null; sort_order?: number };
+      const now = new Date().toISOString();
+      const id = uuidv4();
+      const nextSort = body.sort_order ?? (
+        (db.prepare('SELECT COALESCE(MAX(sort_order), -1) + 1 AS next_sort FROM budget_groups').get() as { next_sort: number }).next_sort
+      );
+
+      db.prepare(`
+        INSERT INTO budget_groups (id, name, color, sort_order, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?)
+      `).run(id, body.name.trim(), body.color ?? null, nextSort, now, now);
+
+      const current = currentMonthParts();
+      const group = getBudgetGroupsWithTotals(db, current.year, current.month).find((item) => item.id === id);
+      res.status(201).json({ data: group });
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
+router.patch(
+  '/groups/:id',
+  validate(UpdateBudgetGroupSchema),
+  (req: Request, res: Response, next: NextFunction): void => {
+    try {
+      const db = getDb();
+      const { id } = req.params;
+      const body = req.body as { name?: string; color?: string | null; sort_order?: number };
+      const existing = db.prepare('SELECT id FROM budget_groups WHERE id = ?').get(id);
+
+      if (!existing) {
+        res.status(404).json({ error: 'Budget group not found' });
+        return;
+      }
+
+      const updates: string[] = [];
+      const values: unknown[] = [];
+      if (body.name !== undefined) {
+        updates.push('name = ?');
+        values.push(body.name.trim());
+      }
+      if (body.color !== undefined) {
+        updates.push('color = ?');
+        values.push(body.color);
+      }
+      if (body.sort_order !== undefined) {
+        updates.push('sort_order = ?');
+        values.push(body.sort_order);
+      }
+
+      if (updates.length > 0) {
+        updates.push('updated_at = ?');
+        values.push(new Date().toISOString(), id);
+        db.prepare(`UPDATE budget_groups SET ${updates.join(', ')} WHERE id = ?`).run(...values);
+      }
+
+      const current = currentMonthParts();
+      const group = getBudgetGroupsWithTotals(db, current.year, current.month).find((item) => item.id === id);
+      res.json({ data: group });
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
+router.put(
+  '/groups/:id/members',
+  validate(BudgetGroupMembersSchema),
+  (req: Request, res: Response, next: NextFunction): void => {
+    try {
+      const db = getDb();
+      const { id } = req.params;
+      const body = req.body as { category_ids: string[] };
+      const categoryIds = Array.from(new Set(body.category_ids));
+
+      const existing = db.prepare('SELECT id FROM budget_groups WHERE id = ?').get(id);
+      if (!existing) {
+        res.status(404).json({ error: 'Budget group not found' });
+        return;
+      }
+      if (!categoryIdsExist(db, categoryIds)) {
+        res.status(404).json({ error: 'One or more categories were not found' });
+        return;
+      }
+
+      const now = new Date().toISOString();
+      const replaceMembers = db.transaction(() => {
+        db.prepare('DELETE FROM budget_group_members WHERE group_id = ?').run(id);
+        if (categoryIds.length > 0) {
+          const placeholders = categoryIds.map(() => '?').join(', ');
+          db.prepare(`DELETE FROM budget_group_members WHERE category_id IN (${placeholders})`).run(...categoryIds);
+        }
+        const insert = db.prepare(`
+          INSERT INTO budget_group_members (group_id, category_id, sort_order, created_at)
+          VALUES (?, ?, ?, ?)
+        `);
+        categoryIds.forEach((categoryId, index) => insert.run(id, categoryId, index, now));
+        db.prepare('UPDATE budget_groups SET updated_at = ? WHERE id = ?').run(now, id);
+      });
+
+      replaceMembers();
+
+      const current = currentMonthParts();
+      const group = getBudgetGroupsWithTotals(db, current.year, current.month).find((item) => item.id === id);
+      res.json({ data: group });
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
+router.delete('/groups/:id', (req: Request, res: Response, next: NextFunction): void => {
+  try {
+    const db = getDb();
+    const { id } = req.params;
+    const existing = db.prepare('SELECT id FROM budget_groups WHERE id = ?').get(id);
+
+    if (!existing) {
+      res.status(404).json({ error: 'Budget group not found' });
+      return;
+    }
+
+    db.prepare('DELETE FROM budget_groups WHERE id = ?').run(id);
+    res.json({ data: { success: true } });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.get('/rollover-ledger', (req: Request, res: Response, next: NextFunction): void => {
+  try {
+    const parsedMonth = req.query.month === undefined ? null : parseMonthQuery(req.query.month);
+    if (req.query.month !== undefined && !parsedMonth) {
+      res.status(400).json({ error: 'Invalid month filter' });
+      return;
+    }
+
+    const months = req.query.months === undefined ? undefined : parsePositiveInteger(req.query.months);
+    if (req.query.months !== undefined && months === null) {
+      res.status(400).json({ error: 'Invalid months filter' });
+      return;
+    }
+
+    const db = getDb();
+    res.json({
+      data: getBudgetRolloverLedger(db, {
+        budgetId: typeof req.query.budgetId === 'string' ? req.query.budgetId : undefined,
+        month: typeof req.query.month === 'string' ? req.query.month : undefined,
+        months: months ?? undefined,
+      }),
+    });
   } catch (err) {
     next(err);
   }

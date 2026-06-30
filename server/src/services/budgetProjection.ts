@@ -1,6 +1,6 @@
 import type Database from 'better-sqlite3';
-import { addDays, addMonths, format, isBefore, parseISO } from 'date-fns';
-import type { Budget, RecurringPattern } from '../../../shared/types';
+import { addDays, addMonths, format, isBefore, parseISO, subMonths } from 'date-fns';
+import type { Budget, BudgetRolloverLedgerEntry, RecurringPattern } from '../../../shared/types';
 
 type Frequency = RecurringPattern['frequency'];
 type ForecastConfidence = NonNullable<Budget['forecast_confidence']>;
@@ -13,6 +13,12 @@ interface BudgetRow extends Omit<Budget, 'rollover'> {
 interface CategoryRow {
   id: string;
   parent_id: string | null;
+}
+
+interface LedgerBudgetRow extends BudgetRow {
+  category_name: string | null;
+  category_color: string | null;
+  category_icon: string | null;
 }
 
 interface RecurringRow {
@@ -136,6 +142,23 @@ function rolloverBalanceForBudget(
   }
 
   return balance;
+}
+
+function monthRangeForLedger(createdMonth: string, throughMonth: string, months: number): {
+  firstComputedMonth: string;
+  firstReturnedMonth: string;
+  endMonthExclusive: string;
+} {
+  const firstReturnedMonth = format(
+    subMonths(parseISO(`${throughMonth}-01`), Math.max(0, months - 1)),
+    'yyyy-MM'
+  );
+
+  return {
+    firstComputedMonth: createdMonth,
+    firstReturnedMonth: createdMonth > firstReturnedMonth ? createdMonth : firstReturnedMonth,
+    endMonthExclusive: nextMonthKey(throughMonth),
+  };
 }
 
 function recurringRows(db: Database.Database, endDate: string): RecurringRow[] {
@@ -275,5 +298,102 @@ export function getMonthlyBudgetsWithProjection(
       projected_percent: availableAmount > 0 ? (projectedSpend / availableAmount) * 100 : 0,
       forecast_confidence: confidence,
     };
+  });
+}
+
+export function getBudgetRolloverLedger(
+  db: Database.Database,
+  options: {
+    budgetId?: string;
+    month?: string;
+    months?: number;
+    now?: Date;
+  } = {}
+): BudgetRolloverLedgerEntry[] {
+  const throughMonth = options.month ?? format(options.now ?? new Date(), 'yyyy-MM');
+  const months = Math.min(Math.max(options.months ?? 12, 1), 120);
+  const descendants = categoryDescendants(db);
+  const where = options.budgetId ? 'WHERE b.id = ? AND b.rollover = 1' : 'WHERE b.rollover = 1';
+  const params = options.budgetId ? [options.budgetId] : [];
+  const budgets = db.prepare(`
+    SELECT
+      b.*,
+      c.name AS category_name,
+      c.color AS category_color,
+      c.icon AS category_icon,
+      0 AS spent
+    FROM budgets b
+    JOIN categories c ON c.id = b.category_id
+    ${where}
+    ORDER BY c.name ASC
+  `).all(...params) as LedgerBudgetRow[];
+
+  const calculatedAt = new Date().toISOString();
+  const upsert = db.prepare(`
+    INSERT INTO budget_rollover_ledger (
+      id, budget_id, month, starting_rollover, budget_amount, actual_spend, ending_rollover, calculated_at
+    )
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(budget_id, month) DO UPDATE SET
+      starting_rollover = excluded.starting_rollover,
+      budget_amount = excluded.budget_amount,
+      actual_spend = excluded.actual_spend,
+      ending_rollover = excluded.ending_rollover,
+      calculated_at = excluded.calculated_at
+  `);
+  const entries: BudgetRolloverLedgerEntry[] = [];
+
+  for (const budget of budgets) {
+    const createdMonth = budget.created_at.slice(0, 7);
+    if (createdMonth > throughMonth) continue;
+
+    const range = monthRangeForLedger(createdMonth, throughMonth, months);
+    const categoryIds = descendants.get(budget.category_id) ?? new Set([budget.category_id]);
+    const spending = spendingByMonth(db, categoryIds, range.firstComputedMonth, range.endMonthExclusive);
+    let balance = Number(budget.rollover_balance ?? 0);
+    let monthKey = range.firstComputedMonth;
+
+    while (monthKey < range.endMonthExclusive) {
+      const startingRollover = balance;
+      const actualSpend = spending.get(monthKey) ?? 0;
+      const endingRollover = startingRollover + budget.amount - actualSpend;
+      const id = `${budget.id}:${monthKey}`;
+
+      upsert.run(
+        id,
+        budget.id,
+        monthKey,
+        startingRollover,
+        budget.amount,
+        actualSpend,
+        endingRollover,
+        calculatedAt
+      );
+
+      if (monthKey >= range.firstReturnedMonth) {
+        entries.push({
+          id,
+          budget_id: budget.id,
+          category_id: budget.category_id,
+          category_name: budget.category_name,
+          category_color: budget.category_color,
+          category_icon: budget.category_icon,
+          month: monthKey,
+          starting_rollover: startingRollover,
+          budget_amount: budget.amount,
+          actual_spend: actualSpend,
+          ending_rollover: endingRollover,
+          calculated_at: calculatedAt,
+        });
+      }
+
+      balance = endingRollover;
+      monthKey = nextMonthKey(monthKey);
+    }
+  }
+
+  return entries.sort((a, b) => {
+    const categoryCompare = (a.category_name ?? '').localeCompare(b.category_name ?? '');
+    return categoryCompare || a.month.localeCompare(b.month);
   });
 }

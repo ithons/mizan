@@ -31,12 +31,16 @@ function BudgetRow({
   onEdit,
   onDelete,
   onAsk,
+  onLedger,
+  onRemoveFromGroup,
 }: {
   budget: BudgetModel;
   month: string;
   onEdit: (categoryId: string, amount: number) => void;
   onDelete: (id: string) => void;
   onAsk: (budget: BudgetModel, month: string) => void;
+  onLedger?: (budget: BudgetModel) => void;
+  onRemoveFromGroup?: (budget: BudgetModel) => void;
 }) {
   const spent = budget.spent ?? 0;
   const rolloverBalance = budget.rollover ? budget.rollover_balance : 0;
@@ -83,6 +87,22 @@ function BudgetRow({
           >
             <Sparkles size={12} />
           </button>
+          {budget.rollover && onLedger && (
+            <button
+              className="font-mono text-xs text-muted hover:text-text"
+              onClick={() => onLedger(budget)}
+            >
+              Ledger
+            </button>
+          )}
+          {onRemoveFromGroup && (
+            <button
+              className="font-mono text-xs text-muted hover:text-text"
+              onClick={() => onRemoveFromGroup(budget)}
+            >
+              Ungroup
+            </button>
+          )}
           {editing ? (
             <div className="flex items-center gap-1">
               <input
@@ -157,6 +177,171 @@ function BudgetRow({
         </span>
       </div>
     </div>
+  );
+}
+
+function BudgetGroupSection({
+  group,
+  budgets,
+  availableBudgets,
+  month,
+  onEdit,
+  onDeleteBudget,
+  onAsk,
+  onLedger,
+  onRename,
+  onDeleteGroup,
+  onSetMembers,
+}: {
+  group: import('@shared/types').BudgetGroup;
+  budgets: BudgetModel[];
+  availableBudgets: BudgetModel[];
+  month: string;
+  onEdit: (categoryId: string, amount: number) => void;
+  onDeleteBudget: (id: string) => void;
+  onAsk: (budget: BudgetModel, month: string) => void;
+  onLedger: (budget: BudgetModel) => void;
+  onRename: (id: string, name: string) => void;
+  onDeleteGroup: (id: string) => void;
+  onSetMembers: (id: string, categoryIds: string[]) => void;
+}) {
+  const [name, setName] = useState(group.name);
+  const memberIds = group.members.map((member) => member.category_id);
+  const projectedRemaining = group.totals.projected_remaining;
+
+  useEffect(() => {
+    setName(group.name);
+  }, [group.name]);
+
+  const commitName = () => {
+    const trimmed = name.trim();
+    if (trimmed && trimmed !== group.name) onRename(group.id, trimmed);
+    else setName(group.name);
+  };
+
+  return (
+    <div className="border-t border-border pt-4 first:border-t-0 first:pt-0">
+      <div className="flex items-center justify-between gap-4 mb-3">
+        <div className="flex items-center gap-2 min-w-0">
+          <span
+            className="w-2.5 h-2.5 rounded-full flex-shrink-0"
+            style={{ backgroundColor: group.color ?? '#32bfa3' }}
+          />
+          <input
+            className="bg-transparent text-sm font-medium text-text focus:outline-none focus:ring-1 focus:ring-green-50 rounded px-1 py-0.5"
+            value={name}
+            onChange={(event) => setName(event.target.value)}
+            onBlur={commitName}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter') commitName();
+              if (event.key === 'Escape') setName(group.name);
+            }}
+          />
+          <span className="text-xs text-muted font-mono">{group.totals.budget_count} budgets</span>
+        </div>
+        <div className="flex items-center gap-4 text-xs">
+          <span className="font-mono text-muted">{formatCurrency(group.totals.projected_spend)} projected</span>
+          <span
+            className="font-mono"
+            style={{ color: projectedRemaining >= 0 ? '#32bfa3' : '#ef6f8a' }}
+          >
+            {formatCurrency(projectedRemaining)} left
+          </span>
+          <button
+            className="text-muted hover:text-rose"
+            onClick={() => onDeleteGroup(group.id)}
+          >
+            Delete
+          </button>
+        </div>
+      </div>
+
+      {availableBudgets.length > 0 && (
+        <select
+          className="mb-2 bg-background border border-border rounded px-2 py-1 text-xs text-text focus:outline-none"
+          value=""
+          onChange={(event) => {
+            if (!event.target.value) return;
+            onSetMembers(group.id, [...memberIds, event.target.value]);
+          }}
+        >
+          <option value="">Add category budget</option>
+          {availableBudgets.map((budget) => (
+            <option key={budget.id} value={budget.category_id}>
+              {budget.category_name ?? budget.category_id}
+            </option>
+          ))}
+        </select>
+      )}
+
+      {budgets.length > 0 ? (
+        budgets.map((budget) => (
+          <BudgetRow
+            key={budget.id}
+            budget={budget}
+            month={month}
+            onEdit={onEdit}
+            onDelete={onDeleteBudget}
+            onAsk={onAsk}
+            onLedger={onLedger}
+            onRemoveFromGroup={(item) =>
+              onSetMembers(group.id, memberIds.filter((categoryId) => categoryId !== item.category_id))
+            }
+          />
+        ))
+      ) : (
+        <p className="text-xs text-muted py-3">No category budgets in this group yet.</p>
+      )}
+    </div>
+  );
+}
+
+function RolloverLedgerModal({
+  budget,
+  month,
+  onClose,
+}: {
+  budget: BudgetModel | null;
+  month: string;
+  onClose: () => void;
+}) {
+  const { data: ledger = [] } = useQuery({
+    queryKey: ['budgets', 'rollover-ledger', budget?.id, month],
+    queryFn: () => budgetsApi.rolloverLedger({ budgetId: budget?.id, month, months: 12 }),
+    enabled: Boolean(budget),
+  });
+
+  return (
+    <Modal open={Boolean(budget)} onClose={onClose} title="Rollover Ledger">
+      <div className="space-y-3">
+        <p className="text-sm text-text">{budget?.category_name ?? 'Budget'}</p>
+        <div className="border border-border rounded overflow-hidden">
+          <table className="w-full text-xs">
+            <thead className="border-b border-border bg-background/40">
+              <tr>
+                {['Month', 'Starting', 'Budget', 'Spent', 'Ending'].map((label) => (
+                  <th key={label} className="text-left px-3 py-2 text-muted font-medium">{label}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {ledger.map((row) => (
+                <tr key={row.id} className="border-b border-border last:border-0">
+                  <td className="px-3 py-2 font-mono text-text">{row.month}</td>
+                  <td className="px-3 py-2 font-mono text-muted">{formatCurrency(row.starting_rollover)}</td>
+                  <td className="px-3 py-2 font-mono text-muted">{formatCurrency(row.budget_amount)}</td>
+                  <td className="px-3 py-2 font-mono text-rose">{formatCurrency(row.actual_spend)}</td>
+                  <td className="px-3 py-2 font-mono text-text">{formatCurrency(row.ending_rollover)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {ledger.length === 0 && (
+            <p className="text-xs text-muted text-center py-6">No rollover ledger rows for this budget.</p>
+          )}
+        </div>
+      </div>
+    </Modal>
   );
 }
 
@@ -427,12 +612,19 @@ export function Budget() {
   const [tab, setTab] = useState<'monthly' | 'recurring'>('monthly');
   const [currentMonth, setCurrentMonth] = useState(format(now, 'yyyy-MM'));
   const [showAddModal, setShowAddModal] = useState(false);
+  const [newGroupName, setNewGroupName] = useState('');
+  const [ledgerBudget, setLedgerBudget] = useState<BudgetModel | null>(null);
   const qc = useQueryClient();
   const { addToast } = useAppStore();
 
   const { data: budgets = [], isLoading } = useQuery({
     queryKey: ['budgets', currentMonth],
     queryFn: () => budgetsApi.getMonth(currentMonth),
+  });
+
+  const { data: groups = [] } = useQuery({
+    queryKey: ['budgets', 'groups', currentMonth],
+    queryFn: () => budgetsApi.groups(currentMonth),
   });
 
   const { data: categoriesTree = [] } = useQuery({
@@ -456,6 +648,35 @@ export function Budget() {
     onError: (err: Error) => addToast({ type: 'error', message: err.message }),
   });
 
+  const createGroupMutation = useMutation({
+    mutationFn: () => budgetsApi.createGroup({ name: newGroupName }),
+    onSuccess: () => {
+      setNewGroupName('');
+      invalidateFinancialData(qc);
+    },
+    onError: (err: Error) => addToast({ type: 'error', message: err.message }),
+  });
+
+  const renameGroupMutation = useMutation({
+    mutationFn: ({ id, name }: { id: string; name: string }) =>
+      budgetsApi.updateGroup(id, { name }),
+    onSuccess: () => invalidateFinancialData(qc),
+    onError: (err: Error) => addToast({ type: 'error', message: err.message }),
+  });
+
+  const deleteGroupMutation = useMutation({
+    mutationFn: budgetsApi.deleteGroup,
+    onSuccess: () => invalidateFinancialData(qc),
+    onError: (err: Error) => addToast({ type: 'error', message: err.message }),
+  });
+
+  const groupMembersMutation = useMutation({
+    mutationFn: ({ id, categoryIds }: { id: string; categoryIds: string[] }) =>
+      budgetsApi.setGroupMembers(id, categoryIds),
+    onSuccess: () => invalidateFinancialData(qc),
+    onError: (err: Error) => addToast({ type: 'error', message: err.message }),
+  });
+
   // Summary stats
   const budgeted = budgets.reduce((sum, b) => sum + availableBudgetAmount(b), 0);
   const spent = budgets.reduce((sum, b) => sum + (b.spent ?? 0), 0);
@@ -466,6 +687,14 @@ export function Budget() {
 
   // Unbudgeted: categories with spending but no budget
   const budgetedCatIds = new Set(budgets.map((b) => b.category_id));
+  const groupedCategoryIds = new Set(groups.flatMap((group) =>
+    group.members.map((member) => member.category_id)
+  ));
+  const groupedBudgets = new Map(groups.map((group) => [
+    group.id,
+    budgets.filter((budget) => group.members.some((member) => member.category_id === budget.category_id)),
+  ]));
+  const ungroupedBudgets = budgets.filter((budget) => !groupedCategoryIds.has(budget.category_id));
   const askAdvisorAboutBudget = (budget: BudgetModel, month: string) => {
     navigate('/advisor', {
       state: advisorRouteState(buildBudgetAdvisorPrompt(budget, month)),
@@ -561,19 +790,67 @@ export function Budget() {
               </button>
             </div>
 
+            <div className="flex items-center gap-2 mb-4">
+              <input
+                className="bg-background border border-border rounded px-3 py-1.5 text-xs text-text focus:outline-none focus:ring-1 focus:ring-green-50 min-w-[220px]"
+                value={newGroupName}
+                onChange={(event) => setNewGroupName(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter' && newGroupName.trim()) createGroupMutation.mutate();
+                }}
+                placeholder="New budget group"
+              />
+              <button
+                className="flex items-center gap-1.5 text-xs border border-border rounded px-2.5 py-1.5 text-muted hover:text-text disabled:opacity-40"
+                onClick={() => createGroupMutation.mutate()}
+                disabled={!newGroupName.trim() || createGroupMutation.isPending}
+              >
+                <Plus size={12} />
+                Add Group
+              </button>
+            </div>
+
             {isLoading ? (
               <div className="py-8 text-center text-muted text-sm">Loading...</div>
             ) : budgets.length > 0 ? (
-              budgets.map((budget) => (
-                <BudgetRow
-                  key={budget.id}
-                  budget={budget}
-                  month={currentMonth}
-                  onEdit={(categoryId, amount) => editMutation.mutate({ categoryId, amount })}
-                  onDelete={(id) => deleteMutation.mutate(id)}
-                  onAsk={askAdvisorAboutBudget}
-                />
-              ))
+              <div className="space-y-5">
+                {groups.map((group) => (
+                  <BudgetGroupSection
+                    key={group.id}
+                    group={group}
+                    budgets={groupedBudgets.get(group.id) ?? []}
+                    availableBudgets={ungroupedBudgets}
+                    month={currentMonth}
+                    onEdit={(categoryId, amount) => editMutation.mutate({ categoryId, amount })}
+                    onDeleteBudget={(id) => deleteMutation.mutate(id)}
+                    onAsk={askAdvisorAboutBudget}
+                    onLedger={setLedgerBudget}
+                    onRename={(id, name) => renameGroupMutation.mutate({ id, name })}
+                    onDeleteGroup={(id) => deleteGroupMutation.mutate(id)}
+                    onSetMembers={(id, categoryIds) => groupMembersMutation.mutate({ id, categoryIds })}
+                  />
+                ))}
+
+                {ungroupedBudgets.length > 0 && (
+                  <div className="border-t border-border pt-4 first:border-t-0 first:pt-0">
+                    <div className="flex items-center gap-2 mb-2">
+                      <h3 className="text-sm font-medium text-text">Ungrouped</h3>
+                      <span className="text-xs text-muted font-mono">{ungroupedBudgets.length} budgets</span>
+                    </div>
+                    {ungroupedBudgets.map((budget) => (
+                      <BudgetRow
+                        key={budget.id}
+                        budget={budget}
+                        month={currentMonth}
+                        onEdit={(categoryId, amount) => editMutation.mutate({ categoryId, amount })}
+                        onDelete={(id) => deleteMutation.mutate(id)}
+                        onAsk={askAdvisorAboutBudget}
+                        onLedger={setLedgerBudget}
+                      />
+                    ))}
+                  </div>
+                )}
+              </div>
             ) : (
               <EmptyState
                 icon={WalletCards}
@@ -595,6 +872,11 @@ export function Budget() {
         open={showAddModal}
         onClose={() => setShowAddModal(false)}
         categories={categories}
+      />
+      <RolloverLedgerModal
+        budget={ledgerBudget}
+        month={currentMonth}
+        onClose={() => setLedgerBudget(null)}
       />
     </div>
   );

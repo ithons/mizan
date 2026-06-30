@@ -1,7 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import Database from 'better-sqlite3';
-import { getMonthlyBudgetsWithProjection } from '../server/src/services/budgetProjection';
+import {
+  getBudgetRolloverLedger,
+  getMonthlyBudgetsWithProjection,
+} from '../server/src/services/budgetProjection';
 
 function setupBudgetDb(): Database.Database {
   const db = new Database(':memory:');
@@ -49,6 +52,18 @@ function setupBudgetDb(): Database.Database {
       transaction_count INTEGER NOT NULL DEFAULT 0,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
+    );
+
+    CREATE TABLE budget_rollover_ledger (
+      id TEXT PRIMARY KEY,
+      budget_id TEXT NOT NULL,
+      month TEXT NOT NULL,
+      starting_rollover REAL NOT NULL,
+      budget_amount REAL NOT NULL,
+      actual_spend REAL NOT NULL,
+      ending_rollover REAL NOT NULL,
+      calculated_at TEXT NOT NULL,
+      UNIQUE(budget_id, month)
     );
   `);
 
@@ -171,4 +186,51 @@ test('rollover budgets use prior posted spending as current month carryover', (t
   assert.equal(food?.projected_spend, 100);
   assert.equal(food?.projected_remaining, 650);
   assert.equal(food?.projected_percent, 100 / 750 * 100);
+});
+
+test('rollover ledger records month by month carryover math', (t) => {
+  const db = setupBudgetDb();
+  t.after(() => db.close());
+
+  db.prepare(`
+    UPDATE budgets
+    SET rollover = 1, created_at = '2026-04-01'
+    WHERE id = 'budget_food'
+  `).run();
+
+  db.prepare(`
+    INSERT INTO transactions (id, category_id, recurring_id, date, amount, pending)
+    VALUES
+      ('april_food', 'cat_food', NULL, '2026-04-10', -450, 0),
+      ('may_food', 'cat_food', NULL, '2026-05-11', -300, 0)
+  `).run();
+
+  const ledger = getBudgetRolloverLedger(db, {
+    budgetId: 'budget_food',
+    month: '2026-06',
+    months: 3,
+    now: new Date('2026-06-15T12:00:00.000Z'),
+  });
+
+  assert.deepEqual(
+    ledger.map((row) => ({
+      month: row.month,
+      starting: row.starting_rollover,
+      budget: row.budget_amount,
+      spent: row.actual_spend,
+      ending: row.ending_rollover,
+    })),
+    [
+      { month: '2026-04', starting: 0, budget: 500, spent: 450, ending: 50 },
+      { month: '2026-05', starting: 50, budget: 500, spent: 300, ending: 250 },
+      { month: '2026-06', starting: 250, budget: 500, spent: 100, ending: 650 },
+    ]
+  );
+
+  const persisted = db.prepare(`
+    SELECT COUNT(*) AS count
+    FROM budget_rollover_ledger
+    WHERE budget_id = 'budget_food'
+  `).get() as { count: number };
+  assert.equal(persisted.count, 3);
 });

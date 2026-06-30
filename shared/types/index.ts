@@ -156,6 +156,53 @@ export interface Budget {
   forecast_confidence?: 'none' | 'confirmed' | 'likely' | 'uncertain';
 }
 
+export interface BudgetGroupTotals {
+  budget_count: number;
+  budgeted: number;
+  spent: number;
+  rollover_balance: number;
+  expected_recurring: number;
+  projected_spend: number;
+  projected_remaining: number;
+  forecast_confidence: NonNullable<Budget['forecast_confidence']>;
+}
+
+export interface BudgetGroupMember {
+  group_id: string;
+  category_id: string;
+  sort_order: number;
+  created_at: string;
+  category_name?: string | null;
+  category_color?: string | null;
+  category_icon?: string | null;
+}
+
+export interface BudgetGroup {
+  id: string;
+  name: string;
+  color?: string | null;
+  sort_order: number;
+  created_at: string;
+  updated_at: string;
+  members: BudgetGroupMember[];
+  totals: BudgetGroupTotals;
+}
+
+export interface BudgetRolloverLedgerEntry {
+  id: string;
+  budget_id: string;
+  category_id: string;
+  category_name?: string | null;
+  category_color?: string | null;
+  category_icon?: string | null;
+  month: string;
+  starting_rollover: number;
+  budget_amount: number;
+  actual_spend: number;
+  ending_rollover: number;
+  calculated_at: string;
+}
+
 export interface RecurringPattern {
   id: string;
   merchant_name: string;
