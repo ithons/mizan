@@ -30,6 +30,7 @@ import { useAppStore } from '../store';
 import { Modal } from '../components/Modal';
 import { AmountBadge } from '../components/AmountBadge';
 import { CategoryBadge } from '../components/CategoryBadge';
+import { EmptyState } from '../components/EmptyState';
 import { SkeletonList } from '../components/SkeletonLoader';
 import { ConfirmRemoveModal } from '../components/ConfirmRemoveModal';
 import { SyncActivityPanel } from '../components/SyncActivityPanel';
@@ -499,6 +500,7 @@ function InstitutionGroup({
 // ─── Account Detail ──────────────────────────────────────────────────────────
 
 function AccountDetail({ account }: { account: Account }) {
+  const navigate = useNavigate();
   const [tab, setTab] = useState<'transactions' | 'holdings' | 'inv-transactions'>('transactions');
   const isInvestment = ['brokerage', 'ira_traditional', 'ira_roth'].includes(account.type);
   const isCrypto = account.type === 'crypto_wallet';
@@ -782,7 +784,15 @@ function AccountDetail({ account }: { account: Account }) {
               ))}
               {!txLoading && (txs?.data ?? []).length === 0 && (
                 <tr>
-                  <td colSpan={4} className="px-4 py-8 text-center text-xs text-muted">No transactions found</td>
+                  <td colSpan={4}>
+                    <EmptyState
+                      icon={CreditCard}
+                      title="No transactions found"
+                      description="Run sync or inspect the full ledger if this account should have recent activity."
+                      action={() => navigate('/transactions')}
+                      actionLabel="View Ledger"
+                    />
+                  </td>
                 </tr>
               )}
             </tbody>
@@ -1212,7 +1222,7 @@ export function Accounts() {
 
   const connectCoinbase = () => {
     setAddMenuOpen(false);
-    navigate('/settings');
+    navigate('/settings?section=coinbase');
   };
 
   const connectPlaid = async () => {
@@ -1445,11 +1455,15 @@ export function Accounts() {
               )}
 
               {totalAccounts === 0 && !isLoading && (
-                <div className="py-12 text-center text-muted text-sm px-4">
-                  <CreditCard size={32} className="mx-auto mb-3 opacity-20" />
-                  <p className="mb-1">No accounts yet</p>
-                  <p className="text-xs">Click "Add" to connect your accounts</p>
-                </div>
+                <EmptyState
+                  icon={CreditCard}
+                  title="No accounts yet"
+                  description="Connect a bank, configure Coinbase, or create a manual account to start building Mizān."
+                  action={connectPlaid}
+                  actionLabel="Connect Bank"
+                  secondaryAction={() => setShowManualModal(true)}
+                  secondaryActionLabel="Add Manual"
+                />
               )}
             </>
           )}
@@ -1495,6 +1509,18 @@ export function Accounts() {
           )}
           {selectedAccount ? (
             <AccountDetail account={selectedAccount} />
+          ) : totalAccounts === 0 && !isLoading ? (
+            <div className="flex h-full items-center justify-center">
+              <EmptyState
+                icon={CreditCard}
+                title="Connect your first account"
+                description="Balances, reports, budgets, and review queues depend on account data."
+                action={connectPlaid}
+                actionLabel="Connect Bank"
+                secondaryAction={() => setShowManualModal(true)}
+                secondaryActionLabel="Add Manual"
+              />
+            </div>
           ) : (
             <div className="flex flex-col items-center justify-center h-full text-muted">
               <CreditCard size={48} className="mb-4 opacity-20" />
