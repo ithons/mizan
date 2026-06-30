@@ -1,0 +1,200 @@
+import type Database from 'better-sqlite3';
+import type { Holding, Security } from '../../../shared/types';
+
+interface HoldingRow {
+  id: string;
+  account_id: string;
+  security_id: string;
+  quantity: number;
+  institution_price: number;
+  institution_value: number;
+  provider_cost_basis: number | null;
+  cost_basis: number | null;
+  effective_cost_basis: number | null;
+  manual_cost_basis: number | null;
+  manual_cost_basis_note: string | null;
+  manual_cost_basis_updated_at: string | null;
+  cost_basis_quality: 'manual' | 'provider' | 'missing';
+  currency: string;
+  updated_at: string;
+  ticker: string | null;
+  security_name: string | null;
+  security_type: string | null;
+  sector: string | null;
+  sector_source: string | null;
+}
+
+interface SecurityRow {
+  id: string;
+  plaid_security_id: string | null;
+  ticker: string | null;
+  name: string;
+  type: Security['type'];
+  currency: string;
+  sector: string | null;
+  sector_source: string | null;
+}
+
+export interface UpdateHoldingCostBasisInput {
+  manual_cost_basis: number | null;
+  manual_cost_basis_note?: string | null;
+}
+
+export interface UpdateSecurityMetadataInput {
+  sector: string | null;
+  sector_source?: string | null;
+}
+
+function httpError(message: string, status: number): Error & { status: number } {
+  const err = new Error(message) as Error & { status: number };
+  err.status = status;
+  return err;
+}
+
+const holdingSelect = `
+  SELECT
+    h.id,
+    h.account_id,
+    h.security_id,
+    h.quantity,
+    h.institution_price,
+    h.institution_value,
+    h.cost_basis AS provider_cost_basis,
+    COALESCE(h.manual_cost_basis, h.cost_basis) AS cost_basis,
+    COALESCE(h.manual_cost_basis, h.cost_basis) AS effective_cost_basis,
+    h.manual_cost_basis,
+    h.manual_cost_basis_note,
+    h.manual_cost_basis_updated_at,
+    CASE
+      WHEN h.manual_cost_basis IS NOT NULL THEN 'manual'
+      WHEN h.cost_basis IS NOT NULL THEN 'provider'
+      ELSE 'missing'
+    END AS cost_basis_quality,
+    h.currency,
+    h.updated_at,
+    s.ticker,
+    s.name AS security_name,
+    s.type AS security_type,
+    s.sector,
+    s.sector_source
+  FROM holdings h
+  JOIN securities s ON s.id = h.security_id
+`;
+
+function holdingFromRow(row: HoldingRow): Holding {
+  return {
+    id: row.id,
+    account_id: row.account_id,
+    security_id: row.security_id,
+    quantity: row.quantity,
+    institution_price: row.institution_price,
+    institution_value: row.institution_value,
+    provider_cost_basis: row.provider_cost_basis,
+    cost_basis: row.cost_basis,
+    effective_cost_basis: row.effective_cost_basis,
+    manual_cost_basis: row.manual_cost_basis,
+    manual_cost_basis_note: row.manual_cost_basis_note,
+    manual_cost_basis_updated_at: row.manual_cost_basis_updated_at,
+    cost_basis_quality: row.cost_basis_quality,
+    currency: row.currency,
+    updated_at: row.updated_at,
+    ticker: row.ticker,
+    security_name: row.security_name,
+    security_type: row.security_type,
+    sector: row.sector,
+    sector_source: row.sector_source,
+  };
+}
+
+function securityFromRow(row: SecurityRow): Security {
+  return {
+    id: row.id,
+    plaid_security_id: row.plaid_security_id,
+    ticker: row.ticker,
+    name: row.name,
+    type: row.type,
+    currency: row.currency,
+    sector: row.sector,
+    sector_source: row.sector_source,
+  };
+}
+
+export function listHoldingsWithMetadata(
+  db: Database.Database,
+  accountId?: string | null
+): Holding[] {
+  const where = accountId ? 'WHERE h.account_id = ?' : '';
+  const params = accountId ? [accountId] : [];
+  return (db.prepare(`
+    ${holdingSelect}
+    ${where}
+    ORDER BY h.institution_value DESC
+  `).all(...params) as HoldingRow[]).map(holdingFromRow);
+}
+
+export function getHoldingWithMetadata(
+  db: Database.Database,
+  holdingId: string
+): Holding | null {
+  const row = db.prepare(`
+    ${holdingSelect}
+    WHERE h.id = ?
+  `).get(holdingId) as HoldingRow | undefined;
+  return row ? holdingFromRow(row) : null;
+}
+
+export function setManualCostBasis(
+  db: Database.Database,
+  holdingId: string,
+  input: UpdateHoldingCostBasisInput
+): Holding {
+  const existing = db.prepare('SELECT id FROM holdings WHERE id = ?').get(holdingId);
+  if (!existing) throw httpError('Holding not found', 404);
+
+  if (input.manual_cost_basis != null && !Number.isFinite(input.manual_cost_basis)) {
+    throw httpError('manual_cost_basis must be a finite number', 400);
+  }
+
+  const note = input.manual_cost_basis == null
+    ? null
+    : input.manual_cost_basis_note?.trim() || null;
+  const updatedAt = input.manual_cost_basis == null ? null : new Date().toISOString();
+
+  db.prepare(`
+    UPDATE holdings
+    SET manual_cost_basis = ?,
+        manual_cost_basis_note = ?,
+        manual_cost_basis_updated_at = ?
+    WHERE id = ?
+  `).run(input.manual_cost_basis, note, updatedAt, holdingId);
+
+  const holding = getHoldingWithMetadata(db, holdingId);
+  if (!holding) throw httpError('Holding not found', 404);
+  return holding;
+}
+
+export function setSecurityMetadata(
+  db: Database.Database,
+  securityId: string,
+  input: UpdateSecurityMetadataInput
+): Security {
+  const existing = db.prepare('SELECT id FROM securities WHERE id = ?').get(securityId);
+  if (!existing) throw httpError('Security not found', 404);
+
+  const sector = input.sector?.trim() || null;
+  const sectorSource = sector ? input.sector_source?.trim() || 'manual' : null;
+  db.prepare(`
+    UPDATE securities
+    SET sector = ?,
+        sector_source = ?
+    WHERE id = ?
+  `).run(sector, sectorSource, securityId);
+
+  const row = db.prepare(`
+    SELECT id, plaid_security_id, ticker, name, type, currency, sector, sector_source
+    FROM securities
+    WHERE id = ?
+  `).get(securityId) as SecurityRow | undefined;
+  if (!row) throw httpError('Security not found', 404);
+  return securityFromRow(row);
+}

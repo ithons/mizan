@@ -1,9 +1,10 @@
 import type { Account, Holding, InvestmentTransaction } from '@shared/types';
 
-export type AllocationLens = 'asset_type' | 'account_type' | 'tax_treatment' | 'symbol';
+export type AllocationLens = 'asset_type' | 'sector' | 'account_type' | 'tax_treatment' | 'symbol';
 
 export const ALLOCATION_LENSES: Array<{ id: AllocationLens; label: string }> = [
   { id: 'asset_type', label: 'Asset' },
+  { id: 'sector', label: 'Sector' },
   { id: 'account_type', label: 'Account' },
   { id: 'tax_treatment', label: 'Tax' },
   { id: 'symbol', label: 'Symbol' },
@@ -33,6 +34,8 @@ export interface CostBasisStats {
   totalCount: number;
   knownCount: number;
   missingCount: number;
+  manualCount: number;
+  providerCount: number;
   knownCostBasis: number;
   unrealized: number | null;
   returnPct: number | null;
@@ -142,6 +145,10 @@ function titleCase(value: string): string {
 
 export function getCostBasisStats(holdings: Holding[]): CostBasisStats {
   const known = holdings.filter((holding) => holding.cost_basis != null);
+  const manualCount = holdings.filter((holding) => holding.cost_basis_quality === 'manual').length;
+  const providerCount = known.filter((holding) =>
+    holding.cost_basis_quality === 'provider' || !holding.cost_basis_quality
+  ).length;
   const knownCostBasis = known.reduce((sum, holding) => sum + (holding.cost_basis ?? 0), 0);
   const knownValue = known.reduce((sum, holding) => sum + holding.institution_value, 0);
   const missingCount = holdings.length - known.length;
@@ -161,6 +168,8 @@ export function getCostBasisStats(holdings: Holding[]): CostBasisStats {
     totalCount: holdings.length,
     knownCount: known.length,
     missingCount,
+    manualCount,
+    providerCount,
     knownCostBasis,
     unrealized,
     returnPct,
@@ -170,9 +179,9 @@ export function getCostBasisStats(holdings: Holding[]): CostBasisStats {
 }
 
 export function costBasisTone(label: CostBasisStats['label']): string {
-  if (label === 'Complete') return '#32bfa3';
-  if (label === 'No holdings') return '#718087';
-  return '#e2a53f';
+  if (label === 'Complete') return 'text-green';
+  if (label === 'No holdings') return 'text-muted';
+  return 'text-amber';
 }
 
 function getTaxTreatmentLabel(type: Account['type'] | undefined): string {
@@ -192,6 +201,13 @@ function getAllocationGroup(
   if (lens === 'asset_type') {
     const type = holding.security_type ?? 'unclassified';
     return { key: `asset:${type}`, label: titleCase(type) };
+  }
+
+  if (lens === 'sector') {
+    const sector = holding.sector?.trim();
+    return sector
+      ? { key: `sector:${sector}`, label: sector }
+      : { key: 'sector:unavailable', label: 'Sector unavailable' };
   }
 
   if (lens === 'account_type') {
@@ -350,6 +366,13 @@ export function getAllocationQualityLabel(
     return 'Classified by provider type';
   }
 
+  if (lens === 'sector') {
+    const missingSector = holdings.filter((holding) => !holding.sector).length;
+    if (missingSector === holdings.length) return 'Sector metadata not available';
+    if (missingSector > 0) return `${formatHoldingCount(missingSector)} missing sector`;
+    return 'Sector metadata available';
+  }
+
   const unlabeled = holdings.filter((holding) => !holding.ticker && !holding.security_name).length;
   if (unlabeled > 0) return `${formatHoldingCount(unlabeled)} unlabeled`;
   return 'Labeled by security';
@@ -474,6 +497,7 @@ export function getInvestmentDataQualitySummary({
   const issues: InvestmentDataQualityIssue[] = [];
   const missingAccountLinks = holdings.filter((holding) => !accountById.has(holding.account_id)).length;
   const unclassifiedHoldings = holdings.filter((holding) => !holding.security_type).length;
+  const missingSectorHoldings = holdings.filter((holding) => !holding.sector).length;
 
   if (holdings.length === 0) {
     issues.push({
@@ -515,6 +539,22 @@ export function getInvestmentDataQualitySummary({
       label: 'Security type missing',
       detail: `${formatHoldingCount(unclassifiedHoldings)} lack asset-class classification.`,
       severity: 'warning',
+    });
+  }
+
+  if (holdings.length > 0 && missingSectorHoldings === holdings.length) {
+    issues.push({
+      id: 'sector-missing',
+      label: 'Sector unavailable',
+      detail: 'Sector allocation needs security metadata that is not available for these holdings.',
+      severity: 'info',
+    });
+  } else if (missingSectorHoldings > 0) {
+    issues.push({
+      id: 'sector-partial',
+      label: 'Sector partial',
+      detail: `${formatHoldingCount(missingSectorHoldings)} lack sector metadata.`,
+      severity: 'info',
     });
   }
 

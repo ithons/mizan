@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import {
   AreaChart,
@@ -9,7 +9,7 @@ import {
   Tooltip,
   ResponsiveContainer,
 } from 'recharts';
-import { ChevronUp, ChevronDown, Sparkles } from 'lucide-react';
+import { ChevronUp, ChevronDown, Pencil, Sparkles } from 'lucide-react';
 import { format, subMonths } from 'date-fns';
 import { investmentsApi, reportsApi, accountsApi } from '../lib/api';
 import { formatCurrency, formatDate } from '../lib/formatters';
@@ -32,6 +32,10 @@ import {
 import { AmountBadge } from '../components/AmountBadge';
 import { SkeletonList, SkeletonCard } from '../components/SkeletonLoader';
 import { EmptyState } from '../components/EmptyState';
+import { Modal } from '../components/Modal';
+import { parseDecimalInput } from '../lib/numberInput';
+import { invalidateFinancialData } from '../lib/queryInvalidation';
+import { useAppStore } from '../store';
 import type { Holding } from '@shared/types';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -40,7 +44,20 @@ type SortCol = 'ticker' | 'value' | 'pnl' | 'pnl_pct';
 type SortDir = 'asc' | 'desc';
 type ActiveTab = 'holdings' | 'transactions';
 
+interface CostBasisDraft {
+  holding: Holding;
+  amount: string;
+  note: string;
+}
+
+interface SectorDraft {
+  holding: Holding;
+  sector: string;
+}
+
 const INV_ACCOUNT_TYPES = ['brokerage', 'ira_traditional', 'ira_roth', 'crypto_wallet'];
+const CHART_BLUE = '#0090ff';
+const CHART_TICK = '#687076';
 
 const TX_TYPE_COLORS: Record<string, string> = {
   buy: 'bg-green-10 text-green',
@@ -67,11 +84,11 @@ function formatSignedCurrency(n: number): string {
   return `${n > 0 ? '+' : ''}${formatCurrency(n)}`;
 }
 
-function dataQualityTone(status: 'empty' | 'strong' | 'limited' | 'attention'): string {
-  if (status === 'strong') return '#32bfa3';
-  if (status === 'attention') return '#ef6f8a';
-  if (status === 'empty') return '#718087';
-  return '#e2a53f';
+function dataQualityToneClass(status: 'empty' | 'strong' | 'limited' | 'attention'): string {
+  if (status === 'strong') return 'text-green';
+  if (status === 'attention') return 'text-rose';
+  if (status === 'empty') return 'text-muted';
+  return 'text-amber';
 }
 
 function issueSeverityClass(severity: 'info' | 'warning' | 'attention'): string {
@@ -80,11 +97,22 @@ function issueSeverityClass(severity: 'info' | 'warning' | 'attention'): string 
   return 'border-border bg-background';
 }
 
-function driftTone(label: 'No target' | 'On target' | 'Watch' | 'Drifting'): string {
-  if (label === 'On target') return '#32bfa3';
-  if (label === 'Drifting') return '#ef6f8a';
-  if (label === 'Watch') return '#e2a53f';
-  return '#718087';
+function driftToneClass(label: 'No target' | 'On target' | 'Watch' | 'Drifting'): string {
+  if (label === 'On target') return 'text-green';
+  if (label === 'Drifting') return 'text-rose';
+  if (label === 'Watch') return 'text-amber';
+  return 'text-muted';
+}
+
+function returnToneClass(value: number | null): string {
+  if (value == null) return 'text-muted';
+  return value >= 0 ? 'text-green' : 'text-rose';
+}
+
+function costBasisQualityLabel(holding: Holding): string {
+  if (holding.cost_basis_quality === 'manual') return 'manual';
+  if (holding.cost_basis_quality === 'provider') return 'provider';
+  return 'missing';
 }
 
 function PnlCell({ value, pct }: { value: number | null; pct: number | null }) {
@@ -95,6 +123,159 @@ function PnlCell({ value, pct }: { value: number | null; pct: number | null }) {
       {value >= 0 ? '+' : ''}{formatCurrency(value)}
       {pct != null && <span className="text-xs ml-1 opacity-70">{formatPct(pct)}</span>}
     </span>
+  );
+}
+
+function CostBasisModal({
+  draft,
+  isSaving,
+  onChange,
+  onClose,
+  onClear,
+  onSubmit,
+}: {
+  draft: CostBasisDraft | null;
+  isSaving: boolean;
+  onChange: (draft: CostBasisDraft) => void;
+  onClose: () => void;
+  onClear: () => void;
+  onSubmit: () => void;
+}) {
+  if (!draft) return null;
+
+  return (
+    <Modal open={Boolean(draft)} onClose={onClose} title="Cost Basis Correction">
+      <div className="space-y-4">
+        <div className="rounded border border-border bg-background/50 px-3 py-2">
+          <p className="text-sm text-text">{draft.holding.ticker ?? draft.holding.security_name ?? 'Holding'}</p>
+          <p className="text-xs text-muted mt-1">
+            Provider basis {draft.holding.provider_cost_basis == null ? 'not available' : formatCurrency(draft.holding.provider_cost_basis)}
+          </p>
+        </div>
+
+        <label className="block">
+          <span className="text-xs text-muted">Manual cost basis</span>
+          <input
+            type="text"
+            inputMode="decimal"
+            className="mt-1 w-full rounded border border-border bg-surface px-3 py-2 text-sm text-text font-mono"
+            value={draft.amount}
+            onChange={(event) => onChange({ ...draft, amount: event.target.value })}
+          />
+        </label>
+
+        <label className="block">
+          <span className="text-xs text-muted">Note</span>
+          <input
+            type="text"
+            className="mt-1 w-full rounded border border-border bg-surface px-3 py-2 text-sm text-text"
+            value={draft.note}
+            onChange={(event) => onChange({ ...draft, note: event.target.value })}
+            placeholder="Optional"
+          />
+        </label>
+
+        <div className="flex items-center justify-between gap-2">
+          <button
+            type="button"
+            className="rounded border border-border px-3 py-1.5 text-xs text-muted hover:text-rose disabled:opacity-50"
+            onClick={onClear}
+            disabled={isSaving || draft.holding.manual_cost_basis == null}
+          >
+            Clear manual
+          </button>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              className="rounded border border-border px-3 py-1.5 text-xs text-muted hover:text-text"
+              onClick={onClose}
+              disabled={isSaving}
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              className="rounded bg-green px-3 py-1.5 text-xs font-medium text-white disabled:opacity-50"
+              onClick={onSubmit}
+              disabled={isSaving}
+            >
+              Save
+            </button>
+          </div>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+function SectorModal({
+  draft,
+  isSaving,
+  onChange,
+  onClose,
+  onClear,
+  onSubmit,
+}: {
+  draft: SectorDraft | null;
+  isSaving: boolean;
+  onChange: (draft: SectorDraft) => void;
+  onClose: () => void;
+  onClear: () => void;
+  onSubmit: () => void;
+}) {
+  if (!draft) return null;
+
+  return (
+    <Modal open={Boolean(draft)} onClose={onClose} title="Sector Metadata">
+      <div className="space-y-4">
+        <div className="rounded border border-border bg-background/50 px-3 py-2">
+          <p className="text-sm text-text">{draft.holding.ticker ?? draft.holding.security_name ?? 'Security'}</p>
+          <p className="text-xs text-muted mt-1">
+            {draft.holding.security_type ? `Asset type ${draft.holding.security_type}` : 'Asset type unavailable'}
+          </p>
+        </div>
+
+        <label className="block">
+          <span className="text-xs text-muted">Sector</span>
+          <input
+            type="text"
+            className="mt-1 w-full rounded border border-border bg-surface px-3 py-2 text-sm text-text"
+            value={draft.sector}
+            onChange={(event) => onChange({ ...draft, sector: event.target.value })}
+            placeholder="Technology, Healthcare, Financials"
+          />
+        </label>
+
+        <div className="flex items-center justify-between gap-2">
+          <button
+            type="button"
+            className="rounded border border-border px-3 py-1.5 text-xs text-muted hover:text-rose disabled:opacity-50"
+            onClick={onClear}
+            disabled={isSaving || !draft.holding.sector}
+          >
+            Clear sector
+          </button>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              className="rounded border border-border px-3 py-1.5 text-xs text-muted hover:text-text"
+              onClick={onClose}
+              disabled={isSaving}
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              className="rounded bg-green px-3 py-1.5 text-xs font-medium text-white disabled:opacity-50"
+              onClick={onSubmit}
+              disabled={isSaving}
+            >
+              Save
+            </button>
+          </div>
+        </div>
+      </div>
+    </Modal>
   );
 }
 
@@ -149,12 +330,16 @@ function ChartTooltip({ active, payload, label }: { active?: boolean; payload?: 
 
 export function Investments() {
   const navigate = useNavigate();
+  const qc = useQueryClient();
+  const { addToast } = useAppStore();
   const [selectedAccountId, setSelectedAccountId] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<ActiveTab>('holdings');
   const [sortBy, setSortBy] = useState<SortCol>('value');
   const [sortDir, setSortDir] = useState<SortDir>('desc');
   const [txTypeFilter, setTxTypeFilter] = useState<string>('');
   const [allocationLens, setAllocationLens] = useState<AllocationLens>('asset_type');
+  const [costBasisDraft, setCostBasisDraft] = useState<CostBasisDraft | null>(null);
+  const [sectorDraft, setSectorDraft] = useState<SectorDraft | null>(null);
 
   const startDate = format(subMonths(new Date(), 12), 'yyyy-MM-dd');
   const endDate = format(new Date(), 'yyyy-MM-dd');
@@ -184,6 +369,37 @@ export function Investments() {
     queryFn: accountsApi.list,
   });
 
+  const costBasisMutation = useMutation({
+    mutationFn: (params: {
+      holdingId: string;
+      manualCostBasis: number | null;
+      note?: string | null;
+    }) => investmentsApi.updateHoldingCostBasis(params.holdingId, {
+      manual_cost_basis: params.manualCostBasis,
+      manual_cost_basis_note: params.note ?? null,
+    }),
+    onSuccess: () => {
+      invalidateFinancialData(qc);
+      setCostBasisDraft(null);
+      addToast({ type: 'success', message: 'Cost basis updated' });
+    },
+    onError: (err: Error) => addToast({ type: 'error', message: err.message }),
+  });
+
+  const sectorMutation = useMutation({
+    mutationFn: (params: { securityId: string; sector: string | null }) =>
+      investmentsApi.updateSecurityMetadata(params.securityId, {
+        sector: params.sector,
+        sector_source: params.sector ? 'manual' : null,
+      }),
+    onSuccess: () => {
+      invalidateFinancialData(qc);
+      setSectorDraft(null);
+      addToast({ type: 'success', message: 'Sector metadata updated' });
+    },
+    onError: (err: Error) => addToast({ type: 'error', message: err.message }),
+  });
+
   const accountById = useMemo(
     () => new Map(accounts.map((account) => [account.id, account])),
     [accounts]
@@ -194,6 +410,55 @@ export function Investments() {
         holding,
         accountById.get(holding.account_id) ?? null
       )),
+    });
+  };
+  const openCostBasisEditor = (holding: Holding) => {
+    setCostBasisDraft({
+      holding,
+      amount: holding.cost_basis == null ? '' : holding.cost_basis.toFixed(2),
+      note: holding.manual_cost_basis_note ?? '',
+    });
+  };
+  const saveCostBasisDraft = () => {
+    if (!costBasisDraft) return;
+    const parsed = parseDecimalInput(costBasisDraft.amount);
+    if (parsed == null || parsed < 0) {
+      addToast({ type: 'error', message: 'Enter a nonnegative cost basis' });
+      return;
+    }
+    costBasisMutation.mutate({
+      holdingId: costBasisDraft.holding.id,
+      manualCostBasis: parsed,
+      note: costBasisDraft.note || null,
+    });
+  };
+  const clearManualCostBasis = () => {
+    if (!costBasisDraft) return;
+    costBasisMutation.mutate({
+      holdingId: costBasisDraft.holding.id,
+      manualCostBasis: null,
+      note: null,
+    });
+  };
+  const openSectorEditor = (holding: Holding) => {
+    setSectorDraft({
+      holding,
+      sector: holding.sector ?? '',
+    });
+  };
+  const saveSectorDraft = () => {
+    if (!sectorDraft) return;
+    const sector = sectorDraft.sector.trim() || null;
+    sectorMutation.mutate({
+      securityId: sectorDraft.holding.security_id,
+      sector,
+    });
+  };
+  const clearSector = () => {
+    if (!sectorDraft) return;
+    sectorMutation.mutate({
+      securityId: sectorDraft.holding.security_id,
+      sector: null,
     });
   };
 
@@ -315,6 +580,7 @@ export function Investments() {
     () => getAllocationQualityLabel(filteredHoldings, allocationLens, accountById),
     [filteredHoldings, allocationLens, accountById]
   );
+  const hasSectorData = filteredHoldings.some((holding) => Boolean(holding.sector));
   const allocationDrift = useMemo(
     () => allocationLens === 'asset_type'
       ? getAllocationDrift(allocationSlices, STARTER_ASSET_TARGETS)
@@ -374,8 +640,7 @@ export function Investments() {
             <div className="bg-surface shadow-sm border border-border rounded p-5">
               <p className="text-xs text-muted mb-1">Unrealized P&L</p>
               <p
-                className="font-mono text-2xl font-medium"
-                style={{ color: unrealized == null ? undefined : unrealized >= 0 ? '#32bfa3' : '#ef6f8a' }}
+                className={`font-mono text-2xl font-medium ${returnToneClass(unrealized)}`}
                 title={unrealized == null ? 'Cost basis not available' : undefined}
               >
                 {unrealized == null ? '-' : `${unrealized >= 0 ? '+' : ''}${formatCurrency(unrealized)}`}
@@ -384,8 +649,7 @@ export function Investments() {
             <div className="bg-surface shadow-sm border border-border rounded p-5">
               <p className="text-xs text-muted mb-1">Total Return</p>
               <p
-                className="font-mono text-2xl font-medium"
-                style={{ color: totalReturn == null ? undefined : totalReturn >= 0 ? '#32bfa3' : '#ef6f8a' }}
+                className={`font-mono text-2xl font-medium ${returnToneClass(totalReturn)}`}
                 title={totalReturn == null ? 'Cost basis not available' : undefined}
               >
                 {totalReturn == null ? '-' : formatPct(totalReturn)}
@@ -393,15 +657,12 @@ export function Investments() {
             </div>
             <div className="bg-surface shadow-sm border border-border rounded p-5">
               <p className="text-xs text-muted mb-1">Cost Basis Quality</p>
-              <p
-                className="font-mono text-2xl font-medium"
-                style={{ color: costBasisTone(costBasisStats.label) }}
-              >
+              <p className={`font-mono text-2xl font-medium ${costBasisTone(costBasisStats.label)}`}>
                 {costBasisStats.label}
               </p>
               {costBasisStats.totalCount > 0 && (
                 <p className="text-[11px] text-muted mt-1">
-                  {costBasisStats.coveragePct.toFixed(0)}% of holdings covered
+                  {costBasisStats.coveragePct.toFixed(0)}% covered · {costBasisStats.manualCount} manual · {costBasisStats.providerCount} provider
                 </p>
               )}
             </div>
@@ -416,10 +677,7 @@ export function Investments() {
               <p className="text-xs text-muted font-medium uppercase tracking-wider">Investment Data Quality</p>
               <p className="text-sm text-text mt-1">{investmentDataQuality.detail}</p>
             </div>
-            <p
-              className="font-mono text-sm"
-              style={{ color: dataQualityTone(investmentDataQuality.status) }}
-            >
+            <p className={`font-mono text-sm ${dataQualityToneClass(investmentDataQuality.status)}`}>
               {investmentDataQuality.label}
             </p>
           </div>
@@ -497,20 +755,20 @@ export function Investments() {
               <AreaChart data={chartData} margin={{ top: 4, right: 4, left: 0, bottom: 0 }}>
                 <defs>
                   <linearGradient id="invGrad" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#6487f0" stopOpacity={0.25} />
-                    <stop offset="95%" stopColor="#6487f0" stopOpacity={0} />
+                    <stop offset="5%" stopColor={CHART_BLUE} stopOpacity={0.25} />
+                    <stop offset="95%" stopColor={CHART_BLUE} stopOpacity={0} />
                   </linearGradient>
                 </defs>
-                <XAxis dataKey="date" tick={{ fontSize: 10, fill: '#6b6b7a' }} tickLine={false} axisLine={false} />
+                <XAxis dataKey="date" tick={{ fontSize: 10, fill: CHART_TICK }} tickLine={false} axisLine={false} />
                 <YAxis
                   tickFormatter={(v) => `$${(v / 1000).toFixed(0)}k`}
-                  tick={{ fontSize: 10, fill: '#6b6b7a' }}
+                  tick={{ fontSize: 10, fill: CHART_TICK }}
                   tickLine={false}
                   axisLine={false}
                   width={48}
                 />
                 <Tooltip content={<ChartTooltip />} />
-                <Area type="monotone" dataKey="value" stroke="#6487f0" strokeWidth={2} fill="url(#invGrad)" />
+                <Area type="monotone" dataKey="value" stroke={CHART_BLUE} strokeWidth={2} fill="url(#invGrad)" />
               </AreaChart>
             </ResponsiveContainer>
           ) : (
@@ -548,31 +806,40 @@ export function Investments() {
             </div>
           </div>
 
-          <div className="space-y-3">
-            {allocationSlices.map((slice) => (
-              <div key={slice.key} className="space-y-1.5">
-                <div className="flex items-center justify-between gap-3 text-xs">
-                  <div className="min-w-0">
-                    <span className="font-medium text-text truncate block">{slice.label}</span>
-                    <span className="text-muted">{formatHoldingCount(slice.count)}</span>
+          {allocationLens === 'sector' && !hasSectorData ? (
+            <div className="rounded border border-border bg-background px-4 py-5">
+              <p className="text-sm font-medium text-text">Sector allocation not available</p>
+              <p className="text-xs text-muted mt-1">
+                Add sector metadata from the holdings table to break this portfolio down by sector.
+              </p>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {allocationSlices.map((slice) => (
+                <div key={slice.key} className="space-y-1.5">
+                  <div className="flex items-center justify-between gap-3 text-xs">
+                    <div className="min-w-0">
+                      <span className="font-medium text-text truncate block">{slice.label}</span>
+                      <span className="text-muted">{formatHoldingCount(slice.count)}</span>
+                    </div>
+                    <div className="text-right flex-shrink-0">
+                      <p className="font-mono text-text">{formatCurrency(slice.value)}</p>
+                      <p className="font-mono text-muted">{slice.pct.toFixed(1)}%</p>
+                    </div>
                   </div>
-                  <div className="text-right flex-shrink-0">
-                    <p className="font-mono text-text">{formatCurrency(slice.value)}</p>
-                    <p className="font-mono text-muted">{slice.pct.toFixed(1)}%</p>
+                  <div className="h-2 rounded-full bg-background border border-border/70 overflow-hidden">
+                    <div
+                      className="h-full rounded-full"
+                      style={{
+                        width: `${Math.max(slice.pct, 1)}%`,
+                        backgroundColor: slice.color,
+                      }}
+                    />
                   </div>
                 </div>
-                <div className="h-2 rounded-full bg-background border border-border/70 overflow-hidden">
-                  <div
-                    className="h-full rounded-full"
-                    style={{
-                      width: `${Math.max(slice.pct, 1)}%`,
-                      backgroundColor: slice.color,
-                    }}
-                  />
-                </div>
-              </div>
-            ))}
-          </div>
+              ))}
+            </div>
+          )}
 
           <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-5 gap-3 border-t border-border pt-3 text-xs">
             <div>
@@ -618,10 +885,7 @@ export function Investments() {
                   <p className="text-xs text-muted font-medium uppercase tracking-wider">Starter Target Drift</p>
                   <p className="text-xs text-muted mt-1">{allocationDrift.detail}</p>
                 </div>
-                <p
-                  className="font-mono text-sm"
-                  style={{ color: driftTone(allocationDrift.label) }}
-                >
+                <p className={`font-mono text-sm ${driftToneClass(allocationDrift.label)}`}>
                   {allocationDrift.label}
                 </p>
               </div>
@@ -631,10 +895,7 @@ export function Investments() {
                   <div key={item.key} className="rounded border border-border bg-background px-3 py-2 text-xs">
                     <div className="flex items-center justify-between gap-2">
                       <span className="text-text font-medium truncate">{item.label}</span>
-                      <span
-                        className="font-mono"
-                        style={{ color: driftTone(item.severity === 'drifting' ? 'Drifting' : item.severity === 'watch' ? 'Watch' : 'On target') }}
-                      >
+                      <span className={`font-mono ${driftToneClass(item.severity === 'drifting' ? 'Drifting' : item.severity === 'watch' ? 'Watch' : 'On target')}`}>
                         {item.driftPct >= 0 ? '+' : ''}{item.driftPct.toFixed(1)} pts
                       </span>
                     </div>
@@ -728,7 +989,7 @@ export function Investments() {
                     <td className="px-3 py-2.5 text-right">
                       <PnlCell value={gl} pct={null} />
                     </td>
-                    <td className="px-3 py-2.5 text-right font-mono" style={{ color: ret == null ? undefined : ret >= 0 ? '#32bfa3' : '#ef6f8a' }}>
+                    <td className={`px-3 py-2.5 text-right font-mono ${returnToneClass(ret)}`}>
                       {ret == null ? '-' : formatPct(ret)}
                     </td>
                   </tr>
@@ -757,7 +1018,7 @@ export function Investments() {
                     <td className="px-3 py-2.5 text-right font-bold">
                       <PnlCell value={totalStats.unrealized} pct={null} />
                     </td>
-                    <td className="px-3 py-2.5 text-right font-mono font-bold" style={{ color: totalStats.returnPct == null ? undefined : totalStats.returnPct >= 0 ? '#32bfa3' : '#ef6f8a' }}>
+                    <td className={`px-3 py-2.5 text-right font-mono font-bold ${returnToneClass(totalStats.returnPct)}`}>
                       {totalStats.returnPct == null ? '-' : formatPct(totalStats.returnPct)}
                     </td>
                   </tr>
@@ -774,7 +1035,7 @@ export function Investments() {
           <button
             onClick={() => setActiveTab('holdings')}
             className={`px-4 py-2 text-sm rounded transition-colors ${
-              activeTab === 'holdings' ? 'bg-[#eaf7f3] text-text' : 'text-muted hover:text-text'
+              activeTab === 'holdings' ? 'bg-green-10 text-text' : 'text-muted hover:text-text'
             }`}
           >
             Holdings {filteredHoldings.length > 0 && `(${filteredHoldings.length})`}
@@ -782,7 +1043,7 @@ export function Investments() {
           <button
             onClick={() => setActiveTab('transactions')}
             className={`px-4 py-2 text-sm rounded transition-colors ${
-              activeTab === 'transactions' ? 'bg-[#eaf7f3] text-text' : 'text-muted hover:text-text'
+              activeTab === 'transactions' ? 'bg-green-10 text-text' : 'text-muted hover:text-text'
             }`}
           >
             Transactions
@@ -796,6 +1057,7 @@ export function Investments() {
                 <tr>
                   <SortableHeader label="Ticker" col="ticker" sortBy={sortBy} sortDir={sortDir} onSort={handleSort} />
                   <th className="text-left px-3 py-2.5 text-xs text-muted font-medium uppercase tracking-wider">Name</th>
+                  <th className="text-left px-3 py-2.5 text-xs text-muted font-medium uppercase tracking-wider">Sector</th>
                   {!selectedAccountId && (
                     <th className="text-left px-3 py-2.5 text-xs text-muted font-medium uppercase tracking-wider">Account</th>
                   )}
@@ -810,7 +1072,7 @@ export function Investments() {
               </thead>
               <tbody>
                 {holdingsLoading ? (
-                  <SkeletonList rows={8} cols={selectedAccountId ? 9 : 10} />
+                  <SkeletonList rows={8} cols={selectedAccountId ? 10 : 11} />
                 ) : sortedHoldings.length === 0 ? null : (
                   sortedHoldings.map((h) => {
                     const pnl = h.cost_basis != null ? h.institution_value - h.cost_basis : null;
@@ -823,6 +1085,26 @@ export function Investments() {
                         <td className="px-3 py-2.5 text-muted max-w-[140px]">
                           <span className="truncate block" title={h.security_name ?? undefined}>{h.security_name}</span>
                         </td>
+                        <td className="px-3 py-2.5 text-muted max-w-[130px]">
+                          <div className="flex items-center gap-2">
+                            <div className="min-w-0">
+                              <span className={`truncate block ${h.sector ? 'text-text' : 'text-amber'}`}>
+                                {h.sector ?? 'Not available'}
+                              </span>
+                              {h.sector_source && (
+                                <span className="text-[10px] text-muted">{h.sector_source}</span>
+                              )}
+                            </div>
+                            <button
+                              type="button"
+                              className="text-muted hover:text-blue opacity-0 group-hover:opacity-100 transition-colors"
+                              onClick={() => openSectorEditor(h)}
+                              title="Edit sector"
+                            >
+                              <Pencil size={12} />
+                            </button>
+                          </div>
+                        </td>
                         {!selectedAccountId && (
                           <td className="px-3 py-2.5 text-muted max-w-[120px]">
                             <span className="truncate block" title={acct?.account_name ?? undefined}>{acct?.account_name ?? '-'}</span>
@@ -832,16 +1114,29 @@ export function Investments() {
                         <td className="px-3 py-2.5 text-right font-mono">{formatCurrency(h.institution_price)}</td>
                         <td className="px-3 py-2.5 text-right font-mono font-medium text-text">{formatCurrency(h.institution_value)}</td>
                         <td className="px-3 py-2.5 text-right font-mono">
-                          {h.cost_basis != null ? (
-                            <span className="text-muted">{formatCurrency(h.cost_basis)}</span>
-                          ) : (
-                            <span className="text-amber">Missing</span>
-                          )}
+                          <div className="flex items-center justify-end gap-2">
+                            <div>
+                              {h.cost_basis != null ? (
+                                <span className="text-muted">{formatCurrency(h.cost_basis)}</span>
+                              ) : (
+                                <span className="text-amber">Missing</span>
+                              )}
+                              <p className="text-[10px] text-muted">{costBasisQualityLabel(h)}</p>
+                            </div>
+                            <button
+                              type="button"
+                              className="text-muted hover:text-blue opacity-0 group-hover:opacity-100 transition-colors"
+                              onClick={() => openCostBasisEditor(h)}
+                              title="Edit cost basis"
+                            >
+                              <Pencil size={12} />
+                            </button>
+                          </div>
                         </td>
                         <td className="px-3 py-2.5 text-right">
                           {isCash ? <span className="text-muted">-</span> : <PnlCell value={pnl} pct={null} />}
                         </td>
-                        <td className="px-3 py-2.5 text-right font-mono" style={{ color: pct == null ? undefined : pct >= 0 ? '#32bfa3' : '#ef6f8a' }}>
+                        <td className={`px-3 py-2.5 text-right font-mono ${returnToneClass(pct)}`}>
                           {isCash ? '-' : pct == null ? '-' : formatPct(pct)}
                         </td>
                         <td className="px-2 py-2.5 text-right">
@@ -863,7 +1158,7 @@ export function Investments() {
                   const totalV = sortedHoldings.reduce((s, h) => s + h.institution_value, 0);
                   return (
                     <tr className="border-t-2 border-border">
-                      <td className="px-3 py-2.5 font-bold text-text" colSpan={selectedAccountId ? 4 : 5}>TOTAL</td>
+                      <td className="px-3 py-2.5 font-bold text-text" colSpan={selectedAccountId ? 5 : 6}>TOTAL</td>
                       <td className="px-3 py-2.5 text-right font-mono font-bold text-text">{formatCurrency(totalV)}</td>
                       <td className="px-3 py-2.5 text-right">
                         <p className="font-mono text-muted">
@@ -876,7 +1171,7 @@ export function Investments() {
                       <td className="px-3 py-2.5 text-right font-bold">
                         <PnlCell value={visibleStats.unrealized} pct={null} />
                       </td>
-                      <td className="px-3 py-2.5 text-right font-mono font-bold" style={{ color: visibleStats.returnPct == null ? undefined : visibleStats.returnPct >= 0 ? '#32bfa3' : '#ef6f8a' }}>
+                      <td className={`px-3 py-2.5 text-right font-mono font-bold ${returnToneClass(visibleStats.returnPct)}`}>
                         {visibleStats.returnPct == null ? '-' : formatPct(visibleStats.returnPct)}
                       </td>
                       <td className="px-2 py-2.5" />
@@ -996,6 +1291,22 @@ export function Investments() {
           </div>
         )}
       </div>
+      <CostBasisModal
+        draft={costBasisDraft}
+        isSaving={costBasisMutation.isPending}
+        onChange={setCostBasisDraft}
+        onClose={() => setCostBasisDraft(null)}
+        onClear={clearManualCostBasis}
+        onSubmit={saveCostBasisDraft}
+      />
+      <SectorModal
+        draft={sectorDraft}
+        isSaving={sectorMutation.isPending}
+        onChange={setSectorDraft}
+        onClose={() => setSectorDraft(null)}
+        onClear={clearSector}
+        onSubmit={saveSectorDraft}
+      />
     </div>
   );
 }

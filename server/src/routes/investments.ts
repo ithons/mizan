@@ -1,46 +1,78 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import { getDb } from '../db/index';
+import { validate } from '../middleware/validate';
+import { UpdateHoldingCostBasisSchema, UpdateSecurityMetadataSchema } from '../../../shared/schemas';
+import {
+  listHoldingsWithMetadata,
+  setManualCostBasis,
+  setSecurityMetadata,
+} from '../services/investmentMetadata';
 
 const router = Router();
+
+function routeParam(value: string | string[] | undefined): string | null {
+  return typeof value === 'string' && value.length > 0 ? value : null;
+}
 
 // GET /holdings - all holdings JOIN securities
 router.get('/holdings', (_req: Request, res: Response, next: NextFunction): void => {
   try {
     const db = getDb();
-    const holdings = db.prepare(`
-      SELECT
-        h.*,
-        s.ticker,
-        s.name AS security_name,
-        s.type AS security_type
-      FROM holdings h
-      JOIN securities s ON s.id = h.security_id
-      ORDER BY h.institution_value DESC
-    `).all();
-
-    res.json({ data: holdings });
+    res.json({ data: listHoldingsWithMetadata(db) });
   } catch (err) {
     next(err);
   }
 });
 
+router.put(
+  '/holdings/:id/cost-basis',
+  validate(UpdateHoldingCostBasisSchema),
+  (req: Request, res: Response, next: NextFunction): void => {
+    try {
+      const db = getDb();
+      const id = routeParam(req.params.id);
+      if (!id) {
+        res.status(400).json({ error: 'Invalid holding id' });
+        return;
+      }
+
+      res.json({ data: setManualCostBasis(db, id, req.body) });
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
+router.put(
+  '/securities/:id/metadata',
+  validate(UpdateSecurityMetadataSchema),
+  (req: Request, res: Response, next: NextFunction): void => {
+    try {
+      const db = getDb();
+      const id = routeParam(req.params.id);
+      if (!id) {
+        res.status(400).json({ error: 'Invalid security id' });
+        return;
+      }
+
+      res.json({ data: setSecurityMetadata(db, id, req.body) });
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
 // GET /holdings/:accountId - holdings for specific account
 router.get('/holdings/:accountId', (req: Request, res: Response, next: NextFunction): void => {
   try {
     const db = getDb();
-    const holdings = db.prepare(`
-      SELECT
-        h.*,
-        s.ticker,
-        s.name AS security_name,
-        s.type AS security_type
-      FROM holdings h
-      JOIN securities s ON s.id = h.security_id
-      WHERE h.account_id = ?
-      ORDER BY h.institution_value DESC
-    `).all(req.params.accountId);
+    const accountId = routeParam(req.params.accountId);
+    if (!accountId) {
+      res.status(400).json({ error: 'Invalid account id' });
+      return;
+    }
 
-    res.json({ data: holdings });
+    res.json({ data: listHoldingsWithMetadata(db, accountId) });
   } catch (err) {
     next(err);
   }

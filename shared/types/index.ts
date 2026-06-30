@@ -104,6 +104,8 @@ export interface Security {
   name: string;
   type: 'equity' | 'etf' | 'mutual_fund' | 'crypto' | 'cash' | 'other';
   currency: string;
+  sector?: string | null;
+  sector_source?: string | null;
 }
 
 export interface Holding {
@@ -114,12 +116,20 @@ export interface Holding {
   institution_price: number;
   institution_value: number;
   cost_basis?: number | null;
+  provider_cost_basis?: number | null;
+  effective_cost_basis?: number | null;
+  manual_cost_basis?: number | null;
+  manual_cost_basis_note?: string | null;
+  manual_cost_basis_updated_at?: string | null;
+  cost_basis_quality?: 'manual' | 'provider' | 'missing';
   currency: string;
   updated_at: string;
   // joined
   ticker?: string | null;
   security_name?: string | null;
   security_type?: string | null;
+  sector?: string | null;
+  sector_source?: string | null;
 }
 
 export interface Category {

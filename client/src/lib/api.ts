@@ -32,6 +32,7 @@ import type {
   NetWorthHistory,
   CredentialStatus,
   Holding,
+  Security,
   InvestmentTransaction,
   TransactionReviewSummary,
   PaginatedResponse,
@@ -187,6 +188,22 @@ export const investmentsApi = {
   holdings: () => apiFetch<Holding[]>('/api/investments/holdings'),
   holdingsByAccount: (accountId: string) =>
     apiFetch<Holding[]>(`/api/investments/holdings/${accountId}`),
+  updateHoldingCostBasis: (
+    holdingId: string,
+    body: { manual_cost_basis: number | null; manual_cost_basis_note?: string | null }
+  ) =>
+    apiFetch<Holding>(`/api/investments/holdings/${holdingId}/cost-basis`, {
+      method: 'PUT',
+      body: JSON.stringify(body),
+    }),
+  updateSecurityMetadata: (
+    securityId: string,
+    body: { sector: string | null; sector_source?: string | null }
+  ) =>
+    apiFetch<Security>(`/api/investments/securities/${securityId}/metadata`, {
+      method: 'PUT',
+      body: JSON.stringify(body),
+    }),
   transactions: (params?: { accountId?: string; startDate?: string; endDate?: string }) => {
     const q = new URLSearchParams();
     if (params?.accountId) q.set('accountId', params.accountId);

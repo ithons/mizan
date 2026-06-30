@@ -150,6 +150,16 @@ export const CoinbaseCredentialsSchema = z.object({
   privateKey: z.string().min(1),
 });
 
+export const UpdateHoldingCostBasisSchema = z.object({
+  manual_cost_basis: z.number().nonnegative().nullable(),
+  manual_cost_basis_note: z.string().max(240).nullable().optional(),
+});
+
+export const UpdateSecurityMetadataSchema = z.object({
+  sector: z.string().trim().min(1).max(80).nullable(),
+  sector_source: z.string().trim().min(1).max(40).nullable().optional(),
+});
+
 export const ExportCsvSchema = z.object({
   startDate: z.string().optional(),
   endDate: z.string().optional(),

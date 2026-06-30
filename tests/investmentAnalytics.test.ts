@@ -53,6 +53,11 @@ function holding(overrides: Partial<Holding>): Holding {
     ticker: overrides.ticker ?? null,
     security_name: overrides.security_name ?? null,
     security_type: overrides.security_type ?? null,
+    cost_basis_quality: overrides.cost_basis_quality,
+    provider_cost_basis: overrides.provider_cost_basis,
+    manual_cost_basis: overrides.manual_cost_basis,
+    sector: overrides.sector ?? null,
+    sector_source: overrides.sector_source ?? null,
   };
 }
 
@@ -86,10 +91,25 @@ test('cost basis stats only calculate returns from holdings with known basis', (
   assert.equal(stats.totalCount, 3);
   assert.equal(stats.knownCount, 2);
   assert.equal(stats.missingCount, 1);
+  assert.equal(stats.manualCount, 0);
+  assert.equal(stats.providerCount, 2);
   assert.equal(stats.knownCostBasis, 1800);
   assert.equal(stats.unrealized, 300);
   assert.equal(stats.returnPct, 300 / 1800 * 100);
   assert.equal(stats.coveragePct, 2 / 3 * 100);
+});
+
+test('cost basis stats count manual corrections separately', () => {
+  const stats = getCostBasisStats([
+    holding({ id: 'manual', institution_value: 1200, cost_basis: 1100, cost_basis_quality: 'manual', manual_cost_basis: 1100, provider_cost_basis: 1000 }),
+    holding({ id: 'provider', institution_value: 900, cost_basis: 800, cost_basis_quality: 'provider', provider_cost_basis: 800 }),
+    holding({ id: 'missing', institution_value: 500, cost_basis: null, cost_basis_quality: 'missing' }),
+  ]);
+
+  assert.equal(stats.knownCount, 2);
+  assert.equal(stats.manualCount, 1);
+  assert.equal(stats.providerCount, 1);
+  assert.equal(stats.knownCostBasis, 1900);
 });
 
 test('allocation quality makes missing account links explicit', () => {
@@ -118,6 +138,32 @@ test('allocation quality makes missing account links explicit', () => {
     '1 holding missing account links'
   );
 });
+
+test('sector allocation uses metadata when available and marks gaps', () => {
+  const slices = getAllocationSlices([
+    holding({ id: 'tech_a', sector: 'Technology', institution_value: 1000 }),
+    holding({ id: 'tech_b', sector: 'Technology', institution_value: 500 }),
+    holding({ id: 'health', sector: 'Healthcare', institution_value: 300 }),
+    holding({ id: 'missing', sector: null, institution_value: 200 }),
+  ], 'sector', new Map());
+
+  assert.deepEqual(
+    slices.map((slice) => [slice.label, slice.value, Number(slice.pct.toFixed(1))]),
+    [
+      ['Technology', 1500, 75],
+      ['Healthcare', 300, 15],
+      ['Sector unavailable', 200, 10],
+    ]
+  );
+  assert.equal(
+    getAllocationQualityLabel([
+      holding({ id: 'tech', sector: 'Technology' }),
+      holding({ id: 'missing', sector: null }),
+    ], 'sector', new Map()),
+    '1 holding missing sector'
+  );
+});
+
 
 test('allocation drift compares current slices against explicit targets', () => {
   const drift = getAllocationDrift(
@@ -255,6 +301,7 @@ test('investment data quality marks provider limitations without requiring atten
   assert.equal(summary.status, 'limited');
   assert.deepEqual(summary.issues.map((issue) => issue.id), [
     'security-type-missing',
+    'sector-missing',
     'realized-gain-unavailable',
     'history-limited',
   ]);
@@ -279,6 +326,7 @@ test('investment data quality escalates missing core holding data', () => {
   assert.deepEqual(summary.issues.map((issue) => issue.id), [
     'missing-account-links',
     'cost-basis-missing',
+    'sector-missing',
     'no-investment-transactions',
   ]);
 });

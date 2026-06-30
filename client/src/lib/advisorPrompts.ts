@@ -644,6 +644,8 @@ export function buildHoldingAdvisorPrompt(
   const returnPct = unrealizedGain != null && holding.cost_basis != null && holding.cost_basis > 0
     ? (unrealizedGain / holding.cost_basis) * 100
     : null;
+  const costBasisSource = holding.cost_basis_quality ?? (holding.cost_basis == null ? 'missing' : 'provider');
+  const sector = holding.sector ?? 'not available';
 
   return {
     source: 'investment',
@@ -661,6 +663,11 @@ export function buildHoldingAdvisorPrompt(
       price: holding.institution_price,
       value: holding.institution_value,
       costBasis: holding.cost_basis ?? null,
+      providerCostBasis: holding.provider_cost_basis ?? null,
+      manualCostBasis: holding.manual_cost_basis ?? null,
+      costBasisSource,
+      sector,
+      sectorSource: holding.sector_source ?? null,
       unrealizedGain,
       returnPct,
     },
@@ -669,9 +676,10 @@ export function buildHoldingAdvisorPrompt(
       `It is held in ${accountName} at ${institutionName}.`,
       `Quantity is ${holding.quantity.toFixed(4)}, current price is ${formatMoneyValue(holding.institution_price)}, and market value is ${formatMoneyValue(holding.institution_value)}.`,
       holding.cost_basis != null
-        ? `Cost basis is ${formatMoneyValue(holding.cost_basis)}, unrealized gain or loss is ${formatMoneyValue(unrealizedGain ?? 0)}, and return is ${returnPct == null ? 'not available' : `${returnPct.toFixed(1)}%`}.`
+        ? `Effective cost basis is ${formatMoneyValue(holding.cost_basis)} from ${costBasisSource} data, provider basis is ${holding.provider_cost_basis == null ? 'not available' : formatMoneyValue(holding.provider_cost_basis)}, unrealized gain or loss is ${formatMoneyValue(unrealizedGain ?? 0)}, and return is ${returnPct == null ? 'not available' : `${returnPct.toFixed(1)}%`}.`
         : 'Cost basis is missing, so unrealized return quality is limited.',
-      'Explain concentration, cost basis quality, return quality, and what I should review before making decisions about this position.',
+      `Sector is ${sector}${holding.sector_source ? ` from ${holding.sector_source}` : ''}.`,
+      'Explain concentration, cost basis quality, sector metadata quality, return quality, and what I should review before making decisions about this position.',
     ].join(' '),
   };
 }
