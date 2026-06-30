@@ -258,6 +258,16 @@ export interface MerchantRule {
   match_count?: number;
 }
 
+export interface MerchantRuleSuggestionPreview {
+  id: string;
+  date: string;
+  amount: number;
+  merchant_name: string;
+  account_name?: string | null;
+  category_name?: string | null;
+  will_apply: boolean;
+}
+
 export interface MerchantRuleSuggestion {
   pattern: string;
   category_id: string;
@@ -267,6 +277,9 @@ export interface MerchantRuleSuggestion {
   categorized_count: number;
   uncategorized_count: number;
   confidence: number;
+  affected_transaction_ids: string[];
+  preview_transactions: MerchantRuleSuggestionPreview[];
+  reason: string;
 }
 
 export type TransactionReviewQueueId =

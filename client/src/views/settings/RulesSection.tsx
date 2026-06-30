@@ -31,7 +31,7 @@ import {
   syncApi,
   flattenCategories,
 } from '../../lib/api';
-import { formatRelativeTime } from '../../lib/formatters';
+import { formatCurrency, formatDate, formatRelativeTime } from '../../lib/formatters';
 import { useAppStore } from '../../store';
 import { invalidateFinancialData } from '../../lib/queryInvalidation';
 import { Modal } from '../../components/Modal';
@@ -203,6 +203,23 @@ export function RulesSection() {
                     {' '}
                     - {Math.round(suggestion.confidence * 100)}% confidence
                   </p>
+                  <p className="text-xs text-muted mt-1">{suggestion.reason}</p>
+                  {suggestion.preview_transactions.length > 0 && (
+                    <div className="mt-2 flex flex-wrap gap-1.5">
+                      {suggestion.preview_transactions.slice(0, 4).map((transaction) => (
+                        <span
+                          key={transaction.id}
+                          className="text-[11px] text-muted border border-amber/20 rounded px-1.5 py-0.5 bg-background/45"
+                        >
+                          {transaction.will_apply ? 'Will update' : transaction.category_name ?? 'Evidence'}
+                          {' '}
+                          {formatDate(transaction.date)}
+                          {' '}
+                          {formatCurrency(transaction.amount)}
+                        </span>
+                      ))}
+                    </div>
+                  )}
                 </div>
                 <button
                   className="flex items-center gap-1.5 text-xs text-[#273238] bg-amber rounded px-2.5 py-1.5 hover:opacity-90 disabled:opacity-40"

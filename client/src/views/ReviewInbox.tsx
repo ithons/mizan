@@ -181,6 +181,25 @@ function RuleSuggestionRow({
         <p className="text-xs text-muted">
           {suggestion.uncategorized_count} uncategorized, {suggestion.categorized_count} already categorized, {Math.round(suggestion.confidence * 100)}% confidence
         </p>
+        <p className="text-xs text-muted mt-1">{suggestion.reason}</p>
+        {suggestion.preview_transactions.length > 0 && (
+          <div className="mt-2 grid grid-cols-1 sm:grid-cols-2 gap-1.5">
+            {suggestion.preview_transactions.slice(0, 4).map((transaction) => (
+              <div key={transaction.id} className="border border-border rounded px-2 py-1.5 bg-background/45">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-[11px] text-text truncate">{transaction.merchant_name}</span>
+                  <span className="text-[11px] font-mono text-muted">{formatCurrency(transaction.amount)}</span>
+                </div>
+                <p className="text-[11px] text-muted truncate">
+                  {transaction.will_apply ? 'Will update' : transaction.category_name ?? 'Evidence'}
+                  {' '}
+                  · {formatDate(transaction.date)}
+                  {transaction.account_name ? ` · ${transaction.account_name}` : ''}
+                </p>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
       <button
         className="flex items-center gap-1.5 text-xs bg-blue text-white rounded px-2.5 py-1.5 hover:opacity-90 disabled:opacity-40"

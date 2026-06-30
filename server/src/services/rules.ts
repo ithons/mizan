@@ -1,7 +1,10 @@
 import { v4 as uuidv4 } from 'uuid';
 import type Database from 'better-sqlite3';
 import { compareTwoStrings } from 'string-similarity';
-import type { MerchantRuleSuggestion } from '../../../shared/types';
+import type {
+  MerchantRuleSuggestion,
+  MerchantRuleSuggestionPreview,
+} from '../../../shared/types';
 
 export interface RuleApplicationResult {
   updated: number;
@@ -17,6 +20,30 @@ interface TransactionRuleCandidate {
   merchant_name: string | null;
   original_name: string;
   category_id: string | null;
+}
+
+interface RawMerchantRuleSuggestion {
+  merchant_key: string;
+  pattern: string;
+  category_id: string;
+  category_name: string;
+  category_color?: string | null;
+  category_icon?: string | null;
+  categorized_count: number;
+  uncategorized_count: number;
+  categorized_total: number;
+  confidence: number;
+}
+
+interface RuleSuggestionPreviewRow {
+  id: string;
+  date: string;
+  amount: number;
+  merchant_name: string | null;
+  original_name: string;
+  account_name: string | null;
+  category_id: string | null;
+  category_name: string | null;
 }
 
 function transactionMerchantName(row: {
@@ -172,8 +199,46 @@ export function applyMerchantRuleToMatchingTransactions(
   return { updated };
 }
 
+function reasonForSuggestion(row: RawMerchantRuleSuggestion): string {
+  return `${row.categorized_count} of ${row.categorized_total} categorized ${row.pattern} transaction${row.categorized_total === 1 ? '' : 's'} use ${row.category_name}, so ${row.uncategorized_count} uncategorized match${row.uncategorized_count === 1 ? '' : 'es'} can be reviewed together.`;
+}
+
+function getRuleSuggestionPreview(
+  db: Database.Database,
+  merchantKey: string
+): MerchantRuleSuggestionPreview[] {
+  const rows = db.prepare(`
+    SELECT
+      t.id,
+      t.date,
+      t.amount,
+      t.merchant_name,
+      t.original_name,
+      a.account_name,
+      t.category_id,
+      c.name AS category_name
+    FROM transactions t
+    LEFT JOIN accounts a ON a.id = t.account_id
+    LEFT JOIN categories c ON c.id = t.category_id
+    WHERE t.pending = 0
+      AND lower(trim(COALESCE(NULLIF(t.merchant_name, ''), NULLIF(t.original_name, '')))) = ?
+    ORDER BY t.category_id IS NULL DESC, t.date DESC, ABS(t.amount) DESC
+    LIMIT 6
+  `).all(merchantKey) as RuleSuggestionPreviewRow[];
+
+  return rows.map((row) => ({
+    id: row.id,
+    date: row.date,
+    amount: row.amount,
+    merchant_name: transactionMerchantName(row),
+    account_name: row.account_name,
+    category_name: row.category_name,
+    will_apply: row.category_id === null,
+  }));
+}
+
 export function suggestMerchantRules(db: Database.Database): MerchantRuleSuggestion[] {
-  return db.prepare(`
+  const rows = db.prepare(`
     WITH normalized AS (
       SELECT
         lower(trim(COALESCE(NULLIF(t.merchant_name, ''), NULLIF(t.original_name, '')))) AS merchant_key,
@@ -218,6 +283,7 @@ export function suggestMerchantRules(db: Database.Database): MerchantRuleSuggest
       JOIN uncategorized_counts uc ON uc.merchant_key = cc.merchant_key
     )
     SELECT
+      r.merchant_key,
       r.pattern,
       r.category_id,
       c.name AS category_name,
@@ -225,6 +291,7 @@ export function suggestMerchantRules(db: Database.Database): MerchantRuleSuggest
       c.icon AS category_icon,
       r.categorized_count,
       r.uncategorized_count,
+      r.categorized_total,
       (1.0 * r.categorized_count / r.categorized_total) AS confidence
     FROM ranked r
     JOIN categories c ON c.id = r.category_id
@@ -239,5 +306,25 @@ export function suggestMerchantRules(db: Database.Database): MerchantRuleSuggest
       )
     ORDER BY r.uncategorized_count DESC, r.categorized_count DESC, r.pattern ASC
     LIMIT 10
-  `).all() as MerchantRuleSuggestion[];
+  `).all() as RawMerchantRuleSuggestion[];
+
+  return rows.map((row) => {
+    const preview = getRuleSuggestionPreview(db, row.merchant_key);
+
+    return {
+      pattern: row.pattern,
+      category_id: row.category_id,
+      category_name: row.category_name,
+      category_color: row.category_color,
+      category_icon: row.category_icon,
+      categorized_count: row.categorized_count,
+      uncategorized_count: row.uncategorized_count,
+      confidence: row.confidence,
+      affected_transaction_ids: preview
+        .filter((transaction) => transaction.will_apply)
+        .map((transaction) => transaction.id),
+      preview_transactions: preview,
+      reason: reasonForSuggestion(row),
+    };
+  });
 }

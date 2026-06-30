@@ -6,6 +6,7 @@ import type {
   TransactionReviewSummary,
 } from '@shared/types';
 import { CategoryBadge } from '../../components/CategoryBadge';
+import { formatCurrency, formatDate } from '../../lib/formatters';
 
 const queueTone: Record<TransactionReviewQueueId, { color: string; icon: React.ElementType }> = {
   uncategorized: { color: '#e2a53f', icon: Tag },
@@ -87,6 +88,23 @@ export function TransactionReviewPanel({
                 <p className="text-xs text-muted">
                   {suggestion.uncategorized_count} uncategorized, {Math.round(suggestion.confidence * 100)}% confidence
                 </p>
+                <p className="text-xs text-muted mt-0.5">{suggestion.reason}</p>
+                {suggestion.preview_transactions.length > 0 && (
+                  <div className="mt-2 flex flex-wrap gap-1.5">
+                    {suggestion.preview_transactions.slice(0, 3).map((transaction) => (
+                      <span
+                        key={transaction.id}
+                        className="text-[11px] text-muted border border-border rounded px-1.5 py-0.5 bg-background/45"
+                      >
+                        {transaction.will_apply ? 'Will update' : transaction.category_name ?? 'Evidence'}
+                        {' '}
+                        {formatDate(transaction.date)}
+                        {' '}
+                        {formatCurrency(transaction.amount)}
+                      </span>
+                    ))}
+                  </div>
+                )}
               </div>
               <button
                 className="text-xs text-muted hover:text-green disabled:opacity-40"

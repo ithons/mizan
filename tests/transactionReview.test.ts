@@ -120,6 +120,24 @@ test('transaction review summary combines review queues from existing data', (t)
 
   assert.equal(summary.rule_suggestions[0].pattern, 'Target');
   assert.equal(summary.rule_suggestions[0].category_id, 'cat_food');
+  assert.deepEqual(summary.rule_suggestions[0].affected_transaction_ids, ['target_3']);
+  assert.match(summary.rule_suggestions[0].reason, /2 of 2 categorized Target transactions use Food/);
+  assert.equal(
+    summary.rule_suggestions[0].preview_transactions.some((transaction) =>
+      transaction.id === 'target_3' &&
+      transaction.will_apply &&
+      transaction.account_name === 'Checking'
+    ),
+    true
+  );
+  assert.equal(
+    summary.rule_suggestions[0].preview_transactions.some((transaction) =>
+      transaction.id === 'target_2' &&
+      !transaction.will_apply &&
+      transaction.category_name === 'Food'
+    ),
+    true
+  );
   assert.equal(summary.recurring_candidates[0].id, 'rent');
 });
 
