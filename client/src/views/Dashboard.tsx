@@ -440,13 +440,13 @@ function DashboardFocusPanel({
                 <Plus size={15} /> Manual account
               </button>
               <button
-                onClick={() => onNavigate('/settings')}
+                onClick={() => onNavigate('/settings?section=coinbase')}
                 className="flex items-center justify-center gap-2 rounded border border-border text-text px-3 py-2.5 text-sm hover:bg-white/5"
               >
                 <Wallet size={15} /> Coinbase
               </button>
               <button
-                onClick={() => onNavigate('/settings')}
+                onClick={() => onNavigate('/settings?section=data')}
                 className="flex items-center justify-center gap-2 rounded border border-border text-text px-3 py-2.5 text-sm hover:bg-white/5"
               >
                 <FileInput size={15} /> Import CSV

@@ -1,5 +1,6 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query';
+import { useSearchParams } from 'react-router-dom';
 import {
   Eye,
   EyeOff,
@@ -1084,8 +1085,26 @@ const sectionItems: { key: SettingsSection; label: string; icon: LucideIcon }[] 
   { key: 'about', label: 'About', icon: Info },
 ];
 
+function settingsSection(value: string | null): SettingsSection {
+  return sectionItems.some((section) => section.key === value)
+    ? value as SettingsSection
+    : 'plaid';
+}
+
 export function Settings() {
-  const [activeSection, setActiveSection] = useState<SettingsSection>('plaid');
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [activeSection, setActiveSection] = useState<SettingsSection>(() =>
+    settingsSection(searchParams.get('section'))
+  );
+
+  useEffect(() => {
+    setActiveSection(settingsSection(searchParams.get('section')));
+  }, [searchParams]);
+
+  const selectSection = (section: SettingsSection) => {
+    setActiveSection(section);
+    setSearchParams({ section }, { replace: true });
+  };
 
   return (
     <div className="p-6 flex gap-6">
@@ -1099,7 +1118,7 @@ export function Settings() {
             return (
               <button
                 key={s.key}
-                onClick={() => setActiveSection(s.key)}
+                onClick={() => selectSection(s.key)}
                 className={`w-full text-left px-3 py-2 text-sm rounded transition-colors flex items-center gap-2.5 ${
                   active
                     ? 'bg-[#1e1e22] text-text'
