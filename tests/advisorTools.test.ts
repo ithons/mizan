@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import Database from 'better-sqlite3';
+import { format, subDays } from 'date-fns';
 import { confirmAdvisorDraft } from '../server/src/services/advisorDrafts';
 import { analyzeAdvisorQuestion, buildAdvisorReadTools } from '../server/src/services/advisorTools';
 
@@ -15,6 +16,7 @@ function insertTransaction(
     merchant: string;
     categoryId: string | null;
     reviewStatus?: 'open' | 'reviewed';
+    recurringId?: string | null;
   }
 ): void {
   db.prepare(`
@@ -22,7 +24,7 @@ function insertTransaction(
       id, account_id, date, amount, merchant_name, original_name, category_id, pending,
       recurring_id, review_status, duplicate_status, transfer_status, created_at, updated_at
     )
-    VALUES (?, 'acct_checking', ?, ?, ?, ?, ?, 0, NULL, ?, 'none', 'none', ?, ?)
+    VALUES (?, 'acct_checking', ?, ?, ?, ?, ?, 0, ?, ?, 'none', 'none', ?, ?)
   `).run(
     params.id,
     params.date,
@@ -30,6 +32,7 @@ function insertTransaction(
     params.merchant,
     params.merchant,
     params.categoryId,
+    params.recurringId ?? null,
     params.reviewStatus ?? 'reviewed',
     TEST_NOW,
     TEST_NOW
@@ -141,6 +144,16 @@ function setupAdvisorDb(): Database.Database {
       is_archived INTEGER NOT NULL DEFAULT 0,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
+    );
+
+    CREATE TABLE net_worth_snapshots (
+      id TEXT PRIMARY KEY,
+      date TEXT NOT NULL,
+      total_assets REAL NOT NULL DEFAULT 0,
+      total_liabilities REAL NOT NULL DEFAULT 0,
+      net_worth REAL NOT NULL DEFAULT 0,
+      breakdown TEXT NOT NULL DEFAULT '{}',
+      created_at TEXT NOT NULL
     );
   `);
 
@@ -283,6 +296,98 @@ test('advisor budget analysis uses rollover-adjusted available amount', (t) => {
   assert.equal(analysis.intent, 'budget');
   assert.match(analysis.answer, /Food: projected \$100\.00 of \$220\.00, \$120\.00 remaining\./);
   assert.ok(analysis.citations.some((citation) => citation.id === 'budget:budget_food'));
+});
+
+test('advisor quality analysis cites local trust issues', (t) => {
+  const db = setupAdvisorDb();
+  t.after(() => db.close());
+
+  const analysis = analyzeAdvisorQuestion(
+    db,
+    'Can I trust the data quality right now?',
+    new Date(TEST_NOW)
+  );
+
+  assert.equal(analysis.intent, 'quality');
+  assert.match(analysis.answer, /Data quality is/);
+  assert.ok(analysis.citations.some((citation) => citation.kind === 'data_quality'));
+  assert.ok(analysis.citations.some((citation) => citation.id === 'data-quality:transaction-review'));
+});
+
+test('advisor subscription analysis cites recurring subscription evidence', (t) => {
+  const db = setupAdvisorDb();
+  t.after(() => db.close());
+
+  db.prepare(`
+    INSERT INTO recurring_patterns (
+      id, merchant_name, category_id, average_amount, frequency, last_seen, next_expected,
+      is_active, is_confirmed, transaction_count, created_at, updated_at
+    )
+    VALUES ('rec_streaming', 'Streaming', 'cat_food', 15, 'monthly', ?, ?, 1, 1, 4, ?, ?)
+  `).run(
+    format(subDays(new Date(), 30), 'yyyy-MM-dd'),
+    format(new Date(), 'yyyy-MM-dd'),
+    TEST_NOW,
+    TEST_NOW
+  );
+  insertTransaction(db, {
+    id: 'streaming_1',
+    date: format(subDays(new Date(), 90), 'yyyy-MM-dd'),
+    amount: -15,
+    merchant: 'Streaming',
+    categoryId: 'cat_food',
+    recurringId: 'rec_streaming',
+  });
+  insertTransaction(db, {
+    id: 'streaming_2',
+    date: format(subDays(new Date(), 60), 'yyyy-MM-dd'),
+    amount: -15,
+    merchant: 'Streaming',
+    categoryId: 'cat_food',
+    recurringId: 'rec_streaming',
+  });
+  insertTransaction(db, {
+    id: 'streaming_3',
+    date: format(subDays(new Date(), 30), 'yyyy-MM-dd'),
+    amount: -19,
+    merchant: 'Streaming',
+    categoryId: 'cat_food',
+    recurringId: 'rec_streaming',
+  });
+
+  const analysis = analyzeAdvisorQuestion(
+    db,
+    'What subscriptions or price increases should I review?',
+    new Date(TEST_NOW)
+  );
+
+  assert.equal(analysis.intent, 'subscriptions');
+  assert.match(analysis.answer, /subscription-like recurring bill/);
+  assert.match(analysis.answer, /Price increases/);
+  assert.ok(analysis.citations.some((citation) => citation.id === 'subscription:rec_streaming'));
+});
+
+test('advisor anomaly analysis cites unusual report signals', (t) => {
+  const db = setupAdvisorDb();
+  t.after(() => db.close());
+
+  insertTransaction(db, {
+    id: 'previous_paycheck',
+    date: '2026-05-25',
+    amount: 3000,
+    merchant: 'Employer',
+    categoryId: 'cat_income_paycheck',
+  });
+
+  const analysis = analyzeAdvisorQuestion(
+    db,
+    'Are there any unusual income gaps?',
+    new Date(TEST_NOW)
+  );
+
+  assert.equal(analysis.intent, 'insights');
+  assert.match(analysis.answer, /Income gap detected/);
+  assert.ok(analysis.citations.some((citation) => citation.id === 'insight:income-gap'));
 });
 
 test('advisor drafts and confirms a transaction category change', (t) => {

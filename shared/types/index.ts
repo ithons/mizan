@@ -531,8 +531,11 @@ export type AdvisorIntent =
   | 'review'
   | 'budget'
   | 'recurring'
+  | 'subscriptions'
   | 'goals'
-  | 'reports';
+  | 'reports'
+  | 'insights'
+  | 'quality';
 
 export type AdvisorCitationKind =
   | 'account'
@@ -542,7 +545,9 @@ export type AdvisorCitationKind =
   | 'recurring'
   | 'report'
   | 'sync'
-  | 'review';
+  | 'review'
+  | 'data_quality'
+  | 'insight';
 
 export interface AdvisorCitation {
   id: string;
