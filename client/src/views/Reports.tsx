@@ -17,11 +17,16 @@ import {
   CartesianGrid,
   Legend,
 } from 'recharts';
-import { ChevronRight } from 'lucide-react';
+import { ChevronRight, Sparkles } from 'lucide-react';
 import { format, subMonths, startOfMonth, endOfMonth, startOfYear } from 'date-fns';
 import { reportsApi, networthApi, investmentsApi, categoriesApi } from '../lib/api';
 import { advisorRouteState } from '../lib/advisorRouteState';
-import { buildReportAdvisorPrompt } from '../lib/advisorPrompts';
+import {
+  buildNetWorthEvidenceAdvisorPrompt,
+  buildReportAdvisorPrompt,
+  buildReportDrilldownAdvisorPrompt,
+  buildReportEvidenceAdvisorPrompt,
+} from '../lib/advisorPrompts';
 import { formatCurrency, formatMonth, formatDate, formatPercent } from '../lib/formatters';
 import { PageLoader } from '../components/LoadingSpinner';
 import { EmptyState } from '../components/EmptyState';
@@ -242,6 +247,26 @@ function formatDelta(metric: ReportMetricSummary, isRate = false): string {
   return `${sign}${formatCurrency(metric.delta)}`;
 }
 
+function AdvisorEvidenceButton({
+  disabled,
+  onClick,
+}: {
+  disabled: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      disabled={disabled}
+      onClick={onClick}
+      className="text-xs border border-border rounded px-3 py-1.5 text-muted hover:text-green disabled:opacity-40 disabled:hover:text-muted flex items-center gap-1"
+    >
+      <Sparkles size={13} />
+      Ask advisor
+    </button>
+  );
+}
+
 function ReportMetricCard({
   label,
   metric,
@@ -375,6 +400,7 @@ function ReportDrilldownModal({
   endDate: string;
   onClose: () => void;
 }) {
+  const navigate = useNavigate();
   const { data, isLoading } = useQuery<ReportDrilldown>({
     queryKey: ['reports', 'drilldown', target?.kind, target?.categoryId, startDate, endDate],
     queryFn: () => reportsApi.drilldown({
@@ -385,6 +411,12 @@ function ReportDrilldownModal({
     }),
     enabled: !!target,
   });
+  const askAdvisor = () => {
+    if (!data) return;
+    navigate('/advisor', {
+      state: advisorRouteState(buildReportDrilldownAdvisorPrompt(data)),
+    });
+  };
 
   return (
     <Modal
@@ -394,6 +426,9 @@ function ReportDrilldownModal({
       maxWidth="760px"
     >
       <div className="space-y-4">
+        <div className="flex justify-end">
+          <AdvisorEvidenceButton disabled={!data} onClick={askAdvisor} />
+        </div>
         <div className="flex items-center justify-between gap-3">
           <div>
             <p className="text-xs text-muted mb-1">Backed by</p>
@@ -457,6 +492,7 @@ function ReportEvidenceModal({
   endDate: string;
   onClose: () => void;
 }) {
+  const navigate = useNavigate();
   const { data, isLoading } = useQuery<ReportEvidenceDrilldown>({
     queryKey: ['reports', 'evidence', target?.kind, target?.month, target?.flowType, startDate, endDate],
     queryFn: () => reportsApi.evidence({
@@ -468,6 +504,12 @@ function ReportEvidenceModal({
     }),
     enabled: !!target,
   });
+  const askAdvisor = () => {
+    if (!data) return;
+    navigate('/advisor', {
+      state: advisorRouteState(buildReportEvidenceAdvisorPrompt(data)),
+    });
+  };
 
   return (
     <Modal
@@ -477,6 +519,9 @@ function ReportEvidenceModal({
       maxWidth="800px"
     >
       <div className="space-y-4">
+        <div className="flex justify-end">
+          <AdvisorEvidenceButton disabled={!data} onClick={askAdvisor} />
+        </div>
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs">
           <div>
             <p className="text-muted mb-1">Backed by</p>
@@ -541,11 +586,18 @@ function NetWorthEvidenceModal({
   snapshot: NetWorthSnapshot | null;
   onClose: () => void;
 }) {
+  const navigate = useNavigate();
   const { data, isLoading } = useQuery<ReportNetWorthEvidence>({
     queryKey: ['reports', 'networth-evidence', snapshot?.id],
     queryFn: () => reportsApi.netWorthEvidence(snapshot!.id),
     enabled: !!snapshot,
   });
+  const askAdvisor = () => {
+    if (!data) return;
+    navigate('/advisor', {
+      state: advisorRouteState(buildNetWorthEvidenceAdvisorPrompt(data)),
+    });
+  };
 
   return (
     <Modal
@@ -555,6 +607,9 @@ function NetWorthEvidenceModal({
       maxWidth="820px"
     >
       <div className="space-y-4">
+        <div className="flex justify-end">
+          <AdvisorEvidenceButton disabled={!data} onClick={askAdvisor} />
+        </div>
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs">
           <div>
             <p className="text-muted mb-1">Assets</p>

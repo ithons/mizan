@@ -6,9 +6,12 @@ import type {
   Holding,
   RecurringForecast,
   RecurringForecastOccurrence,
+  ReportDrilldown,
+  ReportEvidenceDrilldown,
   ReportCategoryChange,
   ReportExcludedFlowSummary,
   ReportMetricSummary,
+  ReportNetWorthEvidence,
   ReportSummary,
   Transaction,
 } from '@shared/types';
@@ -92,6 +95,33 @@ function summarizeForecastOccurrences(forecast: RecurringForecast): string {
     .join('; ');
 }
 
+function summarizeTransactions(transactions: Transaction[]): string {
+  if (transactions.length === 0) return 'none';
+  return transactions
+    .slice(0, 5)
+    .map((transaction) => {
+      const merchantName = transaction.merchant_name ?? transaction.original_name;
+      const accountName = transaction.account_name ?? 'unknown account';
+      const categoryName = transaction.category_name ?? 'uncategorized';
+      return `${transaction.date} ${merchantName} ${formatSignedMoneyValue(transaction.amount)} from ${accountName} in ${categoryName}`;
+    })
+    .join('; ');
+}
+
+function summarizeNetWorthAccounts(evidence: ReportNetWorthEvidence): string {
+  if (evidence.accounts.length === 0) return 'none';
+  return evidence.accounts
+    .slice(0, 5)
+    .map((account) => {
+      const accountName = account.account_name ?? account.account_id;
+      const institutionName = account.institution_name ?? 'missing institution';
+      const accountType = account.type ?? 'unknown type';
+      const role = account.is_liability ? 'liability' : 'asset';
+      return `${accountName} at ${institutionName} ${formatMoneyValue(account.balance)} ${role} (${accountType})`;
+    })
+    .join('; ');
+}
+
 export function buildReportAdvisorPrompt(
   report: ReportSummary,
   context: ReportAdvisorPromptContext
@@ -146,6 +176,108 @@ export function buildReportAdvisorPrompt(
       `Spending movers: ${spendingMovers}.`,
       `Excluded flows: ${excludedFlows}.`,
       'Explain the main changes, whether exclusions affect interpretation, and which backing report evidence I should inspect.',
+    ].join(' '),
+  };
+}
+
+export function buildReportDrilldownAdvisorPrompt(
+  drilldown: ReportDrilldown
+): AdvisorRoutePrompt {
+  const startDate = drilldown.start_date ?? 'unknown start';
+  const endDate = drilldown.end_date ?? 'unknown end';
+  const transactionSummary = summarizeTransactions(drilldown.transactions);
+
+  return {
+    source: 'reports',
+    recordKind: 'report_drilldown',
+    recordId: `${drilldown.kind}:${drilldown.category_id}:${startDate}:${endDate}`,
+    params: {
+      kind: drilldown.kind,
+      categoryId: drilldown.category_id,
+      categoryName: drilldown.category_name,
+      startDate,
+      endDate,
+      total: drilldown.total,
+      count: drilldown.count,
+      transactionSummary,
+    },
+    prompt: [
+      `Explain the ${drilldown.category_name} ${drilldown.kind} report drill-through from ${startDate} to ${endDate}.`,
+      `The total is ${formatMoneyValue(drilldown.total)} across ${drilldown.count} transaction${drilldown.count === 1 ? '' : 's'}.`,
+      `Backing transactions: ${transactionSummary}.`,
+      'Explain why this report number changed, whether any transactions look miscategorized or excluded incorrectly, and what I should inspect next.',
+    ].join(' '),
+  };
+}
+
+export function buildReportEvidenceAdvisorPrompt(
+  evidence: ReportEvidenceDrilldown
+): AdvisorRoutePrompt {
+  const startDate = evidence.start_date ?? 'unknown start';
+  const endDate = evidence.end_date ?? 'unknown end';
+  const transactionSummary = summarizeTransactions(evidence.transactions);
+  const evidenceScope = evidence.kind === 'cashflow_month'
+    ? `cash-flow month ${evidence.month ?? evidence.label}`
+    : `excluded ${evidence.flow_type ?? evidence.label} flow`;
+
+  return {
+    source: 'reports',
+    recordKind: 'report_evidence',
+    recordId: `${evidence.kind}:${evidence.month ?? evidence.flow_type ?? evidence.label}:${startDate}:${endDate}`,
+    params: {
+      kind: evidence.kind,
+      label: evidence.label,
+      startDate,
+      endDate,
+      month: evidence.month ?? null,
+      flowType: evidence.flow_type ?? null,
+      income: evidence.income,
+      expenses: evidence.expenses,
+      net: evidence.net,
+      total: evidence.total,
+      count: evidence.count,
+      transactionSummary,
+    },
+    prompt: [
+      `Explain this ${evidenceScope} evidence from ${startDate} to ${endDate}.`,
+      `Income is ${formatMoneyValue(evidence.income)}, spending is ${formatMoneyValue(evidence.expenses)}, net is ${formatSignedMoneyValue(evidence.net)}, and total is ${formatMoneyValue(evidence.total)}.`,
+      `It is backed by ${evidence.count} transaction${evidence.count === 1 ? '' : 's'}: ${transactionSummary}.`,
+      'Explain how these transactions affect the report, whether exclusions or transfers are being handled correctly, and what should be reviewed.',
+    ].join(' '),
+  };
+}
+
+export function buildNetWorthEvidenceAdvisorPrompt(
+  evidence: ReportNetWorthEvidence
+): AdvisorRoutePrompt {
+  const snapshot = evidence.snapshot;
+  const previousDate = evidence.previous_snapshot?.date ?? null;
+  const accountSummary = summarizeNetWorthAccounts(evidence);
+
+  return {
+    source: 'reports',
+    recordKind: 'networth_evidence',
+    recordId: snapshot.id,
+    params: {
+      snapshotId: snapshot.id,
+      date: snapshot.date,
+      previousSnapshotDate: previousDate,
+      totalAssets: snapshot.total_assets,
+      totalLiabilities: snapshot.total_liabilities,
+      netWorth: snapshot.net_worth,
+      delta: evidence.delta ?? null,
+      assetDelta: evidence.asset_delta ?? null,
+      liabilityDelta: evidence.liability_delta ?? null,
+      accountCount: evidence.accounts.length,
+      accountSummary,
+    },
+    prompt: [
+      `Explain the net-worth evidence for ${snapshot.date}.`,
+      `Assets are ${formatMoneyValue(snapshot.total_assets)}, liabilities are ${formatMoneyValue(snapshot.total_liabilities)}, and net worth is ${formatMoneyValue(snapshot.net_worth)}.`,
+      previousDate ? `Compared with ${previousDate}, net worth changed by ${formatSignedMoneyValue(evidence.delta ?? 0)}.` : 'There is no prior snapshot comparison.',
+      `Asset change is ${evidence.asset_delta != null ? formatSignedMoneyValue(evidence.asset_delta) : 'unknown'} and liability change is ${evidence.liability_delta != null ? formatSignedMoneyValue(evidence.liability_delta) : 'unknown'}.`,
+      `Account evidence: ${accountSummary}.`,
+      'Explain why net worth changed, which accounts drove it, and whether stale sync or missing account records could affect trust.',
     ].join(' '),
   };
 }

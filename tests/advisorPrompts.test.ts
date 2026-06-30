@@ -6,12 +6,27 @@ import {
   buildDashboardCardAdvisorPrompt,
   buildGoalAdvisorPrompt,
   buildHoldingAdvisorPrompt,
+  buildNetWorthEvidenceAdvisorPrompt,
   buildRecurringForecastAdvisorPrompt,
   buildRecurringOccurrenceAdvisorPrompt,
   buildReportAdvisorPrompt,
+  buildReportDrilldownAdvisorPrompt,
+  buildReportEvidenceAdvisorPrompt,
   buildTransactionAdvisorPrompt,
 } from '../client/src/lib/advisorPrompts';
-import type { Account, Budget, Goal, Holding, RecurringForecast, ReportSummary, Transaction } from '../shared/types';
+import type {
+  Account,
+  Budget,
+  Goal,
+  Holding,
+  NetWorthSnapshot,
+  RecurringForecast,
+  ReportDrilldown,
+  ReportEvidenceDrilldown,
+  ReportNetWorthEvidence,
+  ReportSummary,
+  Transaction,
+} from '../shared/types';
 
 function budget(overrides: Partial<Budget> = {}): Budget {
   return {
@@ -179,6 +194,84 @@ function reportSummary(overrides: Partial<ReportSummary> = {}): ReportSummary {
   };
 }
 
+function reportDrilldown(overrides: Partial<ReportDrilldown> = {}): ReportDrilldown {
+  return {
+    kind: overrides.kind ?? 'spending',
+    category_id: overrides.category_id ?? 'cat_food',
+    category_name: overrides.category_name ?? 'Food',
+    start_date: overrides.start_date ?? '2026-06-01',
+    end_date: overrides.end_date ?? '2026-06-30',
+    total: overrides.total ?? 146.72,
+    count: overrides.count ?? 2,
+    transactions: overrides.transactions ?? [
+      transaction({ id: 'tx_food_1', amount: -46.72, merchant_name: 'City Market' }),
+      transaction({ id: 'tx_food_2', amount: -100, merchant_name: 'Dinner House', category_name: 'Dining' }),
+    ],
+  };
+}
+
+function reportEvidence(overrides: Partial<ReportEvidenceDrilldown> = {}): ReportEvidenceDrilldown {
+  return {
+    kind: overrides.kind ?? 'cashflow_month',
+    label: overrides.label ?? 'Cash flow for June 2026',
+    start_date: overrides.start_date ?? '2026-06-01',
+    end_date: overrides.end_date ?? '2026-06-30',
+    month: overrides.month ?? '2026-06',
+    flow_type: overrides.flow_type ?? undefined,
+    income: overrides.income ?? 5000,
+    expenses: overrides.expenses ?? 3200,
+    net: overrides.net ?? 1800,
+    total: overrides.total ?? 8200,
+    count: overrides.count ?? 2,
+    transactions: overrides.transactions ?? [
+      transaction({ id: 'tx_paycheck', amount: 5000, merchant_name: 'Payroll', category_name: 'Paycheck' }),
+      transaction({ id: 'tx_rent', amount: -1800, merchant_name: 'Rent', category_name: 'Rent' }),
+    ],
+  };
+}
+
+function netWorthSnapshot(overrides: Partial<NetWorthSnapshot> = {}): NetWorthSnapshot {
+  return {
+    id: overrides.id ?? 'snap_2026_06_30',
+    date: overrides.date ?? '2026-06-30',
+    total_assets: overrides.total_assets ?? 82000,
+    total_liabilities: overrides.total_liabilities ?? 12000,
+    net_worth: overrides.net_worth ?? 70000,
+    breakdown: overrides.breakdown ?? '{}',
+    is_estimated: overrides.is_estimated ?? false,
+    created_at: overrides.created_at ?? '2026-06-30T12:00:00.000Z',
+    liquid_assets: overrides.liquid_assets ?? 20000,
+    investment_assets: overrides.investment_assets ?? 62000,
+    crypto_assets: overrides.crypto_assets ?? 0,
+  };
+}
+
+function netWorthEvidence(overrides: Partial<ReportNetWorthEvidence> = {}): ReportNetWorthEvidence {
+  return {
+    kind: 'networth_snapshot',
+    label: overrides.label ?? 'Net worth on 2026-06-30',
+    snapshot: overrides.snapshot ?? netWorthSnapshot(),
+    previous_snapshot: overrides.previous_snapshot ?? netWorthSnapshot({
+      id: 'snap_2026_05_31',
+      date: '2026-05-31',
+      total_assets: 79000,
+      total_liabilities: 12500,
+      net_worth: 66500,
+    }),
+    delta: overrides.delta ?? 3500,
+    asset_delta: overrides.asset_delta ?? 3000,
+    liability_delta: overrides.liability_delta ?? -500,
+    accounts: overrides.accounts ?? [{
+      account_id: 'acct_brokerage',
+      account_name: 'Brokerage',
+      institution_name: 'Test Bank',
+      type: 'investment',
+      is_liability: false,
+      balance: 62000,
+    }],
+  };
+}
+
 function recurringForecast(overrides: Partial<RecurringForecast> = {}): RecurringForecast {
   return {
     days: overrides.days ?? 60,
@@ -229,6 +322,45 @@ test('report advisor prompt captures summary metrics and exclusions', () => {
   assert.match(prompt.prompt, /Compared with Prior month/);
   assert.match(prompt.prompt, /Food \$820\.00 \(\+\$120\.00\)/);
   assert.match(prompt.prompt, /transfers: 6 transactions/);
+});
+
+test('report drilldown advisor prompt captures backing transactions', () => {
+  const prompt = buildReportDrilldownAdvisorPrompt(reportDrilldown());
+
+  assert.equal(prompt.source, 'reports');
+  assert.equal(prompt.recordKind, 'report_drilldown');
+  assert.equal(prompt.recordId, 'spending:cat_food:2026-06-01:2026-06-30');
+  assert.equal(prompt.params?.categoryName, 'Food');
+  assert.equal(prompt.params?.count, 2);
+  assert.match(prompt.prompt, /Food spending report drill-through/);
+  assert.match(prompt.prompt, /total is \$146\.72 across 2 transactions/);
+  assert.match(prompt.prompt, /City Market -\$46\.72 from Rewards Checking in Groceries/);
+});
+
+test('report evidence advisor prompt captures cash-flow evidence', () => {
+  const prompt = buildReportEvidenceAdvisorPrompt(reportEvidence());
+
+  assert.equal(prompt.source, 'reports');
+  assert.equal(prompt.recordKind, 'report_evidence');
+  assert.equal(prompt.recordId, 'cashflow_month:2026-06:2026-06-01:2026-06-30');
+  assert.equal(prompt.params?.net, 1800);
+  assert.equal(prompt.params?.count, 2);
+  assert.match(prompt.prompt, /cash-flow month 2026-06 evidence/);
+  assert.match(prompt.prompt, /Income is \$5000\.00, spending is \$3200\.00, net is \+\$1800\.00/);
+  assert.match(prompt.prompt, /Payroll \+\$5000\.00 from Rewards Checking in Paycheck/);
+});
+
+test('net worth evidence advisor prompt captures account attribution', () => {
+  const prompt = buildNetWorthEvidenceAdvisorPrompt(netWorthEvidence());
+
+  assert.equal(prompt.source, 'reports');
+  assert.equal(prompt.recordKind, 'networth_evidence');
+  assert.equal(prompt.recordId, 'snap_2026_06_30');
+  assert.equal(prompt.params?.accountCount, 1);
+  assert.equal(prompt.params?.assetDelta, 3000);
+  assert.match(prompt.prompt, /net-worth evidence for 2026-06-30/);
+  assert.match(prompt.prompt, /net worth is \$70000\.00/);
+  assert.match(prompt.prompt, /Brokerage at Test Bank \$62000\.00 asset/);
 });
 
 test('dashboard card advisor prompt captures the selected metric context', () => {
