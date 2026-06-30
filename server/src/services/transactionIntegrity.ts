@@ -14,6 +14,7 @@ interface DuplicateRow {
   merchant_name: string | null;
   original_name: string;
   pending: number;
+  source_type: string;
 }
 
 interface TransferRow {
@@ -76,7 +77,8 @@ export function refreshDuplicateCandidates(db: Database.Database): DuplicateDete
       t.amount,
       t.merchant_name,
       t.original_name,
-      t.pending
+      t.pending,
+      t.source_type
     FROM transactions t
     JOIN accounts a ON a.id = t.account_id
     WHERE t.duplicate_status != 'dismissed'
@@ -84,31 +86,107 @@ export function refreshDuplicateCandidates(db: Database.Database): DuplicateDete
   `).all() as DuplicateRow[];
 
   const groups = new Map<string, DuplicateRow[]>();
+  const byAmount = new Map<number, DuplicateRow[]>();
 
   for (const row of rows) {
     const merchant = normalizeMerchant(row.merchant_name || row.original_name);
     if (!merchant) continue;
 
+    const cents = amountCents(row.amount);
+    
+    // Exact strict match key (original logic)
     const key = [
       row.account_id,
       row.date,
-      amountCents(row.amount),
+      cents,
       row.pending,
       merchant,
     ].join('|');
     const group = groups.get(key) ?? [];
     group.push(row);
     groups.set(key, group);
+
+    // Amount bucket for fuzzy matching across providers
+    const bucket = byAmount.get(cents) ?? [];
+    bucket.push(row);
+    byAmount.set(cents, bucket);
+  }
+
+  // Find fuzzy cross-provider duplicates
+  const fuzzyPairs: Array<[string, string]> = [];
+  const usedInFuzzy = new Set<string>();
+
+  for (const bucket of byAmount.values()) {
+    if (bucket.length < 2) continue;
+    
+    for (let i = 0; i < bucket.length; i++) {
+      for (let j = i + 1; j < bucket.length; j++) {
+        const a = bucket[i];
+        const b = bucket[j];
+        
+        // Skip if they are from the same provider
+        if (a.source_type === b.source_type) continue;
+        
+        // Ensure one is Plaid and the other is Teller/SimpleFIN (cross-provider)
+        const isCrossProvider = 
+          (a.source_type === 'plaid' && ['teller', 'simplefin'].includes(b.source_type)) ||
+          (b.source_type === 'plaid' && ['teller', 'simplefin'].includes(a.source_type));
+          
+        if (!isCrossProvider) continue;
+        
+        // Check date window (+/- 3 days)
+        if (Math.abs(dateToDay(a.date) - dateToDay(b.date)) > 3) continue;
+        
+        // Check merchant similarity
+        const merchantA = normalizeMerchant(a.merchant_name || a.original_name);
+        const merchantB = normalizeMerchant(b.merchant_name || b.original_name);
+        
+        // If merchants are somewhat similar, or if exact same amount/date across different accounts during a migration
+        const sameDay = a.date === b.date;
+        const merchantMatch = merchantA.includes(merchantB) || merchantB.includes(merchantA);
+        
+        if (merchantMatch || sameDay) {
+          fuzzyPairs.push([a.id, b.id]);
+          usedInFuzzy.add(a.id);
+          usedInFuzzy.add(b.id);
+        }
+      }
+    }
   }
 
   let groupCount = 0;
   let transactionCount = 0;
+  const processedFuzzyPairs = new Set<string>();
 
+  // Process strict groups
   for (const [key, group] of groups) {
     if (group.length < 2) continue;
+    
+    // Filter out rows that are part of a fuzzy pair to avoid putting them in two groups
+    const strictGroup = group.filter(row => !usedInFuzzy.has(row.id));
+    if (strictGroup.length < 2) continue;
 
-    const ids = group.map((row) => row.id);
+    const ids = strictGroup.map((row) => row.id);
     const groupId = `dup_${shortHash(key)}`;
+    db.prepare(`
+      UPDATE transactions
+      SET duplicate_group_id = ?,
+          duplicate_status = 'candidate'
+      WHERE id IN (${placeholders(ids)})
+    `).run(groupId, ...ids);
+
+    groupCount++;
+    transactionCount += ids.length;
+  }
+  
+  // Process fuzzy cross-provider groups
+  for (const [idA, idB] of fuzzyPairs) {
+    const pairKey = [idA, idB].sort().join('|');
+    if (processedFuzzyPairs.has(pairKey)) continue;
+    processedFuzzyPairs.add(pairKey);
+    
+    const ids = [idA, idB];
+    const groupId = `dup_fuzzy_${shortHash(pairKey)}`;
     db.prepare(`
       UPDATE transactions
       SET duplicate_group_id = ?,

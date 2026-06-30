@@ -88,6 +88,7 @@ function setupAdvisorDb(): Database.Database {
       original_name TEXT NOT NULL,
       category_id TEXT,
       pending INTEGER NOT NULL DEFAULT 0,
+      source_type TEXT NOT NULL DEFAULT 'manual',
       recurring_id TEXT,
       review_status TEXT NOT NULL DEFAULT 'open',
       duplicate_group_id TEXT,

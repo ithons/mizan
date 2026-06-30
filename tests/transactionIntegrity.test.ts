@@ -38,6 +38,7 @@ function setupIntegrityDb(): Database.Database {
       original_name TEXT NOT NULL DEFAULT '',
       category_id TEXT,
       pending INTEGER NOT NULL DEFAULT 0,
+      source_type TEXT NOT NULL DEFAULT 'manual',
       duplicate_group_id TEXT,
       duplicate_status TEXT NOT NULL DEFAULT 'none',
       transfer_pair_id TEXT,
