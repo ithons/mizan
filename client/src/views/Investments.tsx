@@ -17,8 +17,10 @@ import { advisorRouteState } from '../lib/advisorRouteState';
 import { buildHoldingAdvisorPrompt } from '../lib/advisorPrompts';
 import {
   ALLOCATION_LENSES,
+  STARTER_ASSET_TARGETS,
   costBasisTone,
   formatHoldingCount,
+  getAllocationDrift,
   getAllocationQualityLabel,
   getAllocationSlices,
   getConcentrationSummary,
@@ -76,6 +78,13 @@ function issueSeverityClass(severity: 'info' | 'warning' | 'attention'): string 
   if (severity === 'attention') return 'border-rose/30 bg-rose/5';
   if (severity === 'warning') return 'border-amber/30 bg-amber/5';
   return 'border-border bg-background';
+}
+
+function driftTone(label: 'No target' | 'On target' | 'Watch' | 'Drifting'): string {
+  if (label === 'On target') return '#32bfa3';
+  if (label === 'Drifting') return '#ef6f8a';
+  if (label === 'Watch') return '#e2a53f';
+  return '#718087';
 }
 
 function PnlCell({ value, pct }: { value: number | null; pct: number | null }) {
@@ -305,6 +314,12 @@ export function Investments() {
   const allocationQuality = useMemo(
     () => getAllocationQualityLabel(filteredHoldings, allocationLens, accountById),
     [filteredHoldings, allocationLens, accountById]
+  );
+  const allocationDrift = useMemo(
+    () => allocationLens === 'asset_type'
+      ? getAllocationDrift(allocationSlices, STARTER_ASSET_TARGETS)
+      : null,
+    [allocationLens, allocationSlices]
   );
   const concentrationSummary = useMemo(
     () => getConcentrationSummary(filteredHoldings, accountById),
@@ -595,6 +610,42 @@ export function Investments() {
               <p className="text-text mt-1">{allocationQuality}</p>
             </div>
           </div>
+
+          {allocationDrift && (
+            <div className="border-t border-border pt-3 space-y-3">
+              <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <p className="text-xs text-muted font-medium uppercase tracking-wider">Starter Target Drift</p>
+                  <p className="text-xs text-muted mt-1">{allocationDrift.detail}</p>
+                </div>
+                <p
+                  className="font-mono text-sm"
+                  style={{ color: driftTone(allocationDrift.label) }}
+                >
+                  {allocationDrift.label}
+                </p>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
+                {allocationDrift.items.slice(0, 3).map((item) => (
+                  <div key={item.key} className="rounded border border-border bg-background px-3 py-2 text-xs">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-text font-medium truncate">{item.label}</span>
+                      <span
+                        className="font-mono"
+                        style={{ color: driftTone(item.severity === 'drifting' ? 'Drifting' : item.severity === 'watch' ? 'Watch' : 'On target') }}
+                      >
+                        {item.driftPct >= 0 ? '+' : ''}{item.driftPct.toFixed(1)} pts
+                      </span>
+                    </div>
+                    <p className="text-muted mt-1">
+                      {item.currentPct.toFixed(1)}% current / {item.targetPct.toFixed(1)}% target
+                    </p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
       )}
 

@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   getAllocationQualityLabel,
+  getAllocationDrift,
   getAllocationSlices,
   getConcentrationSummary,
   getCostBasisStats,
@@ -116,6 +117,56 @@ test('allocation quality makes missing account links explicit', () => {
     getAllocationQualityLabel(holdings, 'tax_treatment', accounts),
     '1 holding missing account links'
   );
+});
+
+test('allocation drift compares current slices against explicit targets', () => {
+  const drift = getAllocationDrift(
+    [
+      {
+        key: 'asset:etf',
+        label: 'ETF',
+        value: 800,
+        count: 2,
+        pct: 80,
+        color: '#6487f0',
+      },
+      {
+        key: 'asset:cash',
+        label: 'Cash',
+        value: 200,
+        count: 1,
+        pct: 20,
+        color: '#32bfa3',
+      },
+    ],
+    [
+      { key: 'asset:etf', label: 'ETF', targetPct: 60 },
+      { key: 'asset:cash', label: 'Cash', targetPct: 5 },
+      { key: 'asset:equity', label: 'Equity', targetPct: 35 },
+    ]
+  );
+
+  assert.equal(drift.label, 'Drifting');
+  assert.equal(drift.maxDriftPct, 35);
+  assert.deepEqual(
+    drift.items.map((item) => [item.label, item.currentPct, item.targetPct, item.driftPct, item.severity]),
+    [
+      ['Equity', 0, 35, -35, 'drifting'],
+      ['ETF', 80, 60, 20, 'drifting'],
+      ['Cash', 20, 5, 15, 'drifting'],
+    ]
+  );
+  assert.match(drift.detail, /Equity is 35\.0 points below target/);
+});
+
+test('allocation drift handles empty views without inventing targets', () => {
+  const drift = getAllocationDrift([], [
+    { key: 'asset:etf', label: 'ETF', targetPct: 60 },
+  ]);
+
+  assert.equal(drift.label, 'No target');
+  assert.equal(drift.maxDriftPct, 0);
+  assert.deepEqual(drift.items, []);
 });
 
 test('concentration summary groups positions before calculating top exposure', () => {

@@ -20,6 +20,15 @@ export const ALLOCATION_COLORS = [
   '#7bbf6a',
 ];
 
+export const STARTER_ASSET_TARGETS = [
+  { key: 'asset:etf', label: 'ETF', targetPct: 60 },
+  { key: 'asset:mutual_fund', label: 'Mutual Fund', targetPct: 20 },
+  { key: 'asset:equity', label: 'Equity', targetPct: 15 },
+  { key: 'asset:cash', label: 'Cash', targetPct: 5 },
+  { key: 'asset:crypto', label: 'Crypto', targetPct: 0 },
+  { key: 'asset:other', label: 'Other', targetPct: 0 },
+] satisfies AllocationTarget[];
+
 export interface CostBasisStats {
   totalCount: number;
   knownCount: number;
@@ -41,6 +50,29 @@ interface AllocationAccumulator {
 export interface AllocationSlice extends AllocationAccumulator {
   pct: number;
   color: string;
+}
+
+export interface AllocationTarget {
+  key: string;
+  label: string;
+  targetPct: number;
+}
+
+export interface AllocationDriftItem {
+  key: string;
+  label: string;
+  value: number;
+  currentPct: number;
+  targetPct: number;
+  driftPct: number;
+  severity: 'on_target' | 'watch' | 'drifting';
+}
+
+export interface AllocationDriftSummary {
+  label: 'No target' | 'On target' | 'Watch' | 'Drifting';
+  detail: string;
+  maxDriftPct: number;
+  items: AllocationDriftItem[];
 }
 
 export interface ConcentrationSummary {
@@ -235,6 +267,68 @@ export function getAllocationSlices(
     : sorted;
 
   return withAllocationPct(visible, total);
+}
+
+function driftSeverity(absDriftPct: number): AllocationDriftItem['severity'] {
+  if (absDriftPct >= 10) return 'drifting';
+  if (absDriftPct >= 5) return 'watch';
+  return 'on_target';
+}
+
+export function getAllocationDrift(
+  slices: AllocationSlice[],
+  targets: AllocationTarget[]
+): AllocationDriftSummary {
+  if (slices.length === 0 || targets.length === 0) {
+    return {
+      label: 'No target',
+      detail: 'No allocation target can be compared for this view.',
+      maxDriftPct: 0,
+      items: [],
+    };
+  }
+
+  const sliceByKey = new Map(slices.map((slice) => [slice.key, slice]));
+  const targetByKey = new Map(targets.map((target) => [target.key, target]));
+  const keys = new Set([...sliceByKey.keys(), ...targetByKey.keys()]);
+  const items = Array.from(keys)
+    .map((key) => {
+      const slice = sliceByKey.get(key);
+      const target = targetByKey.get(key);
+      const currentPct = slice?.pct ?? 0;
+      const targetPct = target?.targetPct ?? 0;
+      const driftPct = currentPct - targetPct;
+      const absDriftPct = Math.abs(driftPct);
+
+      return {
+        key,
+        label: slice?.label ?? target?.label ?? key,
+        value: slice?.value ?? 0,
+        currentPct,
+        targetPct,
+        driftPct,
+        severity: driftSeverity(absDriftPct),
+      };
+    })
+    .sort((a, b) => Math.abs(b.driftPct) - Math.abs(a.driftPct));
+
+  const maxDriftPct = Math.abs(items[0]?.driftPct ?? 0);
+  const label = maxDriftPct >= 10
+    ? 'Drifting'
+    : maxDriftPct >= 5
+      ? 'Watch'
+      : 'On target';
+  const leader = items[0];
+  const detail = leader
+    ? `${leader.label} is ${Math.abs(leader.driftPct).toFixed(1)} points ${leader.driftPct >= 0 ? 'above' : 'below'} target.`
+    : 'No allocation target can be compared for this view.';
+
+  return {
+    label,
+    detail,
+    maxDriftPct,
+    items,
+  };
 }
 
 export function getAllocationQualityLabel(
