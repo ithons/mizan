@@ -27,6 +27,8 @@ import { SkeletonList } from '../components/SkeletonLoader';
 import { invalidateFinancialData } from '../lib/queryInvalidation';
 import { useAppStore } from '../store';
 import { CategoryDropdown } from './transactions/TransactionControls';
+import { getUncategorizedBatchGroups } from '../lib/reviewGrouping';
+import type { ReviewBatchGroup } from '../lib/reviewGrouping';
 import type {
   DuplicateCandidateGroup,
   MerchantRuleSuggestion,
@@ -318,11 +320,52 @@ function EmptyQueue() {
   );
 }
 
+function BatchGroupRow({
+  group,
+  categories,
+  categoryId,
+  busy,
+  onCategory,
+  onApply,
+}: {
+  group: ReviewBatchGroup;
+  categories: ReturnType<typeof flattenCategories>;
+  categoryId: string | null;
+  busy: boolean;
+  onCategory: (categoryId: string) => void;
+  onApply: () => void;
+}) {
+  return (
+    <div className="grid grid-cols-[1fr_180px_auto] gap-3 items-center px-3 py-2 border-b border-border last:border-0">
+      <div className="min-w-0">
+        <p className="text-sm text-text truncate">{group.merchant_name}</p>
+        <p className="text-xs text-muted truncate">
+          {group.count} transactions in {group.account_name ?? 'Unknown account'}, {formatCurrency(group.total_amount)}
+        </p>
+      </div>
+      <CategoryDropdown
+        value={categoryId}
+        categories={categories}
+        onChange={onCategory}
+      />
+      <button
+        className="flex items-center gap-1.5 text-xs bg-text text-surface rounded px-2.5 py-1.5 hover:opacity-90 disabled:opacity-40"
+        onClick={onApply}
+        disabled={busy || !categoryId}
+      >
+        <Check size={12} />
+        Apply
+      </button>
+    </div>
+  );
+}
+
 export function ReviewInbox() {
   const qc = useQueryClient();
   const { addToast } = useAppStore();
   const [params, setParams] = useSearchParams();
   const [selectedIndex, setSelectedIndex] = useState(0);
+  const [batchCategories, setBatchCategories] = useState<Record<string, string>>({});
 
   const { data: summary } = useQuery({
     queryKey: ['transactions', 'review'],
@@ -430,6 +473,28 @@ export function ReviewInbox() {
     onError: (err: Error) => addToast({ type: 'error', message: err.message }),
   });
 
+  const bulkCategoryMutation = useMutation({
+    mutationFn: ({ ids, categoryId }: { ids: string[]; categoryId: string }) =>
+      transactionsApi.bulkCategory(ids, categoryId),
+    onSuccess: (_result, variables) => {
+      invalidateReview();
+      setBatchCategories((existing) => {
+        const next = { ...existing };
+        for (const group of uncategorizedGroups) {
+          if (group.transaction_ids.every((id) => variables.ids.includes(id))) {
+            delete next[group.key];
+          }
+        }
+        return next;
+      });
+      addToast({
+        type: 'success',
+        message: `Categorized ${variables.ids.length} transaction${variables.ids.length === 1 ? '' : 's'} and saved rule`,
+      });
+    },
+    onError: (err: Error) => addToast({ type: 'error', message: err.message }),
+  });
+
   const activeItems = activeQueue === 'uncategorized'
     ? uncategorized?.data ?? []
     : activeQueue === 'pending'
@@ -448,6 +513,10 @@ export function ReviewInbox() {
         : activeQueue === 'duplicate_candidates'
           ? duplicateCandidates.length
           : transferCandidates.length;
+  const uncategorizedGroups = useMemo(
+    () => getUncategorizedBatchGroups(uncategorized?.data ?? []),
+    [uncategorized?.data]
+  );
 
   useEffect(() => {
     setSelectedIndex(0);
@@ -592,15 +661,48 @@ export function ReviewInbox() {
           <SkeletonList rows={10} cols={5} />
         ) : activeQueue === 'uncategorized' ? (
           activeItems.length > 0 ? (
-            activeItems.map((transaction, index) => (
-              <TransactionRow
-                key={transaction.id}
-                transaction={transaction}
-                selected={index === selectedIndex}
-                categories={categories}
-                onCategory={(transactionId, categoryId) => updateCategoryMutation.mutate({ transactionId, categoryId })}
-              />
-            ))
+            <>
+              {uncategorizedGroups.length > 0 && (
+                <div className="border-b border-border bg-background/40">
+                  <div className="px-3 py-2 border-b border-border">
+                    <p className="text-xs text-muted">Repeated merchants</p>
+                  </div>
+                  {uncategorizedGroups.slice(0, 4).map((group) => {
+                    const categoryId = batchCategories[group.key] ?? null;
+                    const busy = bulkCategoryMutation.isPending &&
+                      bulkCategoryMutation.variables?.ids.join('|') === group.transaction_ids.join('|');
+                    return (
+                      <BatchGroupRow
+                        key={group.key}
+                        group={group}
+                        categories={categories}
+                        categoryId={categoryId}
+                        busy={busy}
+                        onCategory={(nextCategoryId) =>
+                          setBatchCategories((existing) => ({ ...existing, [group.key]: nextCategoryId }))
+                        }
+                        onApply={() => {
+                          if (!categoryId) return;
+                          bulkCategoryMutation.mutate({
+                            ids: group.transaction_ids,
+                            categoryId,
+                          });
+                        }}
+                      />
+                    );
+                  })}
+                </div>
+              )}
+              {activeItems.map((transaction, index) => (
+                <TransactionRow
+                  key={transaction.id}
+                  transaction={transaction}
+                  selected={index === selectedIndex}
+                  categories={categories}
+                  onCategory={(transactionId, categoryId) => updateCategoryMutation.mutate({ transactionId, categoryId })}
+                />
+              ))}
+            </>
           ) : <EmptyQueue />
         ) : activeQueue === 'pending' ? (
           activeItems.length > 0 ? (
