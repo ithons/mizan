@@ -1,10 +1,11 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useSearchParams } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
   AlertTriangle,
   ArrowLeftRight,
   Check,
+  CheckCheck,
   CheckCircle2,
   Clock,
   RefreshCw,
@@ -29,6 +30,12 @@ import { useAppStore } from '../store';
 import { CategoryDropdown } from './transactions/TransactionControls';
 import { getUncategorizedBatchGroups } from '../lib/reviewGrouping';
 import type { ReviewBatchGroup } from '../lib/reviewGrouping';
+import {
+  REVIEW_QUEUE_ORDER,
+  nextReviewQueue,
+  reviewBatchActions,
+  type ReviewBatchActionId,
+} from '../lib/reviewInboxBatch';
 import type {
   DuplicateCandidateGroup,
   MerchantRuleSuggestion,
@@ -46,15 +53,6 @@ const queueTone = {
   duplicate_candidates: { color: '#ef6f8a', icon: Trash2 },
   transfer_candidates: { color: '#6487f0', icon: ArrowLeftRight },
 } satisfies Record<TransactionReviewQueueId, { color: string; icon: LucideIcon }>;
-
-const queueOrder: TransactionReviewQueueId[] = [
-  'uncategorized',
-  'rule_suggestions',
-  'pending',
-  'recurring_candidates',
-  'duplicate_candidates',
-  'transfer_candidates',
-];
 
 function categoryUpdateMessage(applied: number): string {
   if (applied <= 0) return 'Transaction categorized';
@@ -384,12 +382,51 @@ function BatchGroupRow({
   );
 }
 
+function BatchToolbar({
+  actions,
+  busy,
+  itemCount,
+  onAction,
+}: {
+  actions: ReturnType<typeof reviewBatchActions>;
+  busy: boolean;
+  itemCount: number;
+  onAction: (actionId: ReviewBatchActionId) => void;
+}) {
+  if (actions.length === 0) return null;
+
+  return (
+    <div className="flex items-center justify-between gap-3 px-3 py-2 border-b border-border bg-background/45">
+      <p className="text-xs text-muted font-mono">{itemCount} visible</p>
+      <div className="flex items-center gap-2">
+        {actions.map((action) => (
+          <button
+            key={action.id}
+            className={`flex items-center gap-1.5 text-xs rounded px-2.5 py-1.5 disabled:opacity-40 ${
+              action.id === 'primary'
+                ? 'bg-text text-surface hover:opacity-90'
+                : 'border border-border text-muted hover:text-text'
+            }`}
+            onClick={() => onAction(action.id)}
+            disabled={busy}
+          >
+            {action.id === 'primary' ? <CheckCheck size={12} /> : <Trash2 size={12} />}
+            {busy ? 'Working' : action.label}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 export function ReviewInbox() {
   const qc = useQueryClient();
+  const navigate = useNavigate();
   const { addToast } = useAppStore();
   const [params, setParams] = useSearchParams();
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [batchCategories, setBatchCategories] = useState<Record<string, string>>({});
+  const [batchBusy, setBatchBusy] = useState(false);
 
   const { data: summary } = useQuery({
     queryKey: ['transactions', 'review'],
@@ -550,6 +587,16 @@ export function ReviewInbox() {
     () => getUncategorizedBatchGroups(uncategorized?.data ?? []),
     [uncategorized?.data]
   );
+  const visibleBatchActions = reviewBatchActions(activeQueue, activeItemCount);
+  const batchActionBusy =
+    batchBusy ||
+    applyRuleMutation.isPending ||
+    markReviewMutation.isPending ||
+    confirmRecurringMutation.isPending ||
+    dismissRecurringMutation.isPending ||
+    dismissDuplicateMutation.isPending ||
+    confirmTransferMutation.isPending ||
+    dismissTransferMutation.isPending;
 
   useEffect(() => {
     setSelectedIndex(0);
@@ -561,6 +608,10 @@ export function ReviewInbox() {
 
   const setActiveQueue = (queueId: TransactionReviewQueueId) => {
     setParams({ queue: queueId });
+  };
+
+  const moveQueue = (direction: 1 | -1) => {
+    setActiveQueue(nextReviewQueue(activeQueue, direction));
   };
 
   const runPrimaryAction = () => {
@@ -588,6 +639,45 @@ export function ReviewInbox() {
     }
   };
 
+  const runBatchPrimaryAction = async () => {
+    if (activeItemCount === 0 || batchActionBusy) return;
+
+    try {
+      setBatchBusy(true);
+      if (activeQueue === 'pending') {
+        await Promise.all(activeItems.map((transaction) =>
+          transactionsApi.markReview(transaction.id, 'reviewed')
+        ));
+        addToast({ type: 'success', message: `Marked ${activeItems.length} pending transaction${activeItems.length === 1 ? '' : 's'} reviewed` });
+      } else if (activeQueue === 'rule_suggestions') {
+        await Promise.all(ruleSuggestions.map((suggestion) =>
+          rulesApi.create({
+            pattern: suggestion.pattern,
+            category_id: suggestion.category_id,
+            apply_existing: true,
+          })
+        ));
+        addToast({ type: 'success', message: `Applied ${ruleSuggestions.length} rule suggestion${ruleSuggestions.length === 1 ? '' : 's'}` });
+      } else if (activeQueue === 'recurring_candidates') {
+        await Promise.all(recurringCandidates.map((pattern) => recurringApi.confirm(pattern.id)));
+        addToast({ type: 'success', message: `Confirmed ${recurringCandidates.length} recurring candidate${recurringCandidates.length === 1 ? '' : 's'}` });
+      } else if (activeQueue === 'transfer_candidates') {
+        await Promise.all(transferCandidates.map((pair) =>
+          transactionsApi.confirmTransferPair(pair.pair_id)
+        ));
+        addToast({ type: 'success', message: `Confirmed ${transferCandidates.length} transfer match${transferCandidates.length === 1 ? '' : 'es'}` });
+      } else {
+        return;
+      }
+
+      invalidateReview();
+    } catch (err) {
+      addToast({ type: 'error', message: err instanceof Error ? err.message : 'Batch action failed' });
+    } finally {
+      setBatchBusy(false);
+    }
+  };
+
   const runDismissAction = () => {
     if (activeQueue === 'recurring_candidates') {
       const pattern = recurringCandidates[selectedIndex];
@@ -607,6 +697,44 @@ export function ReviewInbox() {
     }
   };
 
+  const runBatchDismissAction = async () => {
+    if (activeItemCount === 0 || batchActionBusy) return;
+
+    try {
+      setBatchBusy(true);
+      if (activeQueue === 'recurring_candidates') {
+        await Promise.all(recurringCandidates.map((pattern) => recurringApi.dismiss(pattern.id)));
+        addToast({ type: 'success', message: `Dismissed ${recurringCandidates.length} recurring candidate${recurringCandidates.length === 1 ? '' : 's'}` });
+      } else if (activeQueue === 'duplicate_candidates') {
+        await Promise.all(duplicateCandidates.map((group) =>
+          transactionsApi.dismissDuplicateGroup(group.group_id)
+        ));
+        addToast({ type: 'success', message: `Dismissed ${duplicateCandidates.length} duplicate group${duplicateCandidates.length === 1 ? '' : 's'}` });
+      } else if (activeQueue === 'transfer_candidates') {
+        await Promise.all(transferCandidates.map((pair) =>
+          transactionsApi.dismissTransferPair(pair.pair_id)
+        ));
+        addToast({ type: 'success', message: `Dismissed ${transferCandidates.length} transfer match${transferCandidates.length === 1 ? '' : 'es'}` });
+      } else {
+        return;
+      }
+
+      invalidateReview();
+    } catch (err) {
+      addToast({ type: 'error', message: err instanceof Error ? err.message : 'Batch action failed' });
+    } finally {
+      setBatchBusy(false);
+    }
+  };
+
+  const runBatchAction = (actionId: ReviewBatchActionId) => {
+    if (actionId === 'primary') {
+      void runBatchPrimaryAction();
+    } else {
+      void runBatchDismissAction();
+    }
+  };
+
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       const target = event.target;
@@ -623,10 +751,26 @@ export function ReviewInbox() {
       const key = event.key.toLowerCase();
 
       if (/^[1-6]$/.test(event.key)) {
-        const queueId = queueOrder[Number(event.key) - 1];
+        const queueId = REVIEW_QUEUE_ORDER[Number(event.key) - 1];
         if (!queueId) return;
         event.preventDefault();
         setActiveQueue(queueId);
+        return;
+      }
+
+      if (key === 'n') {
+        event.preventDefault();
+        moveQueue(1);
+        return;
+      }
+      if (key === 'p') {
+        event.preventDefault();
+        moveQueue(-1);
+        return;
+      }
+      if (key === 'f' && totalOpen === 0) {
+        event.preventDefault();
+        navigate('/');
         return;
       }
 
@@ -644,18 +788,36 @@ export function ReviewInbox() {
       }
       if (event.key === 'Enter' || key === 'a') {
         event.preventDefault();
-        runPrimaryAction();
+        if (event.shiftKey) {
+          void runBatchPrimaryAction();
+        } else {
+          runPrimaryAction();
+        }
         return;
       }
       if (key === 'd') {
         event.preventDefault();
-        runDismissAction();
+        if (event.shiftKey) {
+          void runBatchDismissAction();
+        } else {
+          runDismissAction();
+        }
       }
     };
 
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [activeItemCount, runDismissAction, runPrimaryAction, setActiveQueue]);
+  }, [
+    activeItemCount,
+    moveQueue,
+    navigate,
+    runBatchDismissAction,
+    runBatchPrimaryAction,
+    runDismissAction,
+    runPrimaryAction,
+    setActiveQueue,
+    totalOpen,
+  ]);
 
   const queues = summary?.queues ?? [];
   const totalOpen = summary?.total_open ?? 0;
@@ -669,9 +831,18 @@ export function ReviewInbox() {
           <p className="text-sm text-muted font-mono">{totalOpen} open</p>
         </div>
         {totalOpen === 0 && (
-          <div className="flex items-center gap-2 text-sm text-green">
-            <CheckCircle2 size={16} />
-            Review complete
+          <div className="flex items-center gap-3">
+            <div className="flex items-center gap-2 text-sm text-green">
+              <CheckCircle2 size={16} />
+              Review complete
+            </div>
+            <button
+              className="flex items-center gap-1.5 text-xs bg-text text-surface rounded px-3 py-1.5 hover:opacity-90"
+              onClick={() => navigate('/')}
+            >
+              <Check size={12} />
+              Dashboard
+            </button>
           </div>
         )}
       </div>
@@ -740,73 +911,113 @@ export function ReviewInbox() {
           ) : <EmptyQueue />
         ) : activeQueue === 'pending' ? (
           activeItems.length > 0 ? (
-            activeItems.map((transaction, index) => (
-              <TransactionRow
-                key={transaction.id}
-                transaction={transaction}
-                selected={index === selectedIndex}
-                categories={categories}
-                onCategory={(transactionId, categoryId) => updateCategoryMutation.mutate({ transactionId, categoryId })}
-                onReviewed={(transactionId) => markReviewMutation.mutate(transactionId)}
-                reviewing={markReviewMutation.isPending}
+            <>
+              <BatchToolbar
+                actions={visibleBatchActions}
+                busy={batchActionBusy}
+                itemCount={activeItemCount}
+                onAction={runBatchAction}
               />
-            ))
+              {activeItems.map((transaction, index) => (
+                <TransactionRow
+                  key={transaction.id}
+                  transaction={transaction}
+                  selected={index === selectedIndex}
+                  categories={categories}
+                  onCategory={(transactionId, categoryId) => updateCategoryMutation.mutate({ transactionId, categoryId })}
+                  onReviewed={(transactionId) => markReviewMutation.mutate(transactionId)}
+                  reviewing={markReviewMutation.isPending}
+                />
+              ))}
+            </>
           ) : <EmptyQueue />
         ) : activeQueue === 'rule_suggestions' ? (
           ruleSuggestions.length > 0 ? (
-            ruleSuggestions.map((suggestion, index) => (
-              <RuleSuggestionRow
-                key={`${suggestion.pattern}:${suggestion.category_id}`}
-                suggestion={suggestion}
-                selected={index === selectedIndex}
-                onApply={(item) => applyRuleMutation.mutate(item)}
-                applying={applyRuleMutation.isPending && applyRuleMutation.variables?.pattern === suggestion.pattern}
+            <>
+              <BatchToolbar
+                actions={visibleBatchActions}
+                busy={batchActionBusy}
+                itemCount={activeItemCount}
+                onAction={runBatchAction}
               />
-            ))
+              {ruleSuggestions.map((suggestion, index) => (
+                <RuleSuggestionRow
+                  key={`${suggestion.pattern}:${suggestion.category_id}`}
+                  suggestion={suggestion}
+                  selected={index === selectedIndex}
+                  onApply={(item) => applyRuleMutation.mutate(item)}
+                  applying={applyRuleMutation.isPending && applyRuleMutation.variables?.pattern === suggestion.pattern}
+                />
+              ))}
+            </>
           ) : <EmptyQueue />
         ) : activeQueue === 'recurring_candidates' ? (
           recurringCandidates.length > 0 ? (
-            recurringCandidates.map((pattern, index) => (
-              <RecurringRow
-                key={pattern.id}
-                pattern={pattern}
-                selected={index === selectedIndex}
-                onConfirm={(id) => confirmRecurringMutation.mutate(id)}
-                onDismiss={(id) => dismissRecurringMutation.mutate(id)}
-                busy={
-                  (confirmRecurringMutation.isPending && confirmRecurringMutation.variables === pattern.id) ||
-                  (dismissRecurringMutation.isPending && dismissRecurringMutation.variables === pattern.id)
-                }
+            <>
+              <BatchToolbar
+                actions={visibleBatchActions}
+                busy={batchActionBusy}
+                itemCount={activeItemCount}
+                onAction={runBatchAction}
               />
-            ))
+              {recurringCandidates.map((pattern, index) => (
+                <RecurringRow
+                  key={pattern.id}
+                  pattern={pattern}
+                  selected={index === selectedIndex}
+                  onConfirm={(id) => confirmRecurringMutation.mutate(id)}
+                  onDismiss={(id) => dismissRecurringMutation.mutate(id)}
+                  busy={
+                    (confirmRecurringMutation.isPending && confirmRecurringMutation.variables === pattern.id) ||
+                    (dismissRecurringMutation.isPending && dismissRecurringMutation.variables === pattern.id)
+                  }
+                />
+              ))}
+            </>
           ) : <EmptyQueue />
         ) : activeQueue === 'duplicate_candidates' ? (
           duplicateCandidates.length > 0 ? (
-            duplicateCandidates.map((group, index) => (
-              <DuplicateRow
-                key={group.group_id}
-                group={group}
-                selected={index === selectedIndex}
-                onDismiss={(groupId) => dismissDuplicateMutation.mutate(groupId)}
-                busy={dismissDuplicateMutation.isPending && dismissDuplicateMutation.variables === group.group_id}
+            <>
+              <BatchToolbar
+                actions={visibleBatchActions}
+                busy={batchActionBusy}
+                itemCount={activeItemCount}
+                onAction={runBatchAction}
               />
-            ))
+              {duplicateCandidates.map((group, index) => (
+                <DuplicateRow
+                  key={group.group_id}
+                  group={group}
+                  selected={index === selectedIndex}
+                  onDismiss={(groupId) => dismissDuplicateMutation.mutate(groupId)}
+                  busy={dismissDuplicateMutation.isPending && dismissDuplicateMutation.variables === group.group_id}
+                />
+              ))}
+            </>
           ) : <EmptyQueue />
         ) : (
           transferCandidates.length > 0 ? (
-            transferCandidates.map((pair, index) => (
-              <TransferRow
-                key={pair.pair_id}
-                pair={pair}
-                selected={index === selectedIndex}
-                onConfirm={(pairId) => confirmTransferMutation.mutate(pairId)}
-                onDismiss={(pairId) => dismissTransferMutation.mutate(pairId)}
-                busy={
-                  (confirmTransferMutation.isPending && confirmTransferMutation.variables === pair.pair_id) ||
-                  (dismissTransferMutation.isPending && dismissTransferMutation.variables === pair.pair_id)
-                }
+            <>
+              <BatchToolbar
+                actions={visibleBatchActions}
+                busy={batchActionBusy}
+                itemCount={activeItemCount}
+                onAction={runBatchAction}
               />
-            ))
+              {transferCandidates.map((pair, index) => (
+                <TransferRow
+                  key={pair.pair_id}
+                  pair={pair}
+                  selected={index === selectedIndex}
+                  onConfirm={(pairId) => confirmTransferMutation.mutate(pairId)}
+                  onDismiss={(pairId) => dismissTransferMutation.mutate(pairId)}
+                  busy={
+                    (confirmTransferMutation.isPending && confirmTransferMutation.variables === pair.pair_id) ||
+                    (dismissTransferMutation.isPending && dismissTransferMutation.variables === pair.pair_id)
+                  }
+                />
+              ))}
+            </>
           ) : <EmptyQueue />
         )}
       </div>
