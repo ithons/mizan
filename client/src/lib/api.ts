@@ -17,6 +17,7 @@ import type {
   SyncRun,
   SyncRunDetail,
   CashflowReport,
+  ReportDrilldown,
   ReportSummary,
   SpendingReport,
   NetWorthHistory,
@@ -362,6 +363,14 @@ export const reportsApi = {
     if (params?.endDate) q.set('endDate', params.endDate);
     if (params?.categoryIds?.length) q.set('categoryIds', params.categoryIds.join(','));
     return apiFetch<{ months: string[]; series: Array<{ category_id: string; category_name: string; color?: string | null; values: number[] }> }>(`/api/reports/trends?${q.toString()}`);
+  },
+  drilldown: (params: ReportParams & { kind: 'spending' | 'income'; categoryId: string }) => {
+    const q = new URLSearchParams();
+    q.set('kind', params.kind);
+    q.set('categoryId', params.categoryId);
+    if (params.startDate) q.set('startDate', params.startDate);
+    if (params.endDate) q.set('endDate', params.endDate);
+    return apiFetch<ReportDrilldown>(`/api/reports/drilldown?${q.toString()}`);
   },
   networth: (params?: { months?: number }) =>
     apiFetch<NetWorthHistory>(`/api/reports/networth${params?.months ? `?months=${params.months}` : ''}`),

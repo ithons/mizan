@@ -2,6 +2,7 @@ import type Database from 'better-sqlite3';
 import { addDays, differenceInCalendarDays, format, parseISO, subDays } from 'date-fns';
 import type {
   CashflowReport,
+  ReportDrilldown,
   ReportCategoryChange,
   ReportExcludedFlowSummary,
   ReportMetricSummary,
@@ -16,6 +17,11 @@ interface ReportDateRange {
 
 interface SpendingReportOptions extends ReportDateRange {
   parentOnly?: boolean;
+}
+
+interface ReportDrilldownOptions extends ReportDateRange {
+  kind: 'spending' | 'income';
+  categoryId: string;
 }
 
 export interface TrendReport {
@@ -424,6 +430,12 @@ export function getIncomeReport(
   };
 }
 
+function categoryName(db: Database.Database, categoryId: string): string {
+  if (categoryId === 'uncategorized') return 'Uncategorized';
+  const row = db.prepare('SELECT name FROM categories WHERE id = ?').get(categoryId) as { name: string } | undefined;
+  return row?.name ?? 'Unknown category';
+}
+
 function childrenByParent(db: Database.Database): Map<string, string[]> {
   const rows = db.prepare('SELECT id, parent_id FROM categories').all() as Array<{
     id: string;
@@ -446,6 +458,63 @@ function collectDescendants(children: Map<string, string[]>, categoryId: string)
     childId,
     ...collectDescendants(children, childId),
   ]);
+}
+
+export function getReportDrilldown(
+  db: Database.Database,
+  options: ReportDrilldownOptions
+): ReportDrilldown {
+  const { conditions, params } = dateConditions(options);
+  const categoryParams: unknown[] = [];
+
+  if (options.kind === 'spending') {
+    conditions.push('t.amount < 0');
+    conditions.push(expenseCategoryCondition());
+  } else {
+    conditions.push('t.amount > 0');
+    conditions.push(incomeCategoryCondition());
+  }
+
+  if (options.categoryId === 'uncategorized') {
+    conditions.push('t.category_id IS NULL');
+  } else {
+    const categoryIds = [
+      options.categoryId,
+      ...collectDescendants(childrenByParent(db), options.categoryId),
+    ];
+    conditions.push(`t.category_id IN (${categoryIds.map(() => '?').join(',')})`);
+    categoryParams.push(...categoryIds);
+  }
+
+  const rows = db.prepare(`
+    ${excludedCategoriesCte()}
+    SELECT
+      t.*,
+      c.name AS category_name,
+      c.color AS category_color,
+      c.icon AS category_icon,
+      a.account_name,
+      a.institution_name
+    FROM transactions t
+    LEFT JOIN categories c ON c.id = t.category_id
+    LEFT JOIN accounts a ON a.id = t.account_id
+    WHERE ${conditions.join(' AND ')}
+    ORDER BY t.date DESC, t.created_at DESC
+  `).all(...excludedCategoryParams(), ...params, ...categoryParams) as ReportDrilldown['transactions'];
+
+  const total = rows.reduce((sum, transaction) =>
+    sum + (options.kind === 'spending' ? Math.abs(transaction.amount) : transaction.amount), 0);
+
+  return {
+    kind: options.kind,
+    category_id: options.categoryId,
+    category_name: categoryName(db, options.categoryId),
+    start_date: options.startDate,
+    end_date: options.endDate,
+    total,
+    count: rows.length,
+    transactions: rows,
+  };
 }
 
 export function getSpendingTrendsReport(

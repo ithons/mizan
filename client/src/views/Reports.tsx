@@ -22,7 +22,10 @@ import { reportsApi, networthApi, investmentsApi, categoriesApi } from '../lib/a
 import { formatCurrency, formatMonth, formatDate, formatPercent } from '../lib/formatters';
 import { PageLoader } from '../components/LoadingSpinner';
 import { EmptyState } from '../components/EmptyState';
-import type { Category, ReportMetricSummary, ReportSummary } from '@shared/types';
+import { AmountBadge } from '../components/AmountBadge';
+import { CategoryBadge } from '../components/CategoryBadge';
+import { Modal } from '../components/Modal';
+import type { Category, ReportDrilldown, ReportMetricSummary, ReportSummary } from '@shared/types';
 const COLORS = [
   '#4ecba3', '#5b8dee', '#d4a44c', '#e07070', '#a78bfa',
   '#f472b6', '#34d399', '#fb923c', '#60a5fa', '#f87171',
@@ -70,6 +73,12 @@ interface CategoryOption {
   color?: string | null;
   is_income: boolean;
   is_investment: boolean;
+}
+
+interface DrilldownTarget {
+  kind: 'spending' | 'income';
+  categoryId: string;
+  categoryName: string;
 }
 
 function getDateRange(preset: DatePreset, customStart?: string, customEnd?: string) {
@@ -300,11 +309,94 @@ function ReportSummaryPanel({ summary }: { summary?: ReportSummary }) {
   );
 }
 
+function ReportDrilldownModal({
+  target,
+  startDate,
+  endDate,
+  onClose,
+}: {
+  target: DrilldownTarget | null;
+  startDate: string;
+  endDate: string;
+  onClose: () => void;
+}) {
+  const { data, isLoading } = useQuery<ReportDrilldown>({
+    queryKey: ['reports', 'drilldown', target?.kind, target?.categoryId, startDate, endDate],
+    queryFn: () => reportsApi.drilldown({
+      kind: target!.kind,
+      categoryId: target!.categoryId,
+      startDate,
+      endDate,
+    }),
+    enabled: !!target,
+  });
+
+  return (
+    <Modal
+      open={!!target}
+      onClose={onClose}
+      title={target?.categoryName ?? 'Report Detail'}
+      maxWidth="760px"
+    >
+      <div className="space-y-4">
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <p className="text-xs text-muted mb-1">Backed by</p>
+            <p className="font-mono text-lg text-text">
+              {data ? `${data.count} transaction${data.count === 1 ? '' : 's'}` : 'Loading'}
+            </p>
+          </div>
+          <div className="text-right">
+            <p className="text-xs text-muted mb-1">Total</p>
+            <p
+              className="font-mono text-lg"
+              style={{ color: target?.kind === 'income' ? '#4ecba3' : '#e07070' }}
+            >
+              {data ? formatCurrency(data.total) : '-'}
+            </p>
+          </div>
+        </div>
+
+        <div className="border border-border rounded overflow-hidden max-h-[420px] overflow-y-auto">
+          {isLoading ? (
+            <div className="py-12 text-center text-sm text-muted">Loading transactions...</div>
+          ) : data && data.transactions.length > 0 ? (
+            <div className="divide-y divide-border">
+              {data.transactions.map((transaction) => (
+                <div key={transaction.id} className="grid grid-cols-[88px_1fr_150px_96px] gap-3 items-center px-3 py-2.5">
+                  <span className="text-xs text-muted font-mono">{formatDate(transaction.date)}</span>
+                  <div className="min-w-0">
+                    <p className="text-sm text-text truncate">{transaction.merchant_name || transaction.original_name}</p>
+                    <p className="text-xs text-muted truncate">{transaction.account_name}</p>
+                  </div>
+                  {transaction.category_name ? (
+                    <CategoryBadge
+                      name={transaction.category_name}
+                      color={transaction.category_color}
+                      icon={transaction.category_icon}
+                    />
+                  ) : (
+                    <span className="text-xs text-muted">Uncategorized</span>
+                  )}
+                  <AmountBadge amount={transaction.amount} className="text-right" />
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="py-12 text-center text-sm text-muted">No backing transactions</div>
+          )}
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
 // ─── Spending Tab ─────────────────────────────────────────────────────────────
 
 function SpendingTab({ startDate, endDate }: { startDate: string; endDate: string }) {
   const [drillId, setDrillId] = useState<string | null>(null);
   const [drillName, setDrillName] = useState<string | null>(null);
+  const [detailTarget, setDetailTarget] = useState<DrilldownTarget | null>(null);
 
   const { data: spending, isLoading } = useQuery({
     queryKey: ['spending', startDate, endDate],
@@ -377,7 +469,15 @@ function SpendingTab({ startDate, endDate }: { startDate: string; endDate: strin
           </thead>
           <tbody>
             {displayCats.map((c, i) => (
-              <tr key={c.category_id} className="border-b border-border hover:bg-white/2">
+              <tr
+                key={c.category_id}
+                className="border-b border-border hover:bg-white/2 cursor-pointer"
+                onClick={() => setDetailTarget({
+                  kind: 'spending',
+                  categoryId: c.category_id,
+                  categoryName: c.category_name,
+                })}
+              >
                 <td className="px-4 py-2">
                   <div className="flex items-center gap-2">
                     <span className="w-2 h-2 rounded-full" style={{ backgroundColor: c.color || COLORS[i % COLORS.length] }} />
@@ -400,6 +500,12 @@ function SpendingTab({ startDate, endDate }: { startDate: string; endDate: strin
           )}
         </table>
       </div>
+      <ReportDrilldownModal
+        target={detailTarget}
+        startDate={startDate}
+        endDate={endDate}
+        onClose={() => setDetailTarget(null)}
+      />
     </div>
   );
 }
@@ -407,6 +513,7 @@ function SpendingTab({ startDate, endDate }: { startDate: string; endDate: strin
 // ─── Income Tab ───────────────────────────────────────────────────────────────
 
 function IncomeTab({ startDate, endDate }: { startDate: string; endDate: string }) {
+  const [detailTarget, setDetailTarget] = useState<DrilldownTarget | null>(null);
   const { data: income, isLoading } = useQuery({
     queryKey: ['income', startDate, endDate],
     queryFn: () => reportsApi.income({ startDate, endDate }),
@@ -447,7 +554,15 @@ function IncomeTab({ startDate, endDate }: { startDate: string; endDate: string 
           </thead>
           <tbody>
             {categories.map((c, i) => (
-              <tr key={c.category_id} className="border-b border-border hover:bg-white/2">
+              <tr
+                key={c.category_id}
+                className="border-b border-border hover:bg-white/2 cursor-pointer"
+                onClick={() => setDetailTarget({
+                  kind: 'income',
+                  categoryId: c.category_id,
+                  categoryName: c.category_name,
+                })}
+              >
                 <td className="px-4 py-2">
                   <div className="flex items-center gap-2">
                     <span className="w-2 h-2 rounded-full" style={{ backgroundColor: c.color || COLORS[i % COLORS.length] }} />
@@ -470,6 +585,12 @@ function IncomeTab({ startDate, endDate }: { startDate: string; endDate: string 
           )}
         </table>
       </div>
+      <ReportDrilldownModal
+        target={detailTarget}
+        startDate={startDate}
+        endDate={endDate}
+        onClose={() => setDetailTarget(null)}
+      />
     </div>
   );
 }

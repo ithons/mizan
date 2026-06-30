@@ -581,6 +581,17 @@ export interface ReportSummary {
   excluded_flows: ReportExcludedFlowSummary[];
 }
 
+export interface ReportDrilldown {
+  kind: 'spending' | 'income';
+  category_id: string;
+  category_name: string;
+  start_date?: string;
+  end_date?: string;
+  total: number;
+  count: number;
+  transactions: Transaction[];
+}
+
 export interface NetWorthHistory {
   snapshots: NetWorthSnapshot[];
 }

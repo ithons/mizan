@@ -4,6 +4,7 @@ import Database from 'better-sqlite3';
 import {
   getCashflowReport,
   getIncomeReport,
+  getReportDrilldown,
   getReportSummary,
   getSpendingReport,
   getSpendingTrendsReport,
@@ -24,6 +25,7 @@ interface TransactionFixture {
   amount: number;
   category_id?: string | null;
   pending?: number;
+  account_id?: string;
 }
 
 function setupReportingDb(): Database.Database {
@@ -33,20 +35,35 @@ function setupReportingDb(): Database.Database {
     CREATE TABLE categories (
       id TEXT PRIMARY KEY,
       name TEXT NOT NULL,
+      icon TEXT,
       color TEXT,
       parent_id TEXT,
       is_income INTEGER NOT NULL DEFAULT 0,
       is_investment INTEGER NOT NULL DEFAULT 0
     );
 
+    CREATE TABLE accounts (
+      id TEXT PRIMARY KEY,
+      account_name TEXT NOT NULL,
+      institution_name TEXT NOT NULL
+    );
+
     CREATE TABLE transactions (
       id TEXT PRIMARY KEY,
+      account_id TEXT NOT NULL,
       date TEXT NOT NULL,
       amount REAL NOT NULL,
+      merchant_name TEXT,
+      original_name TEXT NOT NULL,
       category_id TEXT,
       pending INTEGER NOT NULL DEFAULT 0,
-      transfer_status TEXT NOT NULL DEFAULT 'none'
+      transfer_status TEXT NOT NULL DEFAULT 'none',
+      created_at TEXT NOT NULL DEFAULT '2026-06-30T00:00:00.000Z',
+      updated_at TEXT NOT NULL DEFAULT '2026-06-30T00:00:00.000Z'
     );
+
+    INSERT INTO accounts (id, account_name, institution_name)
+    VALUES ('acct_checking', 'Everyday Checking', 'Mizan Test Bank');
   `);
 
   const insertCategory = db.prepare(`
@@ -85,8 +102,12 @@ function setupReportingDb(): Database.Database {
   }
 
   const insertTransaction = db.prepare(`
-    INSERT INTO transactions (id, date, amount, category_id, pending, transfer_status)
-    VALUES (@id, @date, @amount, @category_id, @pending, @transfer_status)
+    INSERT INTO transactions (
+      id, account_id, date, amount, merchant_name, original_name, category_id, pending, transfer_status
+    )
+    VALUES (
+      @id, @account_id, @date, @amount, @merchant_name, @original_name, @category_id, @pending, @transfer_status
+    )
   `);
 
   const transactions: TransactionFixture[] = [
@@ -106,8 +127,11 @@ function setupReportingDb(): Database.Database {
   for (const transaction of transactions) {
     insertTransaction.run({
       id: transaction.id,
+      account_id: transaction.account_id ?? 'acct_checking',
       date: transaction.date,
       amount: transaction.amount,
+      merchant_name: transaction.id,
+      original_name: transaction.id,
       category_id: transaction.category_id ?? null,
       pending: transaction.pending ?? 0,
       transfer_status: 'none',
@@ -253,4 +277,47 @@ test('report summary compares equal prior period and explains excluded flows', (
   assert.equal(summary.excluded_flows.find((flow) => flow.flow_type === 'crypto')?.outflows, 50);
   assert.equal(summary.excluded_flows.find((flow) => flow.flow_type === 'investments')?.inflows, 20);
   assert.equal(summary.spending_movers[0].category_id, 'uncategorized');
+});
+
+test('report drilldown returns backing spending transactions for category rollups', (t) => {
+  const db = setupReportingDb();
+  t.after(() => db.close());
+
+  const detail = getReportDrilldown(db, {
+    kind: 'spending',
+    categoryId: 'cat_food',
+    startDate: '2026-06-01',
+    endDate: '2026-06-30',
+  });
+
+  assert.equal(detail.category_name, 'Food');
+  assert.equal(detail.total, 100);
+  assert.equal(detail.count, 1);
+  assert.equal(detail.transactions[0]?.id, 'restaurant');
+  assert.equal(detail.transactions[0]?.account_name, 'Everyday Checking');
+});
+
+test('report drilldown keeps uncategorized and income evidence traceable', (t) => {
+  const db = setupReportingDb();
+  t.after(() => db.close());
+
+  const uncategorized = getReportDrilldown(db, {
+    kind: 'spending',
+    categoryId: 'uncategorized',
+    startDate: '2026-06-01',
+    endDate: '2026-06-30',
+  });
+
+  assert.equal(uncategorized.total, 30);
+  assert.deepEqual(uncategorized.transactions.map((transaction) => transaction.id), ['uncategorized_expense']);
+
+  const income = getReportDrilldown(db, {
+    kind: 'income',
+    categoryId: 'cat_income_paycheck',
+    startDate: '2026-06-01',
+    endDate: '2026-06-30',
+  });
+
+  assert.equal(income.total, 1000);
+  assert.deepEqual(income.transactions.map((transaction) => transaction.id), ['paycheck']);
 });

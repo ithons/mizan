@@ -3,6 +3,7 @@ import { getDb } from '../db/index';
 import {
   getCashflowReport,
   getIncomeReport,
+  getReportDrilldown,
   getReportSummary,
   getSpendingReport,
   getSpendingTrendsReport,
@@ -92,6 +93,37 @@ router.get('/trends', (req: Request, res: Response, next: NextFunction): void =>
         startDate,
         endDate,
         categoryIds: parsedCategoryIds,
+      }),
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// GET /drilldown?kind=spending|income&categoryId&startDate&endDate
+router.get('/drilldown', (req: Request, res: Response, next: NextFunction): void => {
+  try {
+    const db = getDb();
+    const kind = firstQueryValue(req.query.kind);
+    const categoryId = firstQueryValue(req.query.categoryId);
+    const startDate = firstQueryValue(req.query.startDate);
+    const endDate = firstQueryValue(req.query.endDate);
+
+    if (kind !== 'spending' && kind !== 'income') {
+      res.status(400).json({ error: 'Invalid report drilldown kind' });
+      return;
+    }
+    if (!categoryId) {
+      res.status(400).json({ error: 'categoryId is required' });
+      return;
+    }
+
+    res.json({
+      data: getReportDrilldown(db, {
+        kind,
+        categoryId,
+        startDate,
+        endDate,
       }),
     });
   } catch (err) {
