@@ -21,6 +21,7 @@ import { ChevronRight } from 'lucide-react';
 import { format, subMonths, startOfMonth, endOfMonth, startOfYear } from 'date-fns';
 import { reportsApi, networthApi, investmentsApi, categoriesApi } from '../lib/api';
 import { advisorRouteState } from '../lib/advisorRouteState';
+import { buildReportAdvisorPrompt } from '../lib/advisorPrompts';
 import { formatCurrency, formatMonth, formatDate, formatPercent } from '../lib/formatters';
 import { PageLoader } from '../components/LoadingSpinner';
 import { EmptyState } from '../components/EmptyState';
@@ -1568,18 +1569,7 @@ export function Reports() {
   };
   const askAdvisorAboutReport = (report: ReportSummary) => {
     navigate('/advisor', {
-      state: advisorRouteState({
-        source: 'reports',
-        prompt: `Explain this ${tab === 'cashflow' ? 'cash-flow' : tab} report from ${report.start_date ?? startDate} to ${report.end_date ?? endDate}. Focus on income, spending, net cash flow, excluded flows, and what changed versus ${report.comparison_label}.`,
-        recordKind: 'report_summary',
-        recordId: `${report.start_date ?? startDate}:${report.end_date ?? endDate}`,
-        params: {
-          tab,
-          startDate: report.start_date ?? startDate,
-          endDate: report.end_date ?? endDate,
-          comparison: report.comparison,
-        },
-      }),
+      state: advisorRouteState(buildReportAdvisorPrompt(report, { tab, startDate, endDate })),
     });
   };
 

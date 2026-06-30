@@ -4,9 +4,10 @@ import {
   buildAccountAdvisorPrompt,
   buildBudgetAdvisorPrompt,
   buildHoldingAdvisorPrompt,
+  buildReportAdvisorPrompt,
   buildTransactionAdvisorPrompt,
 } from '../client/src/lib/advisorPrompts';
-import type { Account, Budget, Holding, Transaction } from '../shared/types';
+import type { Account, Budget, Holding, ReportSummary, Transaction } from '../shared/types';
 
 function budget(overrides: Partial<Budget> = {}): Budget {
   return {
@@ -103,6 +104,72 @@ function holding(overrides: Partial<Holding> = {}): Holding {
     security_type: overrides.security_type ?? 'etf',
   };
 }
+
+function reportSummary(overrides: Partial<ReportSummary> = {}): ReportSummary {
+  return {
+    start_date: overrides.start_date ?? '2026-06-01',
+    end_date: overrides.end_date ?? '2026-06-30',
+    comparison: overrides.comparison ?? 'prior_month',
+    comparison_label: overrides.comparison_label ?? 'Prior month',
+    comparison_start_date: overrides.comparison_start_date ?? '2026-05-01',
+    comparison_end_date: overrides.comparison_end_date ?? '2026-05-31',
+    income: overrides.income ?? { current: 5000, previous: 4800, delta: 200, delta_percent: 4.17 },
+    expenses: overrides.expenses ?? { current: 3200, previous: 3000, delta: 200, delta_percent: 6.67 },
+    net: overrides.net ?? { current: 1800, previous: 1800, delta: 0, delta_percent: 0 },
+    savings_rate: overrides.savings_rate ?? { current: 36, previous: 37.5, delta: -1.5, delta_percent: null },
+    top_spending: overrides.top_spending ?? [{
+      category_id: 'cat_food',
+      category_name: 'Food',
+      current: 820,
+      previous: 700,
+      delta: 120,
+      delta_percent: 17.14,
+    }],
+    top_income: overrides.top_income ?? [{
+      category_id: 'cat_payroll',
+      category_name: 'Payroll',
+      current: 5000,
+      previous: 4800,
+      delta: 200,
+      delta_percent: 4.17,
+    }],
+    spending_movers: overrides.spending_movers ?? [{
+      category_id: 'cat_travel',
+      category_name: 'Travel',
+      current: 450,
+      previous: 50,
+      delta: 400,
+      delta_percent: 800,
+    }],
+    excluded_flows: overrides.excluded_flows ?? [{
+      flow_type: 'transfers',
+      count: 6,
+      inflows: 1200,
+      outflows: -1200,
+      net: 0,
+    }],
+  };
+}
+
+test('report advisor prompt captures summary metrics and exclusions', () => {
+  const prompt = buildReportAdvisorPrompt(reportSummary(), {
+    tab: 'cashflow',
+    startDate: '2026-06-01',
+    endDate: '2026-06-30',
+  });
+
+  assert.equal(prompt.source, 'reports');
+  assert.equal(prompt.recordKind, 'report_summary');
+  assert.equal(prompt.recordId, 'cashflow:2026-06-01:2026-06-30');
+  assert.equal(prompt.params?.tab, 'cashflow');
+  assert.equal(prompt.params?.incomeCurrent, 5000);
+  assert.equal(prompt.params?.spendingDelta, 200);
+  assert.equal(prompt.params?.excludedFlowCount, 6);
+  assert.match(prompt.prompt, /cashflow report from 2026-06-01 to 2026-06-30/);
+  assert.match(prompt.prompt, /Compared with Prior month/);
+  assert.match(prompt.prompt, /Food \$820\.00 \(\+\$120\.00\)/);
+  assert.match(prompt.prompt, /transfers: 6 transactions/);
+});
 
 test('budget advisor prompt captures row context and projection math', () => {
   const prompt = buildBudgetAdvisorPrompt(budget(), '2026-06');

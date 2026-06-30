@@ -1,6 +1,23 @@
 import type { AdvisorRoutePrompt } from './advisorRouteState';
-import type { Account, Budget, Holding, Transaction } from '@shared/types';
+import type {
+  Account,
+  Budget,
+  Holding,
+  ReportCategoryChange,
+  ReportExcludedFlowSummary,
+  ReportMetricSummary,
+  ReportSummary,
+  Transaction,
+} from '@shared/types';
 import { availableBudgetAmount, budgetProjectedRemaining, budgetProjectedSpend } from './budgetMath';
+
+export type ReportAdvisorTab = 'spending' | 'income' | 'trends' | 'cashflow' | 'networth' | 'investments';
+
+export interface ReportAdvisorPromptContext {
+  tab: ReportAdvisorTab;
+  startDate: string;
+  endDate: string;
+}
 
 function formatMoneyValue(value: number): string {
   const amount = Math.abs(value).toFixed(2);
@@ -9,6 +26,95 @@ function formatMoneyValue(value: number): string {
 
 function formatCurrencyValue(value: number, currency: string): string {
   return currency === 'USD' ? formatMoneyValue(value) : `${value.toFixed(2)} ${currency}`;
+}
+
+function formatSignedMoneyValue(value: number): string {
+  const sign = value > 0 ? '+' : '';
+  return `${sign}${formatMoneyValue(value)}`;
+}
+
+function formatSignedPercentPoints(value: number): string {
+  const sign = value > 0 ? '+' : '';
+  return `${sign}${value.toFixed(1)} percentage points`;
+}
+
+function reportMetricLine(label: string, metric: ReportMetricSummary, isRate = false): string {
+  const current = isRate ? `${metric.current.toFixed(1)}%` : formatMoneyValue(metric.current);
+  const delta = isRate ? formatSignedPercentPoints(metric.delta) : formatSignedMoneyValue(metric.delta);
+  return `${label} is ${current}, ${delta} versus comparison.`;
+}
+
+function summarizeCategoryChanges(changes: ReportCategoryChange[]): string {
+  if (changes.length === 0) return 'none';
+  return changes
+    .slice(0, 3)
+    .map((change) => `${change.category_name} ${formatMoneyValue(change.current)} (${formatSignedMoneyValue(change.delta)})`)
+    .join('; ');
+}
+
+function summarizeExcludedFlows(flows: ReportExcludedFlowSummary[]): string {
+  if (flows.length === 0) return 'none';
+  return flows
+    .map((flow) => `${flow.flow_type}: ${flow.count} transactions, net ${formatSignedMoneyValue(flow.net)}`)
+    .join('; ');
+}
+
+export function buildReportAdvisorPrompt(
+  report: ReportSummary,
+  context: ReportAdvisorPromptContext
+): AdvisorRoutePrompt {
+  const startDate = report.start_date ?? context.startDate;
+  const endDate = report.end_date ?? context.endDate;
+  const comparisonStartDate = report.comparison_start_date ?? report.previous_start_date ?? null;
+  const comparisonEndDate = report.comparison_end_date ?? report.previous_end_date ?? null;
+  const comparisonRange = comparisonStartDate && comparisonEndDate
+    ? `${comparisonStartDate} to ${comparisonEndDate}`
+    : 'no stored comparison range';
+  const topSpending = summarizeCategoryChanges(report.top_spending);
+  const topIncome = summarizeCategoryChanges(report.top_income);
+  const spendingMovers = summarizeCategoryChanges(report.spending_movers);
+  const excludedFlows = summarizeExcludedFlows(report.excluded_flows);
+
+  return {
+    source: 'reports',
+    recordKind: 'report_summary',
+    recordId: `${context.tab}:${startDate}:${endDate}`,
+    params: {
+      tab: context.tab,
+      startDate,
+      endDate,
+      comparison: report.comparison,
+      comparisonLabel: report.comparison_label,
+      comparisonStartDate,
+      comparisonEndDate,
+      incomeCurrent: report.income.current,
+      incomeDelta: report.income.delta,
+      spendingCurrent: report.expenses.current,
+      spendingDelta: report.expenses.delta,
+      netCurrent: report.net.current,
+      netDelta: report.net.delta,
+      savingsRateCurrent: report.savings_rate.current,
+      savingsRateDelta: report.savings_rate.delta,
+      topSpending,
+      topIncome,
+      spendingMovers,
+      excludedFlows,
+      excludedFlowCount: report.excluded_flows.reduce((sum, flow) => sum + flow.count, 0),
+    },
+    prompt: [
+      `Explain this ${context.tab} report from ${startDate} to ${endDate}.`,
+      `Compared with ${report.comparison_label} (${comparisonRange}).`,
+      reportMetricLine('Income', report.income),
+      reportMetricLine('Spending', report.expenses),
+      reportMetricLine('Net cash flow', report.net),
+      reportMetricLine('Savings rate', report.savings_rate, true),
+      `Top spending: ${topSpending}.`,
+      `Top income: ${topIncome}.`,
+      `Spending movers: ${spendingMovers}.`,
+      `Excluded flows: ${excludedFlows}.`,
+      'Explain the main changes, whether exclusions affect interpretation, and which backing report evidence I should inspect.',
+    ].join(' '),
+  };
 }
 
 export function buildBudgetAdvisorPrompt(budget: Budget, month: string): AdvisorRoutePrompt {
