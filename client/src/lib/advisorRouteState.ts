@@ -2,6 +2,7 @@ export type AdvisorPromptSource =
   | 'dashboard'
   | 'reports'
   | 'budget'
+  | 'goal'
   | 'transaction'
   | 'account'
   | 'investment'

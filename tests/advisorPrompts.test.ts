@@ -4,12 +4,13 @@ import {
   buildAccountAdvisorPrompt,
   buildBudgetAdvisorPrompt,
   buildDashboardCardAdvisorPrompt,
+  buildGoalAdvisorPrompt,
   buildHoldingAdvisorPrompt,
   buildRecurringForecastAdvisorPrompt,
   buildReportAdvisorPrompt,
   buildTransactionAdvisorPrompt,
 } from '../client/src/lib/advisorPrompts';
-import type { Account, Budget, Holding, RecurringForecast, ReportSummary, Transaction } from '../shared/types';
+import type { Account, Budget, Goal, Holding, RecurringForecast, ReportSummary, Transaction } from '../shared/types';
 
 function budget(overrides: Partial<Budget> = {}): Budget {
   return {
@@ -104,6 +105,30 @@ function holding(overrides: Partial<Holding> = {}): Holding {
     ticker: overrides.ticker ?? 'VTI',
     security_name: overrides.security_name ?? 'Vanguard Total Stock Market ETF',
     security_type: overrides.security_type ?? 'etf',
+  };
+}
+
+function goal(overrides: Partial<Goal> = {}): Goal {
+  return {
+    id: overrides.id ?? 'goal_emergency',
+    name: overrides.name ?? 'Emergency Fund',
+    type: overrides.type ?? 'savings',
+    target_amount: overrides.target_amount ?? 10000,
+    current_amount: overrides.current_amount ?? 2500,
+    starting_amount: overrides.starting_amount ?? null,
+    account_id: overrides.account_id ?? 'acct_savings',
+    target_date: overrides.target_date ?? '2026-12-31',
+    color: overrides.color ?? '#32bfa3',
+    is_archived: overrides.is_archived ?? false,
+    created_at: overrides.created_at ?? '2026-06-01T00:00:00.000Z',
+    updated_at: overrides.updated_at ?? '2026-06-30T12:00:00.000Z',
+    progress_amount: overrides.progress_amount ?? 4000,
+    remaining_amount: overrides.remaining_amount ?? 6000,
+    progress_percent: overrides.progress_percent ?? 40,
+    account_name: overrides.account_name ?? 'High Yield Savings',
+    institution_name: overrides.institution_name ?? 'Test Bank',
+    account_balance: overrides.account_balance ?? 4000,
+    account_is_liability: overrides.account_is_liability ?? false,
   };
 }
 
@@ -245,6 +270,20 @@ test('recurring forecast advisor prompt captures cash projection context', () =>
   assert.match(prompt.prompt, /Projected income is \$5000\.00, bills are \$2800\.00/);
   assert.match(prompt.prompt, /lowest projected cash \$1200\.00 on 2026-07-01/);
   assert.match(prompt.prompt, /2026-07-01 Rent -\$1800\.00/);
+});
+
+test('goal advisor prompt captures progress and linked account context', () => {
+  const prompt = buildGoalAdvisorPrompt(goal());
+
+  assert.equal(prompt.source, 'goal');
+  assert.equal(prompt.recordKind, 'goal');
+  assert.equal(prompt.recordId, 'goal_emergency');
+  assert.equal(prompt.params?.progressAmount, 4000);
+  assert.equal(prompt.params?.remainingAmount, 6000);
+  assert.equal(prompt.params?.accountBalance, 4000);
+  assert.match(prompt.prompt, /Emergency Fund savings goal/);
+  assert.match(prompt.prompt, /progress is \$4000\.00 \(40\.0%\)/);
+  assert.match(prompt.prompt, /linked to Test Bank High Yield Savings/);
 });
 
 test('budget advisor prompt captures row context and projection math', () => {

@@ -2,6 +2,7 @@ import type { AdvisorRoutePrompt } from './advisorRouteState';
 import type {
   Account,
   Budget,
+  Goal,
   Holding,
   RecurringForecast,
   ReportCategoryChange,
@@ -258,6 +259,51 @@ export function buildBudgetAdvisorPrompt(budget: Budget, month: string): Advisor
       `Projected remaining is ${formatMoneyValue(projectedRemaining)} with ${confidence} forecast confidence.`,
       'Explain whether I am likely to stay under budget, what is driving the projection, and what I should review next.',
     ].join(' '),
+  };
+}
+
+export function buildGoalAdvisorPrompt(goal: Goal): AdvisorRoutePrompt {
+  const accountName = goal.account_name ?? null;
+  const institutionName = goal.institution_name ?? null;
+  const linkedAccount = accountName
+    ? `${institutionName ? `${institutionName} ` : ''}${accountName}`
+    : null;
+  const targetDate = goal.target_date ?? null;
+  const accountBalance = goal.account_balance ?? null;
+
+  return {
+    source: 'goal',
+    recordKind: 'goal',
+    recordId: goal.id,
+    params: {
+      goalId: goal.id,
+      name: goal.name,
+      type: goal.type,
+      targetAmount: goal.target_amount,
+      currentAmount: goal.current_amount,
+      progressAmount: goal.progress_amount,
+      remainingAmount: goal.remaining_amount,
+      progressPercent: goal.progress_percent,
+      startingAmount: goal.starting_amount ?? null,
+      accountId: goal.account_id ?? null,
+      accountName,
+      institutionName,
+      accountBalance,
+      targetDate,
+    },
+    prompt: [
+      `Analyze my ${goal.name} ${goal.type} goal.`,
+      `Target is ${formatMoneyValue(goal.target_amount)} and progress is ${formatMoneyValue(goal.progress_amount)} (${goal.progress_percent.toFixed(1)}%).`,
+      `Remaining amount is ${formatMoneyValue(goal.remaining_amount)}.`,
+      targetDate ? `Target date is ${targetDate}.` : 'There is no target date.',
+      linkedAccount
+        ? `This goal is linked to ${linkedAccount}${accountBalance != null ? ` with balance ${formatMoneyValue(accountBalance)}` : ''}.`
+        : `This goal uses manual progress of ${formatMoneyValue(goal.current_amount)}.`,
+      goal.type === 'debt' && goal.starting_amount != null
+        ? `Starting debt balance is ${formatMoneyValue(goal.starting_amount)}.`
+        : '',
+      'Explain whether the goal is realistic, what could affect progress, and which budgets, bills, accounts, or cash-flow projections I should inspect.',
+    ].filter(Boolean).join(' '),
   };
 }
 

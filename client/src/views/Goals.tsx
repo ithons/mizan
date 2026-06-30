@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useNavigate } from 'react-router-dom';
 import {
   Archive,
   Calendar,
@@ -8,10 +9,13 @@ import {
   Link2,
   Pencil,
   Plus,
+  Sparkles,
   Target,
 } from 'lucide-react';
 import type { Account, Goal, GoalType } from '@shared/types';
 import { accountsApi, goalsApi } from '../lib/api';
+import { advisorRouteState } from '../lib/advisorRouteState';
+import { buildGoalAdvisorPrompt } from '../lib/advisorPrompts';
 import { invalidateFinancialData } from '../lib/queryInvalidation';
 import { formatCurrency, formatDate } from '../lib/formatters';
 import { parseDecimalInput } from '../lib/numberInput';
@@ -54,10 +58,12 @@ function GoalCard({
   goal,
   onEdit,
   onArchive,
+  onAsk,
 }: {
   goal: Goal;
   onEdit: () => void;
   onArchive: () => void;
+  onAsk: () => void;
 }) {
   const Icon = goalIcon(goal.type);
   const complete = goal.progress_percent >= 100;
@@ -86,6 +92,13 @@ function GoalCard({
           )}
         </div>
         <div className="flex items-center gap-1">
+          <button
+            className="w-7 h-7 flex items-center justify-center rounded text-muted hover:text-green hover:bg-black/5"
+            onClick={onAsk}
+            title="Ask advisor"
+          >
+            <Sparkles size={14} />
+          </button>
           <button
             className="w-7 h-7 flex items-center justify-center rounded text-muted hover:text-text hover:bg-black/5"
             onClick={onEdit}
@@ -353,6 +366,7 @@ function GoalModal({
 }
 
 export function Goals() {
+  const navigate = useNavigate();
   const qc = useQueryClient();
   const { addToast } = useAppStore();
   const [open, setOpen] = useState(false);
@@ -426,6 +440,12 @@ export function Goals() {
     setOpen(true);
   };
 
+  const askAdvisorAboutGoal = (goal: Goal) => {
+    navigate('/advisor', {
+      state: advisorRouteState(buildGoalAdvisorPrompt(goal)),
+    });
+  };
+
   if (isLoading) return <PageLoader />;
 
   return (
@@ -478,6 +498,7 @@ export function Goals() {
               goal={goal}
               onEdit={() => openEditGoal(goal)}
               onArchive={() => archiveMutation.mutate(goal.id)}
+              onAsk={() => askAdvisorAboutGoal(goal)}
             />
           ))}
         </div>
