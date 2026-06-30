@@ -5,6 +5,7 @@ import {
   getAllocationSlices,
   getConcentrationSummary,
   getCostBasisStats,
+  getInvestmentDataQualitySummary,
   getInvestmentActivitySummary,
 } from '../client/src/lib/investmentAnalytics';
 import type { Account, Holding, InvestmentTransaction } from '../shared/types';
@@ -167,4 +168,66 @@ test('investment activity summarizes imported transaction flow without inventing
   assert.equal(summary.realizedGain, null);
   assert.equal(summary.realizedGainLabel, 'Not available');
   assert.match(summary.realizedGainDetail, /lot-level sale cost basis/);
+});
+
+test('investment data quality starts empty without investment sources', () => {
+  const summary = getInvestmentDataQualitySummary({
+    holdings: [],
+    transactions: [],
+    investmentAccountCount: 0,
+    accountById: new Map(),
+    historyPointCount: 0,
+  });
+
+  assert.equal(summary.status, 'empty');
+  assert.equal(summary.label, 'No Investment Data');
+  assert.deepEqual(summary.issues.map((issue) => issue.id), ['no-investment-source']);
+});
+
+test('investment data quality marks provider limitations without requiring attention', () => {
+  const accounts = new Map([
+    ['acct_taxable', account('acct_taxable', 'brokerage')],
+  ]);
+  const summary = getInvestmentDataQualitySummary({
+    holdings: [
+      holding({ id: 'known', account_id: 'acct_taxable', security_type: 'equity', cost_basis: 900, institution_value: 1000 }),
+      holding({ id: 'missing_type', account_id: 'acct_taxable', cost_basis: 100, institution_value: 110 }),
+    ],
+    transactions: [
+      investmentTransaction({ id: 'sell', type: 'sell', amount: 250 }),
+    ],
+    investmentAccountCount: 1,
+    accountById: accounts,
+    historyPointCount: 1,
+  });
+
+  assert.equal(summary.status, 'limited');
+  assert.deepEqual(summary.issues.map((issue) => issue.id), [
+    'security-type-missing',
+    'realized-gain-unavailable',
+    'history-limited',
+  ]);
+});
+
+test('investment data quality escalates missing core holding data', () => {
+  const accounts = new Map([
+    ['acct_taxable', account('acct_taxable', 'brokerage')],
+  ]);
+  const summary = getInvestmentDataQualitySummary({
+    holdings: [
+      holding({ id: 'missing_basis', account_id: 'acct_taxable', security_type: 'equity', cost_basis: null, institution_value: 1000 }),
+      holding({ id: 'missing_account', account_id: 'acct_missing', security_type: 'etf', cost_basis: null, institution_value: 500 }),
+    ],
+    transactions: [],
+    investmentAccountCount: 1,
+    accountById: accounts,
+    historyPointCount: 2,
+  });
+
+  assert.equal(summary.status, 'attention');
+  assert.deepEqual(summary.issues.map((issue) => issue.id), [
+    'missing-account-links',
+    'cost-basis-missing',
+    'no-investment-transactions',
+  ]);
 });

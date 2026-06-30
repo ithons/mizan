@@ -21,6 +21,7 @@ import {
   getAllocationSlices,
   getConcentrationSummary,
   getCostBasisStats,
+  getInvestmentDataQualitySummary,
   getInvestmentActivitySummary,
   type AllocationLens,
 } from '../lib/investmentAnalytics';
@@ -60,6 +61,19 @@ function formatPct(n: number | null): string {
 
 function formatSignedCurrency(n: number): string {
   return `${n > 0 ? '+' : ''}${formatCurrency(n)}`;
+}
+
+function dataQualityTone(status: 'empty' | 'strong' | 'limited' | 'attention'): string {
+  if (status === 'strong') return '#32bfa3';
+  if (status === 'attention') return '#ef6f8a';
+  if (status === 'empty') return '#718087';
+  return '#e2a53f';
+}
+
+function issueSeverityClass(severity: 'info' | 'warning' | 'attention'): string {
+  if (severity === 'attention') return 'border-[#ef6f8a]/30 bg-[#ef6f8a]/5';
+  if (severity === 'warning') return 'border-[#e2a53f]/30 bg-[#e2a53f]/5';
+  return 'border-border bg-background';
 }
 
 function PnlCell({ value, pct }: { value: number | null; pct: number | null }) {
@@ -290,6 +304,22 @@ export function Investments() {
     () => getInvestmentActivitySummary(txs),
     [txs]
   );
+  const selectedInvestmentAccount = selectedAccountId
+    ? invAccounts.find((account) => account.id === selectedAccountId)
+    : null;
+  const investmentAccountCount = selectedAccountId == null
+    ? invAccounts.length
+    : Number(selectedInvestmentAccount != null);
+  const investmentDataQuality = useMemo(
+    () => getInvestmentDataQualitySummary({
+      holdings: filteredHoldings,
+      transactions: txs,
+      investmentAccountCount,
+      accountById,
+      historyPointCount: chartData.length,
+    }),
+    [filteredHoldings, txs, investmentAccountCount, accountById, chartData.length]
+  );
 
   return (
     <div className="p-6 space-y-6">
@@ -353,6 +383,43 @@ export function Investments() {
           </>
         )}
       </div>
+
+      {!holdingsLoading && !txsLoading && (
+        <div className="bg-surface border border-border rounded p-4 space-y-4">
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+            <div>
+              <p className="text-xs text-muted font-medium uppercase tracking-wider">Investment Data Quality</p>
+              <p className="text-sm text-text mt-1">{investmentDataQuality.detail}</p>
+            </div>
+            <p
+              className="font-mono text-sm"
+              style={{ color: dataQualityTone(investmentDataQuality.status) }}
+            >
+              {investmentDataQuality.label}
+            </p>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
+            {investmentDataQuality.issues.map((issue) => (
+              <div
+                key={issue.id}
+                className={`rounded border px-3 py-2 ${issueSeverityClass(issue.severity)}`}
+              >
+                <p className="text-xs font-medium text-text">{issue.label}</p>
+                <p className="text-xs text-muted mt-1">{issue.detail}</p>
+              </div>
+            ))}
+            {investmentDataQuality.issues.length === 0 && (
+              <div className="rounded border border-border bg-background px-3 py-2">
+                <p className="text-xs font-medium text-text">No visible limitations</p>
+                <p className="text-xs text-muted mt-1">
+                  Holdings, account links, cost basis, transaction activity, and history are available for this view.
+                </p>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Account selector + Chart */}
       <div className="grid grid-cols-5 gap-4">

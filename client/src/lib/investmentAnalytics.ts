@@ -69,6 +69,28 @@ export interface InvestmentActivitySummary {
   realizedGainDetail: string;
 }
 
+export interface InvestmentDataQualityIssue {
+  id: string;
+  label: string;
+  detail: string;
+  severity: 'info' | 'warning' | 'attention';
+}
+
+export interface InvestmentDataQualitySummary {
+  status: 'empty' | 'strong' | 'limited' | 'attention';
+  label: string;
+  detail: string;
+  issues: InvestmentDataQualityIssue[];
+}
+
+export interface InvestmentDataQualityInput {
+  holdings: Holding[];
+  transactions: InvestmentTransaction[];
+  investmentAccountCount: number;
+  accountById: Map<string, Account>;
+  historyPointCount: number;
+}
+
 const ACCOUNT_TYPE_LABELS: Record<string, string> = {
   brokerage: 'Brokerage',
   ira_traditional: 'Traditional IRA',
@@ -328,4 +350,125 @@ export function getInvestmentActivitySummary(
   );
 
   return summary;
+}
+
+export function getInvestmentDataQualitySummary({
+  holdings,
+  transactions,
+  investmentAccountCount,
+  accountById,
+  historyPointCount,
+}: InvestmentDataQualityInput): InvestmentDataQualitySummary {
+  if (investmentAccountCount === 0 && holdings.length === 0) {
+    return {
+      status: 'empty',
+      label: 'No Investment Data',
+      detail: 'Connect an investment account or Coinbase to evaluate holdings quality.',
+      issues: [
+        {
+          id: 'no-investment-source',
+          label: 'No investment source',
+          detail: 'Mizan has no connected investment account to analyze yet.',
+          severity: 'attention',
+        },
+      ],
+    };
+  }
+
+  const costBasis = getCostBasisStats(holdings);
+  const activity = getInvestmentActivitySummary(transactions);
+  const issues: InvestmentDataQualityIssue[] = [];
+  const missingAccountLinks = holdings.filter((holding) => !accountById.has(holding.account_id)).length;
+  const unclassifiedHoldings = holdings.filter((holding) => !holding.security_type).length;
+
+  if (holdings.length === 0) {
+    issues.push({
+      id: 'no-holdings',
+      label: 'No holdings imported',
+      detail: 'An investment account exists, but no current holdings are available.',
+      severity: 'attention',
+    });
+  }
+
+  if (missingAccountLinks > 0) {
+    issues.push({
+      id: 'missing-account-links',
+      label: 'Missing account links',
+      detail: `${formatHoldingCount(missingAccountLinks)} cannot be tied back to an account.`,
+      severity: 'attention',
+    });
+  }
+
+  if (costBasis.totalCount > 0 && costBasis.missingCount === costBasis.totalCount) {
+    issues.push({
+      id: 'cost-basis-missing',
+      label: 'Cost basis missing',
+      detail: 'Unrealized gain and return cannot be calculated from provider data.',
+      severity: 'attention',
+    });
+  } else if (costBasis.missingCount > 0) {
+    issues.push({
+      id: 'cost-basis-partial',
+      label: 'Cost basis partial',
+      detail: `${formatHoldingCount(costBasis.missingCount)} are excluded from gain and return calculations.`,
+      severity: 'warning',
+    });
+  }
+
+  if (unclassifiedHoldings > 0) {
+    issues.push({
+      id: 'security-type-missing',
+      label: 'Security type missing',
+      detail: `${formatHoldingCount(unclassifiedHoldings)} lack asset-class classification.`,
+      severity: 'warning',
+    });
+  }
+
+  if (activity.transactionCount === 0) {
+    issues.push({
+      id: 'no-investment-transactions',
+      label: 'No activity imported',
+      detail: 'Investment transaction history is unavailable for this period.',
+      severity: 'info',
+    });
+  }
+
+  if (activity.saleCount > 0) {
+    issues.push({
+      id: 'realized-gain-unavailable',
+      label: 'Realized gain unavailable',
+      detail: activity.realizedGainDetail,
+      severity: 'info',
+    });
+  }
+
+  if (historyPointCount <= 1) {
+    issues.push({
+      id: 'history-limited',
+      label: 'History limited',
+      detail: 'Portfolio trend analysis needs more than one historical snapshot.',
+      severity: 'info',
+    });
+  }
+
+  const status = issues.some((issue) => issue.severity === 'attention')
+    ? 'attention'
+    : issues.length > 0
+      ? 'limited'
+      : 'strong';
+  const label = status === 'attention'
+    ? 'Needs Attention'
+    : status === 'limited'
+      ? 'Limited'
+      : 'Strong';
+  const detail = issues.length === 0
+    ? 'Imported holdings have enough metadata for current portfolio summaries.'
+    : `${issues.length} data limitation${issues.length === 1 ? '' : 's'} affect investment analysis.`;
+
+  return {
+    status,
+    label,
+    detail,
+    issues,
+  };
 }
