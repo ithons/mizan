@@ -3,6 +3,7 @@ export const DASHBOARD_LAYOUT_PREFERENCE_KEY = 'dashboard_layout';
 export const DASHBOARD_LAYOUT_IMPORTED_STORAGE_KEY = 'mizan:dashboard-layout:sqlite-imported';
 
 export type DashboardCardId =
+  | 'morning_briefing'
   | 'overview'
   | 'signals'
   | 'sync_activity'
@@ -24,6 +25,11 @@ export interface DashboardLayoutItem {
 }
 
 export const DASHBOARD_CARD_DEFINITIONS: DashboardCardDefinition[] = [
+  {
+    id: 'morning_briefing',
+    label: 'Morning Briefing',
+    detail: 'Safe to Spend, Inbox Zero, and Upcoming Cash Flow Radar',
+  },
   {
     id: 'overview',
     label: 'Overview Stats',

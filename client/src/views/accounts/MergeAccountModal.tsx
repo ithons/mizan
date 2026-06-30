@@ -21,12 +21,12 @@ export function MergeAccountModal({ isOpen, onClose, targetAccount }: MergeAccou
     queryFn: () => accountsApi.list(),
   });
 
-  const accounts = accountsResponse?.data || [];
+  const accounts = accountsResponse || [];
   
   // Filter out the target account, manual accounts, and hidden accounts? 
   // Actually you might want to merge from a hidden account. Just filter out target and manual.
   const sourceOptions = accounts.filter(
-    (a) => a.id !== targetAccount.id && !a.is_manual
+    (a: Account) => a.id !== targetAccount.id && !a.is_manual
   );
 
   const mergeMutation = useMutation({
@@ -50,7 +50,7 @@ export function MergeAccountModal({ isOpen, onClose, targetAccount }: MergeAccou
   };
 
   return (
-    <Modal isOpen={isOpen} onClose={onClose} title="Merge Account Connection">
+    <Modal open={isOpen} onClose={onClose} title="Merge Account Connection">
       <form onSubmit={handleMerge} className="space-y-4">
         <p className="text-sm text-muted">
           Select an account to merge into <strong>{targetAccount.account_name}</strong>. 
@@ -69,7 +69,7 @@ export function MergeAccountModal({ isOpen, onClose, targetAccount }: MergeAccou
             required
           >
             <option value="" disabled>Select account to merge from...</option>
-            {sourceOptions.map((a) => (
+            {sourceOptions.map((a: Account) => (
               <option key={a.id} value={a.id}>
                 {a.institution_name} - {a.account_name} {a.mask ? `(••${a.mask})` : ''} 
                 [{a.connection_type}]

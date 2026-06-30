@@ -75,6 +75,68 @@ const CHART_COLORS = [
 
 const ASSET_COLORS = ['#32bfa3', '#6487f0', '#e2a53f', '#9b8dee'];
 
+function MorningBriefingPanel({
+  safeToSpend,
+  totalOpen,
+  forecast,
+  onNavigate,
+}: {
+  safeToSpend: number;
+  totalOpen: number;
+  forecast?: RecurringForecast;
+  onNavigate: (route: string) => void;
+}) {
+  return (
+    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+      <div 
+        className="bg-surface shadow-sm border border-border rounded p-5 cursor-pointer hover:bg-black/5 transition-colors"
+        onClick={() => onNavigate('/review')}
+      >
+        <p className="text-xs text-muted mb-1">Inbox Zero</p>
+        <p className="font-mono text-3xl font-medium mb-1" style={{ color: totalOpen > 0 ? '#e2a53f' : '#32bfa3' }}>
+          {totalOpen}
+        </p>
+        <p className="text-xs text-muted">items need review</p>
+      </div>
+
+      <div 
+        className="bg-surface shadow-sm border border-border rounded p-5 cursor-pointer hover:bg-black/5 transition-colors"
+        onClick={() => onNavigate('/budget')}
+      >
+        <p className="text-xs text-muted mb-1">Safe to Spend</p>
+        <p className="font-mono text-3xl font-medium mb-1 text-text">
+          {formatCurrency(safeToSpend)}
+        </p>
+        <p className="text-xs text-muted">liquid after bills & budgets</p>
+      </div>
+
+      <div 
+        className="bg-surface shadow-sm border border-border rounded p-5 cursor-pointer hover:bg-black/5 transition-colors"
+        onClick={() => onNavigate('/bills')}
+      >
+        <div className="flex items-center justify-between mb-2">
+          <p className="text-xs text-muted">Radar (next 14d)</p>
+          <ArrowRight size={14} className="text-muted" />
+        </div>
+        {forecast && forecast.occurrences.length > 0 ? (
+          <div className="space-y-1.5">
+            {forecast.occurrences.slice(0, 3).map((item) => (
+              <div key={item.id} className="flex justify-between items-center text-xs">
+                <span className="text-text truncate pr-2">{item.merchant_name}</span>
+                <span className="font-mono flex-shrink-0" style={{ color: item.amount >= 0 ? '#32bfa3' : '#ef6f8a' }}>
+                  {formatCurrency(item.amount)}
+                </span>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <p className="text-xs text-muted mt-2">No upcoming items</p>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function StatCard({
   title,
   value,
@@ -858,6 +920,15 @@ export function Dashboard() {
     ...(otherAssets > 0 ? [{ name: 'Other', value: otherAssets }] : []),
   ].filter((d) => d.value > 0);
 
+  // Safe to Spend Pacing
+  const upcomingBills = Math.abs(forecast?.bills ?? 0);
+  const allocatedBudgets = (budgets ?? []).reduce((sum, b) => {
+    // Only subtract the *remaining* projected amount that hasn't been spent yet
+    const projectedRemaining = b.projected_remaining ?? 0;
+    return sum + Math.max(0, projectedRemaining);
+  }, 0);
+  const safeToSpend = Math.max(0, liquid - upcomingBills - allocatedBudgets);
+
   // Spending donut data
   const donutData = categories.slice(0, 8).map((c, i) => ({
     name: c.category_name,
@@ -993,6 +1064,17 @@ export function Dashboard() {
         </div>
       ) : (
         <div className="flex flex-col gap-6">
+          {visibleDashboardCardSet.has('morning_briefing') && (
+            <div style={{ order: dashboardCardOrder('morning_briefing') }}>
+              <MorningBriefingPanel
+                safeToSpend={safeToSpend}
+                totalOpen={reviewSummary?.total_open ?? 0}
+                forecast={forecast}
+                onNavigate={navigate}
+              />
+            </div>
+          )}
+
           {visibleDashboardCardSet.has('overview') && (
             <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4" style={{ order: dashboardCardOrder('overview') }}>
               <StatCard
@@ -1086,12 +1168,8 @@ export function Dashboard() {
           )}
 
           {visibleDashboardCardSet.has('signals') && (
-            <div className="grid grid-cols-1 xl:grid-cols-4 gap-4" style={{ order: dashboardCardOrder('signals') }}>
-              <div className="xl:col-span-2">
-                <SignalsPanel insights={insights} onNavigate={navigate} onAskAdvisor={askAdvisor} />
-              </div>
-              <DataQualityPanel quality={dataQuality} onNavigate={navigate} />
-              <SyncHealthPanel health={syncHealth} onNavigate={navigate} />
+            <div className="grid grid-cols-1 gap-4" style={{ order: dashboardCardOrder('signals') }}>
+              <SignalsPanel insights={insights} onNavigate={navigate} onAskAdvisor={askAdvisor} />
             </div>
           )}
 
@@ -1257,13 +1335,25 @@ export function Dashboard() {
                       const available = availableBudgetAmount(budget);
                       const projected = budgetProjectedSpend(budget);
                       const pct = budgetProjectedPercent(budget);
-                      const barColor = pct >= 100 ? '#ef6f8a' : pct >= 80 ? '#e2a53f' : '#32bfa3';
+                      const velocity = budget.pacing_velocity ?? 0;
+                      
+                      // Base bar color on velocity if applicable, fallback to pct
+                      const barColor = velocity > 1.05 || pct >= 100 
+                        ? '#ef6f8a' 
+                        : velocity > 0.95 || pct >= 80 
+                          ? '#e2a53f' 
+                          : '#32bfa3';
+                      
                       return (
                         <div key={budget.id}>
                           <div className="flex items-center justify-between text-xs mb-1">
-                            <span className="text-text">{budget.category_name}</span>
+                            <span className="text-text flex items-center gap-1.5">
+                              {budget.category_name}
+                              {velocity > 1.05 && <span className="text-[10px] text-rose font-medium bg-rose/10 px-1.5 rounded">Running hot</span>}
+                              {velocity > 0 && velocity < 0.8 && <span className="text-[10px] text-green font-medium bg-green/10 px-1.5 rounded">On track</span>}
+                            </span>
                             <span className="font-mono text-muted">
-                              {formatCurrency(projected)} / {formatCurrency(available)}
+                              {formatCurrency(budget.spent ?? 0)} / {formatCurrency(available)}
                             </span>
                           </div>
                           <div className="h-1.5 bg-border rounded-full overflow-hidden">
