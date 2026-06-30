@@ -3,6 +3,7 @@ import type {
   Account,
   Budget,
   Holding,
+  RecurringForecast,
   ReportCategoryChange,
   ReportExcludedFlowSummary,
   ReportMetricSummary,
@@ -29,6 +30,14 @@ export interface DashboardCardAdvisorPromptContext {
   delta?: number | null;
   deltaLabel?: string | null;
   extraContext?: string | null;
+}
+
+export interface RecurringForecastAdvisorPromptContext {
+  startingBalance?: number | null;
+  endingBalance?: number | null;
+  lowestBalance?: number | null;
+  lowestDate?: string | null;
+  liquidAccountCount?: number | null;
 }
 
 function formatMoneyValue(value: number): string {
@@ -68,6 +77,16 @@ function summarizeExcludedFlows(flows: ReportExcludedFlowSummary[]): string {
   if (flows.length === 0) return 'none';
   return flows
     .map((flow) => `${flow.flow_type}: ${flow.count} transactions, net ${formatSignedMoneyValue(flow.net)}`)
+    .join('; ');
+}
+
+function summarizeForecastOccurrences(forecast: RecurringForecast): string {
+  if (forecast.occurrences.length === 0) return 'none';
+  return forecast.occurrences
+    .slice(0, 5)
+    .map((occurrence) => (
+      `${occurrence.expected_date} ${occurrence.merchant_name} ${formatSignedMoneyValue(occurrence.amount)} (${occurrence.confidence_label})`
+    ))
     .join('; ');
 }
 
@@ -156,6 +175,55 @@ export function buildDashboardCardAdvisorPrompt(
       deltaPhrase,
       extraContext,
       'Explain what changed, whether this needs review, and which accounts, transactions, reports, sync runs, or budget rows I should inspect.',
+    ].join(' '),
+  };
+}
+
+export function buildRecurringForecastAdvisorPrompt(
+  forecast: RecurringForecast,
+  context: RecurringForecastAdvisorPromptContext = {}
+): AdvisorRoutePrompt {
+  const confirmedNet = forecast.confirmed_income - forecast.confirmed_bills;
+  const likelyNet = forecast.likely_income - forecast.likely_bills;
+  const uncertainNet = forecast.uncertain_income - forecast.uncertain_bills;
+  const nextOccurrences = summarizeForecastOccurrences(forecast);
+  const projectionContext = [
+    context.liquidAccountCount != null ? `${context.liquidAccountCount} liquid account${context.liquidAccountCount === 1 ? '' : 's'}` : null,
+    context.startingBalance != null ? `starting cash ${formatMoneyValue(context.startingBalance)}` : null,
+    context.lowestBalance != null ? `lowest projected cash ${formatMoneyValue(context.lowestBalance)}${context.lowestDate ? ` on ${context.lowestDate}` : ''}` : null,
+    context.endingBalance != null ? `ending cash ${formatMoneyValue(context.endingBalance)}` : null,
+  ].filter(Boolean).join(', ') || 'no local cash projection context';
+
+  return {
+    source: 'recurring',
+    recordKind: 'recurring_forecast',
+    recordId: `${forecast.days}d`,
+    params: {
+      days: forecast.days,
+      income: forecast.income,
+      bills: forecast.bills,
+      net: forecast.net,
+      confirmedNet,
+      likelyNet,
+      uncertainNet,
+      overdueCount: forecast.overdue_count,
+      reviewCount: forecast.review_count,
+      occurrenceCount: forecast.occurrences.length,
+      startingBalance: context.startingBalance ?? null,
+      endingBalance: context.endingBalance ?? null,
+      lowestBalance: context.lowestBalance ?? null,
+      lowestDate: context.lowestDate ?? null,
+      liquidAccountCount: context.liquidAccountCount ?? null,
+      nextOccurrences,
+    },
+    prompt: [
+      `Analyze my recurring bills and income forecast for the next ${forecast.days} days.`,
+      `Projected income is ${formatMoneyValue(forecast.income)}, bills are ${formatMoneyValue(forecast.bills)}, and net impact is ${formatSignedMoneyValue(forecast.net)}.`,
+      `Confirmed net is ${formatSignedMoneyValue(confirmedNet)}, likely net is ${formatSignedMoneyValue(likelyNet)}, and uncertain net is ${formatSignedMoneyValue(uncertainNet)}.`,
+      `${forecast.review_count} recurring item${forecast.review_count === 1 ? '' : 's'} need review and ${forecast.overdue_count} are overdue.`,
+      `Cash projection context: ${projectionContext}.`,
+      `Next occurrences: ${nextOccurrences}.`,
+      'Explain the cash-flow risk, which patterns need review, and what evidence I should inspect before changing bills or budgets.',
     ].join(' '),
   };
 }

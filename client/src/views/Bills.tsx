@@ -9,12 +9,15 @@ import {
   Clock3,
   CircleAlert,
   RefreshCw,
+  Sparkles,
   Wallet,
   XCircle,
 } from 'lucide-react';
 import { format } from 'date-fns';
-import type { Account, RecurringForecastOccurrence } from '@shared/types';
+import type { Account, RecurringForecast, RecurringForecastOccurrence } from '@shared/types';
 import { accountsApi, recurringApi } from '../lib/api';
+import { advisorRouteState } from '../lib/advisorRouteState';
+import { buildRecurringForecastAdvisorPrompt } from '../lib/advisorPrompts';
 import { formatCurrency, formatDate } from '../lib/formatters';
 import { PageLoader } from '../components/LoadingSpinner';
 import { EmptyState } from '../components/EmptyState';
@@ -225,6 +228,17 @@ export function Bills() {
     null
   );
   const lowestBalance = lowestPoint?.balance ?? startingBalance;
+  const askAdvisorAboutForecast = (currentForecast: RecurringForecast) => {
+    navigate('/advisor', {
+      state: advisorRouteState(buildRecurringForecastAdvisorPrompt(currentForecast, {
+        startingBalance,
+        endingBalance,
+        lowestBalance,
+        lowestDate: lowestPoint?.date ?? null,
+        liquidAccountCount: liquidAccounts.length,
+      })),
+    });
+  };
 
   const nextOccurrence = occurrences[0];
   const grouped = useMemo(() => {
@@ -251,6 +265,16 @@ export function Bills() {
           </p>
         </div>
         <div className="flex items-center gap-2">
+          {forecast && (
+            <button
+              type="button"
+              className="text-xs border border-border rounded px-3 py-1.5 text-muted hover:text-green flex items-center gap-1"
+              onClick={() => askAdvisorAboutForecast(forecast)}
+            >
+              <Sparkles size={13} />
+              Ask advisor
+            </button>
+          )}
           {[30, 60, 90].map((option) => (
             <button
               key={option}

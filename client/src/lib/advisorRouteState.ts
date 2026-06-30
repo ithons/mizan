@@ -5,6 +5,7 @@ export type AdvisorPromptSource =
   | 'transaction'
   | 'account'
   | 'investment'
+  | 'recurring'
   | 'sync'
   | 'review';
 

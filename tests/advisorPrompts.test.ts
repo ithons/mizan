@@ -5,10 +5,11 @@ import {
   buildBudgetAdvisorPrompt,
   buildDashboardCardAdvisorPrompt,
   buildHoldingAdvisorPrompt,
+  buildRecurringForecastAdvisorPrompt,
   buildReportAdvisorPrompt,
   buildTransactionAdvisorPrompt,
 } from '../client/src/lib/advisorPrompts';
-import type { Account, Budget, Holding, ReportSummary, Transaction } from '../shared/types';
+import type { Account, Budget, Holding, RecurringForecast, ReportSummary, Transaction } from '../shared/types';
 
 function budget(overrides: Partial<Budget> = {}): Budget {
   return {
@@ -152,6 +153,38 @@ function reportSummary(overrides: Partial<ReportSummary> = {}): ReportSummary {
   };
 }
 
+function recurringForecast(overrides: Partial<RecurringForecast> = {}): RecurringForecast {
+  return {
+    days: overrides.days ?? 60,
+    income: overrides.income ?? 5000,
+    bills: overrides.bills ?? 2800,
+    net: overrides.net ?? 2200,
+    confirmed_income: overrides.confirmed_income ?? 4000,
+    confirmed_bills: overrides.confirmed_bills ?? 1800,
+    likely_income: overrides.likely_income ?? 1000,
+    likely_bills: overrides.likely_bills ?? 800,
+    uncertain_income: overrides.uncertain_income ?? 0,
+    uncertain_bills: overrides.uncertain_bills ?? 200,
+    overdue_count: overrides.overdue_count ?? 1,
+    review_count: overrides.review_count ?? 2,
+    occurrences: overrides.occurrences ?? [{
+      id: 'occ_rent_2026_07_01',
+      pattern_id: 'rec_rent',
+      merchant_name: 'Rent',
+      frequency: 'monthly',
+      expected_date: '2026-07-01',
+      amount: -1800,
+      is_income: false,
+      is_confirmed: true,
+      confidence: 1,
+      confidence_label: 'confirmed',
+      status: 'upcoming',
+      days_until: 1,
+      needs_review: false,
+    }],
+  };
+}
+
 test('report advisor prompt captures summary metrics and exclusions', () => {
   const prompt = buildReportAdvisorPrompt(reportSummary(), {
     tab: 'cashflow',
@@ -192,6 +225,26 @@ test('dashboard card advisor prompt captures the selected metric context', () =>
   assert.match(prompt.prompt, /displayed value is \$3200\.00/);
   assert.match(prompt.prompt, /displayed change is \+\$200\.00 vs last month/);
   assert.match(prompt.prompt, /Transfers are excluded/);
+});
+
+test('recurring forecast advisor prompt captures cash projection context', () => {
+  const prompt = buildRecurringForecastAdvisorPrompt(recurringForecast(), {
+    startingBalance: 3000,
+    endingBalance: 5200,
+    lowestBalance: 1200,
+    lowestDate: '2026-07-01',
+    liquidAccountCount: 2,
+  });
+
+  assert.equal(prompt.source, 'recurring');
+  assert.equal(prompt.recordKind, 'recurring_forecast');
+  assert.equal(prompt.recordId, '60d');
+  assert.equal(prompt.params?.reviewCount, 2);
+  assert.equal(prompt.params?.lowestBalance, 1200);
+  assert.match(prompt.prompt, /recurring bills and income forecast for the next 60 days/);
+  assert.match(prompt.prompt, /Projected income is \$5000\.00, bills are \$2800\.00/);
+  assert.match(prompt.prompt, /lowest projected cash \$1200\.00 on 2026-07-01/);
+  assert.match(prompt.prompt, /2026-07-01 Rent -\$1800\.00/);
 });
 
 test('budget advisor prompt captures row context and projection math', () => {
