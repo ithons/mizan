@@ -23,7 +23,7 @@ import {
   PanelLeftOpen,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
-import { accountsApi, plaidApi, coinbaseApi, transactionsApi, investmentsApi, syncApi } from '../../lib/api';
+import { accountsApi, plaidApi, coinbaseApi, transactionsApi, investmentsApi, syncApi, tellerApi } from '../../lib/api';
 import { formatCurrency, formatDate, formatRelativeTime } from '../../lib/formatters';
 import { ACCOUNT_TYPE_LABELS, CATEGORY_COLORS } from '../../lib/constants';
 import { useAppStore } from '../../store';
@@ -107,6 +107,11 @@ export function Accounts() {
   const { data: plaidItems = [] } = useQuery({
     queryKey: ['plaid-items'],
     queryFn: plaidApi.listItems,
+  });
+
+  const { data: tellerItems = [] } = useQuery({
+    queryKey: ['teller-items'],
+    queryFn: tellerApi.listItems,
   });
 
   const { data: syncHealth } = useQuery({
@@ -292,6 +297,17 @@ export function Accounts() {
       return;
     }
 
+    if (connection.provider === 'simplefin' || connection.provider === 'teller') {
+      if (connection.recommended_action === 'connect' || connection.recommended_action === 'reconnect') {
+        navigate(`/settings?section=${connection.provider}`);
+        return;
+      }
+      if (connection.recommended_action !== 'none') {
+        syncAllMutation.mutate();
+      }
+      return;
+    }
+
     if (connection.recommended_action === 'reconnect') {
       void handleReauth(connection.id);
       return;
@@ -324,7 +340,17 @@ export function Accounts() {
   }));
 
   const coinbaseAccounts = accounts.filter((a) => a.connection_type === 'coinbase');
+  const simplefinAccounts = accounts.filter((a) => a.connection_type === 'simplefin');
   const manualAccounts = accounts.filter((a) => a.is_manual);
+
+  const tellerAccounts = accounts.filter((a) => a.connection_type === 'teller');
+  // Group teller accounts by connection_id (enrollment_id)
+  const tellerGroups = tellerAccounts.reduce<Record<string, Account[]>>((acc, a) => {
+    const key = a.connection_id || 'unknown';
+    if (!acc[key]) acc[key] = [];
+    acc[key].push(a);
+    return acc;
+  }, {});
 
   const totalAccounts = showHidden ? accounts.length : accounts.filter((a) => !a.is_hidden).length;
 
@@ -447,6 +473,45 @@ export function Accounts() {
                   onDisconnectCoinbase={() => setConfirmDisconnectCoinbase(true)}
                 />
               )}
+
+              {/* SimpleFIN group */}
+              {simplefinAccounts.length > 0 && (
+                <InstitutionGroup
+                  label="SimpleFIN"
+                  accounts={simplefinAccounts}
+                  showHidden={showHidden}
+                  selectedId={selectedId}
+                  onSelect={setSelectedId}
+                  onHide={(id) => hideMutation.mutate(id)}
+                  onAsk={askAdvisorAboutAccount}
+                  holdingsByAccount={holdingsByAccount}
+                  groupType="simplefin"
+                  onSyncItem={() => syncAllMutation.mutate()}
+                  onRemoveItem={() => navigate('/settings?section=simplefin')}
+                />
+              )}
+
+              {/* Teller groups */}
+              {Object.entries(tellerGroups).map(([enrollmentId, grpAccounts]) => {
+                const item = tellerItems.find(t => t.enrollment_id === enrollmentId);
+                const label = item?.institution_name || grpAccounts[0]?.institution_name || 'Teller Connection';
+                return (
+                  <InstitutionGroup
+                    key={enrollmentId}
+                    label={label}
+                    accounts={grpAccounts}
+                    showHidden={showHidden}
+                    selectedId={selectedId}
+                    onSelect={setSelectedId}
+                    onHide={(id) => hideMutation.mutate(id)}
+                    onAsk={askAdvisorAboutAccount}
+                    holdingsByAccount={holdingsByAccount}
+                    groupType="teller"
+                    onSyncItem={() => syncAllMutation.mutate()}
+                    onRemoveItem={() => item && tellerApi.deleteItem(item.id).then(() => invalidateFinancialData(qc))}
+                  />
+                );
+              })}
 
               {/* Manual accounts */}
               {manualAccounts.length > 0 && (

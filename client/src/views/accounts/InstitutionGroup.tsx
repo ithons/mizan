@@ -74,7 +74,7 @@ export function InstitutionGroup({
   onDelete?: (id: string) => void;
   onEdit?: (id: string) => void;
   holdingsByAccount: Record<string, Holding[]>;
-  groupType: 'plaid' | 'coinbase' | 'manual';
+  groupType: 'plaid' | 'coinbase' | 'manual' | 'simplefin' | 'teller';
   plaidItem?: PlaidItem;
   onSyncItem?: () => void;
   onRemoveItem?: () => void;
@@ -114,7 +114,7 @@ export function InstitutionGroup({
           <span className="font-mono text-xs" style={{ color: total >= 0 ? '#32bfa3' : '#ef6f8a' }}>
             {formatCurrency(total)}
           </span>
-          {(groupType === 'plaid' || groupType === 'coinbase') && (
+          {(groupType === 'plaid' || groupType === 'coinbase' || groupType === 'simplefin' || groupType === 'teller') && (
             <div className="relative" ref={menuRef} onClick={(e) => e.stopPropagation()}>
               <button
                 className="opacity-0 group-hover/header:opacity-100 p-0.5 text-muted hover:text-text transition-all"
@@ -124,7 +124,7 @@ export function InstitutionGroup({
               </button>
               {menuOpen && (
                 <div className="absolute right-0 top-5 bg-surface shadow-sm border border-border rounded shadow-lg z-30 w-44 py-1">
-                  {groupType === 'plaid' && (
+                  {(groupType === 'plaid' || groupType === 'simplefin' || groupType === 'teller') && (
                     <>
                       <button
                         className="flex items-center gap-2 w-full px-3 py-1.5 text-xs text-muted hover:text-text hover:bg-black/5"
@@ -132,7 +132,7 @@ export function InstitutionGroup({
                       >
                         <RefreshCw size={12} /> Sync Institution
                       </button>
-                      {needsReauth && (
+                      {needsReauth && groupType === 'plaid' && (
                         <button
                           className="flex items-center gap-2 w-full px-3 py-1.5 text-xs text-amber hover:bg-black/5"
                           onClick={() => { onReauthItem?.(); setMenuOpen(false); }}
