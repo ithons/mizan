@@ -1,6 +1,8 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import Anthropic from '@anthropic-ai/sdk';
+import { getDb } from '../db/index';
 import { buildAdvisorContextSnapshot, ADVISOR_SYSTEM_PROMPT } from '../services/aiContext';
+import { analyzeAdvisorQuestion } from '../services/advisorTools';
 import type { ChatMessage } from '../../../shared/types';
 
 const router = Router();
@@ -21,6 +23,21 @@ router.get('/context', (_req: Request, res: Response, next: NextFunction): void 
         configured: Boolean(process.env.ANTHROPIC_API_KEY),
       },
     });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// POST /api/ai/analyze - local read-tool analysis with provenance
+router.post('/analyze', (req: Request, res: Response, next: NextFunction): void => {
+  try {
+    const question = typeof req.body?.question === 'string' ? req.body.question.trim() : '';
+    if (!question) {
+      res.status(400).json({ error: 'question is required' });
+      return;
+    }
+
+    res.json({ data: analyzeAdvisorQuestion(getDb(), question) });
   } catch (err) {
     next(err);
   }

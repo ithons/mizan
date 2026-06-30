@@ -477,12 +477,60 @@ export interface AdvisorAction {
   severity: InsightSeverity;
 }
 
+export type AdvisorIntent =
+  | 'overview'
+  | 'sync'
+  | 'review'
+  | 'budget'
+  | 'recurring'
+  | 'goals'
+  | 'reports';
+
+export type AdvisorCitationKind =
+  | 'account'
+  | 'transaction'
+  | 'budget'
+  | 'goal'
+  | 'recurring'
+  | 'report'
+  | 'sync'
+  | 'review';
+
+export interface AdvisorCitation {
+  id: string;
+  kind: AdvisorCitationKind;
+  label: string;
+  detail?: string;
+  route?: string;
+  record_id?: string;
+  amount?: number | null;
+  date?: string | null;
+}
+
+export interface AdvisorToolStatus {
+  id: string;
+  label: string;
+  status: 'available' | 'empty' | 'attention';
+  count: number;
+  route: string;
+}
+
+export interface AdvisorAnalysis {
+  question: string;
+  intent: AdvisorIntent;
+  answer: string;
+  generated_at: string;
+  tools: AdvisorToolStatus[];
+  citations: AdvisorCitation[];
+}
+
 export interface AdvisorContextResponse {
   context: string;
   configured: boolean;
   generated_at: string;
   sync_health: SyncHealth;
   actions: AdvisorAction[];
+  tools: AdvisorToolStatus[];
 }
 
 export interface ApiResponse<T> {

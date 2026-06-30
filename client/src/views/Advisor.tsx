@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import {
   ArrowRight,
   Send,
@@ -12,7 +12,13 @@ import {
   RefreshCw,
   AlertTriangle,
 } from 'lucide-react';
-import type { AdvisorAction, DataQualitySummary, Insight } from '@shared/types';
+import type {
+  AdvisorAction,
+  AdvisorAnalysis,
+  AdvisorToolStatus,
+  DataQualitySummary,
+  Insight,
+} from '@shared/types';
 import { aiApi, insightsApi } from '../lib/api';
 import { useAiChat } from '../hooks/useAiChat';
 import { formatRelativeTime } from '../lib/formatters';
@@ -79,7 +85,7 @@ function ContextPanel() {
         onClick={() => setOpen((p) => !p)}
       >
         {open ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
-        <span className="flex-1 text-left">Financial context sent to Claude</span>
+        <span className="flex-1 text-left">Local advisor context</span>
         <button
           onClick={(e) => { e.stopPropagation(); refetch(); }}
           className="p-1 rounded hover:bg-white/10 transition-colors"
@@ -109,6 +115,12 @@ const qualityTone: Record<DataQualitySummary['status'], string> = {
   review: '#5b8dee',
   stale: '#d4a44c',
   attention: '#e07070',
+};
+
+const toolTone: Record<AdvisorToolStatus['status'], string> = {
+  available: '#4ecba3',
+  empty: '#6b6b7a',
+  attention: '#d4a44c',
 };
 
 function AdvisorActionsPanel({
@@ -178,6 +190,32 @@ function DataFreshnessPanel({
   );
 }
 
+function AdvisorToolsPanel({ tools }: { tools?: AdvisorToolStatus[] }) {
+  if (!tools || tools.length === 0) return null;
+
+  return (
+    <div className="border border-border rounded-lg overflow-hidden">
+      <div className="px-3 py-2.5 border-b border-border">
+        <p className="text-xs text-muted font-medium">Read Tools</p>
+      </div>
+      <div className="divide-y divide-border">
+        {tools.map((tool) => (
+          <Link
+            key={tool.id}
+            to={tool.route}
+            className="flex items-center justify-between gap-3 px-3 py-2 text-xs hover:bg-white/5 transition-colors"
+          >
+            <span className="text-text">{tool.label}</span>
+            <span className="font-mono" style={{ color: toolTone[tool.status] }}>
+              {tool.count}
+            </span>
+          </Link>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function AdvisorQualityPanel({
   quality,
   onAsk,
@@ -231,7 +269,49 @@ function AdvisorQualityPanel({
 
 // ── Message Bubble ────────────────────────────────────────────────────────────
 
-function MessageBubble({ role, content, streaming }: { role: string; content: string; streaming?: boolean }) {
+function CitationList({ analysis }: { analysis?: AdvisorAnalysis }) {
+  const citations = analysis?.citations ?? [];
+  if (citations.length === 0) return null;
+
+  return (
+    <div className="mt-3 pt-2 border-t border-border">
+      <p className="text-[11px] text-muted mb-2">Evidence</p>
+      <div className="flex flex-wrap gap-2">
+        {citations.map((citation) => {
+          const content = (
+            <>
+              <span className="text-text">{citation.label}</span>
+              {citation.detail && <span className="text-muted"> {citation.detail}</span>}
+            </>
+          );
+          const className = "text-[11px] border border-border rounded px-2 py-1 bg-background/40 hover:border-[#4ecba3]/40 transition-colors";
+
+          return citation.route ? (
+            <Link key={citation.id} to={citation.route} className={className}>
+              {content}
+            </Link>
+          ) : (
+            <span key={citation.id} className={className}>
+              {content}
+            </span>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function MessageBubble({
+  role,
+  content,
+  streaming,
+  analysis,
+}: {
+  role: string;
+  content: string;
+  streaming?: boolean;
+  analysis?: AdvisorAnalysis;
+}) {
   const isUser = role === 'user';
   return (
     <div className={`flex ${isUser ? 'justify-end' : 'justify-start'} mb-4`}>
@@ -258,6 +338,7 @@ function MessageBubble({ role, content, streaming }: { role: string; content: st
             {streaming && content && (
               <span className="inline-block w-1.5 h-3.5 bg-[#4ecba3] animate-pulse rounded-sm ml-0.5 align-middle" />
             )}
+            {!streaming && <CitationList analysis={analysis} />}
           </div>
         )}
       </div>
@@ -265,19 +346,18 @@ function MessageBubble({ role, content, streaming }: { role: string; content: st
   );
 }
 
-// ── No API Key State ──────────────────────────────────────────────────────────
+// ── Advisor Error State ───────────────────────────────────────────────────────
 
-function NoApiKey() {
+function AdvisorUnavailable() {
   return (
     <div className="flex flex-col items-center justify-center h-full gap-4 text-center px-8">
       <div className="w-12 h-12 rounded-full bg-[#e07070]/10 flex items-center justify-center">
         <AlertTriangle size={22} className="text-[#e07070]" />
       </div>
       <div>
-        <p className="text-sm font-medium text-text mb-1">Anthropic API key not configured</p>
+        <p className="text-sm font-medium text-text mb-1">Advisor context unavailable</p>
         <p className="text-xs text-muted">
-          Add <code className="font-mono bg-white/10 px-1 rounded">ANTHROPIC_API_KEY=sk-ant-...</code> to your{' '}
-          <code className="font-mono bg-white/10 px-1 rounded">.env</code> file and restart the server.
+          Mizān could not load local financial context. Check the server and retry.
         </p>
       </div>
     </div>
@@ -362,7 +442,6 @@ function EmptyChat({
 export function Advisor() {
   const { messages, isStreaming, sendMessage, stopStreaming, clearChat } = useAiChat();
   const [input, setInput] = useState('');
-  const [apiError, setApiError] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -385,9 +464,7 @@ export function Advisor() {
     staleTime: 5 * 60 * 1000,
   });
 
-  useEffect(() => {
-    setApiError(contextError || contextStatus?.configured === false);
-  }, [contextError, contextStatus?.configured]);
+  const contextUnavailable = contextError;
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -421,7 +498,7 @@ export function Advisor() {
           <BrainCircuit size={16} className="text-[#4ecba3]" />
           <h1 className="text-sm font-medium text-text">AI Advisor</h1>
           <span className="text-xs text-muted font-mono bg-[#4ecba3]/10 border border-[#4ecba3]/20 px-1.5 py-0.5 rounded">
-            claude-opus-4-8
+            local tools
           </span>
         </div>
         {messages.length > 0 && (
@@ -440,8 +517,8 @@ export function Advisor() {
         <div className="flex flex-col flex-1 overflow-hidden">
           {/* Messages */}
           <div className="flex-1 overflow-y-auto px-6 py-4">
-            {apiError ? (
-              <NoApiKey />
+            {contextUnavailable ? (
+              <AdvisorUnavailable />
             ) : messages.length === 0 ? (
               <EmptyChat insights={insights} onSend={askPrompt} />
             ) : (
@@ -452,6 +529,7 @@ export function Advisor() {
                     role={msg.role}
                     content={msg.content}
                     streaming={msg.streaming}
+                    analysis={msg.analysis}
                   />
                 ))}
                 <div ref={bottomRef} />
@@ -460,7 +538,7 @@ export function Advisor() {
           </div>
 
           {/* Input */}
-          {!apiError && (
+          {!contextUnavailable && (
             <div className="px-6 py-4 border-t border-border flex-shrink-0">
               <div className="flex gap-2 items-end">
                 <textarea
@@ -468,7 +546,7 @@ export function Advisor() {
                   value={input}
                   onChange={(e) => setInput(e.target.value)}
                   onKeyDown={handleKeyDown}
-                  placeholder="Ask about your finances... (Enter to send, Shift+Enter for newline)"
+                  placeholder="Ask about your finances (Enter to send, Shift+Enter for newline)"
                   rows={2}
                   className="flex-1 bg-surface border border-border rounded-lg px-3 py-2.5 text-sm text-text placeholder-muted resize-none focus:outline-none focus:border-[#4ecba3]/50 transition-colors"
                   disabled={isStreaming}
@@ -493,7 +571,7 @@ export function Advisor() {
                 )}
               </div>
               <p className="text-[10px] text-muted/50 mt-1.5">
-                Financial data is sent to Anthropic's API. Not financial advice - always verify with a professional.
+                Analysis runs locally against Mizān data. Draft changes still require explicit confirmation.
               </p>
             </div>
           )}
@@ -508,6 +586,7 @@ export function Advisor() {
             statusDetail={contextStatus?.sync_health.status_detail}
             lastSyncedAt={contextStatus?.sync_health.last_synced_at}
           />
+          <AdvisorToolsPanel tools={contextStatus?.tools} />
           <AdvisorActionsPanel actions={contextStatus?.actions} onAsk={askPrompt} />
           <ContextPanel />
         </div>

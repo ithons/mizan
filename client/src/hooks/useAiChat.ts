@@ -1,10 +1,11 @@
 import { useState, useRef, useCallback } from 'react';
 import { aiApi } from '../lib/api';
-import type { ChatMessage } from '@shared/types';
+import type { AdvisorAnalysis, ChatMessage } from '@shared/types';
 
 export interface DisplayMessage extends ChatMessage {
   id: string;
   streaming?: boolean;
+  analysis?: AdvisorAnalysis;
 }
 
 function errorMessage(err: unknown, fallback: string) {
@@ -36,12 +37,6 @@ export function useAiChat() {
     setMessages((prev) => [...prev, userMsg, assistantMsg]);
     setIsStreaming(true);
 
-    // Build conversation history for the API (exclude streaming placeholder)
-    const history: ChatMessage[] = [...messages, userMsg].map((m) => ({
-      role: m.role,
-      content: m.content,
-    }));
-
     const controller = new AbortController();
     abortRef.current = controller;
 
@@ -63,26 +58,15 @@ export function useAiChat() {
     };
 
     try {
-      await aiApi.streamChat(
-        history,
-        (chunk) => {
-          setMessages((prev) =>
-            prev.map((m) =>
-              m.id === assistantId ? { ...m, content: m.content + chunk } : m
-            )
-          );
-        },
-        () => {
-          setMessages((prev) =>
-            prev.map((m) =>
-              m.id === assistantId ? { ...m, streaming: false } : m
-            )
-          );
-          finish();
-        },
-        finishWithError,
-        controller.signal
+      const analysis = await aiApi.analyze(userText, controller.signal);
+      setMessages((prev) =>
+        prev.map((m) =>
+          m.id === assistantId
+            ? { ...m, content: analysis.answer, analysis, streaming: false }
+            : m
+        )
       );
+      finish();
     } catch (err) {
       const isAbort = err instanceof Error && err.name === 'AbortError';
       if (!isAbort) {
@@ -100,7 +84,7 @@ export function useAiChat() {
         finish();
       }
     }
-  }, [messages, isStreaming]);
+  }, [isStreaming]);
 
   const stopStreaming = useCallback(() => {
     abortRef.current?.abort();

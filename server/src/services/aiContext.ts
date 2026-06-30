@@ -13,6 +13,7 @@ import { buildRecurringForecast } from './recurringForecast';
 import { getCashflowReport, getReportSummary } from './reporting';
 import { getTransactionReviewSummary } from './transactionReview';
 import { getSyncHealth } from './syncHealth';
+import { buildAdvisorReadTools } from './advisorTools';
 
 export const ADVISOR_SYSTEM_PROMPT = `You are a sharp, honest personal financial advisor with access to the user's complete financial picture. Their real balances, transactions, portfolio, goals, recurring bills, and cash-flow forecast are provided below.
 
@@ -181,6 +182,7 @@ export function buildAdvisorContextSnapshot(): Omit<AdvisorContextResponse, 'con
     generated_at: new Date().toISOString(),
     sync_health: syncHealth,
     actions,
+    tools: buildAdvisorReadTools(db, today),
   };
 }
 

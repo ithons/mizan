@@ -28,6 +28,7 @@ import type {
   PaginatedResponse,
   ChatMessage,
   AiStreamEvent,
+  AdvisorAnalysis,
   AdvisorContextResponse,
 } from '@shared/types';
 
@@ -505,6 +506,12 @@ export const settingsApi = {
 
 export const aiApi = {
   getContext: () => apiFetch<AdvisorContextResponse>('/api/ai/context'),
+  analyze: (question: string, signal?: AbortSignal) =>
+    apiFetch<AdvisorAnalysis>('/api/ai/analyze', {
+      method: 'POST',
+      body: JSON.stringify({ question }),
+      signal,
+    }),
 
   streamChat: async (
     messages: ChatMessage[],
