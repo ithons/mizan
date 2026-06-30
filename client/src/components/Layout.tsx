@@ -4,6 +4,7 @@ import { Group, Panel, Separator } from 'react-resizable-panels';
 import type { PanelImperativeHandle, PanelSize } from 'react-resizable-panels';
 import { PanelLeftClose, PanelLeftOpen } from 'lucide-react';
 import { Sidebar } from './Sidebar';
+import { CommandPalette } from './CommandPalette';
 
 const STORAGE_KEY = 'mizan:sidebar';
 
@@ -60,6 +61,7 @@ export function Layout() {
 
   return (
     <div className="flex h-screen overflow-hidden bg-background">
+      <CommandPalette />
       <Group orientation="horizontal" style={{ width: '100%', height: '100%' }}>
         <Panel
           panelRef={sidebarRef}
