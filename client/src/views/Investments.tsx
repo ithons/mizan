@@ -13,37 +13,28 @@ import { ChevronUp, ChevronDown } from 'lucide-react';
 import { format, subMonths } from 'date-fns';
 import { investmentsApi, reportsApi, accountsApi } from '../lib/api';
 import { formatCurrency, formatDate } from '../lib/formatters';
+import {
+  ALLOCATION_LENSES,
+  costBasisTone,
+  formatHoldingCount,
+  getAllocationQualityLabel,
+  getAllocationSlices,
+  getConcentrationSummary,
+  getCostBasisStats,
+  type AllocationLens,
+} from '../lib/investmentAnalytics';
 import { AmountBadge } from '../components/AmountBadge';
 import { SkeletonList, SkeletonCard } from '../components/SkeletonLoader';
 import { EmptyState } from '../components/EmptyState';
-import type { Holding, InvestmentTransaction, Account } from '@shared/types';
+import type { Holding } from '@shared/types';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 type SortCol = 'ticker' | 'value' | 'pnl' | 'pnl_pct';
 type SortDir = 'asc' | 'desc';
 type ActiveTab = 'holdings' | 'transactions';
-type AllocationLens = 'asset_type' | 'account_type' | 'tax_treatment' | 'symbol';
 
 const INV_ACCOUNT_TYPES = ['brokerage', 'ira_traditional', 'ira_roth', 'crypto_wallet'];
-
-const ALLOCATION_LENSES: Array<{ id: AllocationLens; label: string }> = [
-  { id: 'asset_type', label: 'Asset' },
-  { id: 'account_type', label: 'Account' },
-  { id: 'tax_treatment', label: 'Tax' },
-  { id: 'symbol', label: 'Symbol' },
-];
-
-const ALLOCATION_COLORS = [
-  '#6487f0',
-  '#32bfa3',
-  '#ef6f8a',
-  '#e2a53f',
-  '#9b7ef2',
-  '#5bbad5',
-  '#f08c6d',
-  '#7bbf6a',
-];
 
 const TX_TYPE_COLORS: Record<string, string> = {
   buy: 'bg-[#32bfa3]/10 text-[#32bfa3]',
@@ -61,183 +52,9 @@ const ACCOUNT_TYPE_LABELS: Record<string, string> = {
   crypto_wallet: 'Crypto',
 };
 
-interface CostBasisStats {
-  totalCount: number;
-  knownCount: number;
-  missingCount: number;
-  knownCostBasis: number;
-  unrealized: number | null;
-  returnPct: number | null;
-  coveragePct: number;
-  label: 'Complete' | 'Partial' | 'Missing' | 'No holdings';
-}
-
-interface AllocationAccumulator {
-  key: string;
-  label: string;
-  value: number;
-  count: number;
-}
-
-interface AllocationSlice extends AllocationAccumulator {
-  pct: number;
-  color: string;
-}
-
 function formatPct(n: number | null): string {
   if (n == null) return '-';
   return `${n >= 0 ? '+' : ''}${n.toFixed(1)}%`;
-}
-
-function formatHoldingCount(count: number): string {
-  return `${count} holding${count === 1 ? '' : 's'}`;
-}
-
-function titleCase(value: string): string {
-  return value
-    .replace(/_/g, ' ')
-    .replace(/\b\w/g, (char) => char.toUpperCase());
-}
-
-function getCostBasisStats(holdings: Holding[]): CostBasisStats {
-  const known = holdings.filter((holding) => holding.cost_basis != null);
-  const knownCostBasis = known.reduce((sum, holding) => sum + (holding.cost_basis ?? 0), 0);
-  const knownValue = known.reduce((sum, holding) => sum + holding.institution_value, 0);
-  const missingCount = holdings.length - known.length;
-  const unrealized = known.length > 0 ? knownValue - knownCostBasis : null;
-  const returnPct = unrealized != null && knownCostBasis > 0
-    ? (unrealized / knownCostBasis) * 100
-    : null;
-  const label = holdings.length === 0
-    ? 'No holdings'
-    : missingCount === 0
-      ? 'Complete'
-      : known.length === 0
-        ? 'Missing'
-        : 'Partial';
-
-  return {
-    totalCount: holdings.length,
-    knownCount: known.length,
-    missingCount,
-    knownCostBasis,
-    unrealized,
-    returnPct,
-    coveragePct: holdings.length > 0 ? (known.length / holdings.length) * 100 : 0,
-    label,
-  };
-}
-
-function costBasisTone(label: CostBasisStats['label']): string {
-  if (label === 'Complete') return '#32bfa3';
-  if (label === 'No holdings') return '#718087';
-  return '#e2a53f';
-}
-
-function getTaxTreatmentLabel(type: Account['type'] | undefined): string {
-  if (type === 'ira_traditional' || type === 'ira_roth') return 'Tax-advantaged';
-  if (type === 'brokerage') return 'Taxable';
-  if (type === 'crypto_wallet') return 'Crypto';
-  return 'Other';
-}
-
-function getAllocationGroup(
-  holding: Holding,
-  lens: AllocationLens,
-  accountById: Map<string, Account>
-): { key: string; label: string } {
-  const account = accountById.get(holding.account_id);
-
-  if (lens === 'asset_type') {
-    const type = holding.security_type ?? 'unclassified';
-    return { key: `asset:${type}`, label: titleCase(type) };
-  }
-
-  if (lens === 'account_type') {
-    const type = account?.type ?? 'other';
-    return { key: `account:${type}`, label: ACCOUNT_TYPE_LABELS[type] ?? titleCase(type) };
-  }
-
-  if (lens === 'tax_treatment') {
-    const label = getTaxTreatmentLabel(account?.type);
-    return { key: `tax:${label}`, label };
-  }
-
-  const symbol = holding.ticker ?? holding.security_name ?? 'Unlabeled security';
-  return { key: `symbol:${symbol}`, label: symbol };
-}
-
-function getAllocationSlices(
-  holdings: Holding[],
-  lens: AllocationLens,
-  accountById: Map<string, Account>
-): AllocationSlice[] {
-  const total = holdings.reduce((sum, holding) => sum + holding.institution_value, 0);
-  if (total <= 0) return [];
-
-  const groups = new Map<string, AllocationAccumulator>();
-
-  for (const holding of holdings) {
-    const group = getAllocationGroup(holding, lens, accountById);
-    const existing = groups.get(group.key);
-    if (existing) {
-      existing.value += holding.institution_value;
-      existing.count += 1;
-    } else {
-      groups.set(group.key, {
-        key: group.key,
-        label: group.label,
-        value: holding.institution_value,
-        count: 1,
-      });
-    }
-  }
-
-  const sorted = Array.from(groups.values()).sort((a, b) => b.value - a.value);
-  const visible = lens === 'symbol' && sorted.length > 8
-    ? [
-        ...sorted.slice(0, 7),
-        sorted.slice(7).reduce<AllocationAccumulator>(
-          (rest, slice) => ({
-            key: 'symbol:other',
-            label: 'Other',
-            value: rest.value + slice.value,
-            count: rest.count + slice.count,
-          }),
-          { key: 'symbol:other', label: 'Other', value: 0, count: 0 }
-        ),
-      ]
-    : sorted;
-
-  return visible.map((slice, index) => ({
-    ...slice,
-    pct: (slice.value / total) * 100,
-    color: ALLOCATION_COLORS[index % ALLOCATION_COLORS.length],
-  }));
-}
-
-function getAllocationQualityLabel(
-  holdings: Holding[],
-  lens: AllocationLens,
-  accountById: Map<string, Account>
-): string {
-  if (holdings.length === 0) return 'No holdings';
-
-  if (lens === 'account_type' || lens === 'tax_treatment') {
-    const missingAccounts = holdings.filter((holding) => !accountById.has(holding.account_id)).length;
-    if (missingAccounts > 0) return `${formatHoldingCount(missingAccounts)} missing account links`;
-    return lens === 'tax_treatment' ? 'Inferred from account type' : 'Linked to accounts';
-  }
-
-  if (lens === 'asset_type') {
-    const unclassified = holdings.filter((holding) => !holding.security_type).length;
-    if (unclassified > 0) return `${formatHoldingCount(unclassified)} unclassified`;
-    return 'Classified by provider type';
-  }
-
-  const unlabeled = holdings.filter((holding) => !holding.ticker && !holding.security_name).length;
-  if (unlabeled > 0) return `${formatHoldingCount(unlabeled)} unlabeled`;
-  return 'Labeled by security';
 }
 
 function PnlCell({ value, pct }: { value: number | null; pct: number | null }) {
@@ -460,6 +277,10 @@ export function Investments() {
     () => getAllocationQualityLabel(filteredHoldings, allocationLens, accountById),
     [filteredHoldings, allocationLens, accountById]
   );
+  const concentrationSummary = useMemo(
+    () => getConcentrationSummary(filteredHoldings, accountById),
+    [filteredHoldings, accountById]
+  );
 
   return (
     <div className="p-6 space-y-6">
@@ -652,17 +473,35 @@ export function Investments() {
             ))}
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-3 border-t border-border pt-3 text-xs">
+          <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-5 gap-3 border-t border-border pt-3 text-xs">
             <div>
-              <p className="text-muted">Largest Exposure</p>
-              <p className="font-mono text-text mt-1">
-                {allocationSlices[0].label} / {allocationSlices[0].pct.toFixed(1)}%
+              <p className="text-muted">Concentration</p>
+              <p className="font-mono text-text mt-1" title={concentrationSummary.detail}>
+                {concentrationSummary.label}
               </p>
             </div>
             <div>
-              <p className="text-muted">Lens</p>
-              <p className="text-text mt-1">
-                {ALLOCATION_LENSES.find((lens) => lens.id === allocationLens)?.label ?? 'Asset'}
+              <p className="text-muted">Largest Position</p>
+              <p className="font-mono text-text mt-1">
+                {concentrationSummary.largestPosition
+                  ? `${concentrationSummary.largestPosition.label} / ${concentrationSummary.largestPosition.pct.toFixed(1)}%`
+                  : '-'}
+              </p>
+            </div>
+            <div>
+              <p className="text-muted">Top 5 Positions</p>
+              <p className="font-mono text-text mt-1">
+                {concentrationSummary.topFivePct == null
+                  ? '-'
+                  : `${formatCurrency(concentrationSummary.topFiveValue)} / ${concentrationSummary.topFivePct.toFixed(1)}%`}
+              </p>
+            </div>
+            <div>
+              <p className="text-muted">Largest Account Type</p>
+              <p className="font-mono text-text mt-1">
+                {concentrationSummary.largestAccount
+                  ? `${concentrationSummary.largestAccount.label} / ${concentrationSummary.largestAccount.pct.toFixed(1)}%`
+                  : '-'}
               </p>
             </div>
             <div>
