@@ -1,4 +1,5 @@
 import type { Response } from 'express';
+import type Database from 'better-sqlite3';
 import type { SyncEvent } from '../../../shared/types';
 import { syncCoinbase } from './coinbase';
 import { syncSimplefin } from './simplefin';
@@ -12,7 +13,7 @@ import {
   recordSyncRunItem,
   startSyncRun,
 } from './syncHistory';
-import { refreshTransactionIntegrity } from './transactionIntegrity';
+import { refreshTransactionIntegrity, type TransactionIntegrityResult } from './transactionIntegrity';
 import { describeBalanceChange } from './balanceChanges';
 import { runBackgroundAiReview } from './aiWorker';
 
@@ -50,6 +51,109 @@ export function emitSyncEvent(event: SyncEvent): void {
 }
 
 
+
+export interface PostSyncStageFns {
+  detectRecurring: () => void;
+  refreshTransactionIntegrity: (db: Database.Database) => TransactionIntegrityResult;
+  takeSnapshot: () => void;
+}
+
+const defaultPostSyncStages: PostSyncStageFns = {
+  detectRecurring,
+  refreshTransactionIntegrity,
+  takeSnapshot,
+};
+
+export interface PostSyncStagesResult {
+  integrity: TransactionIntegrityResult;
+  deferredError: Error | null;
+}
+
+// Each stage (recurring detection, integrity refresh, snapshot) gets its own try/catch
+// so a failure in one doesn't skip the others or mask an otherwise-successful provider sync.
+export function runPostSyncStages(
+  db: Database.Database,
+  runId: string,
+  deferredError: Error | null,
+  stages: PostSyncStageFns = defaultPostSyncStages
+): PostSyncStagesResult {
+  let nextDeferredError = deferredError;
+
+  emitSyncEvent({ type: 'sync_progress', message: 'Detecting recurring transactions...', progress: 75 });
+  try {
+    stages.detectRecurring();
+  } catch (err) {
+    const message = (err as Error).message || 'Recurring detection failed';
+    recordSyncRunItem(db, runId, {
+      provider: 'system',
+      connection_id: 'recurring-detection',
+      institution_name: 'Recurring detection',
+      status: 'failed',
+      error_message: message,
+      recovery_action: 'Retry sync. Recurring pattern detection will run again next sync.',
+    });
+    nextDeferredError = nextDeferredError ?? new Error(message);
+  }
+
+  let integrity: TransactionIntegrityResult = {
+    duplicates: { groupCount: 0, transactionCount: 0 },
+    transfers: { pairCount: 0, transactionCount: 0 },
+  };
+  try {
+    integrity = stages.refreshTransactionIntegrity(db);
+    const integrityItem = recordSyncRunItem(db, runId, {
+      provider: 'system',
+      connection_id: 'transaction-integrity',
+      institution_name: 'Transaction integrity',
+      status: 'succeeded',
+    });
+    if (integrity.duplicates.groupCount > 0) {
+      recordSyncChange(db, integrityItem.id, {
+        entity_type: 'integrity',
+        entity_id: null,
+        change_type: 'detected',
+        description: `${integrity.duplicates.groupCount} duplicate group(s) need review`,
+      });
+    }
+    if (integrity.transfers.pairCount > 0) {
+      recordSyncChange(db, integrityItem.id, {
+        entity_type: 'integrity',
+        entity_id: null,
+        change_type: 'detected',
+        description: `${integrity.transfers.pairCount} transfer pair(s) need review`,
+      });
+    }
+  } catch (err) {
+    const message = (err as Error).message || 'Transaction integrity check failed';
+    recordSyncRunItem(db, runId, {
+      provider: 'system',
+      connection_id: 'transaction-integrity',
+      institution_name: 'Transaction integrity',
+      status: 'failed',
+      error_message: message,
+      recovery_action: 'Retry sync. Duplicate/transfer detection will run again next sync.',
+    });
+    nextDeferredError = nextDeferredError ?? new Error(message);
+  }
+
+  emitSyncEvent({ type: 'sync_progress', message: 'Taking net worth snapshot...', progress: 90 });
+  try {
+    stages.takeSnapshot();
+  } catch (err) {
+    const message = (err as Error).message || 'Snapshot failed';
+    recordSyncRunItem(db, runId, {
+      provider: 'system',
+      connection_id: 'net-worth-snapshot',
+      institution_name: 'Net worth snapshot',
+      status: 'failed',
+      error_message: message,
+      recovery_action: 'Retry sync. A snapshot will be taken again next sync.',
+    });
+    nextDeferredError = nextDeferredError ?? new Error(message);
+  }
+
+  return { integrity, deferredError: nextDeferredError };
+}
 
 export async function runFullSync(): Promise<void> {
   if (_activeSyncPromise) {
@@ -156,36 +260,9 @@ async function _runFullSyncInternal(): Promise<void> {
       }
     }
 
-    // Detect recurring
-    emitSyncEvent({ type: 'sync_progress', message: 'Detecting recurring transactions...', progress: 75 });
-    detectRecurring();
-    const integrity = refreshTransactionIntegrity(db);
-    const integrityItem = recordSyncRunItem(db, run.id, {
-      provider: 'system',
-      connection_id: 'transaction-integrity',
-      institution_name: 'Transaction integrity',
-      status: 'succeeded',
-    });
-    if (integrity.duplicates.groupCount > 0) {
-      recordSyncChange(db, integrityItem.id, {
-        entity_type: 'integrity',
-        entity_id: null,
-        change_type: 'detected',
-        description: `${integrity.duplicates.groupCount} duplicate group(s) need review`,
-      });
-    }
-    if (integrity.transfers.pairCount > 0) {
-      recordSyncChange(db, integrityItem.id, {
-        entity_type: 'integrity',
-        entity_id: null,
-        change_type: 'detected',
-        description: `${integrity.transfers.pairCount} transfer pair(s) need review`,
-      });
-    }
-
-    // Take snapshot
-    emitSyncEvent({ type: 'sync_progress', message: 'Taking net worth snapshot...', progress: 90 });
-    takeSnapshot();
+    const postSync = runPostSyncStages(db, run.id, deferredError);
+    const integrity = postSync.integrity;
+    deferredError = postSync.deferredError;
 
     finishSyncRun(db, run.id, {
       status: deferredError ? 'partial' : 'succeeded',

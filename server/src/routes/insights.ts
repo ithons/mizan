@@ -133,15 +133,16 @@ router.get('/', (_req: Request, res: Response, next: NextFunction): void => {
       });
     }
 
-    const plaidItems = db.prepare(`
-      SELECT institution_name, last_synced_at, status
-      FROM plaid_items
+    const simplefinConnections = db.prepare(`
+      SELECT 'SimpleFIN' AS institution_name, last_synced_at, status
+      FROM simplefin_connections
+      WHERE status != 'removed'
     `).all() as ConnectionRow[];
     const coinbaseConnections = db.prepare(`
       SELECT display_name AS institution_name, last_synced_at, status
       FROM coinbase_connections
     `).all() as ConnectionRow[];
-    const connections = [...plaidItems, ...coinbaseConnections];
+    const connections = [...simplefinConnections, ...coinbaseConnections];
     const brokenConnections = connections.filter((connection) => connection.status !== 'active');
     const staleConnections = connections.filter((connection) => {
       if (connection.status !== 'active') return false;

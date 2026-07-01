@@ -131,7 +131,7 @@ export function backfillSnapshots(): void {
     for (const txn of laterTransactions) {
       if (approxBalances[txn.account_id] !== undefined) {
         // Reverse the transaction: transactions reduce/increase balance
-        // In Plaid convention: negative amount = money going out (expense), positive = income
+        // Sign convention: negative amount = money going out (expense), positive = income
         approxBalances[txn.account_id] -= txn.amount;
       }
     }

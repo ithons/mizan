@@ -22,11 +22,8 @@ router.get('/', (_req: Request, res: Response, next: NextFunction): void => {
   try {
     const db = getDb();
     const accounts = (db.prepare(`
-      SELECT
-        a.*,
-        pi.last_synced_at
+      SELECT a.*
       FROM accounts a
-      LEFT JOIN plaid_items pi ON pi.id = a.connection_id AND a.connection_type = 'plaid'
       ORDER BY a.sort_order ASC, a.created_at ASC
     `).all() as AccountRow[]).map((a) => ({
       ...a,
@@ -240,17 +237,9 @@ router.post(
         const providerFields: string[] = [];
         const providerValues: any[] = [];
 
-        if (source.teller_account_id) {
-          providerFields.push('teller_account_id = ?');
-          providerValues.push(source.teller_account_id);
-        }
         if (source.simplefin_account_id) {
           providerFields.push('simplefin_account_id = ?');
           providerValues.push(source.simplefin_account_id);
-        }
-        if (source.plaid_account_id) {
-          providerFields.push('plaid_account_id = ?');
-          providerValues.push(source.plaid_account_id);
         }
 
         // Update target account connection info to match source

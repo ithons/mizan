@@ -5,3 +5,5 @@ dist/
 *.pem
 *.key
 .DS_Store
+CLAUDE.md
+AGENT.md

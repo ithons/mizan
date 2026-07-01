@@ -5,6 +5,7 @@ import type { z } from 'zod';
 import type { CsvImportPreview, CsvImportPreviewIssue, CsvImportPreviewRow } from '../../../shared/types';
 import type { CsvImportMappingSchema } from '../../../shared/schemas';
 import { adjustManualAccountBalance } from './manualAccountBalance';
+import { amountCents } from './transactionIntegrity';
 
 export type CsvImportMapping = z.infer<typeof CsvImportMappingSchema>;
 
@@ -109,7 +110,7 @@ function duplicateCandidateCount(
     FROM transactions
     WHERE account_id = ?
       AND date = ?
-      AND ABS(amount - ?) < 0.005
+      AND CAST(ROUND(amount * 100) AS INTEGER) = ?
       AND (
         merchant_name = ?
         OR original_name = ?
@@ -117,7 +118,7 @@ function duplicateCandidateCount(
   `).get(
     row.account_id,
     row.date,
-    row.amount,
+    amountCents(row.amount),
     row.merchant_name,
     row.original_name
   ) as { count: number } | undefined;
@@ -136,11 +137,11 @@ function transferCandidateCount(
     FROM transactions
     WHERE account_id <> ?
       AND date = ?
-      AND ABS(amount + ?) < 0.005
+      AND CAST(ROUND(amount * 100) AS INTEGER) = ?
   `).get(
     row.account_id,
     row.date,
-    row.amount
+    -amountCents(row.amount)
   ) as { count: number } | undefined;
 
   return transfer?.count ?? 0;

@@ -44,7 +44,7 @@ function shortHash(input: string): string {
   return crypto.createHash('sha256').update(input).digest('hex').slice(0, 16);
 }
 
-function amountCents(amount: number): number {
+export function amountCents(amount: number): number {
   return Math.round(amount * 100);
 }
 
@@ -86,7 +86,6 @@ export function refreshDuplicateCandidates(db: Database.Database): DuplicateDete
   `).all() as DuplicateRow[];
 
   const groups = new Map<string, DuplicateRow[]>();
-  const byAmount = new Map<number, DuplicateRow[]>();
 
   for (const row of rows) {
     const merchant = normalizeMerchant(row.merchant_name || row.original_name);

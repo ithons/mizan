@@ -536,11 +536,6 @@ export const settingsApi = {
     }),
   importRuns: (limit = 20) =>
     apiFetch<DataImportRun[]>(`/api/settings/import-runs?limit=${limit}`),
-  savePlaidCredentials: (body: { clientId: string; secret: string; environment: string }) =>
-    apiFetch<void>('/api/settings/credentials/plaid', {
-      method: 'POST',
-      body: JSON.stringify(body),
-    }),
   saveCoinbaseCredentials: (body: { keyName: string; privateKey: string }) =>
     apiFetch<void>('/api/settings/credentials/coinbase', {
       method: 'POST',
@@ -689,18 +684,4 @@ export const aiApi = {
       }
     }
   },
-};
-
-// ─── Health ──────────────────────────────────────────────────────────────────
-
-export const healthApi = {
-  get: () =>
-    apiFetch<{
-      status: string;
-      version: string;
-      plaidEnvironment: 'sandbox' | 'production' | null;
-      plaidItemCount: number;
-      coinbaseConnected: boolean;
-      error: string | null;
-    }>('/api/health'),
 };

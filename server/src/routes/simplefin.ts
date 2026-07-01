@@ -41,7 +41,7 @@ router.get('/connection', (_req: Request, res: Response, next: NextFunction): vo
   try {
     const db = getDb();
     const item = db.prepare(
-      "SELECT * FROM simplefin_connections WHERE status != 'removed' LIMIT 1"
+      "SELECT id, status, last_synced_at, created_at FROM simplefin_connections WHERE status != 'removed' LIMIT 1"
     ).get();
 
     res.json({ data: item || null });

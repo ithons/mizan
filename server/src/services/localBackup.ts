@@ -12,7 +12,6 @@ export const LOCAL_BACKUP_TABLES = [
   'recurring_patterns',
   'merchant_rules',
   'goals',
-  'plaid_items',
   'coinbase_connections',
   'net_worth_snapshots',
   'sync_runs',

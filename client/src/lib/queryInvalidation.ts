@@ -2,7 +2,6 @@ import type { QueryClient } from '@tanstack/react-query';
 
 const FINANCIAL_QUERY_KEYS = [
   'accounts',
-  'plaid-items',
   'transactions',
   'networth',
   'budgets',

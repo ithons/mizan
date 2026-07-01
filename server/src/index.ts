@@ -60,6 +60,14 @@ async function main() {
     })
   );
 
+  if (IS_PROD) {
+    if (process.env.CORS_ORIGIN) {
+      console.log(`[startup] CORS_ORIGIN=${process.env.CORS_ORIGIN} — cross-origin requests allowed. The app has no auth middleware, so anything reachable at this origin can read/write your financial data.`);
+    } else {
+      console.log('[startup] CORS_ORIGIN not set — cross-origin API requests will be rejected. Fine if this process also serves the client (the default). Set CORS_ORIGIN if the client is hosted elsewhere.');
+    }
+  }
+
   app.use(express.json({ limit: '10mb' }));
 
   // API routes

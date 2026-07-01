@@ -50,7 +50,7 @@ export function invalidateCategoryData(queryClient: ReturnType<typeof useQueryCl
   invalidateFinancialData(queryClient);
 }
 
-// ─── Plaid Section ────────────────────────────────────────────────────────────
+// ─── Category Row ────────────────────────────────────────────────────────────
 
 export function CategoryRow({
   category,

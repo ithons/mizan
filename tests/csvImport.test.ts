@@ -136,3 +136,24 @@ test('csv import commit imports valid rows and reports invalid row errors', (t) 
   const account = db.prepare('SELECT current_balance FROM accounts WHERE id = ?').get('acct_cash') as { current_balance: number };
   assert.equal(account.current_balance, 83.5);
 });
+
+test('csv import duplicate detection compares exact cents, not a float epsilon', (t) => {
+  const db = setupCsvImportDb();
+  t.after(() => db.close());
+
+  // 0.1 + 0.2 !== 0.3 under IEEE-754; stored directly to prove cents-rounding still matches it.
+  db.prepare(`
+    INSERT INTO transactions (id, account_id, date, amount, merchant_name, original_name, created_at, updated_at)
+    VALUES ('txn_float_noise', 'acct_cash', '2026-06-28', ?, 'Noisy', 'Noisy', '2026-06-28T00:00:00.000Z', '2026-06-28T00:00:00.000Z')
+  `).run(-(0.1 + 0.2 + 19.5));
+
+  const noisyRows = [
+    { date: '2026-06-28', amount: '-19.80', merchant: 'Noisy', category: 'Food', account: 'Cash', notes: '' },
+    { date: '2026-06-28', amount: '-19.79', merchant: 'Noisy', category: 'Food', account: 'Cash', notes: '' },
+  ];
+
+  const preview = buildCsvImportPreview(db, { rows: noisyRows, mapping });
+
+  assert.equal(preview.rows[0]?.duplicate_candidate_count, 1, 'matches a float-noisy existing amount at the cent level');
+  assert.equal(preview.rows[1]?.duplicate_candidate_count, 0, 'does not match an amount one cent away');
+});
