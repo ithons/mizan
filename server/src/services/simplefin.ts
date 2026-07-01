@@ -130,7 +130,10 @@ export async function syncSimplefin() {
     for (const txn of (acct.transactions || [])) {
       const existingTxn = db.prepare('SELECT id FROM transactions WHERE simplefin_transaction_id = ?').get(txn.id);
 
-      // Convert epoch seconds to YYYY-MM-DD in the local timezone
+      // Convert epoch seconds to YYYY-MM-DD in the local timezone.
+      // Note: This relies on the assumption that the server's local timezone matches 
+      // the user's timezone. For a local-first desktop app, this is correct. If deployed 
+      // to a remote VPS, this may cause late-night transactions to land on the wrong day.
       const date = format(new Date(txn.posted * 1000), 'yyyy-MM-dd');
       const amount = parseFloat(txn.amount); // already negative for expenses
       const merchantName = txn.payee || null;

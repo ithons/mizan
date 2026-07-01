@@ -107,7 +107,7 @@ Example JSON format for a draft:
 
     // Let's ask the LLM for suggestions
     const response = await anthropic.messages.create({
-      model: 'claude-3-haiku-20240307',
+      model: 'claude-3-5-haiku-20241022',
       max_tokens: 1024,
       system: systemPrompt,
       messages: [{ role: 'user', content: 'Generate proactive drafts based on the latest sync state.' }],

@@ -89,7 +89,7 @@ router.post('/chat', async (req: Request, res: Response, next: NextFunction): Pr
     const snapshot = buildAdvisorContextSnapshot();
 
     const stream = anthropic.messages.stream({
-      model: 'claude-opus-4-8',
+      model: 'claude-3-7-sonnet-20250219',
       max_tokens: 2048,
       system: [
         {

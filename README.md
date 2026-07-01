@@ -68,7 +68,7 @@ SimpleFIN Bridge provides read-only access to thousands of financial institution
 
 ## AI Architecture
 
-Mizān relies on Anthropic's Claude 3.5 Sonnet / Haiku to perform background sync reviews and exploratory chat.
+Mizān relies on Anthropic's Claude 3.7 Sonnet / 3.5 Haiku to perform background sync reviews and exploratory chat.
 - **Local Heuristics (`/api/ai/analyze`):** The Command Palette (Cmd+K) and context generation rely on completely local, regex/DB-based heuristics. They execute in sub-milliseconds without network overhead.
 - **Cloud LLM (`/api/ai/chat` & background worker):** Explicit chat queries and asynchronous background sync reviews send structured data context to Anthropic APIs. Data ONLY leaves your machine when explicitly initiating a chat or when sync updates trigger a background review.
 
