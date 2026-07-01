@@ -55,7 +55,7 @@ export function MergeAccountModal({ isOpen, onClose, targetAccount }: MergeAccou
         <p className="text-sm text-muted">
           Select an account to merge into <strong>{targetAccount.account_name}</strong>. 
           The selected account will be deleted, and all of its transactions will be moved into this account. 
-          This is useful when switching an account from Plaid to SimpleFIN or Teller.
+          This is useful when switching an account from one sync provider to another.
         </p>
 
         {error && <div className="text-sm text-red-500">{error}</div>}

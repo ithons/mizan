@@ -24,7 +24,6 @@ import {
 } from 'lucide-react';
 import {
   settingsApi,
-  plaidApi,
   coinbaseApi,
   categoriesApi,
   rulesApi,

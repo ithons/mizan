@@ -14,8 +14,8 @@ router.get('/', (_req: Request, res: Response, next: NextFunction): void => {
       "SELECT COUNT(*) as count FROM accounts WHERE is_hidden = 0"
     ).get() as { count: number };
 
-    const plaidItemRow = db.prepare(
-      "SELECT COUNT(*) as count FROM plaid_items WHERE status != 'removed'"
+    const simplefinRow = db.prepare(
+      "SELECT COUNT(*) as count FROM simplefin_connections WHERE status = 'active'"
     ).get() as { count: number };
 
     const coinbaseRow = db.prepare(
@@ -28,8 +28,7 @@ router.get('/', (_req: Request, res: Response, next: NextFunction): void => {
         version: '0.1.0',
         dbPath: DB_PATH,
         connectedAccounts: accountRow.count,
-        plaidEnvironment: creds.plaid?.environment ?? null,
-        plaidItemCount: plaidItemRow.count,
+        simplefinConnected: simplefinRow.count > 0 || !!creds.simplefin?.accessUrl,
         coinbaseConnected: coinbaseRow.count > 0,
         error: null,
       },

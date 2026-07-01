@@ -1,4 +1,4 @@
-export type ConnectionType = 'plaid' | 'coinbase' | 'teller' | 'simplefin' | 'manual';
+export type ConnectionType = 'coinbase' | 'simplefin' | 'manual';
 
 export type AccountType =
   | 'checking'
@@ -13,8 +13,6 @@ export type AccountType =
 
 export interface Account {
   id: string;
-  plaid_account_id?: string | null;
-  teller_account_id?: string | null;
   simplefin_account_id?: string | null;
   coinbase_account_id?: string | null;
   connection_id?: string | null;
@@ -41,8 +39,6 @@ export interface Account {
 
 export interface Transaction {
   id: string;
-  plaid_transaction_id?: string | null;
-  teller_transaction_id?: string | null;
   simplefin_transaction_id?: string | null;
   coinbase_transaction_id?: string | null;
   account_id: string;
@@ -55,7 +51,7 @@ export interface Transaction {
   notes?: string | null;
   is_manual: boolean;
   recurring_id?: string | null;
-  source_type: 'plaid' | 'coinbase' | 'teller' | 'simplefin' | 'manual' | 'import';
+  source_type: 'coinbase' | 'simplefin' | 'manual' | 'import';
   source_detail?: string | null;
   duplicate_group_id?: string | null;
   duplicate_status: 'none' | 'candidate' | 'dismissed';
@@ -107,7 +103,6 @@ export interface DataImportRun {
 
 export interface InvestmentTransaction {
   id: string;
-  plaid_investment_transaction_id?: string | null;
   account_id: string;
   date: string;
   type: 'buy' | 'sell' | 'dividend' | 'transfer' | 'fee' | 'other';
@@ -125,7 +120,6 @@ export interface InvestmentTransaction {
 
 export interface Security {
   id: string;
-  plaid_security_id?: string | null;
   ticker?: string | null;
   name: string;
   type: 'equity' | 'etf' | 'mutual_fund' | 'crypto' | 'cash' | 'other';
@@ -440,26 +434,7 @@ export interface Goal {
   account_is_liability?: boolean | null;
 }
 
-export interface PlaidItem {
-  id: string;
-  item_id: string;
-  institution_id?: string | null;
-  institution_name: string;
-  cursor?: string | null;
-  last_synced_at?: string | null;
-  products?: string | null;
-  status: string;
-  created_at: string;
-}
 
-export interface TellerItem {
-  id: string;
-  enrollment_id: string;
-  institution_name: string;
-  last_synced_at?: string | null;
-  status: string;
-  created_at: string;
-}
 
 export interface SimplefinConnection {
   id: string;
@@ -505,7 +480,7 @@ export type SyncHealthFreshness = 'fresh' | 'stale' | 'never' | 'attention';
 
 export interface SyncHealthConnection {
   id: string;
-  provider: 'plaid' | 'coinbase' | 'teller' | 'simplefin';
+  provider: 'coinbase' | 'simplefin';
   institution_name: string;
   status: string;
   last_synced_at?: string | null;
@@ -535,9 +510,9 @@ export interface SyncHealth {
   connections: SyncHealthConnection[];
 }
 
-export type SyncRunScope = 'full' | 'plaid_item' | 'plaid_all' | 'coinbase' | 'teller_all' | 'simplefin_all';
+export type SyncRunScope = 'full' | 'coinbase' | 'simplefin_all';
 export type SyncRunStatus = 'running' | 'succeeded' | 'partial' | 'failed';
-export type SyncRunItemProvider = 'plaid' | 'coinbase' | 'teller' | 'simplefin' | 'system';
+export type SyncRunItemProvider = 'coinbase' | 'simplefin' | 'system';
 export type SyncRunItemStatus = 'running' | 'succeeded' | 'skipped' | 'reauth_required' | 'failed';
 
 export interface SyncRun {
@@ -1014,11 +989,9 @@ export interface NetWorthHistory {
 }
 
 export interface CredentialStatus {
-  plaid: boolean;
-  plaidEnvironment: 'sandbox' | 'production' | null;
-  plaidFromEnv: boolean;
   coinbase: boolean;
   coinbaseFromEnv: boolean;
+  simplefin: boolean;
 }
 
 export interface CsvImportPreviewIssue {

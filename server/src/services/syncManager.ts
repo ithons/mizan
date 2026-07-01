@@ -1,8 +1,6 @@
 import type { Response } from 'express';
 import type { SyncEvent } from '../../../shared/types';
-import { syncAllItems } from './plaid';
 import { syncCoinbase } from './coinbase';
-import { syncTellerItem } from './teller';
 import { syncSimplefin } from './simplefin';
 import { detectRecurring } from './recurring';
 import { takeSnapshot } from './snapshot';
@@ -51,13 +49,7 @@ export function emitSyncEvent(event: SyncEvent): void {
   }
 }
 
-function formatIssueNames(
-  issues: Array<{ institutionName: string; itemId: string }>
-): string {
-  return issues
-    .map((issue) => issue.institutionName || issue.itemId)
-    .join(', ');
-}
+
 
 export async function runFullSync(): Promise<void> {
   if (_activeSyncPromise) {
@@ -84,46 +76,7 @@ async function _runFullSyncInternal(): Promise<void> {
   try {
     const creds = getCredentials();
 
-    // Sync Teller items
-    if (creds.tellerItems) {
-      for (const [enrollmentId] of Object.entries(creds.tellerItems)) {
-        emitSyncEvent({ type: 'sync_progress', message: `Syncing Teller: ${enrollmentId}...`, progress: 20 });
-        try {
-          const tellerResult = await syncTellerItem(enrollmentId);
-          const runItem = recordSyncRunItem(db, run.id, {
-            provider: 'teller',
-            connection_id: enrollmentId,
-            institution_name: tellerResult.institutionName || 'Teller',
-            status: 'succeeded',
-            accounts_seen: tellerResult.accountCount,
-            transactions_added: tellerResult.added,
-            transactions_modified: tellerResult.modified,
-            transactions_removed: tellerResult.removed,
-            transactions_skipped: tellerResult.skipped,
-          });
 
-          for (const change of tellerResult.balanceChanges) {
-            recordSyncChange(db, runItem.id, {
-              entity_type: 'account',
-              entity_id: change.accountId,
-              change_type: 'updated',
-              description: describeBalanceChange(change),
-            });
-          }
-        } catch (err) {
-          const message = (err as Error).message || 'Teller sync failed';
-          recordSyncRunItem(db, run.id, {
-            provider: 'teller',
-            connection_id: enrollmentId,
-            institution_name: 'Teller',
-            status: 'failed',
-            error_message: message,
-            recovery_action: 'Retry sync. If it continues failing, reconnect Teller.',
-          });
-          deferredError = deferredError ?? new Error(message);
-        }
-      }
-    }
 
     // Sync SimpleFIN
     if (creds.simplefin?.accessUrl) {
@@ -164,43 +117,7 @@ async function _runFullSyncInternal(): Promise<void> {
       }
     }
 
-    // Sync Plaid items
-    emitSyncEvent({ type: 'sync_progress', message: 'Syncing bank accounts...', progress: 10 });
-    const plaidSummary = await syncAllItems();
-    for (const item of plaidSummary.items) {
-      const runItem = recordSyncRunItem(db, run.id, {
-        provider: 'plaid',
-        connection_id: item.itemId,
-        institution_name: item.institutionName,
-        status: item.status === 'synced'
-          ? 'succeeded'
-          : item.status === 'reauth_required'
-            ? 'reauth_required'
-            : 'failed',
-        accounts_seen: item.accountCount,
-        transactions_added: item.added,
-        transactions_modified: item.modified,
-        transactions_removed: item.removed,
-        transactions_skipped: item.skipped,
-        error_message: item.errorMessage,
-        recovery_action: item.recoveryAction,
-      });
 
-      for (const change of item.balanceChanges) {
-        recordSyncChange(db, runItem.id, {
-          entity_type: 'account',
-          entity_id: change.accountId,
-          change_type: 'updated',
-          description: describeBalanceChange(change),
-        });
-      }
-    }
-
-    const plaidIssues = [...plaidSummary.failed, ...plaidSummary.reauthRequired];
-    if (plaidIssues.length > 0) {
-      const names = formatIssueNames(plaidIssues);
-      deferredError = new Error(`Bank sync incomplete for ${names}. Check Accounts or Settings to reconnect or retry.`);
-    }
 
     // Sync Coinbase if connected
     if (creds.coinbase) {

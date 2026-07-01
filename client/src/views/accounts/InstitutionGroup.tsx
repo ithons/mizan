@@ -25,7 +25,7 @@ import {
   PanelLeftOpen,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
-import { accountsApi, plaidApi, coinbaseApi, transactionsApi, investmentsApi, syncApi } from '../../lib/api';
+import { accountsApi, coinbaseApi, transactionsApi, investmentsApi, syncApi } from '../../lib/api';
 import { formatCurrency, formatDate, formatRelativeTime } from '../../lib/formatters';
 import { ACCOUNT_TYPE_LABELS, CATEGORY_COLORS } from '../../lib/constants';
 import { useAppStore } from '../../store';
@@ -36,10 +36,9 @@ import { EmptyState } from '../../components/EmptyState';
 import { SkeletonList } from '../../components/SkeletonLoader';
 import { ConfirmRemoveModal } from '../../components/ConfirmRemoveModal';
 import { SyncActivityPanel } from '../../components/SyncActivityPanel';
-import { loadPlaidLink } from '../../lib/plaidLink';
 import { invalidateFinancialData } from '../../lib/queryInvalidation';
 import { parseDecimalInput } from '../../lib/numberInput';
-import type { Account, PlaidItem, Holding, SyncHealth, SyncHealthConnection, SyncRun } from '@shared/types';
+import type { Account, Holding, SyncHealth, SyncHealthConnection, SyncRun } from '@shared/types';
 
 import { AccountRow } from './AccountRow';
 
@@ -56,10 +55,8 @@ export function InstitutionGroup({
   onEdit,
   holdingsByAccount,
   groupType,
-  plaidItem,
   onSyncItem,
   onRemoveItem,
-  onReauthItem,
   onDisconnectCoinbase,
   onSyncCoinbase,
 }: {
@@ -74,11 +71,9 @@ export function InstitutionGroup({
   onDelete?: (id: string) => void;
   onEdit?: (id: string) => void;
   holdingsByAccount: Record<string, Holding[]>;
-  groupType: 'plaid' | 'coinbase' | 'manual' | 'simplefin' | 'teller';
-  plaidItem?: PlaidItem;
+  groupType: 'coinbase' | 'manual' | 'simplefin';
   onSyncItem?: () => void;
   onRemoveItem?: () => void;
-  onReauthItem?: () => void;
   onDisconnectCoinbase?: () => void;
   onSyncCoinbase?: () => void;
 }) {
@@ -95,8 +90,6 @@ export function InstitutionGroup({
     (sum, a) => sum + (a.is_liability ? -a.current_balance : a.current_balance),
     0
   );
-  const needsReauth = plaidItem?.status === 'reauth_required';
-
   return (
     <div className="mb-1">
       <div className="flex items-center px-3 py-1.5 group/header">
@@ -105,16 +98,14 @@ export function InstitutionGroup({
           onClick={() => setCollapsed((v) => !v)}
         >
           <span className="text-xs font-medium text-muted uppercase tracking-wider truncate">{label}</span>
-          {needsReauth && (
-            <span title="Reconnect required"><AlertTriangle size={11} className="text-amber flex-shrink-0" /></span>
-          )}
+
           {sublabel && <span className="text-xs text-muted/50 font-normal normal-case tracking-normal">{sublabel}</span>}
         </button>
         <div className="flex items-center gap-1.5 flex-shrink-0">
           <span className="font-mono text-xs" style={{ color: total >= 0 ? '#32bfa3' : '#ef6f8a' }}>
             {formatCurrency(total)}
           </span>
-          {(groupType === 'plaid' || groupType === 'coinbase' || groupType === 'simplefin' || groupType === 'teller') && (
+          {(groupType === 'coinbase' || groupType === 'simplefin') && (
             <div className="relative" ref={menuRef} onClick={(e) => e.stopPropagation()}>
               <button
                 className="opacity-0 group-hover/header:opacity-100 p-0.5 text-muted hover:text-text transition-all"
@@ -124,7 +115,7 @@ export function InstitutionGroup({
               </button>
               {menuOpen && (
                 <div className="absolute right-0 top-5 bg-surface shadow-sm border border-border rounded shadow-lg z-30 w-44 py-1">
-                  {(groupType === 'plaid' || groupType === 'simplefin' || groupType === 'teller') && (
+                  {groupType === 'simplefin' && (
                     <>
                       <button
                         className="flex items-center gap-2 w-full px-3 py-1.5 text-xs text-muted hover:text-text hover:bg-black/5"
@@ -132,14 +123,6 @@ export function InstitutionGroup({
                       >
                         <RefreshCw size={12} /> Sync Institution
                       </button>
-                      {needsReauth && groupType === 'plaid' && (
-                        <button
-                          className="flex items-center gap-2 w-full px-3 py-1.5 text-xs text-amber hover:bg-black/5"
-                          onClick={() => { onReauthItem?.(); setMenuOpen(false); }}
-                        >
-                          <Unlink size={12} /> Reconnect
-                        </button>
-                      )}
                       <div className="border-t border-border my-1" />
                       <button
                         className="flex items-center gap-2 w-full px-3 py-1.5 text-xs text-rose hover:bg-black/5"

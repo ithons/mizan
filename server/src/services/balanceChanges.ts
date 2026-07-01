@@ -1,4 +1,4 @@
-export type BalanceChangeProvider = 'plaid' | 'coinbase' | 'teller' | 'simplefin' | 'manual';
+export type BalanceChangeProvider = 'coinbase' | 'simplefin' | 'manual';
 
 export interface AccountBalanceChange {
   accountId: string;
@@ -40,15 +40,11 @@ export function balancesDiffer(previousBalance: number, newBalance: number): boo
 export function describeBalanceChange(change: AccountBalanceChange): string {
   const delta = balanceDelta(change);
   const impact = netWorthImpact(change);
-  const provider = change.provider === 'plaid'
-    ? 'Plaid'
-    : change.provider === 'coinbase'
-      ? 'Coinbase'
-      : change.provider === 'teller'
-        ? 'Teller'
-        : change.provider === 'simplefin'
-          ? 'SimpleFIN'
-          : 'Manual';
+  const provider = change.provider === 'coinbase'
+    ? 'Coinbase'
+    : change.provider === 'simplefin'
+      ? 'SimpleFIN'
+      : 'Manual';
 
   return [
     `${change.accountName} balance changed from ${formatMoney(change.previousBalance, change.currency)} to ${formatMoney(change.newBalance, change.currency)}`,

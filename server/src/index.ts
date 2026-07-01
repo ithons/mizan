@@ -23,8 +23,6 @@ import rulesRouter from './routes/rules';
 import insightsRouter from './routes/insights';
 import reportsRouter from './routes/reports';
 import networthRouter from './routes/networth';
-import plaidRouter from './routes/plaid';
-import tellerRouter from './routes/teller';
 import simplefinRouter from './routes/simplefin';
 import coinbaseRouter from './routes/coinbase';
 import syncRouter from './routes/sync';
@@ -52,11 +50,7 @@ async function main() {
   app.use(morgan('dev'));
 
   // Security
-  app.use(
-    helmet({
-      contentSecurityPolicy: false, // Allow Plaid CDN script
-    })
-  );
+  app.use(helmet());
   app.use(
     cors({
       origin: IS_PROD
@@ -80,8 +74,6 @@ async function main() {
   app.use('/api/insights', insightsRouter);
   app.use('/api/reports', reportsRouter);
   app.use('/api/networth', networthRouter);
-  app.use('/api/plaid', plaidRouter);
-  app.use('/api/teller', tellerRouter);
   app.use('/api/simplefin', simplefinRouter);
   app.use('/api/coinbase', coinbaseRouter);
   app.use('/api/sync', syncRouter);

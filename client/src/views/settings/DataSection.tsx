@@ -24,7 +24,6 @@ import {
 } from 'lucide-react';
 import {
   settingsApi,
-  plaidApi,
   coinbaseApi,
   categoriesApi,
   rulesApi,
@@ -665,27 +664,7 @@ export function DataSection() {
             Delete All Data
           </button>
         </div>
-        <div className="flex items-center justify-between py-2">
-          <div>
-            <p className="text-sm text-text">Disconnect All Plaid Items</p>
-            <p className="text-xs text-muted">Remove all connected bank accounts.</p>
-          </div>
-          <button
-            className="px-3 py-1.5 text-xs border border-rose/40 text-rose rounded hover:bg-rose/10"
-            onClick={async () => {
-              try {
-                const items = await plaidApi.listItems();
-                await Promise.all(items.map((i) => plaidApi.deleteItem(i.id)));
-                invalidateFinancialData(qc);
-                addToast({ type: 'success', message: 'All Plaid items disconnected' });
-              } catch (err: unknown) {
-                addToast({ type: 'error', message: err instanceof Error ? err.message : 'Disconnect failed' });
-              }
-            }}
-          >
-            Disconnect All
-          </button>
-        </div>
+
       </div>
 
       <Modal

@@ -5,9 +5,7 @@ import type { CredentialStatus, SyncHealth, TransactionReviewSummary } from '../
 
 function credentialStatus(overrides: Partial<CredentialStatus> = {}): CredentialStatus {
   return {
-    plaid: false,
-    plaidEnvironment: null,
-    plaidFromEnv: false,
+    simplefin: false,
     coinbase: false,
     coinbaseFromEnv: false,
     ...overrides,
@@ -37,6 +35,7 @@ function reviewSummary(totalOpen: number): TransactionReviewSummary {
     recurring_candidates: [],
     duplicate_candidates: [],
     transfer_candidates: [],
+    ai_drafts: [],
   };
 }
 
@@ -53,10 +52,10 @@ test('onboarding starts with credentials when nothing is configured', () => {
   assert.equal(plan.percentComplete, 0);
 });
 
-test('onboarding moves to source connection after Plaid credentials exist', () => {
+test('onboarding moves to source connection after SimpleFIN credentials exist', () => {
   const plan = getOnboardingPlan({
     accountCount: 0,
-    credentialStatus: credentialStatus({ plaid: true, plaidEnvironment: 'sandbox' }),
+    credentialStatus: credentialStatus({ simplefin: true }),
     syncHealth: syncHealth(),
     reviewSummary: reviewSummary(0),
   });
@@ -81,7 +80,7 @@ test('manual or imported accounts do not block on provider sync', () => {
 test('live accounts must clear sync attention before review', () => {
   const plan = getOnboardingPlan({
     accountCount: 2,
-    credentialStatus: credentialStatus({ plaid: true, plaidEnvironment: 'sandbox' }),
+    credentialStatus: credentialStatus({ simplefin: true }),
     syncHealth: syncHealth({
       status: 'attention',
       status_label: 'Needs attention',
@@ -100,7 +99,7 @@ test('live accounts must clear sync attention before review', () => {
 test('healthy sync with review items routes to the Review Inbox', () => {
   const plan = getOnboardingPlan({
     accountCount: 3,
-    credentialStatus: credentialStatus({ plaid: true, plaidEnvironment: 'sandbox' }),
+    credentialStatus: credentialStatus({ simplefin: true }),
     syncHealth: syncHealth({
       status: 'healthy',
       status_label: 'Healthy',

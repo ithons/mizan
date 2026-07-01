@@ -196,8 +196,8 @@ export function Onboarding() {
             <p className="text-xs text-muted mb-3">Current state</p>
             <div className="space-y-2 text-xs">
               <div className="flex items-center justify-between gap-3">
-                <span className="text-muted">Plaid</span>
-                <span className="font-mono text-text">{credentials?.plaid ? 'configured' : 'not configured'}</span>
+                <span className="text-muted">SimpleFIN</span>
+                <span className="font-mono text-text">{credentials?.simplefin ? 'configured' : 'not configured'}</span>
               </div>
               <div className="flex items-center justify-between gap-3">
                 <span className="text-muted">Accounts</span>

@@ -1,13 +1,9 @@
-import { lazy, Suspense, useEffect, type ReactNode } from 'react';
+import { lazy, Suspense, type ReactNode } from 'react';
 import { Routes, Route } from 'react-router-dom';
-import { useQueryClient } from '@tanstack/react-query';
 import { Layout } from './components/Layout';
 import { ToastContainer } from './components/Toast';
 import { useSyncStatus } from './hooks/useSyncStatus';
 import { useAppStore } from './store';
-import { plaidApi } from './lib/api';
-import { loadPlaidLink } from './lib/plaidLink';
-import { invalidateFinancialData } from './lib/queryInvalidation';
 
 const Dashboard = lazy(() => import('./views/Dashboard').then((module) => ({ default: module.Dashboard })));
 const Onboarding = lazy(() => import('./views/Onboarding').then((module) => ({ default: module.Onboarding })));
@@ -22,10 +18,6 @@ const Investments = lazy(() => import('./views/Investments').then((module) => ({
 const Reports = lazy(() => import('./views/Reports').then((module) => ({ default: module.Reports })));
 const Settings = lazy(() => import('./views/settings/Settings').then((module) => ({ default: module.Settings })));
 const Advisor = lazy(() => import('./views/Advisor').then((module) => ({ default: module.Advisor })));
-
-function errorMessage(err: unknown, fallback: string) {
-  return err instanceof Error && err.message ? err.message : fallback;
-}
 
 function ViewFallback() {
   return (
@@ -46,54 +38,6 @@ function lazyView(view: ReactNode) {
 
 function AppRoutes() {
   useSyncStatus();
-  const qc = useQueryClient();
-  const { addToast } = useAppStore();
-
-  // Handle Plaid OAuth return (Chase, Wells Fargo, etc.)
-  // After the user authenticates with their bank, Plaid redirects back to
-  // the registered redirect URI with ?oauth_state_id=<id>. We must resume
-  // the Link session by passing receivedRedirectUri to Plaid.create().
-  useEffect(() => {
-    const oauthParams = new URLSearchParams(window.location.search);
-    if (!oauthParams.has('oauth_state_id')) return;
-
-    const receivedRedirectUri = window.location.href;
-
-    (async () => {
-      try {
-        const plaid = await loadPlaidLink();
-        const storedToken = sessionStorage.getItem('plaid_link_token');
-        const link_token = storedToken ?? (await plaidApi.createLinkToken()).link_token;
-        sessionStorage.removeItem('plaid_link_token');
-        const handler = plaid.create({
-          token: link_token,
-          receivedRedirectUri,
-          onSuccess: async (publicToken: string, metadata: unknown) => {
-            const result = await plaidApi.exchangeToken(publicToken, metadata);
-            invalidateFinancialData(qc);
-            if (result.initialSyncStatus === 'synced') {
-              addToast({ type: 'success', message: 'Bank connected successfully' });
-            } else {
-              addToast({
-                type: 'error',
-                message: result.initialSyncError
-                  ? `Bank connected, but initial sync failed: ${result.initialSyncError}`
-                  : 'Bank connected, but initial sync did not finish',
-              });
-            }
-            window.history.replaceState({}, '', window.location.pathname);
-          },
-          onExit: () => {
-            window.history.replaceState({}, '', window.location.pathname);
-          },
-        });
-        handler.open();
-      } catch (err: unknown) {
-        addToast({ type: 'error', message: errorMessage(err, 'Failed to resume Plaid OAuth') });
-        window.history.replaceState({}, '', window.location.pathname);
-      }
-    })();
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <>

@@ -26,9 +26,6 @@ const statusTone = {
 
 const scopeLabel: Record<SyncRun['scope'], string> = {
   full: 'Full sync',
-  plaid_item: 'Bank sync',
-  plaid_all: 'Bank sync',
-  teller_all: 'Teller sync',
   simplefin_all: 'SimpleFIN sync',
   coinbase: 'Coinbase sync',
 };

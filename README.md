@@ -43,54 +43,15 @@ All data is stored in the project-local `.mizan/` directory:
 
 Credentials are encrypted at rest using a key derived from your machine's unique identifier. They are never stored in plaintext.
 
-## Plaid Setup
-
-1. Create a free account at [dashboard.plaid.com](https://dashboard.plaid.com)
-2. Go to **Team Settings → API** and copy your **Client ID** and **Sandbox Secret**
-3. Ensure **Transactions** and **Investments** products are enabled
-4. In Mizān, go to **Settings → Plaid** and enter your credentials
-5. Click **Connect Bank or Card** to link an account via Plaid Link
-6. In sandbox, use `user_good` / `pass_good` to test
-
-### OAuth institutions (Chase, Wells Fargo, Bank of America, etc.)
-
-Some banks use OAuth - instead of entering credentials inside Plaid Link, the browser
-navigates to the bank's website and back. **This will not work until you register the
-redirect URI in your Plaid dashboard.** Symptoms of a missing registration: you land on
-the bank login page but never return to the app; or you see `plaid-link-oauth://handoff`
-in the URL state.
-
-**Required one-time setup:**
-
-1. Go to [dashboard.plaid.com](https://dashboard.plaid.com) -> **Team Settings -> API -> Allowed redirect URIs**
-2. Click **Add URI** and enter exactly: `http://localhost:3001`
-3. Save
-
-Without step 2, Plaid embeds `plaid-link-oauth://handoff` (a mobile deep-link scheme) in
-the OAuth state instead of your localhost URL, and the browser cannot handle it.
-
-In production, replace `http://localhost:3001` with your actual domain.
-
 ## SimpleFIN Setup
 
-SimpleFIN Bridge provides read-only access to thousands of financial institutions for a small monthly fee (~$1.50/mo). This is a reliable, privacy-respecting alternative to Plaid.
+SimpleFIN Bridge provides read-only access to thousands of financial institutions for a small monthly fee (~$1.50/mo). This is a reliable, privacy-respecting integration.
 
 1. Create an account at [bridge.simplefin.org](https://bridge.simplefin.org)
 2. Connect your financial institutions through their dashboard.
 3. Once connected, generate a new **Setup Token**.
-4. In Mizān, go to **Settings → SimpleFIN**.
+4. In Mizān, go to **Settings → Connections**.
 5. Paste your Setup Token and click **Connect**. Mizān will securely exchange this for a permanent Access URL and sync your accounts.
-
-## Teller Setup
-
-Teller provides direct, API-based bank connections using TLS certificates.
-
-1. Apply for developer access at [teller.io](https://teller.io)
-2. Once approved, create an application in the Teller dashboard.
-3. Generate and download your TLS certificate (`certificate.pem` and `private_key.pem`).
-4. In Mizān, go to **Settings → Teller**.
-5. Paste the contents of your Certificate and Private Key into the respective fields.
-6. Click **Save** and use the Teller link to connect institutions.
 
 ## Coinbase Setup
 
@@ -114,7 +75,7 @@ Mizān relies on Anthropic's Claude 3.5 Sonnet / Haiku to perform background syn
 ## Privacy
 
 No data leaves your machine except for direct API calls to:
-- Plaid, SimpleFIN, or Teller (transaction syncing)
+- SimpleFIN (transaction syncing)
 - Coinbase (balance syncing)
 - `api.coinbase.com/v2/prices` (public spot price endpoint, no auth)
 - Anthropic (explicit AI chat and background sync reviews)

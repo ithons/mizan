@@ -24,7 +24,6 @@ import {
 } from 'lucide-react';
 import {
   settingsApi,
-  plaidApi,
   coinbaseApi,
   categoriesApi,
   rulesApi,
@@ -46,18 +45,16 @@ const CATEGORY_PRESET_COLORS = [
   '#c4a86e', '#6e8ec4',
 ];
 
-import { PlaidSection } from './PlaidSection';
 import { SimplefinSection } from './SimplefinSection';
-import { TellerSection } from './TellerSection';
 import { CoinbaseSection } from './CoinbaseSection';
 import { CategoriesSection } from './CategoriesSection';
 import { RulesSection } from './RulesSection';
 import { DataSection } from './DataSection';
 import { TaxesSection } from './TaxesSection';
 import { AboutSection } from './AboutSection';
-type SettingsSection = "plaid" | "coinbase" | "categories" | "rules" | "taxes" | "data" | "about";
+type SettingsSection = "connections" | "coinbase" | "categories" | "rules" | "taxes" | "data" | "about";
 const sectionItems: { key: SettingsSection; label: string; icon: any }[] = [
-  { key: "plaid", label: "Plaid", icon: Link2 },
+  { key: "connections", label: "Connections", icon: Link2 },
   { key: "coinbase", label: "Coinbase", icon: Wallet },
   { key: "categories", label: "Categories", icon: Tag },
   { key: "rules", label: "Rules", icon: CheckCircle },
@@ -68,7 +65,7 @@ const sectionItems: { key: SettingsSection; label: string; icon: any }[] = [
 function settingsSection(value: string | null): SettingsSection {
   return sectionItems.some((section) => section.key === value)
     ? value as SettingsSection
-    : "plaid";
+    : "connections";
 }
 
 
@@ -121,14 +118,9 @@ export function Settings() {
           <h2 className="text-base font-semibold text-text mb-6">
             {sectionItems.find((s) => s.key === activeSection)?.label}
           </h2>
-          {activeSection === 'plaid' && (
+          {activeSection === 'connections' && (
             <div className="space-y-8">
               <SimplefinSection />
-              <TellerSection />
-              <div className="pt-8 border-t border-border mt-8">
-                <h2 className="text-xl font-medium text-muted mb-4">Legacy Connections</h2>
-                <PlaidSection />
-              </div>
             </div>
           )}
           {activeSection === 'coinbase' && <CoinbaseSection />}

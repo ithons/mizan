@@ -13,23 +13,13 @@ interface EncryptedFile {
   ciphertext: string;
 }
 
-export interface PlaidCredentials {
-  clientId: string;
-  secret: string;
-  environment: 'sandbox' | 'production';
-}
-
 export interface CoinbaseCredentials {
   keyName: string;
   privateKey: string;
 }
 
 export interface CredentialsStore {
-  plaid?: PlaidCredentials;
   coinbase?: CoinbaseCredentials;
-  plaidItems?: Record<string, { accessToken: string }>;
-  tellerCertificate?: { cert: string; privateKey: string };
-  tellerItems?: Record<string, { accessToken: string }>;
   simplefin?: { setupToken?: string; accessUrl?: string };
 }
 
@@ -148,13 +138,6 @@ export function saveCredentials(store: CredentialsStore): void {
 
 export function getEnvCredentials(): Partial<CredentialsStore> {
   const result: Partial<CredentialsStore> = {};
-  if (process.env.PLAID_CLIENT_ID && process.env.PLAID_SECRET) {
-    result.plaid = {
-      clientId: process.env.PLAID_CLIENT_ID,
-      secret: process.env.PLAID_SECRET,
-      environment: (process.env.PLAID_ENVIRONMENT as 'sandbox' | 'production') ?? 'sandbox',
-    };
-  }
   if (process.env.COINBASE_KEY_NAME && process.env.COINBASE_PRIVATE_KEY) {
     result.coinbase = {
       keyName: process.env.COINBASE_KEY_NAME,
@@ -170,37 +153,10 @@ export function getCredentials(): CredentialsStore {
   return { ...stored, ...env };
 }
 
-export function updatePlaidCredentials(plaid: PlaidCredentials): void {
-  const store = loadCredentials();
-  store.plaid = plaid;
-  saveCredentials(store);
-}
-
 export function updateCoinbaseCredentials(coinbase: CoinbaseCredentials): void {
   const store = loadCredentials();
   store.coinbase = coinbase;
   saveCredentials(store);
-}
-
-export function updateTellerCertificate(cert: string, privateKey: string): void {
-  const store = loadCredentials();
-  store.tellerCertificate = { cert, privateKey };
-  saveCredentials(store);
-}
-
-export function saveTellerItemToken(enrollmentId: string, accessToken: string): void {
-  const store = loadCredentials();
-  if (!store.tellerItems) store.tellerItems = {};
-  store.tellerItems[enrollmentId] = { accessToken };
-  saveCredentials(store);
-}
-
-export function removeTellerItemToken(enrollmentId: string): void {
-  const store = loadCredentials();
-  if (store.tellerItems) {
-    delete store.tellerItems[enrollmentId];
-    saveCredentials(store);
-  }
 }
 
 export function updateSimplefin(accessUrl: string): void {
@@ -218,23 +174,9 @@ export function removeSimplefin(): void {
   }
 }
 
-export function savePlaidItemToken(itemId: string, accessToken: string): void {
-  const store = loadCredentials();
-  if (!store.plaidItems) store.plaidItems = {};
-  store.plaidItems[itemId] = { accessToken };
-  saveCredentials(store);
-}
-
-export function removePlaidItemToken(itemId: string): void {
-  const store = loadCredentials();
-  if (store.plaidItems) {
-    delete store.plaidItems[itemId];
-    saveCredentials(store);
-  }
-}
-
 export function removeCoinbaseCredentials(): void {
   const store = loadCredentials();
   delete store.coinbase;
   saveCredentials(store);
 }
+

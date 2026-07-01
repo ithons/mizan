@@ -167,7 +167,7 @@ function citation(params: AdvisorCitation): AdvisorCitation {
 
 function selectIntent(question: string): AdvisorIntent {
   const text = question.toLowerCase();
-  if (/\b(sync|stale|connection|institution|plaid|coinbase|reconnect)\b/.test(text)) return 'sync';
+  if (/\b(sync|stale|connection|institution|simplefin|coinbase|reconnect)\b/.test(text)) return 'sync';
   if (/\b(data quality|trustworthy|trust|reliable|believable|invariant|wrong number|numbers wrong)\b/.test(text)) return 'quality';
   if (/\b(subscription|subscriptions|renewal|renewals|price increase|price increases)\b/.test(text)) return 'subscriptions';
   if (/\b(anomaly|anomalies|unusual|spike|spikes|gap|gaps|surge|changed a lot)\b/.test(text)) return 'insights';

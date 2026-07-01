@@ -2,7 +2,6 @@ import { Router, Request, Response, NextFunction } from 'express';
 import { getDb } from '../db/index';
 import { validate } from '../middleware/validate';
 import {
-  PlaidCredentialsSchema,
   CoinbaseCredentialsSchema,
   CsvImportMappingSchema,
   DeleteDataSchema,
@@ -13,11 +12,8 @@ import {
 import {
   getCredentials,
   getEnvCredentials,
-  updatePlaidCredentials,
   updateCoinbaseCredentials,
 } from '../services/credentials';
-import type { PlaidCredentials } from '../services/credentials';
-import { resetPlaidClient } from '../services/plaid';
 import { takeSnapshot } from '../services/snapshot';
 import { detectRecurring } from '../services/recurring';
 import { refreshTransactionIntegrity } from '../services/transactionIntegrity';
@@ -50,11 +46,9 @@ router.get('/credentials', (_req: Request, res: Response, next: NextFunction): v
     const envCreds = getEnvCredentials();
     res.json({
       data: {
-        plaid: !!creds.plaid,
-        plaidEnvironment: creds.plaid?.environment ?? null,
-        plaidFromEnv: !!envCreds.plaid,
         coinbase: !!creds.coinbase,
         coinbaseFromEnv: !!envCreds.coinbase,
+        simplefin: !!creds.simplefin?.setupToken || !!creds.simplefin?.accessUrl,
       },
     });
   } catch (err) {
@@ -62,21 +56,7 @@ router.get('/credentials', (_req: Request, res: Response, next: NextFunction): v
   }
 });
 
-// POST /credentials/plaid
-router.post(
-  '/credentials/plaid',
-  validate(PlaidCredentialsSchema),
-  (req: Request, res: Response, next: NextFunction): void => {
-    try {
-      updatePlaidCredentials(req.body as PlaidCredentials);
-      resetPlaidClient();
-      console.log('[plaid] credentials updated, environment=%s', (req.body as PlaidCredentials).environment);
-      res.json({ data: { success: true } });
-    } catch (err) {
-      next(err);
-    }
-  }
-);
+
 
 // POST /credentials/coinbase
 router.post(
@@ -321,7 +301,7 @@ router.delete(
         DELETE FROM budgets;
         DELETE FROM accounts;
         DELETE FROM net_worth_snapshots;
-        DELETE FROM plaid_items;
+        DELETE FROM simplefin_connections;
         DELETE FROM coinbase_connections;
         DELETE FROM sync_changes;
         DELETE FROM sync_run_items;

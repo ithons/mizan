@@ -26,7 +26,6 @@ interface HoldingRow {
 
 interface SecurityRow {
   id: string;
-  plaid_security_id: string | null;
   ticker: string | null;
   name: string;
   type: Security['type'];
@@ -109,7 +108,6 @@ function holdingFromRow(row: HoldingRow): Holding {
 function securityFromRow(row: SecurityRow): Security {
   return {
     id: row.id,
-    plaid_security_id: row.plaid_security_id,
     ticker: row.ticker,
     name: row.name,
     type: row.type,
@@ -191,7 +189,7 @@ export function setSecurityMetadata(
   `).run(sector, sectorSource, securityId);
 
   const row = db.prepare(`
-    SELECT id, plaid_security_id, ticker, name, type, currency, sector, sector_source
+    SELECT id, ticker, name, type, currency, sector, sector_source
     FROM securities
     WHERE id = ?
   `).get(securityId) as SecurityRow | undefined;

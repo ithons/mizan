@@ -23,7 +23,7 @@ import {
   PanelLeftOpen,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
-import { accountsApi, plaidApi, coinbaseApi, transactionsApi, investmentsApi, syncApi } from '../../lib/api';
+import { accountsApi, coinbaseApi, transactionsApi, investmentsApi, syncApi } from '../../lib/api';
 import { formatCurrency, formatDate, formatRelativeTime } from '../../lib/formatters';
 import { ACCOUNT_TYPE_LABELS, CATEGORY_COLORS } from '../../lib/constants';
 import { useAppStore } from '../../store';
@@ -34,10 +34,9 @@ import { EmptyState } from '../../components/EmptyState';
 import { SkeletonList } from '../../components/SkeletonLoader';
 import { ConfirmRemoveModal } from '../../components/ConfirmRemoveModal';
 import { SyncActivityPanel } from '../../components/SyncActivityPanel';
-import { loadPlaidLink } from '../../lib/plaidLink';
 import { invalidateFinancialData } from '../../lib/queryInvalidation';
 import { parseDecimalInput } from '../../lib/numberInput';
-import type { Account, PlaidItem, Holding, SyncHealth, SyncHealthConnection, SyncRun } from '@shared/types';
+import type { Account, Holding, SyncHealth, SyncHealthConnection, SyncRun } from '@shared/types';
 
 
 const syncTone = {

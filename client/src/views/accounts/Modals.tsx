@@ -23,7 +23,7 @@ import {
   PanelLeftOpen,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
-import { accountsApi, plaidApi, coinbaseApi, transactionsApi, investmentsApi, syncApi } from '../../lib/api';
+import { accountsApi, coinbaseApi, transactionsApi, investmentsApi, syncApi } from '../../lib/api';
 import { formatCurrency, formatDate, formatRelativeTime } from '../../lib/formatters';
 import { ACCOUNT_TYPE_LABELS, CATEGORY_COLORS } from '../../lib/constants';
 import { useAppStore } from '../../store';
@@ -34,12 +34,11 @@ import { EmptyState } from '../../components/EmptyState';
 import { SkeletonList } from '../../components/SkeletonLoader';
 import { ConfirmRemoveModal } from '../../components/ConfirmRemoveModal';
 import { SyncActivityPanel } from '../../components/SyncActivityPanel';
-import { loadPlaidLink } from '../../lib/plaidLink';
 import { invalidateFinancialData } from '../../lib/queryInvalidation';
 import { parseDecimalInput } from '../../lib/numberInput';
-import type { Account, PlaidItem, Holding, SyncHealth, SyncHealthConnection, SyncRun } from '@shared/types';
+import type { Account, Holding, SyncHealth, SyncHealthConnection, SyncRun } from '@shared/types';
 
-export function EditManualAccountModal({
+export function EditAccountModal({
   open,
   account,
   onClose,
@@ -55,6 +54,7 @@ export function EditManualAccountModal({
     institution_name: '',
     type: 'checking',
     current_balance: '',
+    is_liability: false,
     color: CATEGORY_COLORS[0],
   });
 
@@ -65,6 +65,7 @@ export function EditManualAccountModal({
         institution_name: account.institution_name ?? '',
         type: account.type,
         current_balance: String(account.current_balance),
+        is_liability: Boolean(account.is_liability),
         color: account.color ?? CATEGORY_COLORS[0],
       });
     }
@@ -72,16 +73,22 @@ export function EditManualAccountModal({
 
   const mutation = useMutation({
     mutationFn: () => {
-      const currentBalance = parseDecimalInput(form.current_balance);
-      if (currentBalance === null) {
-        throw new Error('Enter a valid current balance');
+      // Balance is only editable for manual accounts
+      let currentBalance = account?.current_balance ?? 0;
+      if (account?.is_manual) {
+        const parsed = parseDecimalInput(form.current_balance);
+        if (parsed === null) {
+          throw new Error('Enter a valid current balance');
+        }
+        currentBalance = parsed;
       }
 
       return accountsApi.update(account!.id, {
         account_name: form.account_name,
-        institution_name: form.institution_name,
+        institution_name: account?.is_manual ? form.institution_name : undefined,
         type: form.type as import('@shared/types').AccountType,
-        current_balance: currentBalance,
+        is_liability: form.is_liability,
+        current_balance: account?.is_manual ? currentBalance : undefined,
         color: form.color,
       });
     },
@@ -106,36 +113,53 @@ export function EditManualAccountModal({
             onChange={(e) => setForm({ ...form, account_name: e.target.value })}
           />
         </div>
-        <div>
-          <label className="block text-xs text-muted mb-1">Institution</label>
-          <input
-            className="w-full bg-background border border-border rounded px-3 py-2 text-sm text-text focus:outline-none focus:ring-1 focus:ring-green-50"
-            value={form.institution_name}
-            onChange={(e) => setForm({ ...form, institution_name: e.target.value })}
-            placeholder="Chase"
-          />
+        {account.is_manual && (
+          <div>
+            <label className="block text-xs text-muted mb-1">Institution</label>
+            <input
+              className="w-full bg-background border border-border rounded px-3 py-2 text-sm text-text focus:outline-none focus:ring-1 focus:ring-green-50"
+              value={form.institution_name}
+              onChange={(e) => setForm({ ...form, institution_name: e.target.value })}
+              placeholder="Chase"
+            />
+          </div>
+        )}
+        <div className="flex gap-4">
+          <div className="flex-1">
+            <label className="block text-xs text-muted mb-1">Account Type</label>
+            <select
+              className="w-full bg-background border border-border rounded px-3 py-2 text-sm text-text focus:outline-none focus:ring-1 focus:ring-green-50"
+              value={form.type}
+              onChange={(e) => setForm({ ...form, type: e.target.value })}
+            >
+              {Object.entries(ACCOUNT_TYPE_LABELS).map(([val, label]) => (
+                <option key={val} value={val}>{label}</option>
+              ))}
+            </select>
+          </div>
+          <div className="flex items-end pb-2">
+            <label className="flex items-center gap-2 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={form.is_liability}
+                onChange={(e) => setForm({ ...form, is_liability: e.target.checked })}
+                className="rounded border-border text-green focus:ring-green-50"
+              />
+              <span className="text-sm text-text">Liability</span>
+            </label>
+          </div>
         </div>
-        <div>
-          <label className="block text-xs text-muted mb-1">Account Type</label>
-          <select
-            className="w-full bg-background border border-border rounded px-3 py-2 text-sm text-text focus:outline-none focus:ring-1 focus:ring-green-50"
-            value={form.type}
-            onChange={(e) => setForm({ ...form, type: e.target.value })}
-          >
-            {Object.entries(ACCOUNT_TYPE_LABELS).map(([val, label]) => (
-              <option key={val} value={val}>{label}</option>
-            ))}
-          </select>
-        </div>
-        <div>
-          <label className="block text-xs text-muted mb-1">Current Balance</label>
-          <input
-            type="number"
-            className="w-full bg-background border border-border rounded px-3 py-2 text-sm text-text font-mono focus:outline-none focus:ring-1 focus:ring-green-50"
-            value={form.current_balance}
-            onChange={(e) => setForm({ ...form, current_balance: e.target.value })}
-          />
-        </div>
+        {account.is_manual && (
+          <div>
+            <label className="block text-xs text-muted mb-1">Current Balance</label>
+            <input
+              type="number"
+              className="w-full bg-background border border-border rounded px-3 py-2 text-sm text-text font-mono focus:outline-none focus:ring-1 focus:ring-green-50"
+              value={form.current_balance}
+              onChange={(e) => setForm({ ...form, current_balance: e.target.value })}
+            />
+          </div>
+        )}
         <div>
           <label className="block text-xs text-muted mb-1">Color</label>
           <div className="flex flex-wrap gap-2">
@@ -185,6 +209,7 @@ export function AddManualAccountModal({ open, onClose }: { open: boolean; onClos
     type: 'checking',
     current_balance: '',
     currency: 'USD',
+    is_liability: false,
     color: CATEGORY_COLORS[0],
   });
 
@@ -229,17 +254,30 @@ export function AddManualAccountModal({ open, onClose }: { open: boolean; onClos
             placeholder="Chase"
           />
         </div>
-        <div>
-          <label className="block text-xs text-muted mb-1">Account Type</label>
-          <select
-            className="w-full bg-background border border-border rounded px-3 py-2 text-sm text-text focus:outline-none focus:ring-1 focus:ring-green-50"
-            value={form.type}
-            onChange={(e) => setForm({ ...form, type: e.target.value })}
-          >
-            {Object.entries(ACCOUNT_TYPE_LABELS).map(([val, label]) => (
-              <option key={val} value={val}>{label}</option>
-            ))}
-          </select>
+        <div className="flex gap-4">
+          <div className="flex-1">
+            <label className="block text-xs text-muted mb-1">Account Type</label>
+            <select
+              className="w-full bg-background border border-border rounded px-3 py-2 text-sm text-text focus:outline-none focus:ring-1 focus:ring-green-50"
+              value={form.type}
+              onChange={(e) => setForm({ ...form, type: e.target.value })}
+            >
+              {Object.entries(ACCOUNT_TYPE_LABELS).map(([val, label]) => (
+                <option key={val} value={val}>{label}</option>
+              ))}
+            </select>
+          </div>
+          <div className="flex items-end pb-2">
+            <label className="flex items-center gap-2 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={form.is_liability}
+                onChange={(e) => setForm({ ...form, is_liability: e.target.checked })}
+                className="rounded border-border text-green focus:ring-green-50"
+              />
+              <span className="text-sm text-text">Liability</span>
+            </label>
+          </div>
         </div>
         <div>
           <label className="block text-xs text-muted mb-1">Current Balance</label>

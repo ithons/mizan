@@ -48,7 +48,7 @@ export function getOnboardingPlan({
   syncHealth,
   reviewSummary,
 }: OnboardingPlanInput): OnboardingPlan {
-  const hasPlaidCredentials = credentialStatus?.plaid ?? false;
+  const hasCredentials = credentialStatus?.simplefin ?? false;
   const hasSource = accountCount > 0;
   const hasLiveConnection = (syncHealth?.connection_count ?? 0) > 0;
   const syncNeedsAttention = syncHealth?.status === 'attention' || syncHealth?.status === 'stale';
@@ -56,7 +56,7 @@ export function getOnboardingPlan({
   const reviewCount = reviewSummary?.total_open ?? 0;
   const reviewReady = syncReady && reviewCount === 0;
 
-  const credentialsDone = hasPlaidCredentials || hasSource;
+  const credentialsDone = hasCredentials || hasSource;
   const sourceDone = hasSource;
   const syncDone = syncReady;
   const reviewDone = reviewReady;
@@ -72,12 +72,12 @@ export function getOnboardingPlan({
     {
       id: 'credentials',
       label: 'Credentials',
-      detail: hasPlaidCredentials
-        ? 'Plaid is configured for live bank connections.'
-        : 'Configure Plaid, or start with a manual account or CSV import.',
+      detail: hasCredentials
+        ? 'SimpleFIN is configured for live bank connections.'
+        : 'Configure SimpleFIN, or start with a manual account or CSV import.',
       status: stepStatus(credentialsDone, firstOpenId === 'credentials'),
-      route: '/settings?section=plaid',
-      actionLabel: 'Open Plaid settings',
+      route: '/settings?section=connections',
+      actionLabel: 'Open settings',
     },
     {
       id: 'source',

@@ -14,7 +14,6 @@ import type {
   RecurringOccurrenceAdjustment,
   SubscriptionInsights,
   NetWorthSnapshot,
-  PlaidItem,
   Insight,
   DataQualitySummary,
   SyncHealth,
@@ -49,21 +48,6 @@ import type {
   LocalBackupRestoreResult,
   TransactionUpdateResult,
 } from '@shared/types';
-
-type PlaidSyncStatus = 'synced' | 'reauth_required';
-
-interface PlaidSyncIssue {
-  itemId: string;
-  institutionName: string;
-  message: string;
-}
-
-interface PlaidExchangeResult {
-  itemId: string;
-  accounts: Account[];
-  initialSyncStatus: PlaidSyncStatus | 'failed';
-  initialSyncError?: string;
-}
 
 async function apiFetch<T>(url: string, options?: RequestInit): Promise<T> {
   const res = await fetch(url, {
@@ -508,37 +492,6 @@ export const syncApi = {
   historyDetail: (id: string) => apiFetch<SyncRunDetail>(`/api/sync/history/${id}`),
 };
 
-// ─── Plaid ───────────────────────────────────────────────────────────────────
-
-export const plaidApi = {
-  createLinkToken: () =>
-    apiFetch<{ link_token: string; redirect_uri: string | null }>('/api/plaid/link-token', {
-      method: 'POST',
-      body: JSON.stringify({ redirectUri: window.location.origin }),
-    }),
-  exchangeToken: (publicToken: string, metadata: unknown) =>
-    apiFetch<PlaidExchangeResult>('/api/plaid/exchange-token', {
-      method: 'POST',
-      body: JSON.stringify({ publicToken, metadata }),
-    }),
-  syncItem: (itemId: string) =>
-    apiFetch<{ success: boolean; status: PlaidSyncStatus }>(`/api/plaid/sync/${itemId}`, { method: 'POST' }),
-  syncAll: () => apiFetch<{
-    success: boolean;
-    synced: number;
-    reauthRequired: PlaidSyncIssue[];
-    failed: PlaidSyncIssue[];
-  }>('/api/plaid/sync/all', { method: 'POST' }),
-  listItems: () => apiFetch<PlaidItem[]>('/api/plaid/items'),
-  deleteItem: (itemId: string) =>
-    apiFetch<void>(`/api/plaid/items/${itemId}`, { method: 'DELETE' }),
-  createUpdateToken: (itemId: string) =>
-    apiFetch<{ link_token: string; redirect_uri: string | null }>(`/api/plaid/update-token/${itemId}`, {
-      method: 'POST',
-      body: JSON.stringify({ redirectUri: window.location.origin }),
-    }),
-};
-
 // ─── SimpleFIN ───────────────────────────────────────────────────────────────
 
 export const simplefinApi = {
@@ -549,18 +502,6 @@ export const simplefinApi = {
     }),
   connection: () => apiFetch<{ id: string; status: string } | null>('/api/simplefin/connection'),
   disconnect: () => apiFetch<void>('/api/simplefin/connection', { method: 'DELETE' }),
-};
-
-// ─── Teller ──────────────────────────────────────────────────────────────────
-
-export const tellerApi = {
-  exchangeToken: (body: { enrollmentId: string; accessToken: string }) =>
-    apiFetch<{ success: boolean }>('/api/teller/exchange-token', {
-      method: 'POST',
-      body: JSON.stringify(body),
-    }),
-  listItems: () => apiFetch<Array<{ id: string; enrollment_id: string; institution_name: string; status: string; }>>('/api/teller/items'),
-  deleteItem: (id: string) => apiFetch<void>(`/api/teller/items/${id}`, { method: 'DELETE' }),
 };
 
 export const coinbaseApi = {

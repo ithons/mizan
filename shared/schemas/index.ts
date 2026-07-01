@@ -141,27 +141,6 @@ export const ApplyMerchantRulesSchema = z.object({
   only_uncategorized: z.boolean().default(true),
 });
 
-export const PlaidCredentialsSchema = z.object({
-  clientId: z.string().min(1),
-  secret: z.string().min(1),
-  environment: z.enum(['sandbox', 'production']),
-});
-
-export const PlaidExchangeTokenSchema = z.object({
-  publicToken: z.string().min(1),
-  metadata: z.record(z.unknown()),
-});
-
-export const TellerCredentialsSchema = z.object({
-  cert: z.string().min(1),
-  privateKey: z.string().min(1),
-});
-
-export const TellerExchangeTokenSchema = z.object({
-  enrollmentId: z.string().min(1),
-  accessToken: z.string().min(1),
-});
-
 export const SimplefinCredentialsSchema = z.object({
   setupToken: z.string().min(1),
 });

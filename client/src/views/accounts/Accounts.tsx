@@ -23,7 +23,7 @@ import {
   PanelLeftOpen,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
-import { accountsApi, plaidApi, coinbaseApi, transactionsApi, investmentsApi, syncApi, tellerApi } from '../../lib/api';
+import { accountsApi, coinbaseApi, transactionsApi, investmentsApi, syncApi } from '../../lib/api';
 import { formatCurrency, formatDate, formatRelativeTime } from '../../lib/formatters';
 import { ACCOUNT_TYPE_LABELS, CATEGORY_COLORS } from '../../lib/constants';
 import { useAppStore } from '../../store';
@@ -34,18 +34,17 @@ import { EmptyState } from '../../components/EmptyState';
 import { SkeletonList } from '../../components/SkeletonLoader';
 import { ConfirmRemoveModal } from '../../components/ConfirmRemoveModal';
 import { SyncActivityPanel } from '../../components/SyncActivityPanel';
-import { loadPlaidLink } from '../../lib/plaidLink';
 import { invalidateFinancialData } from '../../lib/queryInvalidation';
 import { parseDecimalInput } from '../../lib/numberInput';
 import { advisorRouteState } from '../../lib/advisorRouteState';
 import { buildAccountAdvisorPrompt } from '../../lib/advisorPrompts';
-import type { Account, PlaidItem, Holding, SyncHealth, SyncHealthConnection, SyncRun } from '@shared/types';
+import type { Account, Holding, SyncHealth, SyncHealthConnection, SyncRun } from '@shared/types';
 
 import { useOutsideClick, errorMessage } from "./utils";
 import { SyncTrustCenter } from './SyncTrustCenter';
 import { InstitutionGroup } from './InstitutionGroup';
 import { AccountDetail } from './AccountDetail';
-import { AddManualAccountModal, EditManualAccountModal } from './Modals';
+import { AddManualAccountModal, EditAccountModal } from './Modals';
 
 export function Accounts() {
   const qc = useQueryClient();
@@ -95,23 +94,13 @@ export function Accounts() {
   const [editAccount, setEditAccount] = useState<Account | null>(null);
 
   // Confirm remove modals
-  const [confirmRemoveItem, setConfirmRemoveItem] = useState<{ id: string; name: string } | null>(null);
+
   const [confirmDisconnectCoinbase, setConfirmDisconnectCoinbase] = useState(false);
   const [confirmDeleteAccount, setConfirmDeleteAccount] = useState<Account | null>(null);
 
   const { data: accounts = [], isLoading } = useQuery({
     queryKey: ['accounts'],
     queryFn: accountsApi.list,
-  });
-
-  const { data: plaidItems = [] } = useQuery({
-    queryKey: ['plaid-items'],
-    queryFn: plaidApi.listItems,
-  });
-
-  const { data: tellerItems = [] } = useQuery({
-    queryKey: ['teller-items'],
-    queryFn: tellerApi.listItems,
   });
 
   const { data: syncHealth } = useQuery({
@@ -164,29 +153,6 @@ export function Accounts() {
     onError: (err: Error) => addToast({ type: 'error', message: err.message }),
   });
 
-  const removeItemMutation = useMutation({
-    mutationFn: (itemId: string) => plaidApi.deleteItem(itemId),
-    onSuccess: () => {
-      invalidateFinancialData(qc);
-      setConfirmRemoveItem(null);
-      addToast({ type: 'success', message: 'Institution removed' });
-    },
-    onError: (err: Error) => addToast({ type: 'error', message: err.message }),
-  });
-
-  const syncItemMutation = useMutation({
-    mutationFn: (itemId: string) => plaidApi.syncItem(itemId),
-    onSuccess: (result) => {
-      invalidateFinancialData(qc);
-      if (!result.success) {
-        addToast({ type: 'error', message: 'Bank needs reconnecting' });
-        return;
-      }
-      addToast({ type: 'success', message: 'Bank sync complete' });
-    },
-    onError: (err: Error) => addToast({ type: 'error', message: err.message }),
-  });
-
   const disconnectCoinbaseMutation = useMutation({
     mutationFn: coinbaseApi.disconnect,
     onSuccess: () => {
@@ -208,65 +174,9 @@ export function Accounts() {
     onError: (err: Error) => addToast({ type: 'error', message: err.message }),
   });
 
-  const handleReauth = async (itemId: string) => {
-    try {
-      const plaid = await loadPlaidLink();
-      const { link_token } = await plaidApi.createUpdateToken(itemId);
-      sessionStorage.setItem('plaid_link_token', link_token);
-      const handler = plaid.create({
-        token: link_token,
-        onSuccess: async () => {
-          sessionStorage.removeItem('plaid_link_token');
-          const result = await plaidApi.syncItem(itemId);
-          invalidateFinancialData(qc);
-          if (!result.success) {
-            addToast({ type: 'error', message: 'Bank still needs reconnecting' });
-            return;
-          }
-          addToast({ type: 'success', message: 'Bank reconnected' });
-        },
-        onExit: () => sessionStorage.removeItem('plaid_link_token'),
-      });
-      handler.open();
-    } catch (err: unknown) {
-      addToast({ type: 'error', message: errorMessage(err, 'Failed to reconnect') });
-    }
-  };
-
   const connectCoinbase = () => {
     setAddMenuOpen(false);
     navigate('/settings?section=coinbase');
-  };
-
-  const connectPlaid = async () => {
-    setAddMenuOpen(false);
-    try {
-      const plaid = await loadPlaidLink();
-      const { link_token } = await plaidApi.createLinkToken();
-      sessionStorage.setItem('plaid_link_token', link_token);
-      const handler = plaid.create({
-        token: link_token,
-        onSuccess: async (publicToken: string, metadata: unknown) => {
-          sessionStorage.removeItem('plaid_link_token');
-          const result = await plaidApi.exchangeToken(publicToken, metadata);
-          invalidateFinancialData(qc);
-          if (result.initialSyncStatus === 'synced') {
-            addToast({ type: 'success', message: 'Bank connected successfully' });
-          } else {
-            addToast({
-              type: 'error',
-              message: result.initialSyncError
-                ? `Bank connected, but initial sync failed: ${result.initialSyncError}`
-                : 'Bank connected, but initial sync did not finish',
-            });
-          }
-        },
-        onExit: () => sessionStorage.removeItem('plaid_link_token'),
-      });
-      handler.open();
-    } catch (err: unknown) {
-      addToast({ type: 'error', message: errorMessage(err, 'Failed to open Plaid') });
-    }
   };
 
   useEffect(() => {
@@ -280,7 +190,7 @@ export function Accounts() {
     navigate('/accounts', { replace: true });
 
     if (connect === 'bank') {
-      void connectPlaid();
+      navigate('/settings?section=connections');
       return;
     }
 
@@ -297,24 +207,15 @@ export function Accounts() {
       return;
     }
 
-    if (connection.provider === 'simplefin' || connection.provider === 'teller') {
+    if (connection.provider === 'simplefin') {
       if (connection.recommended_action === 'connect' || connection.recommended_action === 'reconnect') {
-        navigate(`/settings?section=${connection.provider}`);
+        navigate(`/settings?section=connections`);
         return;
       }
       if (connection.recommended_action !== 'none') {
         syncAllMutation.mutate();
       }
       return;
-    }
-
-    if (connection.recommended_action === 'reconnect') {
-      void handleReauth(connection.id);
-      return;
-    }
-
-    if (connection.recommended_action !== 'none') {
-      syncItemMutation.mutate(connection.id);
     }
   };
 
@@ -326,27 +227,16 @@ export function Accounts() {
 
   const selectedAccount = accounts.find((a) => a.id === selectedId) ?? null;
   const syncingCoinbaseConnection = syncHealth?.connections.find((connection) => connection.provider === 'coinbase');
-  const busyConnectionId = syncItemMutation.isPending && syncItemMutation.variables
-    ? `plaid:${syncItemMutation.variables}`
-    : syncCoinbaseMutation.isPending && syncingCoinbaseConnection
+  const busyConnectionId = syncCoinbaseMutation.isPending && syncingCoinbaseConnection
       ? `coinbase:${syncingCoinbaseConnection.id}`
       : null;
 
-  // Build institution groups
-  const plaidGroups = plaidItems.map((item) => ({
-    item,
-    accounts: accounts.filter((a) => a.connection_id === item.id),
-    sublabel: item.last_synced_at ? formatRelativeTime(item.last_synced_at) : undefined,
-  }));
-
   const coinbaseAccounts = accounts.filter((a) => a.connection_type === 'coinbase');
-  const simplefinAccounts = accounts.filter((a) => a.connection_type === 'simplefin');
   const manualAccounts = accounts.filter((a) => a.is_manual);
 
-  const tellerAccounts = accounts.filter((a) => a.connection_type === 'teller');
-  // Group teller accounts by connection_id (enrollment_id)
-  const tellerGroups = tellerAccounts.reduce<Record<string, Account[]>>((acc, a) => {
-    const key = a.connection_id || 'unknown';
+  const simplefinAccounts = accounts.filter((a) => a.connection_type === 'simplefin');
+  const simplefinGroups = simplefinAccounts.reduce<Record<string, Account[]>>((acc, a) => {
+    const key = a.institution_name || 'SimpleFIN';
     if (!acc[key]) acc[key] = [];
     acc[key].push(a);
     return acc;
@@ -389,7 +279,7 @@ export function Accounts() {
               <div className="absolute right-0 top-6 bg-surface shadow-sm border border-border rounded shadow-lg z-20 w-52 py-1">
                 <button
                   className="flex items-center gap-2 w-full px-3 py-2 text-xs text-text hover:bg-black/5"
-                  onClick={connectPlaid}
+                  onClick={() => navigate('/settings?section=connections')}
                 >
                   <Link size={12} className="text-green" />
                   Connect Bank or Card
@@ -416,7 +306,7 @@ export function Accounts() {
         <SyncTrustCenter
           health={syncHealth}
           onSyncAll={() => syncAllMutation.mutate()}
-          onConnectBank={connectPlaid}
+          onConnectBank={() => navigate('/settings?section=connections')}
           onConnectCoinbase={connectCoinbase}
           onConnectionAction={handleConnectionAction}
           isSyncingAll={syncAllMutation.isPending}
@@ -436,27 +326,6 @@ export function Accounts() {
             </div>
           ) : (
             <>
-              {/* Plaid institution groups */}
-              {plaidGroups.map(({ item, accounts: grpAccounts, sublabel }) => (
-                <InstitutionGroup
-                  key={item.id}
-                  label={item.institution_name}
-                  sublabel={sublabel}
-                  accounts={grpAccounts}
-                  showHidden={showHidden}
-                  selectedId={selectedId}
-                  onSelect={setSelectedId}
-                  onHide={(id) => hideMutation.mutate(id)}
-                  onAsk={askAdvisorAboutAccount}
-                  holdingsByAccount={holdingsByAccount}
-                  groupType="plaid"
-                  plaidItem={item}
-                  onSyncItem={() => syncItemMutation.mutate(item.id)}
-                  onRemoveItem={() => setConfirmRemoveItem({ id: item.id, name: item.institution_name })}
-                  onReauthItem={() => handleReauth(item.id)}
-                />
-              ))}
-
               {/* Coinbase group */}
               {coinbaseAccounts.length > 0 && (
                 <InstitutionGroup
@@ -467,6 +336,10 @@ export function Accounts() {
                   onSelect={setSelectedId}
                   onHide={(id) => hideMutation.mutate(id)}
                   onAsk={askAdvisorAboutAccount}
+                  onEdit={(id) => {
+                    const acc = accounts.find((a) => a.id === id);
+                    if (acc) setEditAccount(acc);
+                  }}
                   holdingsByAccount={holdingsByAccount}
                   groupType="coinbase"
                   onSyncCoinbase={() => syncCoinbaseMutation.mutate()}
@@ -474,44 +347,27 @@ export function Accounts() {
                 />
               )}
 
-              {/* SimpleFIN group */}
-              {simplefinAccounts.length > 0 && (
+              {/* SimpleFIN groups */}
+              {Object.entries(simplefinGroups).map(([institutionName, grpAccounts]) => (
                 <InstitutionGroup
-                  label="SimpleFIN"
-                  accounts={simplefinAccounts}
+                  key={institutionName}
+                  label={institutionName}
+                  accounts={grpAccounts}
                   showHidden={showHidden}
                   selectedId={selectedId}
                   onSelect={setSelectedId}
                   onHide={(id) => hideMutation.mutate(id)}
                   onAsk={askAdvisorAboutAccount}
+                  onEdit={(id) => {
+                    const acc = accounts.find((a) => a.id === id);
+                    if (acc) setEditAccount(acc);
+                  }}
                   holdingsByAccount={holdingsByAccount}
                   groupType="simplefin"
                   onSyncItem={() => syncAllMutation.mutate()}
-                  onRemoveItem={() => navigate('/settings?section=simplefin')}
+                  onRemoveItem={() => navigate('/settings?section=connections')}
                 />
-              )}
-
-              {/* Teller groups */}
-              {Object.entries(tellerGroups).map(([enrollmentId, grpAccounts]) => {
-                const item = tellerItems.find(t => t.enrollment_id === enrollmentId);
-                const label = item?.institution_name || grpAccounts[0]?.institution_name || 'Teller Connection';
-                return (
-                  <InstitutionGroup
-                    key={enrollmentId}
-                    label={label}
-                    accounts={grpAccounts}
-                    showHidden={showHidden}
-                    selectedId={selectedId}
-                    onSelect={setSelectedId}
-                    onHide={(id) => hideMutation.mutate(id)}
-                    onAsk={askAdvisorAboutAccount}
-                    holdingsByAccount={holdingsByAccount}
-                    groupType="teller"
-                    onSyncItem={() => syncAllMutation.mutate()}
-                    onRemoveItem={() => item && tellerApi.deleteItem(item.id).then(() => invalidateFinancialData(qc))}
-                  />
-                );
-              })}
+              ))}
 
               {/* Manual accounts */}
               {manualAccounts.length > 0 && (
@@ -541,7 +397,7 @@ export function Accounts() {
                   icon={CreditCard}
                   title="No accounts yet"
                   description="Connect a bank, configure Coinbase, or create a manual account to start building Mizān."
-                  action={connectPlaid}
+                  action={() => navigate('/settings?section=connections')}
                   actionLabel="Connect Bank"
                   secondaryAction={() => setShowManualModal(true)}
                   secondaryActionLabel="Add Manual"
@@ -597,7 +453,7 @@ export function Accounts() {
                 icon={CreditCard}
                 title="Connect your first account"
                 description="Balances, reports, budgets, and review queues depend on account data."
-                action={connectPlaid}
+                action={() => navigate('/settings?section=connections')}
                 actionLabel="Connect Bank"
                 secondaryAction={() => setShowManualModal(true)}
                 secondaryActionLabel="Add Manual"
@@ -615,20 +471,10 @@ export function Accounts() {
       {/* Modals */}
       <AddManualAccountModal open={showManualModal} onClose={() => setShowManualModal(false)} />
 
-      <EditManualAccountModal
+      <EditAccountModal
         open={editAccount != null}
         account={editAccount}
         onClose={() => setEditAccount(null)}
-      />
-
-      <ConfirmRemoveModal
-        open={confirmRemoveItem != null}
-        onClose={() => setConfirmRemoveItem(null)}
-        title={`Remove ${confirmRemoveItem?.name ?? 'Institution'}?`}
-        description="This will remove all connected accounts for this institution and delete their access token. Existing transactions will be hidden but not deleted."
-        confirmLabel="Remove Institution"
-        onConfirm={() => confirmRemoveItem && removeItemMutation.mutate(confirmRemoveItem.id)}
-        isPending={removeItemMutation.isPending}
       />
 
       <ConfirmRemoveModal

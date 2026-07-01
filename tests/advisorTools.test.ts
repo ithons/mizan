@@ -407,7 +407,7 @@ test('advisor read tools summarize local availability and attention states', (t)
   const tools = buildAdvisorReadTools(db, new Date('2026-06-30T12:00:00.000Z'));
   const byId = new Map(tools.map((tool) => [tool.id, tool]));
 
-  assert.equal(byId.get('sync_health')?.status, 'available');
+  assert.equal(byId.get('sync_health')?.status, 'empty');
   assert.equal(byId.get('accounts')?.count, 2);
   assert.equal(byId.get('review')?.status, 'attention');
   assert.equal(byId.get('review')?.count, 1);

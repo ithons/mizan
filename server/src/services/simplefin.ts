@@ -5,6 +5,28 @@ import { getDb } from '../db/index';
 import type { AccountType } from '../../../shared/types';
 import { balancesDiffer, type AccountBalanceChange } from './balanceChanges';
 
+function guessAccountTypeAndLiability(name: string, orgName: string): { type: AccountType; isLiability: boolean } {
+  const combined = `${name} ${orgName}`.toLowerCase();
+  
+  if (combined.includes('credit') || combined.includes('card')) {
+    return { type: 'credit', isLiability: true };
+  }
+  if (combined.includes('loan') || combined.includes('mortgage')) {
+    return { type: 'other', isLiability: true };
+  }
+  if (combined.includes('savings')) {
+    return { type: 'savings', isLiability: false };
+  }
+  if (combined.includes('brokerage') || combined.includes('investment')) {
+    return { type: 'brokerage', isLiability: false };
+  }
+  if (combined.includes('ira') || combined.includes('roth') || combined.includes('401k')) {
+    return { type: 'ira_traditional', isLiability: false };
+  }
+  
+  return { type: 'checking', isLiability: false };
+}
+
 export async function syncSimplefin() {
   const creds = getCredentials();
   if (!creds.simplefin?.accessUrl) {
@@ -22,15 +44,14 @@ export async function syncSimplefin() {
   const balanceChanges: AccountBalanceChange[] = [];
   const now = new Date().toISOString();
 
-  // Fetch accounts and transactions
-  const res = await client.get('/accounts');
+  // Fetch accounts and transactions (request past 30 days or so, SimpleFIN uses start-date epoch)
+  const startDate = Math.floor(Date.now() / 1000) - (30 * 86400);
+  const res = await client.get(`/accounts?start-date=${startDate}`);
   const data = res.data;
 
   const accountCount = data.accounts?.length || 0;
 
   for (const acct of (data.accounts || [])) {
-    const isLiability = acct.balance < 0 ? 1 : 0;
-    const currentBalance = parseFloat(acct.balance);
     const currency = acct.currency || 'USD';
     const institutionName = acct.org?.name || 'SimpleFIN';
 
@@ -40,10 +61,15 @@ export async function syncSimplefin() {
       WHERE simplefin_account_id = ?
     `).get(acct.id) as any;
 
-    let accountId;
+    let accountId: string;
+    let isLiability: boolean;
+    let currentBalance: number;
 
     if (existingAcct) {
       accountId = existingAcct.id;
+      isLiability = Boolean(existingAcct.is_liability);
+      currentBalance = isLiability ? -parseFloat(acct.balance) : parseFloat(acct.balance);
+
       if (balancesDiffer(existingAcct.current_balance, currentBalance)) {
         balanceChanges.push({
           accountId: existingAcct.id,
@@ -51,7 +77,7 @@ export async function syncSimplefin() {
           provider: 'simplefin',
           previousBalance: existingAcct.current_balance,
           newBalance: currentBalance,
-          isLiability: Boolean(existingAcct.is_liability),
+          isLiability,
           currency: existingAcct.currency ?? currency,
         });
       }
@@ -75,29 +101,75 @@ export async function syncSimplefin() {
       );
     } else {
       accountId = uuidv4();
+      const guessed = guessAccountTypeAndLiability(acct.name, institutionName);
+      isLiability = guessed.isLiability;
+      currentBalance = isLiability ? -parseFloat(acct.balance) : parseFloat(acct.balance);
+
       db.prepare(`
         INSERT INTO accounts
           (id, simplefin_account_id, connection_id, connection_type, institution_name,
            account_name, type, current_balance,
            currency, is_manual, is_hidden, is_liability, sort_order, created_at, updated_at)
-        VALUES (?, ?, 'simplefin_primary', 'simplefin', ?, ?, 'checking', ?, ?, 0, 0, ?, 0, ?, ?)
+        VALUES (?, ?, 'simplefin_primary', 'simplefin', ?, ?, ?, ?, ?, 0, 0, ?, 0, ?, ?)
       `).run(
         accountId,
         acct.id,
         institutionName,
         acct.name,
+        guessed.type,
         currentBalance,
         currency,
-        isLiability,
+        isLiability ? 1 : 0,
         now,
         now
       );
     }
 
     // Process transactions
-    // SimpleFIN doesn't group txns per account in /accounts, it returns them inside /accounts endpoint maybe?
-    // Wait, simplefin usually returns transactions inside the account object or a separate array? Let's assume they are under acct.transactions based on standard MX/SimpleFIN payload. Or if it's top level data.transactions? Let's check typical MX payload. SimpleFIN returns accounts and a separate transactions array or nested. Actually, let's look at MX. Wait, SimpleFIN typically nests transactions? Let's just process them if they are inside acct.transactions.
+    for (const txn of (acct.transactions || [])) {
+      const existingTxn = db.prepare('SELECT id FROM transactions WHERE simplefin_transaction_id = ?').get(txn.id);
+
+      // Convert epoch seconds to YYYY-MM-DD
+      const date = new Date(txn.posted * 1000).toISOString().split('T')[0];
+      const amount = parseFloat(txn.amount); // already negative for expenses
+      const merchantName = txn.payee || null;
+      const originalName = txn.description || '';
+
+      if (existingTxn) {
+        db.prepare(`
+          UPDATE transactions
+          SET date = ?, amount = ?, merchant_name = ?, original_name = ?, updated_at = ?
+          WHERE simplefin_transaction_id = ?
+        `).run(date, amount, merchantName, originalName, now, txn.id);
+        modified++;
+      } else {
+        db.prepare(`
+          INSERT INTO transactions
+            (id, simplefin_transaction_id, account_id, date, amount, merchant_name,
+             original_name, is_manual, source_type, created_at, updated_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?, 0, 'simplefin', ?, ?)
+        `).run(
+          uuidv4(),
+          txn.id,
+          accountId,
+          date,
+          amount,
+          merchantName,
+          originalName,
+          now,
+          now
+        );
+        added++;
+      }
+    }
   }
+
+  // Update simplefin_connections last_synced_at
+  db.prepare(`
+    UPDATE simplefin_connections
+    SET last_synced_at = ?
+    WHERE access_url = ?
+  `).run(now, accessUrl);
 
   return { status: 'synced', accountCount, added, modified, removed, skipped, balanceChanges };
 }
