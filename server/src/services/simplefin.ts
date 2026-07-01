@@ -1,4 +1,5 @@
 import axios from 'axios';
+import { format } from 'date-fns';
 import { v4 as uuidv4 } from 'uuid';
 import { getCredentials } from './credentials';
 import { getDb } from '../db/index';
@@ -129,8 +130,8 @@ export async function syncSimplefin() {
     for (const txn of (acct.transactions || [])) {
       const existingTxn = db.prepare('SELECT id FROM transactions WHERE simplefin_transaction_id = ?').get(txn.id);
 
-      // Convert epoch seconds to YYYY-MM-DD
-      const date = new Date(txn.posted * 1000).toISOString().split('T')[0];
+      // Convert epoch seconds to YYYY-MM-DD in the local timezone
+      const date = format(new Date(txn.posted * 1000), 'yyyy-MM-dd');
       const amount = parseFloat(txn.amount); // already negative for expenses
       const merchantName = txn.payee || null;
       const originalName = txn.description || '';
