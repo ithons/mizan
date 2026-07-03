@@ -15,7 +15,7 @@ export function CategoryBadge({ name, color, icon, size = 'sm' }: CategoryBadgeP
     <span className={`inline-flex items-center gap-1.5 ${textSize} text-muted`}>
       <span
         className={`${dotSize} rounded-full flex-shrink-0`}
-        style={{ backgroundColor: color || '#6b6b7a' }}
+        style={{ backgroundColor: color || '#7a6c5d' }}
       />
       {icon && <span className="text-xs">{icon}</span>}
       <span className="text-text">{name}</span>

@@ -40,7 +40,7 @@ import { PageLoader } from '../../components/LoadingSpinner';
 import type { Category, MerchantRule, MerchantRuleSuggestion, SyncRun } from '@shared/types';
 
 const CATEGORY_PRESET_COLORS = [
-  '#32bfa3', '#6487f0', '#ef6f8a', '#e2a53f', '#9b8dee',
+  '#c9963a', '#7c8b99', '#b5654a', '#ce8642', '#9b8dee',
   '#ee8d5b', '#70c4e0', '#e070b8', '#70e07a', '#a0a0b8',
   '#c4a86e', '#6e8ec4',
 ];
@@ -97,15 +97,15 @@ export function CoinbaseSection() {
   return (
     <div className="space-y-4 max-w-md">
       {credStatus?.coinbaseFromEnv ? (
-        <div className="flex items-start gap-2 p-3 bg-green-10 border border-green/30 rounded">
-          <Info size={13} className="text-green mt-0.5 flex-shrink-0" />
+        <div className="flex items-start gap-2 p-3 bg-positive-10 border border-positive/30 rounded">
+          <Info size={13} className="text-positive mt-0.5 flex-shrink-0" />
           <p className="text-xs text-muted">
             Credentials loaded from <span className="font-mono text-text">.env</span>. To change them, edit that file and restart the server.
           </p>
         </div>
       ) : connected ? (
-        <div className="flex items-center gap-3 p-3 bg-green-10 border border-green/30 rounded">
-          <CheckCircle size={16} className="text-green flex-shrink-0" />
+        <div className="flex items-center gap-3 p-3 bg-positive-10 border border-positive/30 rounded">
+          <CheckCircle size={16} className="text-positive flex-shrink-0" />
           <div>
             <p className="text-sm text-text">Coinbase connected</p>
             <p className="text-xs text-muted">API key stored in local credentials</p>
@@ -113,11 +113,11 @@ export function CoinbaseSection() {
         </div>
       ) : (
         <>
-          <div className="flex items-start gap-2 p-3 bg-blue/10 border border-blue/30 rounded">
-            <Info size={14} className="text-blue mt-0.5 flex-shrink-0" />
+          <div className="flex items-start gap-2 p-3 bg-info/10 border border-info/30 rounded">
+            <Info size={14} className="text-info mt-0.5 flex-shrink-0" />
             <p className="text-xs text-muted">
               Create an API key at{' '}
-              <a href="https://portal.cdp.coinbase.com" target="_blank" rel="noopener noreferrer" className="text-blue hover:underline">
+              <a href="https://portal.cdp.coinbase.com" target="_blank" rel="noopener noreferrer" className="text-info hover:underline">
                 portal.cdp.coinbase.com
               </a>{' '}
               → Advanced Trade API with read-only permissions.
@@ -126,7 +126,7 @@ export function CoinbaseSection() {
           <div>
             <label className="block text-xs text-muted mb-1">Key Name</label>
             <input
-              className="w-full bg-background border border-border rounded px-3 py-2 text-sm text-text font-mono focus:outline-none focus:ring-1 focus:ring-green-50"
+              className="w-full bg-background border border-border rounded px-3 py-2 text-sm text-text font-mono focus:outline-none focus:ring-1 focus:ring-positive-5"
               value={form.keyName}
               onChange={(e) => setForm({ ...form, keyName: e.target.value })}
               placeholder="organizations/xxx/apiKeys/yyy"
@@ -136,7 +136,7 @@ export function CoinbaseSection() {
             <label className="block text-xs text-muted mb-1">Private Key</label>
             <div className="relative">
               <textarea
-                className="w-full bg-background border border-border rounded px-3 py-2 text-sm text-text font-mono resize-none focus:outline-none focus:ring-1 focus:ring-green-50"
+                className="w-full bg-background border border-border rounded px-3 py-2 text-sm text-text font-mono resize-none focus:outline-none focus:ring-1 focus:ring-positive-5"
                 rows={4}
                 value={form.privateKey}
                 onChange={(e) => setForm({ ...form, privateKey: e.target.value })}
@@ -165,7 +165,7 @@ export function CoinbaseSection() {
           </button>
           {!credStatus?.coinbaseFromEnv && (
             <button
-              className="px-4 py-2 text-sm border border-rose/30 rounded text-rose hover:bg-rose/10 flex items-center gap-1.5"
+              className="px-4 py-2 text-sm border border-negative/30 rounded text-negative hover:bg-negative/10 flex items-center gap-1.5"
               onClick={() => setShowDisconnectConfirm(true)}
               disabled={disconnectMutation.isPending}
             >

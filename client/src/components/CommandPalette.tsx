@@ -102,7 +102,7 @@ export function CommandPalette() {
             value={query}
             onChange={(e) => setQuery(e.target.value)}
           />
-          {isAnalyzing && <Loader2 size={16} className="text-green animate-spin ml-3 flex-shrink-0" />}
+          {isAnalyzing && <Loader2 size={16} className="text-positive animate-spin ml-3 flex-shrink-0" />}
         </div>
         
         {query.trim().length > 0 && (
@@ -117,7 +117,7 @@ export function CommandPalette() {
                     setOpen(false);
                     navigate('/advisor', { state: { advisorPrompt: { source: 'palette', prompt: query, recordKind: 'dashboard' } } });
                   }}
-                  className="mt-4 text-xs text-green hover:underline flex items-center gap-1"
+                  className="mt-4 text-xs text-positive hover:underline flex items-center gap-1"
                 >
                   Ask Advisor <ArrowRight size={12} />
                 </button>
@@ -135,11 +135,11 @@ export function CommandPalette() {
                   return (
                     <div 
                       key={draft.id} 
-                      className={`group flex flex-col gap-2 p-3 rounded-lg border ${index === 0 ? 'border-green/30 bg-green/5' : 'border-transparent hover:bg-black/5'} transition-colors cursor-default`}
+                      className={`group flex flex-col gap-2 p-3 rounded-lg border ${index === 0 ? 'border-positive/30 bg-positive/5' : 'border-transparent hover:bg-black/5'} transition-colors cursor-default`}
                     >
                       <div className="flex items-start justify-between gap-3">
                         <div className="flex items-start gap-2 min-w-0">
-                          <Sparkles size={14} className="text-green mt-0.5 flex-shrink-0" />
+                          <Sparkles size={14} className="text-positive mt-0.5 flex-shrink-0" />
                           <div className="min-w-0">
                             <p className="text-sm font-medium text-text truncate">{draft.label}</p>
                             <p className="text-xs text-muted leading-relaxed mt-0.5">{draft.summary}</p>

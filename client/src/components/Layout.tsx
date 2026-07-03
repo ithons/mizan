@@ -81,7 +81,7 @@ export function Layout() {
         >
           <button
             onClick={toggleSidebar}
-            className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-5 h-8 flex items-center justify-center rounded bg-surface shadow-sm border border-border text-muted opacity-0 group-hover:opacity-100 transition-opacity hover:text-text hover:border-green-50 z-10 shadow-sm"
+            className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-5 h-8 flex items-center justify-center rounded bg-surface shadow-sm border border-border text-muted opacity-0 group-hover:opacity-100 transition-opacity hover:text-text hover:border-positive-5 z-10 shadow-sm"
             title={collapsed ? 'Show sidebar' : 'Hide sidebar'}
           >
             {collapsed ? <PanelLeftOpen size={12} /> : <PanelLeftClose size={12} />}
@@ -93,7 +93,7 @@ export function Layout() {
             {collapsed && (
               <button
                 onClick={toggleSidebar}
-                className="absolute top-3 left-3 z-20 w-7 h-7 flex items-center justify-center rounded bg-surface shadow-sm border border-border text-muted hover:text-text hover:border-green-50 transition-colors shadow-sm"
+                className="absolute top-3 left-3 z-20 w-7 h-7 flex items-center justify-center rounded bg-surface shadow-sm border border-border text-muted hover:text-text hover:border-positive-5 transition-colors shadow-sm"
                 title="Show sidebar"
               >
                 <PanelLeftOpen size={14} />

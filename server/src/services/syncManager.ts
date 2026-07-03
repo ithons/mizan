@@ -16,6 +16,7 @@ import {
 import { refreshTransactionIntegrity, type TransactionIntegrityResult } from './transactionIntegrity';
 import { describeBalanceChange } from './balanceChanges';
 import { runBackgroundAiReview } from './aiWorker';
+import { withRetry } from './retry';
 
 // SSE clients registry
 const sseClients = new Set<Response>();
@@ -169,6 +170,24 @@ export async function runFullSync(): Promise<void> {
   return _activeSyncPromise;
 }
 
+let _schedulerHandle: NodeJS.Timeout | null = null;
+
+// Overlapping ticks are safe: runFullSync() already guards against concurrent
+// runs via _activeSyncPromise, so a tick firing mid-sync just no-ops.
+export function startSyncScheduler(intervalMinutes: number): void {
+  if (_schedulerHandle) return;
+  _schedulerHandle = setInterval(() => {
+    runFullSync().catch((err) => {
+      console.error('[scheduler] Sync failed:', (err as Error).message);
+    });
+  }, intervalMinutes * 60_000);
+}
+
+export function stopSyncScheduler(): void {
+  if (_schedulerHandle) clearInterval(_schedulerHandle);
+  _schedulerHandle = null;
+}
+
 async function _runFullSyncInternal(): Promise<void> {
   const db = getDb();
   const run = startSyncRun(db, 'full', 'Full sync started');
@@ -186,7 +205,7 @@ async function _runFullSyncInternal(): Promise<void> {
     if (creds.simplefin?.accessUrl) {
       emitSyncEvent({ type: 'sync_progress', message: 'Syncing SimpleFIN...', progress: 30 });
       try {
-        const simplefinResult = await syncSimplefin();
+        const simplefinResult = await withRetry(() => syncSimplefin());
         const runItem = recordSyncRunItem(db, run.id, {
           provider: 'simplefin',
           connection_id: 'simplefin_primary',
@@ -227,7 +246,7 @@ async function _runFullSyncInternal(): Promise<void> {
     if (creds.coinbase) {
       emitSyncEvent({ type: 'sync_progress', message: 'Syncing Coinbase...', progress: 50 });
       try {
-        const coinbaseResult = await syncCoinbase();
+        const coinbaseResult = await withRetry(() => syncCoinbase());
         const runItem = recordSyncRunItem(db, run.id, {
           provider: 'coinbase',
           connection_id: 'coinbase',

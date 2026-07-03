@@ -28,9 +28,9 @@ const STEP_ICONS: Record<OnboardingStepId, LucideIcon> = {
 };
 
 function stepTone(step: OnboardingStep): string {
-  if (step.status === 'complete') return '#32bfa3';
-  if (step.status === 'active') return '#6487f0';
-  return '#9aa7a2';
+  if (step.status === 'complete') return '#c9963a';
+  if (step.status === 'active') return '#7c8b99';
+  return '#7a6c5d';
 }
 
 function OnboardingStepRow({ step, index, onSelect }: {
@@ -46,8 +46,8 @@ function OnboardingStepRow({ step, index, onSelect }: {
     <button
       className={`w-full text-left rounded border px-4 py-3 transition-colors ${
         step.status === 'active'
-          ? 'border-blue/40 bg-blue/10'
-          : 'border-border bg-surface hover:bg-green/5'
+          ? 'border-info/40 bg-info/10'
+          : 'border-border bg-surface hover:bg-positive/5'
       }`}
       onClick={() => onSelect(step.route)}
     >
@@ -120,7 +120,7 @@ export function Onboarding() {
           </p>
         </div>
         <button
-          className="flex items-center gap-1.5 text-xs text-muted hover:text-green"
+          className="flex items-center gap-1.5 text-xs text-muted hover:text-positive"
           onClick={() => navigate('/')}
         >
           Dashboard <ArrowRight size={11} />
@@ -129,7 +129,7 @@ export function Onboarding() {
 
       <div className="h-2 rounded-full bg-border overflow-hidden">
         <div
-          className="h-full bg-green transition-all"
+          className="h-full bg-positive transition-all"
           style={{ width: `${plan.percentComplete}%` }}
         />
       </div>
@@ -149,7 +149,7 @@ export function Onboarding() {
         <div className="space-y-4">
           <div className="border border-border bg-surface rounded p-4">
             <div className="flex items-start gap-3">
-              <div className="w-9 h-9 rounded bg-blue/10 text-blue flex items-center justify-center flex-shrink-0">
+              <div className="w-9 h-9 rounded bg-info/10 text-info flex items-center justify-center flex-shrink-0">
                 <CurrentIcon size={17} />
               </div>
               <div className="min-w-0">
@@ -169,21 +169,21 @@ export function Onboarding() {
             <p className="text-xs text-muted mb-3">Other entry points</p>
             <div className="grid grid-cols-1 gap-2">
               <button
-                className="flex items-center justify-between gap-3 rounded border border-border px-3 py-2 text-sm text-text hover:bg-green/5"
+                className="flex items-center justify-between gap-3 rounded border border-border px-3 py-2 text-sm text-text hover:bg-positive/5"
                 onClick={() => navigate('/accounts?manual=1')}
               >
                 <span className="flex items-center gap-2"><Database size={14} /> Manual account</span>
                 <ArrowRight size={12} className="text-muted" />
               </button>
               <button
-                className="flex items-center justify-between gap-3 rounded border border-border px-3 py-2 text-sm text-text hover:bg-green/5"
+                className="flex items-center justify-between gap-3 rounded border border-border px-3 py-2 text-sm text-text hover:bg-positive/5"
                 onClick={() => navigate('/settings?section=coinbase')}
               >
                 <span className="flex items-center gap-2"><Wallet size={14} /> Coinbase</span>
                 <ArrowRight size={12} className="text-muted" />
               </button>
               <button
-                className="flex items-center justify-between gap-3 rounded border border-border px-3 py-2 text-sm text-text hover:bg-green/5"
+                className="flex items-center justify-between gap-3 rounded border border-border px-3 py-2 text-sm text-text hover:bg-positive/5"
                 onClick={() => navigate('/settings?section=data')}
               >
                 <span className="flex items-center gap-2"><FileInput size={14} /> CSV import</span>

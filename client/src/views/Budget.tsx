@@ -58,7 +58,7 @@ function BudgetRow({
   const expectedRecurring = budget.expected_recurring ?? 0;
   const projectedPct = budgetProjectedPercent(budget);
   const actualPct = availableAmount > 0 ? (spent / availableAmount) * 100 : 0;
-  const barColor = projectedPct >= 100 ? '#ef6f8a' : projectedPct >= 80 ? '#e2a53f' : '#32bfa3';
+  const barColor = projectedPct >= 100 ? '#b5654a' : projectedPct >= 80 ? '#ce8642' : '#c9963a';
   const remaining = availableAmount - spent;
   const projectedRemaining = budgetProjectedRemaining(budget);
 
@@ -90,7 +90,7 @@ function BudgetRow({
         <div className="flex items-center gap-3">
           <span className="text-xs text-muted">{formatPercent(projectedPct)}</span>
           <button
-            className="text-muted hover:text-blue transition-colors"
+            className="text-muted hover:text-info transition-colors"
             onClick={() => onAsk(budget, month)}
             title="Ask advisor"
           >
@@ -126,7 +126,7 @@ function BudgetRow({
                 }}
               />
               <button onClick={commitEdit}>
-                <Check size={12} className="text-green" />
+                <Check size={12} className="text-positive" />
               </button>
               <button onClick={() => setEditing(false)}>
                 <X size={12} className="text-muted" />
@@ -141,7 +141,7 @@ function BudgetRow({
             </button>
           )}
           <button
-            className="text-muted hover:text-rose transition-colors"
+            className="text-muted hover:text-negative transition-colors"
             onClick={() => onDelete(budget.id)}
           >
             <Trash2 size={12} />
@@ -165,16 +165,16 @@ function BudgetRow({
       <div className="flex justify-between mt-1 gap-3">
         <span className="text-xs text-muted">
           {remaining >= 0 ? (
-            <span className="text-green">{formatCurrency(remaining)} remaining</span>
+            <span className="text-positive">{formatCurrency(remaining)} remaining</span>
           ) : (
-            <span className="text-rose">{formatCurrency(Math.abs(remaining))} over budget</span>
+            <span className="text-negative">{formatCurrency(Math.abs(remaining))} over budget</span>
           )}
         </span>
         <span className="text-xs text-muted text-right">
           {expectedRecurring > 0 ? (
             <>
               {formatCurrency(expectedRecurring)} expected,{' '}
-              <span style={{ color: projectedRemaining >= 0 ? '#32bfa3' : '#ef6f8a' }}>
+              <span style={{ color: projectedRemaining >= 0 ? '#c9963a' : '#b5654a' }}>
                 {projectedRemaining >= 0
                   ? `${formatCurrency(projectedRemaining)} projected left`
                   : `${formatCurrency(Math.abs(projectedRemaining))} projected over`}
@@ -236,10 +236,10 @@ function BudgetGroupSection({
         <div className="flex items-center gap-2 min-w-0">
           <span
             className="w-2.5 h-2.5 rounded-full flex-shrink-0"
-            style={{ backgroundColor: group.color ?? '#32bfa3' }}
+            style={{ backgroundColor: group.color ?? '#c9963a' }}
           />
           <input
-            className="bg-transparent text-sm font-medium text-text focus:outline-none focus:ring-1 focus:ring-green-50 rounded px-1 py-0.5"
+            className="bg-transparent text-sm font-medium text-text focus:outline-none focus:ring-1 focus:ring-positive-5 rounded px-1 py-0.5"
             value={name}
             onChange={(event) => setName(event.target.value)}
             onBlur={commitName}
@@ -250,7 +250,7 @@ function BudgetGroupSection({
           />
           <span className="text-xs text-muted font-mono">{group.totals.budget_count} budgets</span>
           <button
-            className="text-muted hover:text-blue transition-colors"
+            className="text-muted hover:text-info transition-colors"
             onClick={() => onAskGroup(group, month)}
             title="Ask advisor"
           >
@@ -261,12 +261,12 @@ function BudgetGroupSection({
           <span className="font-mono text-muted">{formatCurrency(group.totals.projected_spend)} projected</span>
           <span
             className="font-mono"
-            style={{ color: projectedRemaining >= 0 ? '#32bfa3' : '#ef6f8a' }}
+            style={{ color: projectedRemaining >= 0 ? '#c9963a' : '#b5654a' }}
           >
             {formatCurrency(projectedRemaining)} left
           </span>
           <button
-            className="text-muted hover:text-rose"
+            className="text-muted hover:text-negative"
             onClick={() => onDeleteGroup(group.id)}
           >
             Delete
@@ -350,12 +350,12 @@ function RolloverLedgerModal({
                   <td className="px-3 py-2 font-mono text-text">{row.month}</td>
                   <td className="px-3 py-2 font-mono text-muted">{formatCurrency(row.starting_rollover)}</td>
                   <td className="px-3 py-2 font-mono text-muted">{formatCurrency(row.budget_amount)}</td>
-                  <td className="px-3 py-2 font-mono text-rose">{formatCurrency(row.actual_spend)}</td>
+                  <td className="px-3 py-2 font-mono text-negative">{formatCurrency(row.actual_spend)}</td>
                   <td className="px-3 py-2 font-mono text-text">
                     <div className="flex items-center justify-between gap-2">
                       <span>{formatCurrency(row.ending_rollover)}</span>
                       <button
-                        className="text-muted hover:text-blue transition-colors"
+                        className="text-muted hover:text-info transition-colors"
                         onClick={() => onAskRow(row)}
                         title="Ask advisor"
                       >
@@ -431,7 +431,7 @@ function AddBudgetModal({
         <div>
           <label className="block text-xs text-muted mb-1">Category</label>
           <select
-            className="w-full bg-background border border-border rounded px-3 py-2 text-sm text-text focus:outline-none focus:ring-1 focus:ring-green-50"
+            className="w-full bg-background border border-border rounded px-3 py-2 text-sm text-text focus:outline-none focus:ring-1 focus:ring-positive-5"
             value={form.category_id}
             onChange={(e) => setForm({ ...form, category_id: e.target.value })}
           >
@@ -444,7 +444,7 @@ function AddBudgetModal({
           <label className="block text-xs text-muted mb-1">Budget Amount</label>
           <input
             type="number"
-            className="w-full bg-background border border-border rounded px-3 py-2 text-sm text-text font-mono focus:outline-none focus:ring-1 focus:ring-green-50"
+            className="w-full bg-background border border-border rounded px-3 py-2 text-sm text-text font-mono focus:outline-none focus:ring-1 focus:ring-positive-5"
             value={form.amount}
             onChange={(e) => setForm({ ...form, amount: e.target.value })}
             placeholder="0.00"
@@ -454,7 +454,7 @@ function AddBudgetModal({
           <input
             type="checkbox"
             id="rollover"
-            className="accent-green"
+            className="accent-positive"
             checked={form.rollover}
             onChange={(e) => setForm({ ...form, rollover: e.target.checked })}
           />
@@ -529,7 +529,7 @@ function RecurringTab() {
       {/* Annual total */}
       <div className="bg-surface shadow-sm border border-border rounded p-4 flex items-center justify-between">
         <span className="text-sm text-muted">Total Confirmed Annual Spend</span>
-        <span className="font-mono text-xl text-rose">{formatCurrency(annualTotal)}</span>
+        <span className="font-mono text-xl text-negative">{formatCurrency(annualTotal)}</span>
       </div>
 
       {/* Recurring table */}
@@ -569,13 +569,13 @@ function RecurringTab() {
                   <td className="px-4 py-2 text-muted">{FREQUENCY_LABELS[r.frequency]}</td>
                   <td className="px-4 py-2 font-mono text-text">{formatCurrency(r.average_amount)}</td>
                   <td className="px-4 py-2 font-mono text-muted">{formatDate(r.next_expected)}</td>
-                  <td className="px-4 py-2 font-mono text-rose">{formatCurrency(annual)}</td>
+                  <td className="px-4 py-2 font-mono text-negative">{formatCurrency(annual)}</td>
                   <td className="px-4 py-2">
                     <span
                       className="text-xs px-2 py-0.5 rounded-full"
                       style={{
                         backgroundColor: status === 'confirmed' ? 'rgba(78,203,163,0.15)' : status === 'dismissed' ? 'rgba(107,107,122,0.15)' : 'rgba(212,164,76,0.15)',
-                        color: status === 'confirmed' ? '#32bfa3' : status === 'dismissed' ? '#6b6b7a' : '#e2a53f',
+                        color: status === 'confirmed' ? '#c9963a' : status === 'dismissed' ? '#7a6c5d' : '#ce8642',
                       }}
                     >
                       {status}
@@ -585,7 +585,7 @@ function RecurringTab() {
                     <div className="flex gap-1">
                       {!r.is_confirmed && r.is_active && (
                         <button
-                          className="text-xs text-green hover:opacity-80"
+                          className="text-xs text-positive hover:opacity-80"
                           onClick={() => confirmMutation.mutate(r.id)}
                         >
                           Confirm
@@ -593,7 +593,7 @@ function RecurringTab() {
                       )}
                       {r.is_active && (
                         <button
-                          className="text-xs text-muted hover:text-rose"
+                          className="text-xs text-muted hover:text-negative"
                           onClick={() => dismissMutation.mutate(r.id)}
                         >
                           Dismiss
@@ -623,7 +623,7 @@ function RecurringTab() {
                 <p className="text-sm text-text">{r.merchant_name}</p>
                 <p className="text-xs text-muted font-mono">{formatDate(r.next_expected)}</p>
               </div>
-              <span className="font-mono text-sm text-rose">{formatCurrency(r.average_amount)}</span>
+              <span className="font-mono text-sm text-negative">{formatCurrency(r.average_amount)}</span>
             </div>
           ))}
           {upcoming.length === 0 && (
@@ -749,13 +749,13 @@ export function Budget() {
         <h1 className="text-xl font-semibold text-text">Budget</h1>
         <div className="flex gap-1 bg-surface shadow-sm border border-border rounded p-0.5">
           <button
-            className={`px-3 py-1.5 text-xs rounded ${tab === 'monthly' ? 'bg-green-10 text-green' : 'text-muted hover:text-text'}`}
+            className={`px-3 py-1.5 text-xs rounded ${tab === 'monthly' ? 'bg-positive-10 text-positive' : 'text-muted hover:text-text'}`}
             onClick={() => setTab('monthly')}
           >
             Monthly
           </button>
           <button
-            className={`px-3 py-1.5 text-xs rounded ${tab === 'recurring' ? 'bg-green-10 text-green' : 'text-muted hover:text-text'}`}
+            className={`px-3 py-1.5 text-xs rounded ${tab === 'recurring' ? 'bg-positive-10 text-positive' : 'text-muted hover:text-text'}`}
             onClick={() => setTab('recurring')}
           >
             Recurring
@@ -792,13 +792,13 @@ export function Budget() {
             </div>
             <div className="bg-surface shadow-sm border border-border rounded p-4">
               <p className="text-xs text-muted mb-1">Spent</p>
-              <p className="font-mono text-lg text-rose">{formatCurrency(spent)}</p>
+              <p className="font-mono text-lg text-negative">{formatCurrency(spent)}</p>
             </div>
             <div className="bg-surface shadow-sm border border-border rounded p-4">
               <p className="text-xs text-muted mb-1">Remaining</p>
               <p
                 className="font-mono text-lg"
-                style={{ color: remaining >= 0 ? '#32bfa3' : '#ef6f8a' }}
+                style={{ color: remaining >= 0 ? '#c9963a' : '#b5654a' }}
               >
                 {formatCurrency(remaining)}
               </p>
@@ -807,7 +807,7 @@ export function Budget() {
               <p className="text-xs text-muted mb-1">Projected</p>
               <p
                 className="font-mono text-lg"
-                style={{ color: projectedRemaining >= 0 ? '#32bfa3' : '#ef6f8a' }}
+                style={{ color: projectedRemaining >= 0 ? '#c9963a' : '#b5654a' }}
               >
                 {formatCurrency(projectedSpend)}
               </p>
@@ -824,7 +824,7 @@ export function Budget() {
             <div className="flex items-center justify-between mb-2">
               <h2 className="text-sm font-medium text-text">Budgets</h2>
               <button
-                className="flex items-center gap-1 text-xs text-green hover:opacity-80"
+                className="flex items-center gap-1 text-xs text-positive hover:opacity-80"
                 onClick={() => setShowAddModal(true)}
               >
                 <Plus size={13} /> Add Budget
@@ -833,7 +833,7 @@ export function Budget() {
 
             <div className="flex items-center gap-2 mb-4">
               <input
-                className="bg-background border border-border rounded px-3 py-1.5 text-xs text-text focus:outline-none focus:ring-1 focus:ring-green-50 min-w-[220px]"
+                className="bg-background border border-border rounded px-3 py-1.5 text-xs text-text focus:outline-none focus:ring-1 focus:ring-positive-5 min-w-[220px]"
                 value={newGroupName}
                 onChange={(event) => setNewGroupName(event.target.value)}
                 onKeyDown={(event) => {

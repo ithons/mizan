@@ -63,10 +63,7 @@ import type {
   ReportNetWorthEvidence,
   ReportSummary,
 } from '@shared/types';
-const COLORS = [
-  '#32bfa3', '#6487f0', '#e2a53f', '#ef6f8a', '#a78bfa',
-  '#f472b6', '#34d399', '#fb923c', '#60a5fa', '#f87171',
-];
+import { CHART_COLORS as COLORS } from '../lib/chartColors';
 
 type DatePreset = ReportDatePreset;
 
@@ -159,9 +156,9 @@ function ChartTooltip({ active, payload, label }: ChartTooltipProps) {
       <p className="text-muted mb-1 font-mono">{label}</p>
       {payload.map((p) => (
         <div key={p.dataKey} className="flex items-center gap-2">
-          <span className="w-2 h-2 rounded-full" style={{ backgroundColor: p.color ?? '#6b6b7a' }} />
+          <span className="w-2 h-2 rounded-full" style={{ backgroundColor: p.color ?? '#7a6c5d' }} />
           <span className="text-text">{p.name ?? p.dataKey}:</span>
-          <span className="font-mono" style={{ color: p.color ?? '#6b6b7a' }}>{formatCurrency(Math.abs(p.value))}</span>
+          <span className="font-mono" style={{ color: p.color ?? '#7a6c5d' }}>{formatCurrency(Math.abs(p.value))}</span>
         </div>
       ))}
     </div>
@@ -176,7 +173,7 @@ function getTreemapProps(rawProps: unknown): Required<TreemapContentProps> {
     width: props.width ?? 0,
     height: props.height ?? 0,
     name: props.name ?? '',
-    color: props.color ?? '#6b6b7a',
+    color: props.color ?? '#7a6c5d',
     value: props.value ?? 0,
   };
 }
@@ -198,9 +195,9 @@ function SpendingTreemapContent({ categories = [], onDrill, ...rawProps }: Spend
       />
       {width > 60 && height > 30 && (
         <>
-          <text x={x + 8} y={y + 18} fill="#e8e8ec" fontSize={11} fontWeight={500}>{name}</text>
+          <text x={x + 8} y={y + 18} fill="#e4d9c7" fontSize={11} fontWeight={500}>{name}</text>
           {height > 50 && (
-            <text x={x + 8} y={y + 34} fill="#6b6b7a" fontSize={10} fontFamily="JetBrains Mono">
+            <text x={x + 8} y={y + 34} fill="#7a6c5d" fontSize={10} fontFamily="JetBrains Mono">
               {formatCurrency(value)}
             </text>
           )}
@@ -222,7 +219,7 @@ function BasicTreemapContent(rawProps: TreemapContentProps) {
         style={{ fill: color, opacity: 0.85 }}
       />
       {width > 60 && height > 30 && (
-        <text x={x + 8} y={y + 18} fill="#e8e8ec" fontSize={11}>{name}</text>
+        <text x={x + 8} y={y + 18} fill="#e4d9c7" fontSize={11}>{name}</text>
       )}
     </g>
   );
@@ -254,9 +251,9 @@ function findDrillCategory(categories: DrillCategory[], categoryId: string): Dri
 }
 
 function metricColor(metric: ReportMetricSummary, lowerIsBetter = false): string {
-  if (metric.delta === 0) return '#6b6b7a';
+  if (metric.delta === 0) return '#7a6c5d';
   const good = lowerIsBetter ? metric.delta < 0 : metric.delta > 0;
-  return good ? '#32bfa3' : '#ef6f8a';
+  return good ? '#c9963a' : '#b5654a';
 }
 
 function formatDelta(metric: ReportMetricSummary, isRate = false): string {
@@ -280,7 +277,7 @@ function AdvisorEvidenceButton({
       type="button"
       disabled={disabled}
       onClick={onClick}
-      className="text-xs border border-border rounded px-3 py-1.5 text-muted hover:text-green disabled:opacity-40 disabled:hover:text-muted flex items-center gap-1"
+      className="text-xs border border-border rounded px-3 py-1.5 text-muted hover:text-positive disabled:opacity-40 disabled:hover:text-muted flex items-center gap-1"
       title={label}
     >
       <Sparkles size={13} />
@@ -341,7 +338,7 @@ function ReportSummaryPanel({
           <span className="font-mono">{comparisonRange}</span>
           {onAsk && (
             <button
-              className="text-muted hover:text-green flex items-center gap-1"
+              className="text-muted hover:text-positive flex items-center gap-1"
               onClick={() => onAsk(summary)}
               title="Why did these report numbers change?"
             >
@@ -351,10 +348,10 @@ function ReportSummaryPanel({
         </div>
       </div>
       <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
-        <ReportMetricCard label="Income" metric={summary.income} tone="#32bfa3" />
-        <ReportMetricCard label="Spending" metric={summary.expenses} tone="#ef6f8a" lowerIsBetter />
-        <ReportMetricCard label="Net Cash Flow" metric={summary.net} tone={summary.net.current >= 0 ? '#32bfa3' : '#ef6f8a'} />
-        <ReportMetricCard label="Savings Rate" metric={summary.savings_rate} tone="#6487f0" isRate />
+        <ReportMetricCard label="Income" metric={summary.income} tone="#c9963a" />
+        <ReportMetricCard label="Spending" metric={summary.expenses} tone="#b5654a" lowerIsBetter />
+        <ReportMetricCard label="Net Cash Flow" metric={summary.net} tone={summary.net.current >= 0 ? '#c9963a' : '#b5654a'} />
+        <ReportMetricCard label="Savings Rate" metric={summary.savings_rate} tone="#7c8b99" isRate />
       </div>
 
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-3">
@@ -363,7 +360,7 @@ function ReportSummaryPanel({
           {topMover ? (
             <div>
               <div className="flex items-center gap-2 mb-1">
-                <span className="w-2 h-2 rounded-full" style={{ backgroundColor: topMover.color ?? '#6b6b7a' }} />
+                <span className="w-2 h-2 rounded-full" style={{ backgroundColor: topMover.color ?? '#7a6c5d' }} />
                 <span className="text-sm text-text">{topMover.category_name}</span>
               </div>
               <p className="font-mono text-sm" style={{ color: metricColor(topMover) }}>
@@ -381,7 +378,7 @@ function ReportSummaryPanel({
             {summary.top_spending.slice(0, 3).map((category) => (
               <div key={category.category_id} className="flex items-center justify-between gap-3 text-xs">
                 <span className="text-text truncate">{category.category_name}</span>
-                <span className="font-mono text-rose">{formatCurrency(category.current)}</span>
+                <span className="font-mono text-negative">{formatCurrency(category.current)}</span>
               </div>
             ))}
             {summary.top_spending.length === 0 && <p className="text-sm text-muted">No spending</p>}
@@ -395,7 +392,7 @@ function ReportSummaryPanel({
               <button
                 key={flow.flow_type}
                 type="button"
-                className="flex w-full items-center justify-between gap-3 rounded px-1.5 py-1 text-left text-xs hover:bg-green/5 focus:outline-none focus:ring-1 focus:ring-green/30"
+                className="flex w-full items-center justify-between gap-3 rounded px-1.5 py-1 text-left text-xs hover:bg-positive/5 focus:outline-none focus:ring-1 focus:ring-positive/30"
                 onClick={() => onExcludedFlow?.(flow)}
               >
                 <span className="text-text capitalize">{flow.flow_type}</span>
@@ -463,7 +460,7 @@ function ReportDrilldownModal({
             <p className="text-xs text-muted mb-1">Total</p>
             <p
               className="font-mono text-lg"
-              style={{ color: target?.kind === 'income' ? '#32bfa3' : '#ef6f8a' }}
+              style={{ color: target?.kind === 'income' ? '#c9963a' : '#b5654a' }}
             >
               {data ? formatCurrency(data.total) : '-'}
             </p>
@@ -554,15 +551,15 @@ function ReportEvidenceModal({
           </div>
           <div>
             <p className="text-muted mb-1">Income</p>
-            <p className="font-mono text-lg text-green">{data ? formatCurrency(data.income) : '-'}</p>
+            <p className="font-mono text-lg text-positive">{data ? formatCurrency(data.income) : '-'}</p>
           </div>
           <div>
             <p className="text-muted mb-1">Spending</p>
-            <p className="font-mono text-lg text-rose">{data ? formatCurrency(data.expenses) : '-'}</p>
+            <p className="font-mono text-lg text-negative">{data ? formatCurrency(data.expenses) : '-'}</p>
           </div>
           <div>
             <p className="text-muted mb-1">Net</p>
-            <p className="font-mono text-lg" style={{ color: (data?.net ?? 0) >= 0 ? '#32bfa3' : '#ef6f8a' }}>
+            <p className="font-mono text-lg" style={{ color: (data?.net ?? 0) >= 0 ? '#c9963a' : '#b5654a' }}>
               {data ? formatCurrency(data.net, { showSign: true }) : '-'}
             </p>
           </div>
@@ -636,13 +633,13 @@ function NetWorthEvidenceModal({
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs">
           <div>
             <p className="text-muted mb-1">Assets</p>
-            <p className="font-mono text-lg text-green">
+            <p className="font-mono text-lg text-positive">
               {data ? formatCurrency(data.snapshot.total_assets) : '-'}
             </p>
           </div>
           <div>
             <p className="text-muted mb-1">Liabilities</p>
-            <p className="font-mono text-lg text-rose">
+            <p className="font-mono text-lg text-negative">
               {data ? formatCurrency(data.snapshot.total_liabilities) : '-'}
             </p>
           </div>
@@ -654,7 +651,7 @@ function NetWorthEvidenceModal({
           </div>
           <div>
             <p className="text-muted mb-1">Change</p>
-            <p className="font-mono text-lg" style={{ color: (data?.delta ?? 0) >= 0 ? '#32bfa3' : '#ef6f8a' }}>
+            <p className="font-mono text-lg" style={{ color: (data?.delta ?? 0) >= 0 ? '#c9963a' : '#b5654a' }}>
               {data?.delta != null ? formatCurrency(data.delta, { showSign: true }) : '-'}
             </p>
           </div>
@@ -698,7 +695,7 @@ function NetWorthEvidenceModal({
                   <span className="hidden md:block text-muted capitalize">{account.type ?? 'unknown'}</span>
                   <span
                     className="font-mono text-right"
-                    style={{ color: account.is_liability ? '#ef6f8a' : '#32bfa3' }}
+                    style={{ color: account.is_liability ? '#b5654a' : '#c9963a' }}
                   >
                     {formatCurrency(account.balance)}
                   </span>
@@ -745,7 +742,7 @@ function SpendingTab({ startDate, endDate }: { startDate: string; endDate: strin
       {/* Breadcrumb */}
       <div className="flex items-center gap-1 text-xs">
         <button
-          className={drillId ? 'text-green hover:opacity-80' : 'text-muted cursor-default'}
+          className={drillId ? 'text-positive hover:opacity-80' : 'text-muted cursor-default'}
           onClick={() => { setDrillId(null); setDrillName(null); }}
         >
           All Categories
@@ -816,7 +813,7 @@ function SpendingTab({ startDate, endDate }: { startDate: string; endDate: strin
                     <span className="text-text">{c.category_name}</span>
                   </div>
                 </td>
-                <td className="px-4 py-2 font-mono text-right text-rose">{formatCurrency(c.amount ?? 0)}</td>
+                <td className="px-4 py-2 font-mono text-right text-negative">{formatCurrency(c.amount ?? 0)}</td>
                 <td className="px-4 py-2 font-mono text-right text-muted">{formatPercent(c.percentage ?? 0)}</td>
               </tr>
             ))}
@@ -825,7 +822,7 @@ function SpendingTab({ startDate, endDate }: { startDate: string; endDate: strin
             <tfoot className="border-t border-border bg-background/30">
               <tr>
                 <td className="px-4 py-2 text-sm font-medium text-text">Total</td>
-                <td className="px-4 py-2 font-mono text-right text-rose font-medium">{formatCurrency(spending.total)}</td>
+                <td className="px-4 py-2 font-mono text-right text-negative font-medium">{formatCurrency(spending.total)}</td>
                 <td />
               </tr>
             </tfoot>
@@ -910,7 +907,7 @@ function IncomeTab({ startDate, endDate }: { startDate: string; endDate: string 
                     <span className="text-text">{c.category_name}</span>
                   </div>
                 </td>
-                <td className="px-4 py-2 font-mono text-right text-green">{formatCurrency(c.amount)}</td>
+                <td className="px-4 py-2 font-mono text-right text-positive">{formatCurrency(c.amount)}</td>
                 <td className="px-4 py-2 font-mono text-right text-muted">{formatPercent(c.percentage)}</td>
               </tr>
             ))}
@@ -919,7 +916,7 @@ function IncomeTab({ startDate, endDate }: { startDate: string; endDate: string 
             <tfoot className="border-t border-border bg-background/30">
               <tr>
                 <td className="px-4 py-2 text-sm font-medium text-text">Total</td>
-                <td className="px-4 py-2 font-mono text-right text-green font-medium">{formatCurrency(income.total)}</td>
+                <td className="px-4 py-2 font-mono text-right text-positive font-medium">{formatCurrency(income.total)}</td>
                 <td />
               </tr>
             </tfoot>
@@ -997,9 +994,9 @@ function TrendsTab({
               onClick={() => toggleCat(cat.id)}
               className="flex items-center gap-1.5 px-3 py-1 rounded text-xs border transition-all"
               style={{
-                borderColor: isSelected ? color : '#dbe7e2',
+                borderColor: isSelected ? color : '#e4d9c7',
                 backgroundColor: isSelected ? `${color}15` : 'transparent',
-                color: isSelected ? color : '#6b6b7a',
+                color: isSelected ? color : '#7a6c5d',
               }}
             >
               <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: color }} />
@@ -1019,11 +1016,11 @@ function TrendsTab({
         <div className="bg-surface shadow-sm border border-border rounded p-4">
           <ResponsiveContainer width="100%" height={280}>
             <LineChart data={chartData}>
-              <CartesianGrid vertical={false} stroke="#dbe7e2" />
-              <XAxis dataKey="month" tick={{ fill: '#6b6b7a', fontSize: 11, fontFamily: 'JetBrains Mono' }} axisLine={false} tickLine={false} />
-              <YAxis tick={{ fill: '#6b6b7a', fontSize: 11, fontFamily: 'JetBrains Mono' }} axisLine={false} tickLine={false} tickFormatter={(v) => `$${(v / 1000).toFixed(0)}k`} />
+              <CartesianGrid vertical={false} stroke="#e4d9c7" />
+              <XAxis dataKey="month" tick={{ fill: '#7a6c5d', fontSize: 11, fontFamily: 'JetBrains Mono' }} axisLine={false} tickLine={false} />
+              <YAxis tick={{ fill: '#7a6c5d', fontSize: 11, fontFamily: 'JetBrains Mono' }} axisLine={false} tickLine={false} tickFormatter={(v) => `$${(v / 1000).toFixed(0)}k`} />
               <Tooltip content={<ChartTooltip />} />
-              <Legend wrapperStyle={{ fontSize: 11, color: '#6b6b7a' }} />
+              <Legend wrapperStyle={{ fontSize: 11, color: '#7a6c5d' }} />
               {trends?.series.map((s, i) => (
                 <Line
                   key={s.category_id}
@@ -1086,18 +1083,18 @@ function CashflowTab({ startDate, endDate }: { startDate: string; endDate: strin
         <ReportMetricCard
           label="Income"
           metric={{ current: totals.income, previous: 0, delta: totals.income, delta_percent: null }}
-          tone="#32bfa3"
+          tone="#c9963a"
         />
         <ReportMetricCard
           label="Spending"
           metric={{ current: totals.expenses, previous: 0, delta: totals.expenses, delta_percent: null }}
-          tone="#ef6f8a"
+          tone="#b5654a"
           lowerIsBetter
         />
         <ReportMetricCard
           label="Net"
           metric={{ current: totals.net, previous: 0, delta: totals.net, delta_percent: null }}
-          tone={totals.net >= 0 ? '#32bfa3' : '#ef6f8a'}
+          tone={totals.net >= 0 ? '#c9963a' : '#b5654a'}
         />
       </div>
 
@@ -1106,20 +1103,20 @@ function CashflowTab({ startDate, endDate }: { startDate: string; endDate: strin
           <AreaChart data={chartData}>
             <defs>
               <linearGradient id="cashIncomeGrad" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="5%" stopColor="#32bfa3" stopOpacity={0.2} />
-                <stop offset="95%" stopColor="#32bfa3" stopOpacity={0} />
+                <stop offset="5%" stopColor="#c9963a" stopOpacity={0.2} />
+                <stop offset="95%" stopColor="#c9963a" stopOpacity={0} />
               </linearGradient>
               <linearGradient id="cashExpenseGrad" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="5%" stopColor="#ef6f8a" stopOpacity={0.18} />
-                <stop offset="95%" stopColor="#ef6f8a" stopOpacity={0} />
+                <stop offset="5%" stopColor="#b5654a" stopOpacity={0.18} />
+                <stop offset="95%" stopColor="#b5654a" stopOpacity={0} />
               </linearGradient>
             </defs>
-            <CartesianGrid vertical={false} stroke="#dbe7e2" />
-            <XAxis dataKey="month" tick={{ fill: '#6b6b7a', fontSize: 11, fontFamily: 'JetBrains Mono' }} axisLine={false} tickLine={false} />
-            <YAxis tick={{ fill: '#6b6b7a', fontSize: 11, fontFamily: 'JetBrains Mono' }} axisLine={false} tickLine={false} tickFormatter={(v) => `$${(Number(v) / 1000).toFixed(0)}k`} />
+            <CartesianGrid vertical={false} stroke="#e4d9c7" />
+            <XAxis dataKey="month" tick={{ fill: '#7a6c5d', fontSize: 11, fontFamily: 'JetBrains Mono' }} axisLine={false} tickLine={false} />
+            <YAxis tick={{ fill: '#7a6c5d', fontSize: 11, fontFamily: 'JetBrains Mono' }} axisLine={false} tickLine={false} tickFormatter={(v) => `$${(Number(v) / 1000).toFixed(0)}k`} />
             <Tooltip content={<ChartTooltip />} />
-            <Area type="monotone" dataKey="income" name="Income" stroke="#32bfa3" fill="url(#cashIncomeGrad)" strokeWidth={2} dot={false} />
-            <Area type="monotone" dataKey="expenses" name="Spending" stroke="#ef6f8a" fill="url(#cashExpenseGrad)" strokeWidth={2} dot={false} />
+            <Area type="monotone" dataKey="income" name="Income" stroke="#c9963a" fill="url(#cashIncomeGrad)" strokeWidth={2} dot={false} />
+            <Area type="monotone" dataKey="expenses" name="Spending" stroke="#b5654a" fill="url(#cashExpenseGrad)" strokeWidth={2} dot={false} />
           </AreaChart>
         </ResponsiveContainer>
       </div>
@@ -1137,7 +1134,7 @@ function CashflowTab({ startDate, endDate }: { startDate: string; endDate: strin
             {months.map((month) => (
               <tr
                 key={month.month}
-                className="border-b border-border hover:bg-green/5 cursor-pointer focus:bg-green/5 focus:outline-none focus:ring-1 focus:ring-green/30"
+                className="border-b border-border hover:bg-positive/5 cursor-pointer focus:bg-positive/5 focus:outline-none focus:ring-1 focus:ring-positive/30"
                 tabIndex={0}
                 role="button"
                 onClick={() => setEvidenceTarget({
@@ -1157,9 +1154,9 @@ function CashflowTab({ startDate, endDate }: { startDate: string; endDate: strin
                 }}
               >
                 <td className="px-4 py-2 font-mono text-muted">{formatMonth(month.month)}</td>
-                <td className="px-4 py-2 font-mono text-green">{formatCurrency(month.income)}</td>
-                <td className="px-4 py-2 font-mono text-rose">{formatCurrency(month.expenses)}</td>
-                <td className="px-4 py-2 font-mono" style={{ color: month.net >= 0 ? '#32bfa3' : '#ef6f8a' }}>
+                <td className="px-4 py-2 font-mono text-positive">{formatCurrency(month.income)}</td>
+                <td className="px-4 py-2 font-mono text-negative">{formatCurrency(month.expenses)}</td>
+                <td className="px-4 py-2 font-mono" style={{ color: month.net >= 0 ? '#c9963a' : '#b5654a' }}>
                   {formatCurrency(month.net, { showSign: true })}
                 </td>
               </tr>
@@ -1179,7 +1176,7 @@ function CashflowTab({ startDate, endDate }: { startDate: string; endDate: strin
 
 // ─── Net Worth Tab ────────────────────────────────────────────────────────────
 
-const PIE_COLORS = { liquid: '#32bfa3', investments: '#6487f0', crypto: '#e2a53f', liabilities: '#ef6f8a' };
+const PIE_COLORS = { liquid: '#c9963a', investments: '#7c8b99', crypto: '#ce8642', liabilities: '#b5654a' };
 
 function AssetPieChart({ data, title }: { data: Array<{ name: string; value: number; color: string }>; title: string }) {
   return (
@@ -1213,9 +1210,9 @@ function AssetPieChart({ data, title }: { data: Array<{ name: string; value: num
 }
 
 function signedTone(value: number) {
-  if (value > 0) return '#32bfa3';
-  if (value < 0) return '#ef6f8a';
-  return '#6b6b7a';
+  if (value > 0) return '#c9963a';
+  if (value < 0) return '#b5654a';
+  return '#7a6c5d';
 }
 
 function NetWorthClassRow({ item }: { item: NetWorthClassAttribution }) {
@@ -1384,17 +1381,17 @@ function NetWorthTab() {
       {/* Toggles */}
       <div className="flex gap-2">
         {[
-          { key: 'assets', label: 'Assets', color: '#32bfa3', val: showAssets, set: setShowAssets },
-          { key: 'liabilities', label: 'Liabilities', color: '#ef6f8a', val: showLiabilities, set: setShowLiabilities },
+          { key: 'assets', label: 'Assets', color: '#c9963a', val: showAssets, set: setShowAssets },
+          { key: 'liabilities', label: 'Liabilities', color: '#b5654a', val: showLiabilities, set: setShowLiabilities },
         ].map((t) => (
           <button
             key={t.key}
             onClick={() => t.set(!t.val)}
             className="flex items-center gap-1.5 px-3 py-1 rounded text-xs border transition-all"
             style={{
-              borderColor: t.val ? t.color : '#dbe7e2',
+              borderColor: t.val ? t.color : '#e4d9c7',
               backgroundColor: t.val ? `${t.color}15` : 'transparent',
-              color: t.val ? t.color : '#6b6b7a',
+              color: t.val ? t.color : '#7a6c5d',
             }}
           >
             {t.label}
@@ -1408,29 +1405,29 @@ function NetWorthTab() {
           <AreaChart data={chartData}>
             <defs>
               <linearGradient id="assetsGrad" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="5%" stopColor="#32bfa3" stopOpacity={0.2} />
-                <stop offset="95%" stopColor="#32bfa3" stopOpacity={0} />
+                <stop offset="5%" stopColor="#c9963a" stopOpacity={0.2} />
+                <stop offset="95%" stopColor="#c9963a" stopOpacity={0} />
               </linearGradient>
               <linearGradient id="liabGrad" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="5%" stopColor="#ef6f8a" stopOpacity={0.2} />
-                <stop offset="95%" stopColor="#ef6f8a" stopOpacity={0} />
+                <stop offset="5%" stopColor="#b5654a" stopOpacity={0.2} />
+                <stop offset="95%" stopColor="#b5654a" stopOpacity={0} />
               </linearGradient>
               <linearGradient id="nwGrad" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="5%" stopColor="#6487f0" stopOpacity={0.2} />
-                <stop offset="95%" stopColor="#6487f0" stopOpacity={0} />
+                <stop offset="5%" stopColor="#7c8b99" stopOpacity={0.2} />
+                <stop offset="95%" stopColor="#7c8b99" stopOpacity={0} />
               </linearGradient>
             </defs>
-            <CartesianGrid vertical={false} stroke="#dbe7e2" />
-            <XAxis dataKey="date" tick={{ fill: '#6b6b7a', fontSize: 11, fontFamily: 'JetBrains Mono' }} axisLine={false} tickLine={false} />
-            <YAxis tick={{ fill: '#6b6b7a', fontSize: 11, fontFamily: 'JetBrains Mono' }} axisLine={false} tickLine={false} tickFormatter={(v) => `$${(v / 1000).toFixed(0)}k`} />
+            <CartesianGrid vertical={false} stroke="#e4d9c7" />
+            <XAxis dataKey="date" tick={{ fill: '#7a6c5d', fontSize: 11, fontFamily: 'JetBrains Mono' }} axisLine={false} tickLine={false} />
+            <YAxis tick={{ fill: '#7a6c5d', fontSize: 11, fontFamily: 'JetBrains Mono' }} axisLine={false} tickLine={false} tickFormatter={(v) => `$${(v / 1000).toFixed(0)}k`} />
             <Tooltip content={<ChartTooltip />} />
             {showAssets && (
-              <Area type="monotone" dataKey="assets" name="Assets" stroke="#32bfa3" fill="url(#assetsGrad)" strokeWidth={2} dot={false} />
+              <Area type="monotone" dataKey="assets" name="Assets" stroke="#c9963a" fill="url(#assetsGrad)" strokeWidth={2} dot={false} />
             )}
             {showLiabilities && (
-              <Area type="monotone" dataKey="liabilities" name="Liabilities" stroke="#ef6f8a" fill="url(#liabGrad)" strokeWidth={2} dot={false} />
+              <Area type="monotone" dataKey="liabilities" name="Liabilities" stroke="#b5654a" fill="url(#liabGrad)" strokeWidth={2} dot={false} />
             )}
-            <Area type="monotone" dataKey="netWorth" name="Net Worth" stroke="#6487f0" fill="url(#nwGrad)" strokeWidth={2} dot={false} />
+            <Area type="monotone" dataKey="netWorth" name="Net Worth" stroke="#7c8b99" fill="url(#nwGrad)" strokeWidth={2} dot={false} />
           </AreaChart>
         </ResponsiveContainer>
       </div>
@@ -1452,7 +1449,7 @@ function NetWorthTab() {
               return (
                 <tr
                   key={s.id}
-                  className="border-b border-border hover:bg-green/5 cursor-pointer focus:bg-green/5 focus:outline-none focus:ring-1 focus:ring-green/30"
+                  className="border-b border-border hover:bg-positive/5 cursor-pointer focus:bg-positive/5 focus:outline-none focus:ring-1 focus:ring-positive/30"
                   tabIndex={0}
                   role="button"
                   onClick={() => setEvidenceSnapshot(s)}
@@ -1464,10 +1461,10 @@ function NetWorthTab() {
                   }}
                 >
                   <td className="px-4 py-2 font-mono text-muted">{formatDate(s.date)}</td>
-                  <td className="px-4 py-2 font-mono text-green">{formatCurrency(s.total_assets)}</td>
-                  <td className="px-4 py-2 font-mono text-rose">{formatCurrency(s.total_liabilities)}</td>
+                  <td className="px-4 py-2 font-mono text-positive">{formatCurrency(s.total_assets)}</td>
+                  <td className="px-4 py-2 font-mono text-negative">{formatCurrency(s.total_liabilities)}</td>
                   <td className="px-4 py-2 font-mono text-text">{formatCurrency(s.net_worth)}</td>
-                  <td className="px-4 py-2 font-mono" style={{ color: delta != null ? (delta >= 0 ? '#32bfa3' : '#ef6f8a') : '#6b6b7a' }}>
+                  <td className="px-4 py-2 font-mono" style={{ color: delta != null ? (delta >= 0 ? '#c9963a' : '#b5654a') : '#7a6c5d' }}>
                     {delta != null ? `${delta >= 0 ? '+' : ''}${formatCurrency(delta)}` : '-'}
                   </td>
                 </tr>
@@ -1544,17 +1541,17 @@ function InvestmentsTab() {
         {/* Portfolio history */}
         <div className="bg-surface shadow-sm border border-border rounded p-4">
           <p className="text-xs text-muted mb-1">Portfolio Value</p>
-          <p className="font-mono text-2xl text-blue mb-3">{formatCurrency(totalValue)}</p>
+          <p className="font-mono text-2xl text-info mb-3">{formatCurrency(totalValue)}</p>
           {historyData.length > 0 && (
             <ResponsiveContainer width="100%" height={120}>
               <AreaChart data={historyData}>
                 <defs>
                   <linearGradient id="invGrad" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#6487f0" stopOpacity={0.2} />
-                    <stop offset="95%" stopColor="#6487f0" stopOpacity={0} />
+                    <stop offset="5%" stopColor="#7c8b99" stopOpacity={0.2} />
+                    <stop offset="95%" stopColor="#7c8b99" stopOpacity={0} />
                   </linearGradient>
                 </defs>
-                <Area type="monotone" dataKey="value" stroke="#6487f0" fill="url(#invGrad)" strokeWidth={2} dot={false} />
+                <Area type="monotone" dataKey="value" stroke="#7c8b99" fill="url(#invGrad)" strokeWidth={2} dot={false} />
                 <XAxis dataKey="date" hide />
                 <YAxis hide />
                 <Tooltip content={<ChartTooltip />} />
@@ -1600,16 +1597,16 @@ function InvestmentsTab() {
               const pnlPct = h.cost_basis && h.cost_basis > 0 ? ((h.institution_value - h.cost_basis) / h.cost_basis) * 100 : null;
               return (
                 <tr key={h.id} className="border-b border-border hover:bg-black/5">
-                  <td className="px-4 py-2 font-mono text-blue font-medium">{h.ticker ?? '-'}</td>
+                  <td className="px-4 py-2 font-mono text-info font-medium">{h.ticker ?? '-'}</td>
                   <td className="px-4 py-2 text-text max-w-[160px] truncate">{h.security_name}</td>
                   <td className="px-4 py-2 font-mono text-muted">{h.quantity.toFixed(4)}</td>
                   <td className="px-4 py-2 font-mono text-muted">{formatCurrency(h.institution_price)}</td>
                   <td className="px-4 py-2 font-mono text-text">{formatCurrency(h.institution_value)}</td>
                   <td className="px-4 py-2 font-mono text-muted">{h.cost_basis != null ? formatCurrency(h.cost_basis) : '-'}</td>
-                  <td className="px-4 py-2 font-mono" style={{ color: unrealized != null ? (unrealized >= 0 ? '#32bfa3' : '#ef6f8a') : '#6b6b7a' }}>
+                  <td className="px-4 py-2 font-mono" style={{ color: unrealized != null ? (unrealized >= 0 ? '#c9963a' : '#b5654a') : '#7a6c5d' }}>
                     {unrealized != null ? `${unrealized >= 0 ? '+' : ''}${formatCurrency(unrealized)}` : '-'}
                   </td>
-                  <td className="px-4 py-2 font-mono" style={{ color: pnlPct != null ? (pnlPct >= 0 ? '#32bfa3' : '#ef6f8a') : '#6b6b7a' }}>
+                  <td className="px-4 py-2 font-mono" style={{ color: pnlPct != null ? (pnlPct >= 0 ? '#c9963a' : '#b5654a') : '#7a6c5d' }}>
                     {pnlPct != null ? `${pnlPct >= 0 ? '+' : ''}${formatPercent(pnlPct)}` : '-'}
                   </td>
                 </tr>
@@ -1627,10 +1624,10 @@ function InvestmentsTab() {
                 <tr>
                   <td className="px-4 py-2 font-bold text-text" colSpan={5}>TOTAL</td>
                   <td className="px-4 py-2 font-mono font-bold text-muted">{hasCB ? formatCurrency(totalCB) : '-'}</td>
-                  <td className="px-4 py-2 font-mono font-bold" style={{ color: hasCB ? (totalPnl >= 0 ? '#32bfa3' : '#ef6f8a') : '#6b6b7a' }}>
+                  <td className="px-4 py-2 font-mono font-bold" style={{ color: hasCB ? (totalPnl >= 0 ? '#c9963a' : '#b5654a') : '#7a6c5d' }}>
                     {hasCB ? `${totalPnl >= 0 ? '+' : ''}${formatCurrency(totalPnl)}` : '-'}
                   </td>
-                  <td className="px-4 py-2 font-mono font-bold" style={{ color: totalPct != null ? (totalPct >= 0 ? '#32bfa3' : '#ef6f8a') : '#6b6b7a' }}>
+                  <td className="px-4 py-2 font-mono font-bold" style={{ color: totalPct != null ? (totalPct >= 0 ? '#c9963a' : '#b5654a') : '#7a6c5d' }}>
                     {totalPct != null ? `${totalPct >= 0 ? '+' : ''}${formatPercent(totalPct)}` : '-'}
                   </td>
                 </tr>
@@ -1834,7 +1831,7 @@ export function Reports() {
             <button
               key={view.id}
               onClick={() => applyReportView(view)}
-              className="px-3 py-1.5 text-xs rounded border border-border text-muted hover:text-text hover:bg-green/5"
+              className="px-3 py-1.5 text-xs rounded border border-border text-muted hover:text-text hover:bg-positive/5"
             >
               {view.label}
             </button>
@@ -1843,13 +1840,13 @@ export function Reports() {
             <div key={view.id} className="flex items-center border border-border rounded overflow-hidden">
               <button
                 onClick={() => applyCustomReportView(view)}
-                className="px-3 py-1.5 text-xs text-muted hover:text-text hover:bg-green/5"
+                className="px-3 py-1.5 text-xs text-muted hover:text-text hover:bg-positive/5"
               >
                 {view.label}
               </button>
               <button
                 onClick={() => deleteCustomReportView(view.id)}
-                className="px-2 py-1.5 text-muted hover:text-rose border-l border-border"
+                className="px-2 py-1.5 text-muted hover:text-negative border-l border-border"
                 title={`Delete ${view.label}`}
                 aria-label={`Delete ${view.label}`}
               >
@@ -1868,7 +1865,7 @@ export function Reports() {
               type="button"
               disabled={!newViewName.trim()}
               onClick={saveCurrentView}
-              className="flex items-center gap-1 text-xs text-muted hover:text-green disabled:opacity-40 disabled:hover:text-muted"
+              className="flex items-center gap-1 text-xs text-muted hover:text-positive disabled:opacity-40 disabled:hover:text-muted"
             >
               <Save size={12} />
               Save
@@ -1888,7 +1885,7 @@ export function Reports() {
                 onClick={() => setPreset(p.key)}
                 className={`px-3 py-1.5 text-xs rounded border transition-all ${
                   preset === p.key
-                    ? 'bg-green-10 text-green border-green/40'
+                    ? 'bg-positive-10 text-positive border-positive/40'
                     : 'text-muted border-border hover:text-text'
                 }`}
               >
@@ -1924,7 +1921,7 @@ export function Reports() {
                 onClick={() => setComparison(option.key)}
                 className={`px-3 py-1.5 text-xs rounded border transition-all ${
                   comparison === option.key
-                    ? 'bg-blue/10 text-blue border-blue/40'
+                    ? 'bg-info/10 text-info border-info/40'
                     : 'text-muted border-border hover:text-text'
                 }`}
               >
@@ -1958,7 +1955,7 @@ export function Reports() {
             key={t}
             onClick={() => setTab(t)}
             className={`px-3 py-1.5 text-xs rounded capitalize transition-all ${
-              tab === t ? 'bg-green-10 text-green' : 'text-muted hover:text-text'
+              tab === t ? 'bg-positive-10 text-positive' : 'text-muted hover:text-text'
             }`}
           >
             {t === 'networth' ? 'Net Worth' : t === 'cashflow' ? 'Cash Flow' : t}

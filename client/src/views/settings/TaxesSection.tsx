@@ -46,7 +46,7 @@ export function TaxesSection() {
             min="0"
             max="100"
             step="1"
-            className="bg-background border border-border rounded px-3 py-2 text-sm text-text focus:outline-none focus:ring-1 focus:ring-green-50 w-24"
+            className="bg-background border border-border rounded px-3 py-2 text-sm text-text focus:outline-none focus:ring-1 focus:ring-positive-5 w-24"
             value={rate}
             onChange={(e) => setRate(e.target.value)}
           />

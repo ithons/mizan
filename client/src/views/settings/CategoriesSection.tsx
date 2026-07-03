@@ -40,7 +40,7 @@ import { PageLoader } from '../../components/LoadingSpinner';
 import type { Category, MerchantRule, MerchantRuleSuggestion, SyncRun } from '@shared/types';
 
 const CATEGORY_PRESET_COLORS = [
-  '#32bfa3', '#6487f0', '#ef6f8a', '#e2a53f', '#9b8dee',
+  '#c9963a', '#7c8b99', '#b5654a', '#ce8642', '#9b8dee',
   '#ee8d5b', '#70c4e0', '#e070b8', '#70e07a', '#a0a0b8',
   '#c4a86e', '#6e8ec4',
 ];
@@ -82,14 +82,14 @@ export function CategoryRow({
         className="flex items-center gap-2 py-1.5 hover:bg-black/5 group rounded px-2"
         style={{ paddingLeft: `${8 + depth * 20}px` }}
       >
-        <span className="w-3 h-3 rounded-full flex-shrink-0" style={{ backgroundColor: category.color || '#6b6b7a' }} />
+        <span className="w-3 h-3 rounded-full flex-shrink-0" style={{ backgroundColor: category.color || '#7a6c5d' }} />
         {category.icon && !editing && <span className="text-sm">{category.icon}</span>}
         {editing ? (
           <div className="flex flex-col gap-2 flex-1 py-1">
             <div className="flex items-center gap-1">
               <input
                 autoFocus
-                className="bg-background border border-border rounded px-2 py-0.5 text-xs text-text flex-1 focus:outline-none focus:ring-1 focus:ring-green-50"
+                className="bg-background border border-border rounded px-2 py-0.5 text-xs text-text flex-1 focus:outline-none focus:ring-1 focus:ring-positive-5"
                 value={editName}
                 onChange={(e) => setEditName(e.target.value)}
                 onKeyDown={(e) => {
@@ -98,7 +98,7 @@ export function CategoryRow({
                 }}
               />
               <input
-                className="w-8 bg-background border border-border rounded px-1 py-0.5 text-xs text-center text-text focus:outline-none focus:ring-1 focus:ring-green-50"
+                className="w-8 bg-background border border-border rounded px-1 py-0.5 text-xs text-center text-text focus:outline-none focus:ring-1 focus:ring-positive-5"
                 value={editIcon}
                 onChange={(e) => setEditIcon(e.target.value)}
                 maxLength={2}
@@ -106,7 +106,7 @@ export function CategoryRow({
                 title="Category icon (emoji)"
               />
               <button onClick={handleSave}>
-                <Check size={12} className="text-green" />
+                <Check size={12} className="text-positive" />
               </button>
               <button onClick={() => setEditing(false)}>
                 <X size={12} className="text-muted" />
@@ -132,7 +132,7 @@ export function CategoryRow({
                 <label className="flex items-center gap-1.5 text-[11px] text-muted cursor-pointer">
                   <input
                     type="checkbox"
-                    className="accent-green"
+                    className="accent-positive"
                     checked={editTaxable}
                     onChange={(e) => setEditTaxable(e.target.checked)}
                   />
@@ -144,8 +144,8 @@ export function CategoryRow({
         ) : (
           <>
             <span className="text-sm text-text flex-1">{category.name}</span>
-            {category.is_income && <span className="text-xs text-green bg-green-10 px-1.5 py-0.5 rounded flex-shrink-0">income</span>}
-            {category.taxable && <span className="text-xs text-rose bg-rose/10 px-1.5 py-0.5 rounded flex-shrink-0">taxable</span>}
+            {category.is_income && <span className="text-xs text-positive bg-positive-10 px-1.5 py-0.5 rounded flex-shrink-0">income</span>}
+            {category.taxable && <span className="text-xs text-negative bg-negative/10 px-1.5 py-0.5 rounded flex-shrink-0">taxable</span>}
             {category.is_system && <span className="text-xs text-muted bg-border/50 px-1.5 py-0.5 rounded flex-shrink-0">system</span>}
           </>
         )}
@@ -153,7 +153,7 @@ export function CategoryRow({
           <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
             {depth === 0 && (
               <button
-                className="p-1 text-muted hover:text-green"
+                className="p-1 text-muted hover:text-positive"
                 title="Add subcategory"
                 onClick={() => onAddChild(category.id)}
               >
@@ -173,7 +173,7 @@ export function CategoryRow({
                 >
                   <Edit2 size={12} />
                 </button>
-                <button className="p-1 text-muted hover:text-rose" onClick={() => onDelete(category.id)}>
+                <button className="p-1 text-muted hover:text-negative" onClick={() => onDelete(category.id)}>
                   <Trash2 size={12} />
                 </button>
               </>
@@ -253,7 +253,7 @@ export function CategoriesSection() {
       <div className="flex items-center justify-between">
         <h3 className="text-sm font-medium text-text">Categories</h3>
         <button
-          className="flex items-center gap-1 text-xs text-green hover:opacity-80"
+          className="flex items-center gap-1 text-xs text-positive hover:opacity-80"
           onClick={() => { setAddParentId(null); setShowAddModal(true); }}
         >
           <Plus size={13} /> Add Category
@@ -286,14 +286,14 @@ export function CategoriesSection() {
             <div className="flex gap-2">
               <input
                 autoFocus
-                className="flex-1 bg-background border border-border rounded px-3 py-2 text-sm text-text focus:outline-none focus:ring-1 focus:ring-green-50"
+                className="flex-1 bg-background border border-border rounded px-3 py-2 text-sm text-text focus:outline-none focus:ring-1 focus:ring-positive-5"
                 value={addName}
                 onChange={(e) => setAddName(e.target.value)}
                 onKeyDown={(e) => e.key === 'Enter' && addMutation.mutate()}
                 placeholder="Category name"
               />
               <input
-                className="w-10 bg-background border border-border rounded px-2 py-2 text-sm text-center text-text focus:outline-none focus:ring-1 focus:ring-green-50"
+                className="w-10 bg-background border border-border rounded px-2 py-2 text-sm text-center text-text focus:outline-none focus:ring-1 focus:ring-positive-5"
                 value={addIcon}
                 onChange={(e) => setAddIcon(e.target.value)}
                 maxLength={2}

@@ -91,11 +91,11 @@ export function AccountRow({
   return (
     <div
       className={`flex items-center gap-2 px-3 py-2 cursor-pointer hover:bg-black/5 group relative transition-opacity ${
-        selected ? 'bg-green/5' : ''
+        selected ? 'bg-positive/5' : ''
       } ${isHidden ? 'opacity-40' : ''}`}
       onClick={onSelect}
     >
-      <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: account.color || '#6b6b7a' }} />
+      <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: account.color || '#7a6c5d' }} />
       <div className="flex-1 min-w-0">
         <p className={`text-sm text-text truncate ${isHidden ? 'line-through' : ''}`} title={account.account_name}>
           {account.account_name}
@@ -103,7 +103,7 @@ export function AccountRow({
         <div className="flex items-center gap-1.5">
           <p className="text-xs text-muted font-mono">{account.mask ? `••${account.mask}` : account.currency}</p>
           {isInvestment && unrealized != null && (
-            <span className="text-xs font-mono" style={{ color: unrealized >= 0 ? '#32bfa3' : '#ef6f8a' }}>
+            <span className="text-xs font-mono" style={{ color: unrealized >= 0 ? '#c9963a' : '#b5654a' }}>
               {unrealized >= 0 ? '+' : ''}{formatCurrency(unrealized)}
               {returnPct != null && ` (${returnPct >= 0 ? '+' : ''}${returnPct.toFixed(1)}%)`}
             </span>
@@ -111,7 +111,7 @@ export function AccountRow({
           {isCredit && utilization != null && (
             <span
               className="text-xs font-mono"
-              style={{ color: utilization > 70 ? '#ef6f8a' : utilization > 30 ? '#e2a53f' : '#32bfa3' }}
+              style={{ color: utilization > 70 ? '#b5654a' : utilization > 30 ? '#ce8642' : '#c9963a' }}
             >
               {utilization.toFixed(0)}% used
             </span>
@@ -121,12 +121,12 @@ export function AccountRow({
       <AccountTypeBadge type={account.type} />
       <span
         className="font-mono text-sm flex-shrink-0"
-        style={{ color: account.is_liability ? '#ef6f8a' : '#32bfa3' }}
+        style={{ color: account.is_liability ? '#b5654a' : '#c9963a' }}
       >
         {formatCurrency(account.current_balance)}
       </span>
       <button
-        className="opacity-0 group-hover:opacity-100 px-1.5 py-1 text-[11px] text-muted hover:text-blue transition-all flex items-center gap-1"
+        className="opacity-0 group-hover:opacity-100 px-1.5 py-1 text-[11px] text-muted hover:text-info transition-all flex items-center gap-1"
         onClick={(e) => { e.stopPropagation(); onAsk(); }}
         title="Why did this balance change?"
         aria-label={`Why did ${account.account_name} balance change?`}
@@ -165,7 +165,7 @@ export function AccountRow({
               <>
                 <div className="border-t border-border my-1" />
                 <button
-                  className="flex items-center gap-2 w-full px-3 py-1.5 text-xs text-rose hover:bg-black/5"
+                  className="flex items-center gap-2 w-full px-3 py-1.5 text-xs text-negative hover:bg-black/5"
                   onClick={() => { onDelete(); setMenuOpen(false); }}
                 >
                   <Trash2 size={12} />

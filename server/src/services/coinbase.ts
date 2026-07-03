@@ -25,6 +25,13 @@ interface CoinbaseAccountRow {
   currency?: string | null;
 }
 
+export class CoinbaseApiError extends Error {
+  constructor(message: string, public status?: number) {
+    super(message);
+    this.name = 'CoinbaseApiError';
+  }
+}
+
 function parseCoinbaseNumber(value: string | undefined, label: string): number {
   const parsed = Number.parseFloat(value ?? '0');
   if (!Number.isFinite(parsed)) {
@@ -120,7 +127,7 @@ async function signedRequest<T>(
         errBody?.message ||
         errBody?.error ||
         `HTTP ${axiosErr.response.status}`;
-      throw new Error(`Coinbase API error (${axiosErr.response.status}): ${detail}`);
+      throw new CoinbaseApiError(`Coinbase API error (${axiosErr.response.status}): ${detail}`, axiosErr.response.status);
     }
     throw err;
   }

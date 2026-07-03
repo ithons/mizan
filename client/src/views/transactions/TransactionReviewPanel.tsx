@@ -9,13 +9,13 @@ import { CategoryBadge } from '../../components/CategoryBadge';
 import { formatCurrency, formatDate } from '../../lib/formatters';
 
 const queueTone: Record<TransactionReviewQueueId, { color: string; icon: React.ElementType }> = {
-  ai_insights: { color: '#32bfa3', icon: Sparkles },
-  uncategorized: { color: '#e2a53f', icon: Tag },
-  rule_suggestions: { color: '#6487f0', icon: Sparkles },
-  pending: { color: '#e2a53f', icon: Clock },
-  recurring_candidates: { color: '#32bfa3', icon: RefreshCw },
-  duplicate_candidates: { color: '#ef6f8a', icon: Trash2 },
-  transfer_candidates: { color: '#6487f0', icon: ArrowLeftRight },
+  ai_insights: { color: '#c9963a', icon: Sparkles },
+  uncategorized: { color: '#ce8642', icon: Tag },
+  rule_suggestions: { color: '#7c8b99', icon: Sparkles },
+  pending: { color: '#ce8642', icon: Clock },
+  recurring_candidates: { color: '#c9963a', icon: RefreshCw },
+  duplicate_candidates: { color: '#b5654a', icon: Trash2 },
+  transfer_candidates: { color: '#7c8b99', icon: ArrowLeftRight },
 };
 
 export function TransactionReviewPanel({
@@ -41,7 +41,7 @@ export function TransactionReviewPanel({
           <p className="text-xs text-muted font-mono">{totalOpen} open</p>
         </div>
         {totalOpen === 0 && (
-          <div className="flex items-center gap-1.5 text-xs text-green">
+          <div className="flex items-center gap-1.5 text-xs text-positive">
             <CheckCircle2 size={13} />
             Clear
           </div>
@@ -55,7 +55,7 @@ export function TransactionReviewPanel({
           return (
             <button
               key={queue.id}
-              className="border border-border bg-surface rounded p-3 text-left hover:border-green/40 transition-colors disabled:opacity-50"
+              className="border border-border bg-surface rounded p-3 text-left hover:border-positive/40 transition-colors disabled:opacity-50"
               onClick={() => onQueueSelect(queue.id)}
               disabled={queue.count === 0}
             >
@@ -76,7 +76,7 @@ export function TransactionReviewPanel({
         <div className="border border-border bg-surface rounded divide-y divide-border">
           {suggestions.map((suggestion) => (
             <div key={`${suggestion.pattern}:${suggestion.category_id}`} className="flex items-center gap-3 px-3 py-2">
-              <Sparkles size={13} className="text-blue flex-shrink-0" />
+              <Sparkles size={13} className="text-info flex-shrink-0" />
               <div className="min-w-0 flex-1">
                 <div className="flex items-center gap-2 mb-0.5">
                   <span className="text-sm text-text truncate">{suggestion.pattern}</span>
@@ -108,7 +108,7 @@ export function TransactionReviewPanel({
                 )}
               </div>
               <button
-                className="text-xs text-muted hover:text-green disabled:opacity-40"
+                className="text-xs text-muted hover:text-positive disabled:opacity-40"
                 onClick={() => onApplySuggestion(suggestion)}
                 disabled={applyingPattern === suggestion.pattern}
               >

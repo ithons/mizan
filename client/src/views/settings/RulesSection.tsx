@@ -40,7 +40,7 @@ import { PageLoader } from '../../components/LoadingSpinner';
 import type { Category, MerchantRule, MerchantRuleSuggestion, SyncRun } from '@shared/types';
 
 const CATEGORY_PRESET_COLORS = [
-  '#32bfa3', '#6487f0', '#ef6f8a', '#e2a53f', '#9b8dee',
+  '#c9963a', '#7c8b99', '#b5654a', '#ce8642', '#9b8dee',
   '#ee8d5b', '#70c4e0', '#e070b8', '#70e07a', '#a0a0b8',
   '#c4a86e', '#6e8ec4',
 ];
@@ -148,14 +148,14 @@ export function RulesSection() {
     <div className="space-y-5">
       <div className="grid grid-cols-1 sm:grid-cols-[1fr_180px_auto] gap-2">
         <input
-          className="bg-background border border-border rounded px-3 py-2 text-sm text-text focus:outline-none focus:ring-1 focus:ring-green-50"
+          className="bg-background border border-border rounded px-3 py-2 text-sm text-text focus:outline-none focus:ring-1 focus:ring-positive-5"
           value={pattern}
           onChange={(e) => setPattern(e.target.value)}
           onKeyDown={(e) => e.key === 'Enter' && saveRule()}
           placeholder="Merchant contains..."
         />
         <select
-          className="bg-background border border-border rounded px-3 py-2 text-sm text-text focus:outline-none focus:ring-1 focus:ring-green-50"
+          className="bg-background border border-border rounded px-3 py-2 text-sm text-text focus:outline-none focus:ring-1 focus:ring-positive-5"
           value={categoryId}
           onChange={(e) => setCategoryId(e.target.value)}
         >
@@ -181,17 +181,17 @@ export function RulesSection() {
       )}
 
       {suggestions.length > 0 && (
-        <div className="border border-amber/30 bg-amber/10 rounded">
-          <div className="flex items-center gap-2 px-3 py-2 border-b border-amber/20">
-            <Sparkles size={13} className="text-amber" />
+        <div className="border border-warning/30 bg-warning/10 rounded">
+          <div className="flex items-center gap-2 px-3 py-2 border-b border-warning/20">
+            <Sparkles size={13} className="text-warning" />
             <p className="text-xs font-medium text-text">Suggested rules</p>
           </div>
-          <div className="divide-y divide-amber/15">
+          <div className="divide-y divide-warning/15">
             {suggestions.map((suggestion) => (
               <div key={`${suggestion.pattern}:${suggestion.category_id}`} className="flex items-center gap-3 px-3 py-3">
                 <div
                   className="w-2.5 h-2.5 rounded-full flex-shrink-0"
-                  style={{ backgroundColor: suggestion.category_color ?? '#6b6b7a' }}
+                  style={{ backgroundColor: suggestion.category_color ?? '#7a6c5d' }}
                 />
                 <div className="min-w-0 flex-1">
                   <p className="text-sm text-text truncate">{suggestion.pattern}</p>
@@ -208,7 +208,7 @@ export function RulesSection() {
                       {suggestion.preview_transactions.slice(0, 4).map((transaction) => (
                         <span
                           key={transaction.id}
-                          className="text-[11px] text-muted border border-amber/20 rounded px-1.5 py-0.5 bg-background/45"
+                          className="text-[11px] text-muted border border-warning/20 rounded px-1.5 py-0.5 bg-background/45"
                         >
                           {transaction.will_apply ? 'Will update' : transaction.category_name ?? 'Evidence'}
                           {' '}
@@ -221,7 +221,7 @@ export function RulesSection() {
                   )}
                 </div>
                 <button
-                  className="flex items-center gap-1.5 text-xs text-[#273238] bg-amber rounded px-2.5 py-1.5 hover:opacity-90 disabled:opacity-40"
+                  className="flex items-center gap-1.5 text-xs text-[#332b26] bg-warning rounded px-2.5 py-1.5 hover:opacity-90 disabled:opacity-40"
                   onClick={() => suggestionMutation.mutate(suggestion)}
                   disabled={suggestionMutation.isPending}
                 >
@@ -251,7 +251,7 @@ export function RulesSection() {
           <div key={rule.id} className="flex items-center gap-3 px-3 py-3">
             <div
               className="w-2.5 h-2.5 rounded-full flex-shrink-0"
-              style={{ backgroundColor: rule.category_color ?? '#6b6b7a' }}
+              style={{ backgroundColor: rule.category_color ?? '#7a6c5d' }}
             />
             <div className="min-w-0 flex-1">
               <p className="text-sm text-text truncate">{rule.pattern}</p>
@@ -261,7 +261,7 @@ export function RulesSection() {
               </p>
             </div>
             <button
-              className="p-1 text-muted hover:text-rose"
+              className="p-1 text-muted hover:text-negative"
               onClick={() => deleteMutation.mutate(rule.id)}
               title="Delete rule"
             >

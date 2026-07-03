@@ -80,10 +80,10 @@ export function AccountDetail({ account }: { account: Account }) {
   const utilization = isCredit && account.credit_limit
     ? (account.current_balance / account.credit_limit) * 100
     : null;
-  const utilizationColor = utilization == null ? '#6b6b7a'
-    : utilization > 70 ? '#ef6f8a'
-    : utilization > 30 ? '#e2a53f'
-    : '#32bfa3';
+  const utilizationColor = utilization == null ? '#7a6c5d'
+    : utilization > 70 ? '#b5654a'
+    : utilization > 30 ? '#ce8642'
+    : '#c9963a';
 
   const typeLabel = {
     brokerage: 'Brokerage',
@@ -99,11 +99,11 @@ export function AccountDetail({ account }: { account: Account }) {
         <div className="px-6 py-4 border-b border-border">
           <div className="flex items-center justify-between mb-2">
             <div className="flex items-center gap-3">
-              <span className="w-3 h-3 rounded-full flex-shrink-0" style={{ backgroundColor: account.color || '#6b6b7a' }} />
+              <span className="w-3 h-3 rounded-full flex-shrink-0" style={{ backgroundColor: account.color || '#7a6c5d' }} />
               <h2 className="text-base font-semibold text-text">{account.account_name}</h2>
               <AccountTypeBadge type={account.type} />
               {(account.type === 'ira_traditional' || account.type === 'ira_roth') && (
-                <span className="text-xs bg-blue/20 text-blue px-2 py-0.5 rounded">Tax-Advantaged</span>
+                <span className="text-xs bg-info/20 text-info px-2 py-0.5 rounded">Tax-Advantaged</span>
               )}
             </div>
             
@@ -123,7 +123,7 @@ export function AccountDetail({ account }: { account: Account }) {
         {/* Cash/Checking/Savings: just balance */}
         {!isCredit && !isInvestment && !isCrypto && (
           <>
-            <p className="font-mono text-2xl" style={{ color: account.is_liability ? '#ef6f8a' : '#32bfa3' }}>
+            <p className="font-mono text-2xl" style={{ color: account.is_liability ? '#b5654a' : '#c9963a' }}>
               {formatCurrency(account.current_balance)}
             </p>
             <div className="flex items-center gap-2 mt-1 text-xs text-muted">
@@ -143,7 +143,7 @@ export function AccountDetail({ account }: { account: Account }) {
             <div className="grid grid-cols-2 gap-3">
               <div className="bg-background border border-border rounded p-3">
                 <p className="text-xs text-muted mb-1">Balance Owed</p>
-                <p className="font-mono text-sm text-rose">{formatCurrency(account.current_balance)}</p>
+                <p className="font-mono text-sm text-negative">{formatCurrency(account.current_balance)}</p>
               </div>
               <div className="bg-background border border-border rounded p-3">
                 <p className="text-xs text-muted mb-1">Credit Limit</p>
@@ -153,7 +153,7 @@ export function AccountDetail({ account }: { account: Account }) {
               </div>
               <div className="bg-background border border-border rounded p-3">
                 <p className="text-xs text-muted mb-1">Available Credit</p>
-                <p className="font-mono text-sm text-green">
+                <p className="font-mono text-sm text-positive">
                   {account.available_balance != null ? formatCurrency(account.available_balance) : '-'}
                 </p>
               </div>
@@ -188,7 +188,7 @@ export function AccountDetail({ account }: { account: Account }) {
             <div className="grid grid-cols-2 gap-3">
               <div className="bg-background border border-border rounded p-3">
                 <p className="text-xs text-muted mb-1">Portfolio Value</p>
-                <p className="font-mono text-sm text-green">{formatCurrency(account.current_balance)}</p>
+                <p className="font-mono text-sm text-positive">{formatCurrency(account.current_balance)}</p>
               </div>
               <div className="bg-background border border-border rounded p-3">
                 <p className="text-xs text-muted mb-1">Cost Basis</p>
@@ -198,13 +198,13 @@ export function AccountDetail({ account }: { account: Account }) {
               </div>
               <div className="bg-background border border-border rounded p-3">
                 <p className="text-xs text-muted mb-1">Unrealized G/L</p>
-                <p className="font-mono text-sm" style={{ color: unrealized == null ? '#6b6b7a' : unrealized >= 0 ? '#32bfa3' : '#ef6f8a' }}>
+                <p className="font-mono text-sm" style={{ color: unrealized == null ? '#7a6c5d' : unrealized >= 0 ? '#c9963a' : '#b5654a' }}>
                   {unrealized != null ? `${unrealized >= 0 ? '+' : ''}${formatCurrency(unrealized)}` : '-'}
                 </p>
               </div>
               <div className="bg-background border border-border rounded p-3">
                 <p className="text-xs text-muted mb-1">Total Return</p>
-                <p className="font-mono text-sm" style={{ color: returnPct == null ? '#6b6b7a' : returnPct >= 0 ? '#32bfa3' : '#ef6f8a' }}>
+                <p className="font-mono text-sm" style={{ color: returnPct == null ? '#7a6c5d' : returnPct >= 0 ? '#c9963a' : '#b5654a' }}>
                   {returnPct != null ? `${returnPct >= 0 ? '+' : ''}${returnPct.toFixed(2)}%` : '-'}
                 </p>
               </div>
@@ -223,7 +223,7 @@ export function AccountDetail({ account }: { account: Account }) {
             </div>
             <div>
               <p className="text-xs text-muted mb-1">USD Value</p>
-              <p className="font-mono text-lg text-green">{formatCurrency(account.current_balance)}</p>
+              <p className="font-mono text-lg text-positive">{formatCurrency(account.current_balance)}</p>
             </div>
           </div>
         )}
@@ -236,7 +236,7 @@ export function AccountDetail({ account }: { account: Account }) {
             <button
               key={t}
               onClick={() => setTab(t)}
-              className={`px-3 py-1 text-xs rounded transition-colors ${tab === t ? 'bg-green-10 text-green' : 'text-muted hover:text-text'}`}
+              className={`px-3 py-1 text-xs rounded transition-colors ${tab === t ? 'bg-positive-10 text-positive' : 'text-muted hover:text-text'}`}
             >
               {t === 'inv-transactions' ? 'Inv Transactions' : t.charAt(0).toUpperCase() + t.slice(1)}
             </button>
@@ -263,13 +263,13 @@ export function AccountDetail({ account }: { account: Account }) {
                 const unr = h.cost_basis != null ? h.institution_value - h.cost_basis : null;
                 return (
                   <tr key={h.id} className="border-b border-border hover:bg-black/5">
-                    <td className="px-4 py-2.5 font-mono text-blue font-medium">{h.ticker ?? '-'}</td>
+                    <td className="px-4 py-2.5 font-mono text-info font-medium">{h.ticker ?? '-'}</td>
                     <td className="px-4 py-2.5 text-text truncate max-w-[160px]" title={h.security_name ?? ''}>{h.security_name}</td>
                     <td className="px-4 py-2.5 font-mono text-muted">{h.quantity.toFixed(4)}</td>
                     <td className="px-4 py-2.5 font-mono text-muted">{formatCurrency(h.institution_price)}</td>
                     <td className="px-4 py-2.5 font-mono text-text">{formatCurrency(h.institution_value)}</td>
                     <td className="px-4 py-2.5 font-mono text-muted">{h.cost_basis != null ? formatCurrency(h.cost_basis) : '-'}</td>
-                    <td className="px-4 py-2.5 font-mono" style={{ color: unr != null ? (unr >= 0 ? '#32bfa3' : '#ef6f8a') : '#6b6b7a' }}>
+                    <td className="px-4 py-2.5 font-mono" style={{ color: unr != null ? (unr >= 0 ? '#c9963a' : '#b5654a') : '#7a6c5d' }}>
                       {unr != null ? `${unr >= 0 ? '+' : ''}${formatCurrency(unr)}` : '-'}
                     </td>
                   </tr>
@@ -297,15 +297,15 @@ export function AccountDetail({ account }: { account: Account }) {
                   <td className="px-4 py-2.5 font-mono text-muted">{formatDate(tx.date)}</td>
                   <td className="px-4 py-2.5">
                     <span className={`px-1.5 py-0.5 rounded text-xs ${
-                      tx.type === 'buy' ? 'bg-green-10 text-green' :
-                      tx.type === 'sell' ? 'bg-rose/10 text-rose' :
-                      tx.type === 'dividend' ? 'bg-blue/10 text-blue' :
+                      tx.type === 'buy' ? 'bg-positive-10 text-positive' :
+                      tx.type === 'sell' ? 'bg-negative/10 text-negative' :
+                      tx.type === 'dividend' ? 'bg-info/10 text-info' :
                       'bg-border/50 text-muted'
                     }`}>
                       {tx.type}
                     </span>
                   </td>
-                  <td className="px-4 py-2.5 font-mono text-blue">{tx.ticker ?? tx.security_name ?? tx.name}</td>
+                  <td className="px-4 py-2.5 font-mono text-info">{tx.ticker ?? tx.security_name ?? tx.name}</td>
                   <td className="px-4 py-2.5 font-mono text-muted">{tx.quantity?.toFixed(4) ?? '-'}</td>
                   <td className="px-4 py-2.5 font-mono text-muted">{tx.price != null ? formatCurrency(tx.price) : '-'}</td>
                   <td className="px-4 py-2.5"><AmountBadge amount={tx.amount} /></td>

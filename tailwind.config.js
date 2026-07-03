@@ -2,34 +2,39 @@
 const defaultTheme = require('tailwindcss/defaultTheme');
 
 export default {
+  darkMode: 'class',
   content: ['./client/index.html', './client/src/**/*.{js,ts,jsx,tsx}'],
   theme: {
     extend: {
       colors: {
-        background: '#f7f9fa',
-        surface: '#ffffff',
-        border: '#e8ecef',
-        text: '#11181c',
-        muted: '#687076',
-        green: {
-          DEFAULT: '#12a594',
-          50: 'rgba(18, 165, 148, 0.05)',
-          10: 'rgba(18, 165, 148, 0.1)',
+        background: 'var(--color-bg)',
+        surface: 'var(--color-surface)',
+        border: 'var(--color-border)',
+        text: 'var(--color-text)',
+        muted: 'var(--color-muted)',
+        positive: {
+          DEFAULT: 'var(--color-positive)',
+          5: 'var(--color-positive-5)',
+          10: 'var(--color-positive-10)',
         },
-        rose: {
-          DEFAULT: '#e5484d',
-          50: 'rgba(229, 72, 77, 0.05)',
-          10: 'rgba(229, 72, 77, 0.1)',
+        negative: {
+          DEFAULT: 'var(--color-negative)',
+          5: 'var(--color-negative-5)',
+          10: 'var(--color-negative-10)',
         },
-        amber: {
-          DEFAULT: '#f7ce00',
+        warning: {
+          DEFAULT: 'var(--color-warning)',
+          5: 'var(--color-warning-5)',
+          10: 'var(--color-warning-10)',
         },
-        blue: {
-          DEFAULT: '#0090ff',
+        info: {
+          DEFAULT: 'var(--color-info)',
+          5: 'var(--color-info-5)',
+          10: 'var(--color-info-10)',
         },
       },
       fontFamily: {
-        sans: ['Inter', ...defaultTheme.fontFamily.sans],
+        sans: ['Switzer', ...defaultTheme.fontFamily.sans],
         mono: ['JetBrains Mono', ...defaultTheme.fontFamily.mono],
       },
       borderRadius: {

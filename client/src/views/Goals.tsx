@@ -36,7 +36,7 @@ import { EmptyState } from '../components/EmptyState';
 import { PageLoader } from '../components/LoadingSpinner';
 import { useAppStore } from '../store';
 
-const COLORS = ['#32bfa3', '#6487f0', '#f6c177', '#ef6f8a', '#b48ead'];
+const COLORS = ['#c9963a', '#7c8b99', '#f6c177', '#b5654a', '#b48ead'];
 
 interface GoalFormState {
   name: string;
@@ -67,14 +67,14 @@ function goalIcon(type: GoalType) {
 }
 
 const forecastTone: Record<GoalForecastSeverity, { color: string; icon: LucideIcon; label: string }> = {
-  positive: { color: '#32bfa3', icon: CheckCircle2, label: 'On track' },
-  warning: { color: '#e2a53f', icon: AlertTriangle, label: 'At risk' },
-  attention: { color: '#ef6f8a', icon: CircleAlert, label: 'Blocked' },
-  info: { color: '#6487f0', icon: TrendingUp, label: 'Planning' },
+  positive: { color: '#c9963a', icon: CheckCircle2, label: 'On track' },
+  warning: { color: '#ce8642', icon: AlertTriangle, label: 'At risk' },
+  attention: { color: '#b5654a', icon: CircleAlert, label: 'Blocked' },
+  info: { color: '#7c8b99', icon: TrendingUp, label: 'Planning' },
 };
 
 function GoalForecastPanel({ summary }: { summary: GoalForecastSummary }) {
-  const availableTone = summary.monthly_available_for_goals >= 0 ? '#32bfa3' : '#ef6f8a';
+  const availableTone = summary.monthly_available_for_goals >= 0 ? '#c9963a' : '#b5654a';
 
   return (
     <div className="border border-border bg-surface rounded p-4">
@@ -87,17 +87,17 @@ function GoalForecastPanel({ summary }: { summary: GoalForecastSummary }) {
         </div>
         <div className="flex flex-wrap items-center gap-2 text-xs">
           {summary.at_risk_goal_count > 0 && (
-            <span className="rounded border border-amber/40 text-amber px-2 py-1">
+            <span className="rounded border border-warning/40 text-warning px-2 py-1">
               {summary.at_risk_goal_count} at risk
             </span>
           )}
           {summary.blocked_goal_count > 0 && (
-            <span className="rounded border border-rose/40 text-rose px-2 py-1">
+            <span className="rounded border border-negative/40 text-negative px-2 py-1">
               {summary.blocked_goal_count} blocked
             </span>
           )}
           {summary.on_track_goal_count > 0 && (
-            <span className="rounded border border-green/40 text-green px-2 py-1">
+            <span className="rounded border border-positive/40 text-positive px-2 py-1">
               {summary.on_track_goal_count} on track
             </span>
           )}
@@ -107,13 +107,13 @@ function GoalForecastPanel({ summary }: { summary: GoalForecastSummary }) {
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         <div>
           <p className="text-xs text-muted mb-1">Recurring surplus</p>
-          <p className="font-mono text-lg" style={{ color: summary.monthly_recurring_surplus >= 0 ? '#32bfa3' : '#ef6f8a' }}>
+          <p className="font-mono text-lg" style={{ color: summary.monthly_recurring_surplus >= 0 ? '#c9963a' : '#b5654a' }}>
             {formatCurrency(summary.monthly_recurring_surplus)}
           </p>
         </div>
         <div>
           <p className="text-xs text-muted mb-1">Budget pressure</p>
-          <p className="font-mono text-lg text-amber">{formatCurrency(summary.budget_overage)}</p>
+          <p className="font-mono text-lg text-warning">{formatCurrency(summary.budget_overage)}</p>
         </div>
         <div>
           <p className="text-xs text-muted mb-1">Available</p>
@@ -205,7 +205,7 @@ function GoalCard({
         </div>
         <div className="flex items-center gap-1">
           <button
-            className="w-7 h-7 flex items-center justify-center rounded text-muted hover:text-green hover:bg-black/5"
+            className="w-7 h-7 flex items-center justify-center rounded text-muted hover:text-positive hover:bg-black/5"
             onClick={onAsk}
             title="Ask advisor"
           >
@@ -250,7 +250,7 @@ function GoalCard({
         </div>
         <div className="flex items-center justify-between gap-2 mt-2 text-xs">
           <span className="font-mono text-muted">{goal.progress_percent.toFixed(1)}%</span>
-          <span className={complete ? 'text-green' : 'text-muted'}>
+          <span className={complete ? 'text-positive' : 'text-muted'}>
             {complete ? 'Complete' : `${formatCurrency(goal.remaining_amount)} left`}
           </span>
         </div>
@@ -338,7 +338,7 @@ function GoalModal({
         <div>
           <label className="block text-xs text-muted mb-1">Name</label>
           <input
-            className="w-full bg-background border border-border rounded px-3 py-2 text-sm text-text focus:outline-none focus:ring-1 focus:ring-green-50"
+            className="w-full bg-background border border-border rounded px-3 py-2 text-sm text-text focus:outline-none focus:ring-1 focus:ring-positive-5"
             value={form.name}
             onChange={(e) => setForm({ ...form, name: e.target.value })}
             placeholder="Emergency fund"
@@ -356,7 +356,7 @@ function GoalModal({
                   key={type}
                   className={`flex items-center justify-center gap-2 border rounded px-3 py-2 text-sm capitalize ${
                     active
-                      ? 'border-green-50 bg-green-10 text-green'
+                      ? 'border-positive-5 bg-positive-10 text-positive'
                       : 'border-border text-muted hover:text-text'
                   }`}
                   onClick={() => setForm({ ...form, type })}
@@ -375,7 +375,7 @@ function GoalModal({
             <input
               type="number"
               step="0.01"
-              className="w-full bg-background border border-border rounded px-3 py-2 text-sm text-text font-mono focus:outline-none focus:ring-1 focus:ring-green-50"
+              className="w-full bg-background border border-border rounded px-3 py-2 text-sm text-text font-mono focus:outline-none focus:ring-1 focus:ring-positive-5"
               value={form.target_amount}
               onChange={(e) => setForm({ ...form, target_amount: e.target.value })}
               placeholder="0.00"
@@ -385,7 +385,7 @@ function GoalModal({
             <label className="block text-xs text-muted mb-1">Target Date</label>
             <input
               type="date"
-              className="w-full bg-background border border-border rounded px-3 py-2 text-sm text-text font-mono focus:outline-none focus:ring-1 focus:ring-green-50"
+              className="w-full bg-background border border-border rounded px-3 py-2 text-sm text-text font-mono focus:outline-none focus:ring-1 focus:ring-positive-5"
               value={form.target_date}
               onChange={(e) => setForm({ ...form, target_date: e.target.value })}
             />
@@ -395,7 +395,7 @@ function GoalModal({
         <div>
           <label className="block text-xs text-muted mb-1">Linked Account</label>
           <select
-            className="w-full bg-background border border-border rounded px-3 py-2 text-sm text-text focus:outline-none focus:ring-1 focus:ring-green-50"
+            className="w-full bg-background border border-border rounded px-3 py-2 text-sm text-text focus:outline-none focus:ring-1 focus:ring-positive-5"
             value={form.account_id}
             onChange={(e) => {
               const account = accounts.find((candidate) => candidate.id === e.target.value);
@@ -422,7 +422,7 @@ function GoalModal({
             <input
               type="number"
               step="0.01"
-              className="w-full bg-background border border-border rounded px-3 py-2 text-sm text-text font-mono focus:outline-none focus:ring-1 focus:ring-green-50"
+              className="w-full bg-background border border-border rounded px-3 py-2 text-sm text-text font-mono focus:outline-none focus:ring-1 focus:ring-positive-5"
               value={form.current_amount}
               onChange={(e) => setForm({ ...form, current_amount: e.target.value })}
               placeholder="0.00"
@@ -436,7 +436,7 @@ function GoalModal({
             <input
               type="number"
               step="0.01"
-              className="w-full bg-background border border-border rounded px-3 py-2 text-sm text-text font-mono focus:outline-none focus:ring-1 focus:ring-green-50"
+              className="w-full bg-background border border-border rounded px-3 py-2 text-sm text-text font-mono focus:outline-none focus:ring-1 focus:ring-positive-5"
               value={form.starting_amount}
               onChange={(e) => setForm({ ...form, starting_amount: e.target.value })}
               placeholder={linkedAccount ? String(linkedAccount.current_balance) : '0.00'}
@@ -617,7 +617,7 @@ export function Goals() {
               <p className="text-xs text-muted">{goals.length} active</p>
             </div>
             <div className="h-2 bg-background border border-border rounded overflow-hidden">
-              <div className="h-full bg-green" style={{ width: `${totals.percent}%` }} />
+              <div className="h-full bg-positive" style={{ width: `${totals.percent}%` }} />
             </div>
           </div>
         </>

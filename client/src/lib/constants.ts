@@ -35,15 +35,4 @@ export const INVESTMENT_TX_TYPE_LABELS: Record<string, string> = {
   other: 'Other',
 };
 
-export const CATEGORY_COLORS = [
-  '#32bfa3',
-  '#6487f0',
-  '#ef6f8a',
-  '#e2a53f',
-  '#a78bfa',
-  '#f472b6',
-  '#34d399',
-  '#fb923c',
-  '#60a5fa',
-  '#f87171',
-];
+export { CHART_COLORS as CATEGORY_COLORS } from './chartColors';

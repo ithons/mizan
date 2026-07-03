@@ -49,9 +49,9 @@ function CustomTooltip({ active, payload, label }: CustomTooltipProps) {
       <p className="text-muted mb-1 font-mono">{label}</p>
       {payload.map((p) => (
         <div key={p.dataKey} className="flex items-center gap-2">
-          <span className="w-2 h-2 rounded-full" style={{ backgroundColor: p.color ?? '#6b6b7a' }} />
+          <span className="w-2 h-2 rounded-full" style={{ backgroundColor: p.color ?? '#7a6c5d' }} />
           <span className="text-text">{p.name ?? p.dataKey}:</span>
-          <span className="font-mono" style={{ color: p.color ?? '#6b6b7a' }}>{formatCurrency(Math.abs(p.value))}</span>
+          <span className="font-mono" style={{ color: p.color ?? '#7a6c5d' }}>{formatCurrency(Math.abs(p.value))}</span>
         </div>
       ))}
     </div>
@@ -149,13 +149,13 @@ export function CashFlow() {
         <h2 className="text-sm font-medium text-text mb-4">Income vs Expenses - Trailing 12 Months</h2>
         <ResponsiveContainer width="100%" height={220}>
           <BarChart data={chartData} barCategoryGap="30%">
-            <CartesianGrid vertical={false} stroke="#dbe7e2" />
-            <XAxis dataKey="month" tick={{ fill: '#6b6b7a', fontSize: 11, fontFamily: 'JetBrains Mono' }} axisLine={false} tickLine={false} />
-            <YAxis tick={{ fill: '#6b6b7a', fontSize: 11, fontFamily: 'JetBrains Mono' }} axisLine={false} tickLine={false} tickFormatter={(v) => `$${(v / 1000).toFixed(0)}k`} />
+            <CartesianGrid vertical={false} stroke="#e4d9c7" />
+            <XAxis dataKey="month" tick={{ fill: '#7a6c5d', fontSize: 11, fontFamily: 'JetBrains Mono' }} axisLine={false} tickLine={false} />
+            <YAxis tick={{ fill: '#7a6c5d', fontSize: 11, fontFamily: 'JetBrains Mono' }} axisLine={false} tickLine={false} tickFormatter={(v) => `$${(v / 1000).toFixed(0)}k`} />
             <Tooltip content={<CustomTooltip />} />
-            <Legend wrapperStyle={{ fontSize: 11, color: '#6b6b7a' }} />
-            <Bar dataKey="income" name="Income" fill="#32bfa3" radius={[2, 2, 0, 0]} />
-            <Bar dataKey="expenses" name="Expenses" fill="#ef6f8a" radius={[2, 2, 0, 0]} />
+            <Legend wrapperStyle={{ fontSize: 11, color: '#7a6c5d' }} />
+            <Bar dataKey="income" name="Income" fill="#c9963a" radius={[2, 2, 0, 0]} />
+            <Bar dataKey="expenses" name="Expenses" fill="#b5654a" radius={[2, 2, 0, 0]} />
           </BarChart>
         </ResponsiveContainer>
       </div>
@@ -165,18 +165,18 @@ export function CashFlow() {
         <h2 className="text-sm font-medium text-text mb-4">Net Cash Flow - Trailing 12 Months</h2>
         <ResponsiveContainer width="100%" height={180}>
           <LineChart data={chartData}>
-            <CartesianGrid vertical={false} stroke="#dbe7e2" />
-            <XAxis dataKey="month" tick={{ fill: '#6b6b7a', fontSize: 11, fontFamily: 'JetBrains Mono' }} axisLine={false} tickLine={false} />
-            <YAxis tick={{ fill: '#6b6b7a', fontSize: 11, fontFamily: 'JetBrains Mono' }} axisLine={false} tickLine={false} tickFormatter={(v) => `$${(v / 1000).toFixed(0)}k`} />
+            <CartesianGrid vertical={false} stroke="#e4d9c7" />
+            <XAxis dataKey="month" tick={{ fill: '#7a6c5d', fontSize: 11, fontFamily: 'JetBrains Mono' }} axisLine={false} tickLine={false} />
+            <YAxis tick={{ fill: '#7a6c5d', fontSize: 11, fontFamily: 'JetBrains Mono' }} axisLine={false} tickLine={false} tickFormatter={(v) => `$${(v / 1000).toFixed(0)}k`} />
             <Tooltip content={<CustomTooltip />} />
             <Line
               type="monotone"
               dataKey="net"
               name="Net"
-              stroke="#32bfa3"
+              stroke="#c9963a"
               strokeWidth={2}
               dot={false}
-              activeDot={{ r: 4, fill: '#32bfa3' }}
+              activeDot={{ r: 4, fill: '#c9963a' }}
             />
           </LineChart>
         </ResponsiveContainer>
@@ -190,7 +190,7 @@ export function CashFlow() {
             <h2 className="text-sm font-medium text-text">30-Day Forward Projection</h2>
             <div className="text-right">
               <p className="text-xs text-muted mb-0.5">Projected Net</p>
-              <p className={`font-mono text-sm font-medium ${forecast.net >= 0 ? 'text-green' : 'text-rose'}`}>
+              <p className={`font-mono text-sm font-medium ${forecast.net >= 0 ? 'text-positive' : 'text-negative'}`}>
                 {forecast.net >= 0 ? '+' : ''}{formatCurrency(forecast.net)}
               </p>
             </div>
@@ -200,30 +200,30 @@ export function CashFlow() {
             <div className="bg-background border border-border rounded p-3">
               <p className="text-xs text-muted mb-1 flex items-center justify-between">
                 Confirmed Income
-                <span className="w-1.5 h-1.5 rounded-full bg-green" />
+                <span className="w-1.5 h-1.5 rounded-full bg-positive" />
               </p>
-              <p className="font-mono text-sm text-green">{formatCurrency(forecast.confirmed_income)}</p>
+              <p className="font-mono text-sm text-positive">{formatCurrency(forecast.confirmed_income)}</p>
             </div>
             <div className="bg-background border border-border rounded p-3">
               <p className="text-xs text-muted mb-1 flex items-center justify-between">
                 Likely Income
-                <span className="w-1.5 h-1.5 rounded-full bg-green-50" />
+                <span className="w-1.5 h-1.5 rounded-full bg-positive-5" />
               </p>
-              <p className="font-mono text-sm text-green/80">{formatCurrency(forecast.likely_income)}</p>
+              <p className="font-mono text-sm text-positive/80">{formatCurrency(forecast.likely_income)}</p>
             </div>
             <div className="bg-background border border-border rounded p-3">
               <p className="text-xs text-muted mb-1 flex items-center justify-between">
                 Confirmed Bills
-                <span className="w-1.5 h-1.5 rounded-full bg-rose" />
+                <span className="w-1.5 h-1.5 rounded-full bg-negative" />
               </p>
-              <p className="font-mono text-sm text-rose">{formatCurrency(forecast.confirmed_bills)}</p>
+              <p className="font-mono text-sm text-negative">{formatCurrency(forecast.confirmed_bills)}</p>
             </div>
             <div className="bg-background border border-border rounded p-3">
               <p className="text-xs text-muted mb-1 flex items-center justify-between">
                 Likely Bills
-                <span className="w-1.5 h-1.5 rounded-full bg-rose/50" />
+                <span className="w-1.5 h-1.5 rounded-full bg-negative/50" />
               </p>
-              <p className="font-mono text-sm text-rose/80">{formatCurrency(forecast.likely_bills)}</p>
+              <p className="font-mono text-sm text-negative/80">{formatCurrency(forecast.likely_bills)}</p>
             </div>
           </div>
         </div>
@@ -232,24 +232,24 @@ export function CashFlow() {
       {selectedMonthData && (
         <div className="grid grid-cols-3 gap-4">
           <div
-            className="bg-surface shadow-sm border border-border rounded p-4 cursor-pointer hover:bg-green/5 transition-colors"
+            className="bg-surface shadow-sm border border-border rounded p-4 cursor-pointer hover:bg-positive/5 transition-colors"
             onClick={() => navigate('/transactions')}
           >
             <p className="text-xs text-muted mb-1">Income</p>
-            <p className="font-mono text-xl text-green">{formatCurrency(selectedMonthData.income)}</p>
+            <p className="font-mono text-xl text-positive">{formatCurrency(selectedMonthData.income)}</p>
           </div>
           <div
-            className="bg-surface shadow-sm border border-border rounded p-4 cursor-pointer hover:bg-green/5 transition-colors"
+            className="bg-surface shadow-sm border border-border rounded p-4 cursor-pointer hover:bg-positive/5 transition-colors"
             onClick={() => navigate('/transactions')}
           >
             <p className="text-xs text-muted mb-1">Expenses</p>
-            <p className="font-mono text-xl text-rose">{formatCurrency(Math.abs(selectedMonthData.expenses))}</p>
+            <p className="font-mono text-xl text-negative">{formatCurrency(Math.abs(selectedMonthData.expenses))}</p>
           </div>
           <div className="bg-surface shadow-sm border border-border rounded p-4">
             <p className="text-xs text-muted mb-1">Net</p>
             <p
               className="font-mono text-xl"
-              style={{ color: selectedMonthData.net >= 0 ? '#32bfa3' : '#ef6f8a' }}
+              style={{ color: selectedMonthData.net >= 0 ? '#c9963a' : '#b5654a' }}
             >
               {formatCurrency(selectedMonthData.net)}
             </p>
@@ -312,7 +312,7 @@ export function CashFlow() {
                 <div className="flex items-center justify-between px-4 py-3 border-t border-border">
                   <span className="text-xs text-muted">Showing 50 of {txs.length}</span>
                   <button
-                    className="text-xs text-green hover:opacity-80 flex items-center gap-1"
+                    className="text-xs text-positive hover:opacity-80 flex items-center gap-1"
                     onClick={() => navigate('/transactions')}
                   >
                     View all <ArrowRight size={11} />

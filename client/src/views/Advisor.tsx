@@ -107,23 +107,23 @@ function ContextPanel() {
 }
 
 const actionTone: Record<AdvisorAction['severity'], string> = {
-  critical: '#ef6f8a',
-  warning: '#e2a53f',
-  positive: '#32bfa3',
-  info: '#6487f0',
+  critical: '#b5654a',
+  warning: '#ce8642',
+  positive: '#c9963a',
+  info: '#7c8b99',
 };
 
 const qualityTone: Record<DataQualitySummary['status'], string> = {
-  healthy: '#32bfa3',
-  review: '#6487f0',
-  stale: '#e2a53f',
-  attention: '#ef6f8a',
+  healthy: '#c9963a',
+  review: '#7c8b99',
+  stale: '#ce8642',
+  attention: '#b5654a',
 };
 
 const toolTone: Record<AdvisorToolStatus['status'], string> = {
-  available: '#32bfa3',
-  empty: '#6b6b7a',
-  attention: '#e2a53f',
+  available: '#c9963a',
+  empty: '#7a6c5d',
+  attention: '#ce8642',
 };
 
 function AdvisorActionsPanel({
@@ -153,7 +153,7 @@ function AdvisorActionsPanel({
             <p className="text-[11px] text-muted leading-relaxed mb-2">{action.reason}</p>
             <div className="flex gap-2">
               <button
-                className="text-[11px] text-muted hover:text-green"
+                className="text-[11px] text-muted hover:text-positive"
                 onClick={() => onAsk(action.prompt)}
               >
                 Ask
@@ -227,7 +227,7 @@ function AdvisorQualityPanel({
   onAsk: (prompt: string) => void;
 }) {
   const navigate = useNavigate();
-  const tone = quality ? qualityTone[quality.status] : '#6b6b7a';
+  const tone = quality ? qualityTone[quality.status] : '#7a6c5d';
   const visibleIssues = quality?.issues.slice(0, 2) ?? [];
 
   return (
@@ -250,7 +250,7 @@ function AdvisorQualityPanel({
               <p className="text-[11px] text-muted leading-relaxed mt-0.5">{issue.message}</p>
               <div className="flex gap-2 mt-1.5">
                 <button
-                  className="text-[11px] text-muted hover:text-green"
+                  className="text-[11px] text-muted hover:text-positive"
                   onClick={() => onAsk(`What should I do about this data quality issue: ${issue.label}?`)}
                 >
                   Ask
@@ -313,7 +313,7 @@ function DraftActionsList({ drafts }: { drafts?: AdvisorDraftAction[] }) {
               <button
                 onClick={() => mutation.mutate(draft)}
                 disabled={applied || pending}
-                className="flex items-center gap-1.5 text-[11px] text-green border border-green/30 rounded px-2 py-1 hover:bg-green-10 disabled:opacity-50 disabled:cursor-not-allowed"
+                className="flex items-center gap-1.5 text-[11px] text-positive border border-positive/30 rounded px-2 py-1 hover:bg-positive-10 disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {applied ? <Check size={12} /> : null}
                 {applied ? 'Applied' : pending ? 'Applying' : 'Apply'}
@@ -332,7 +332,7 @@ function DraftActionsList({ drafts }: { drafts?: AdvisorDraftAction[] }) {
           </div>
         );
       })}
-      {error && <p className="text-[11px] text-rose">{error}</p>}
+      {error && <p className="text-[11px] text-negative">{error}</p>}
     </div>
   );
 }
@@ -352,7 +352,7 @@ function CitationList({ analysis }: { analysis?: AdvisorAnalysis }) {
               {citation.detail && <span className="text-muted"> {citation.detail}</span>}
             </>
           );
-          const className = "text-[11px] border border-border rounded px-2 py-1 bg-background/40 hover:border-green/40 transition-colors";
+          const className = "text-[11px] border border-border rounded px-2 py-1 bg-background/40 hover:border-positive/40 transition-colors";
 
           return citation.route ? (
             <Link key={citation.id} to={citation.route} className={className}>
@@ -384,14 +384,14 @@ function MessageBubble({
   return (
     <div className={`flex ${isUser ? 'justify-end' : 'justify-start'} mb-4`}>
       {!isUser && (
-        <div className="w-6 h-6 rounded-full bg-green/20 border border-green/30 flex items-center justify-center flex-shrink-0 mt-0.5 mr-2">
-          <BrainCircuit size={12} className="text-green" />
+        <div className="w-6 h-6 rounded-full bg-positive/20 border border-positive/30 flex items-center justify-center flex-shrink-0 mt-0.5 mr-2">
+          <BrainCircuit size={12} className="text-positive" />
         </div>
       )}
       <div
         className={`max-w-[80%] rounded-xl px-4 py-3 text-sm leading-relaxed ${
           isUser
-            ? 'bg-green/15 border border-green/25 text-text ml-8'
+            ? 'bg-positive/15 border border-positive/25 text-text ml-8'
             : 'bg-surface shadow-sm border border-border text-text'
         }`}
       >
@@ -401,10 +401,10 @@ function MessageBubble({
           <div className="text-muted space-y-0.5">
             {content ? renderMarkdown(content) : null}
             {streaming && !content && (
-              <span className="inline-block w-1.5 h-3.5 bg-green animate-pulse rounded-sm ml-0.5" />
+              <span className="inline-block w-1.5 h-3.5 bg-positive animate-pulse rounded-sm ml-0.5" />
             )}
             {streaming && content && (
-              <span className="inline-block w-1.5 h-3.5 bg-green animate-pulse rounded-sm ml-0.5 align-middle" />
+              <span className="inline-block w-1.5 h-3.5 bg-positive animate-pulse rounded-sm ml-0.5 align-middle" />
             )}
             {!streaming && <DraftActionsList drafts={analysis?.drafts} />}
             {!streaming && <CitationList analysis={analysis} />}
@@ -420,8 +420,8 @@ function MessageBubble({
 function AdvisorUnavailable() {
   return (
     <div className="flex flex-col items-center justify-center h-full gap-4 text-center px-8">
-      <div className="w-12 h-12 rounded-full bg-rose/10 flex items-center justify-center">
-        <AlertTriangle size={22} className="text-rose" />
+      <div className="w-12 h-12 rounded-full bg-negative/10 flex items-center justify-center">
+        <AlertTriangle size={22} className="text-negative" />
       </div>
       <div>
         <p className="text-sm font-medium text-text mb-1">Advisor context unavailable</p>
@@ -485,8 +485,8 @@ function EmptyChat({
   return (
     <div className="flex flex-col items-center justify-center h-full gap-6 px-8">
       <div className="text-center">
-        <div className="w-12 h-12 rounded-full bg-green-10 border border-green/20 flex items-center justify-center mx-auto mb-3">
-          <BrainCircuit size={22} className="text-green" />
+        <div className="w-12 h-12 rounded-full bg-positive-10 border border-positive/20 flex items-center justify-center mx-auto mb-3">
+          <BrainCircuit size={22} className="text-positive" />
         </div>
         <p className="text-sm font-medium text-text mb-1">AI Financial Advisor</p>
         <p className="text-xs text-muted">Ask questions about your accounts, transactions, budgets, goals, and recurring cash flow.</p>
@@ -579,16 +579,16 @@ export function Advisor() {
       {/* Header */}
       <div className="px-6 py-4 border-b border-border flex items-center justify-between flex-shrink-0">
         <div className="flex items-center gap-2">
-          <BrainCircuit size={16} className="text-green" />
+          <BrainCircuit size={16} className="text-positive" />
           <h1 className="text-sm font-medium text-text">AI Advisor</h1>
-          <span className="text-xs text-muted font-mono bg-green-10 border border-green/20 px-1.5 py-0.5 rounded">
+          <span className="text-xs text-muted font-mono bg-positive-10 border border-positive/20 px-1.5 py-0.5 rounded">
             local tools
           </span>
         </div>
         {messages.length > 0 && (
           <button
             onClick={clearChat}
-            className="flex items-center gap-1.5 text-xs text-muted hover:text-rose transition-colors"
+            className="flex items-center gap-1.5 text-xs text-muted hover:text-negative transition-colors"
           >
             <Trash2 size={13} />
             Clear
@@ -632,13 +632,13 @@ export function Advisor() {
                   onKeyDown={handleKeyDown}
                   placeholder="Ask about your finances (Enter to send, Shift+Enter for newline)"
                   rows={2}
-                  className="flex-1 bg-surface shadow-sm border border-border rounded-lg px-3 py-2.5 text-sm text-text placeholder-muted resize-none focus:outline-none focus:border-green-50 transition-colors"
+                  className="flex-1 bg-surface shadow-sm border border-border rounded-lg px-3 py-2.5 text-sm text-text placeholder-muted resize-none focus:outline-none focus:border-positive-5 transition-colors"
                   disabled={isStreaming}
                 />
                 {isStreaming ? (
                   <button
                     onClick={stopStreaming}
-                    className="flex-shrink-0 w-9 h-9 flex items-center justify-center rounded-lg bg-rose/15 border border-rose/30 text-rose hover:bg-rose/25 transition-colors"
+                    className="flex-shrink-0 w-9 h-9 flex items-center justify-center rounded-lg bg-negative/15 border border-negative/30 text-negative hover:bg-negative/25 transition-colors"
                     title="Stop"
                   >
                     <Square size={14} />
@@ -647,7 +647,7 @@ export function Advisor() {
                   <button
                     onClick={handleSend}
                     disabled={!input.trim()}
-                    className="flex-shrink-0 w-9 h-9 flex items-center justify-center rounded-lg bg-green/15 border border-green/30 text-green hover:bg-green/25 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                    className="flex-shrink-0 w-9 h-9 flex items-center justify-center rounded-lg bg-positive/15 border border-positive/30 text-positive hover:bg-positive/25 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
                     title="Send (Enter)"
                   >
                     <Send size={14} />

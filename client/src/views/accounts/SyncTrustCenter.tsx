@@ -40,17 +40,17 @@ import type { Account, Holding, SyncHealth, SyncHealthConnection, SyncRun } from
 
 
 const syncTone = {
-  empty: { color: '#6b6b7a', icon: CreditCard },
-  healthy: { color: '#32bfa3', icon: CheckCircle2 },
-  stale: { color: '#e2a53f', icon: AlertTriangle },
-  attention: { color: '#ef6f8a', icon: CircleAlert },
+  empty: { color: '#7a6c5d', icon: CreditCard },
+  healthy: { color: '#c9963a', icon: CheckCircle2 },
+  stale: { color: '#ce8642', icon: AlertTriangle },
+  attention: { color: '#b5654a', icon: CircleAlert },
 } satisfies Record<SyncHealth['status'], { color: string; icon: LucideIcon }>;
 
 const connectionTone = {
-  fresh: '#32bfa3',
-  stale: '#e2a53f',
-  never: '#e2a53f',
-  attention: '#ef6f8a',
+  fresh: '#c9963a',
+  stale: '#ce8642',
+  never: '#ce8642',
+  attention: '#b5654a',
 } satisfies Record<SyncHealthConnection['freshness'], string>;
 
 function connectionActionLabel(action: SyncHealthConnection['recommended_action']): string | null {
@@ -105,7 +105,7 @@ export function SyncTrustCenter({
           </div>
           {connections.length > 0 && (
             <button
-              className="flex items-center gap-1 text-xs text-muted hover:text-green disabled:opacity-40 flex-shrink-0"
+              className="flex items-center gap-1 text-xs text-muted hover:text-positive disabled:opacity-40 flex-shrink-0"
               onClick={onSyncAll}
               disabled={isSyncingAll}
             >
@@ -124,17 +124,17 @@ export function SyncTrustCenter({
               </div>
               <div>
                 <p className="text-muted">Fresh</p>
-                <p className="font-mono text-green">{health?.fresh_count ?? 0}</p>
+                <p className="font-mono text-positive">{health?.fresh_count ?? 0}</p>
               </div>
               <div>
                 <p className="text-muted">Stale</p>
-                <p className="font-mono" style={{ color: (health?.stale_count ?? 0) > 0 ? '#e2a53f' : '#32bfa3' }}>
+                <p className="font-mono" style={{ color: (health?.stale_count ?? 0) > 0 ? '#ce8642' : '#c9963a' }}>
                   {health?.stale_count ?? 0}
                 </p>
               </div>
               <div>
                 <p className="text-muted">Issues</p>
-                <p className="font-mono" style={{ color: (health?.attention_count ?? 0) > 0 ? '#ef6f8a' : '#32bfa3' }}>
+                <p className="font-mono" style={{ color: (health?.attention_count ?? 0) > 0 ? '#b5654a' : '#c9963a' }}>
                   {health?.attention_count ?? 0}
                 </p>
               </div>
@@ -163,7 +163,7 @@ export function SyncTrustCenter({
                       </span>
                       {actionLabel && (
                         <button
-                          className="text-muted hover:text-green disabled:opacity-40"
+                          className="text-muted hover:text-positive disabled:opacity-40"
                           onClick={() => onConnectionAction(connection)}
                           disabled={busy}
                         >

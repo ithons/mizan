@@ -9,7 +9,7 @@ import ViteExpress from 'vite-express';
 
 import { runMigrations, closeDb, MIZAN_DIR } from './db/index';
 import { loadCredentials } from './services/credentials';
-import { runFullSync } from './services/syncManager';
+import { runFullSync, startSyncScheduler, stopSyncScheduler } from './services/syncManager';
 import { errorHandler } from './middleware/errorHandler';
 
 import accountsRouter from './routes/accounts';
@@ -49,8 +49,10 @@ async function main() {
   app.use(morgan('combined', { stream: logStream }));
   app.use(morgan('dev'));
 
-  // Security
-  app.use(helmet());
+  // Security. Helmet's default CSP (script-src 'self') blocks Vite's inline
+  // HMR preamble script, so dev mode can never render in a real browser with
+  // it on — disable CSP in dev, keep helmet's full defaults in production.
+  app.use(helmet(IS_PROD ? undefined : { contentSecurityPolicy: false }));
   app.use(
     cors({
       origin: IS_PROD
@@ -115,9 +117,19 @@ async function main() {
     }, 2000);
   }
 
+  // Periodic sync is opt-in, same as startup sync — it calls external providers.
+  const syncIntervalMinutes = process.env.MIZAN_SYNC_INTERVAL_MINUTES
+    ? parseInt(process.env.MIZAN_SYNC_INTERVAL_MINUTES, 10)
+    : null;
+  if (syncIntervalMinutes && syncIntervalMinutes > 0) {
+    console.log(`[startup] Periodic sync enabled: every ${syncIntervalMinutes} minute(s).`);
+    startSyncScheduler(syncIntervalMinutes);
+  }
+
   // Graceful shutdown
   const shutdown = () => {
     console.log('\n[server] Shutting down...');
+    stopSyncScheduler();
     server.close(() => {
       closeDb();
       process.exit(0);

@@ -17,6 +17,8 @@ import {
   Loader2,
   AlertTriangle,
   PanelLeftClose,
+  Sun,
+  Moon,
 } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
 import { networthApi, syncApi } from '../lib/api';
@@ -51,7 +53,7 @@ interface SidebarProps {
 
 export function Sidebar({ collapsed = false, onToggle }: SidebarProps) {
   const navigate = useNavigate();
-  const { syncStatus, lastSynced, addToast } = useAppStore();
+  const { syncStatus, lastSynced, addToast, theme, toggleTheme } = useAppStore();
 
   const { data: netWorthData } = useQuery({
     queryKey: ['networth', 'latest'],
@@ -100,15 +102,24 @@ export function Sidebar({ collapsed = false, onToggle }: SidebarProps) {
             Mizān
           </span>
         </div>
-        {onToggle && (
+        <div className="flex items-center gap-1 flex-shrink-0">
           <button
-            onClick={onToggle}
-            className="flex-shrink-0 w-6 h-6 flex items-center justify-center rounded text-muted hover:text-text hover:bg-blue/10 transition-colors"
-            title="Hide sidebar (drag handle to resize)"
+            onClick={toggleTheme}
+            className="w-6 h-6 flex items-center justify-center rounded text-muted hover:text-text hover:bg-info/10 transition-colors"
+            title={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
           >
-            <PanelLeftClose size={14} />
+            {theme === 'dark' ? <Sun size={14} /> : <Moon size={14} />}
           </button>
-        )}
+          {onToggle && (
+            <button
+              onClick={onToggle}
+              className="w-6 h-6 flex items-center justify-center rounded text-muted hover:text-text hover:bg-info/10 transition-colors"
+              title="Hide sidebar (drag handle to resize)"
+            >
+              <PanelLeftClose size={14} />
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Nav */}
@@ -162,14 +173,14 @@ export function Sidebar({ collapsed = false, onToggle }: SidebarProps) {
         <div className="flex items-center gap-2">
           {syncStatus === 'syncing' && (
             <>
-              <Loader2 size={12} className="text-green animate-spin flex-shrink-0" />
+              <Loader2 size={12} className="text-positive animate-spin flex-shrink-0" />
               <span className="text-xs text-muted truncate">Syncing...</span>
             </>
           )}
           {syncStatus === 'error' && (
             <>
-              <AlertTriangle size={12} className="text-rose flex-shrink-0" />
-              <span className="text-xs text-rose truncate">Sync error</span>
+              <AlertTriangle size={12} className="text-negative flex-shrink-0" />
+              <span className="text-xs text-negative truncate">Sync error</span>
             </>
           )}
           {syncStatus === 'idle' && (

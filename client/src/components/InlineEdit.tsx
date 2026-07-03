@@ -47,11 +47,11 @@ export function InlineEdit({ value, onSave, placeholder, className, inputClassNa
           }}
           onBlur={save}
           placeholder={placeholder}
-          className={`bg-background border border-green-50 rounded px-2 py-0.5 text-xs text-text focus:outline-none focus:ring-1 focus:ring-green-50 ${inputClassName ?? ''}`}
+          className={`bg-background border border-positive-5 rounded px-2 py-0.5 text-xs text-text focus:outline-none focus:ring-1 focus:ring-positive-5 ${inputClassName ?? ''}`}
         />
         <button
           onMouseDown={(e) => { e.preventDefault(); save(); }}
-          className="text-green hover:opacity-80"
+          className="text-positive hover:opacity-80"
           tabIndex={-1}
         >
           <Check size={12} />
@@ -70,7 +70,7 @@ export function InlineEdit({ value, onSave, placeholder, className, inputClassNa
   return (
     <button
       onClick={() => setEditing(true)}
-      className={`text-left hover:text-green transition-colors cursor-text ${className ?? ''}`}
+      className={`text-left hover:text-positive transition-colors cursor-text ${className ?? ''}`}
       title="Click to edit"
     >
       {value || <span className="text-muted">{placeholder}</span>}

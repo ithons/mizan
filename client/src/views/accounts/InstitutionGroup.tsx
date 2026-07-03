@@ -102,7 +102,7 @@ export function InstitutionGroup({
           {sublabel && <span className="text-xs text-muted/50 font-normal normal-case tracking-normal">{sublabel}</span>}
         </button>
         <div className="flex items-center gap-1.5 flex-shrink-0">
-          <span className="font-mono text-xs" style={{ color: total >= 0 ? '#32bfa3' : '#ef6f8a' }}>
+          <span className="font-mono text-xs" style={{ color: total >= 0 ? '#c9963a' : '#b5654a' }}>
             {formatCurrency(total)}
           </span>
           {(groupType === 'coinbase' || groupType === 'simplefin') && (
@@ -125,7 +125,7 @@ export function InstitutionGroup({
                       </button>
                       <div className="border-t border-border my-1" />
                       <button
-                        className="flex items-center gap-2 w-full px-3 py-1.5 text-xs text-rose hover:bg-black/5"
+                        className="flex items-center gap-2 w-full px-3 py-1.5 text-xs text-negative hover:bg-black/5"
                         onClick={() => { onRemoveItem?.(); setMenuOpen(false); }}
                       >
                         <Trash2 size={12} /> Remove Institution
@@ -142,7 +142,7 @@ export function InstitutionGroup({
                       </button>
                       <div className="border-t border-border my-1" />
                       <button
-                        className="flex items-center gap-2 w-full px-3 py-1.5 text-xs text-rose hover:bg-black/5"
+                        className="flex items-center gap-2 w-full px-3 py-1.5 text-xs text-negative hover:bg-black/5"
                         onClick={() => { onDisconnectCoinbase?.(); setMenuOpen(false); }}
                       >
                         <Unlink size={12} /> Disconnect Coinbase

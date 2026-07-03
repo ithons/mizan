@@ -44,9 +44,9 @@ const FREQUENCY_LABELS: Record<RecurringForecastOccurrence['frequency'], string>
 
 const LIQUID_ACCOUNT_TYPES = new Set(['checking', 'savings', 'cash']);
 const confidenceTone: Record<RecurringForecastOccurrence['confidence_label'], { text: string; border: string }> = {
-  confirmed: { text: 'text-green', border: 'border-green/40' },
-  likely: { text: 'text-blue', border: 'border-blue/40' },
-  uncertain: { text: 'text-amber', border: 'border-amber/40' },
+  confirmed: { text: 'text-positive', border: 'border-positive/40' },
+  likely: { text: 'text-info', border: 'border-info/40' },
+  uncertain: { text: 'text-warning', border: 'border-warning/40' },
 };
 
 interface ProjectionPoint {
@@ -106,7 +106,7 @@ function Stat({
   value: number;
   tone: 'income' | 'bill' | 'net';
 }) {
-  const valueClass = tone === 'bill' ? 'text-rose' : value >= 0 ? 'text-green' : 'text-rose';
+  const valueClass = tone === 'bill' ? 'text-negative' : value >= 0 ? 'text-positive' : 'text-negative';
 
   return (
     <div className="border border-border bg-surface rounded p-4">
@@ -136,22 +136,22 @@ function SubscriptionInsightPanel({ insights }: { insights: SubscriptionInsights
         </div>
         <div>
           <p className="text-xs text-muted mb-1">Upcoming</p>
-          <p className="font-mono text-lg text-rose">{formatCurrency(insights.total_upcoming_amount)}</p>
+          <p className="font-mono text-lg text-negative">{formatCurrency(insights.total_upcoming_amount)}</p>
         </div>
         <div>
           <p className="text-xs text-muted mb-1">Increases</p>
-          <p className="font-mono text-lg text-amber">{insights.increase_count}</p>
+          <p className="font-mono text-lg text-warning">{insights.increase_count}</p>
         </div>
         <div>
           <p className="text-xs text-muted mb-1">Needs review</p>
-          <p className="font-mono text-lg text-blue">{insights.unconfirmed_count}</p>
+          <p className="font-mono text-lg text-info">{insights.unconfirmed_count}</p>
         </div>
       </div>
 
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-3 mt-4">
         <div className="border border-border rounded bg-background/40">
           <div className="px-3 py-2 border-b border-border flex items-center gap-2">
-            <TrendingUp size={13} className="text-amber" />
+            <TrendingUp size={13} className="text-warning" />
             <p className="text-xs font-medium text-text">Price increases</p>
           </div>
           {insights.increases.length > 0 ? (
@@ -159,7 +159,7 @@ function SubscriptionInsightPanel({ insights }: { insights: SubscriptionInsights
               {insights.increases.slice(0, 3).map((item) => (
                 <div key={item.pattern_id} className="px-3 py-2 text-xs flex items-center justify-between gap-3">
                   <span className="text-text truncate">{item.merchant_name}</span>
-                  <span className="font-mono text-amber flex-shrink-0">
+                  <span className="font-mono text-warning flex-shrink-0">
                     +{formatCurrency(item.increase_amount ?? 0)}
                   </span>
                 </div>
@@ -172,7 +172,7 @@ function SubscriptionInsightPanel({ insights }: { insights: SubscriptionInsights
 
         <div className="border border-border rounded bg-background/40">
           <div className="px-3 py-2 border-b border-border flex items-center gap-2">
-            <CircleAlert size={13} className="text-blue" />
+            <CircleAlert size={13} className="text-info" />
             <p className="text-xs font-medium text-text">Needs review</p>
           </div>
           {insights.unconfirmed.length > 0 ? (
@@ -191,7 +191,7 @@ function SubscriptionInsightPanel({ insights }: { insights: SubscriptionInsights
 
         <div className="border border-border rounded bg-background/40">
           <div className="px-3 py-2 border-b border-border flex items-center gap-2">
-            <CalendarDays size={13} className="text-green" />
+            <CalendarDays size={13} className="text-positive" />
             <p className="text-xs font-medium text-text">Upcoming renewals</p>
           </div>
           {insights.upcoming.length > 0 ? (
@@ -204,7 +204,7 @@ function SubscriptionInsightPanel({ insights }: { insights: SubscriptionInsights
                       {formatDate(item.next_expected)} · {FREQUENCY_LABELS[item.frequency]}
                     </p>
                   </div>
-                  <span className="font-mono text-rose flex-shrink-0">{formatCurrency(item.average_amount)}</span>
+                  <span className="font-mono text-negative flex-shrink-0">{formatCurrency(item.average_amount)}</span>
                 </div>
               ))}
             </div>
@@ -290,7 +290,7 @@ function AdjustmentModal({
           </button>
           <button
             type="button"
-            className="rounded bg-green px-3 py-1.5 text-xs font-medium text-white disabled:opacity-50"
+            className="rounded bg-positive px-3 py-1.5 text-xs font-medium text-white disabled:opacity-50"
             onClick={onSubmit}
             disabled={isSaving}
           >
@@ -324,7 +324,7 @@ function ScheduleRow({
   onRevert: (occurrence: RecurringForecastOccurrence) => void;
 }) {
   const Icon = occurrence.is_income ? ArrowUpCircle : ArrowDownCircle;
-  const amountClass = occurrence.is_income ? 'text-green' : 'text-rose';
+  const amountClass = occurrence.is_income ? 'text-positive' : 'text-negative';
   const confidenceClass = confidenceTone[occurrence.confidence_label];
   const needsAction = occurrence.needs_review || occurrence.status === 'overdue';
   const hasAdjustment = Boolean(occurrence.adjustment_id);
@@ -340,7 +340,7 @@ function ScheduleRow({
           <div className="flex items-center gap-2">
             <p className="text-sm text-text truncate">{occurrence.merchant_name}</p>
             {occurrence.status === 'overdue' && (
-              <span className="text-[10px] text-rose border border-rose/40 rounded px-1.5 py-0.5">
+              <span className="text-[10px] text-negative border border-negative/40 rounded px-1.5 py-0.5">
                 overdue
               </span>
             )}
@@ -352,7 +352,7 @@ function ScheduleRow({
               </span>
             )}
             {hasAdjustment && (
-              <span className="text-[10px] text-blue border border-blue/40 rounded px-1.5 py-0.5">
+              <span className="text-[10px] text-info border border-info/40 rounded px-1.5 py-0.5">
                 adjusted
               </span>
             )}
@@ -380,7 +380,7 @@ function ScheduleRow({
         <div className="flex items-center gap-1">
           <button
             type="button"
-            className="p-1 text-muted hover:text-amber disabled:opacity-30"
+            className="p-1 text-muted hover:text-warning disabled:opacity-30"
             onClick={() => onSkip(occurrence)}
             disabled={isMutating}
             title="Skip once"
@@ -389,7 +389,7 @@ function ScheduleRow({
           </button>
           <button
             type="button"
-            className="p-1 text-muted hover:text-blue disabled:opacity-30"
+            className="p-1 text-muted hover:text-info disabled:opacity-30"
             onClick={() => onSnooze(occurrence)}
             disabled={isMutating}
             title="Snooze once"
@@ -398,7 +398,7 @@ function ScheduleRow({
           </button>
           <button
             type="button"
-            className="p-1 text-muted hover:text-green disabled:opacity-30"
+            className="p-1 text-muted hover:text-positive disabled:opacity-30"
             onClick={() => onAdjust(occurrence)}
             disabled={isMutating}
             title="Adjust amount once"
@@ -408,7 +408,7 @@ function ScheduleRow({
           {occurrence.adjustment_id && (
             <button
               type="button"
-              className="p-1 text-muted hover:text-rose disabled:opacity-30"
+              className="p-1 text-muted hover:text-negative disabled:opacity-30"
               onClick={() => onRevert(occurrence)}
               disabled={isMutating}
               title="Revert adjustment"
@@ -419,7 +419,7 @@ function ScheduleRow({
         </div>
         <button
           type="button"
-          className="p-1 text-muted hover:text-green"
+          className="p-1 text-muted hover:text-positive"
           onClick={() => onAsk(occurrence)}
           title="Ask advisor"
         >
@@ -432,7 +432,7 @@ function ScheduleRow({
           <div className="flex items-center gap-1">
             {!occurrence.is_confirmed && (
               <button
-                className="p-1 text-muted hover:text-green disabled:opacity-30"
+                className="p-1 text-muted hover:text-positive disabled:opacity-30"
                 onClick={() => onConfirm(occurrence.pattern_id)}
                 disabled={isMutating}
                 title="Confirm recurring pattern"
@@ -441,7 +441,7 @@ function ScheduleRow({
               </button>
             )}
             <button
-              className="p-1 text-muted hover:text-rose disabled:opacity-30"
+              className="p-1 text-muted hover:text-negative disabled:opacity-30"
               onClick={() => onDismiss(occurrence.pattern_id)}
               disabled={isMutating}
               title="Dismiss recurring pattern"
@@ -657,7 +657,7 @@ export function Bills() {
           {forecast && (
             <button
               type="button"
-              className="text-xs border border-border rounded px-3 py-1.5 text-muted hover:text-green flex items-center gap-1"
+              className="text-xs border border-border rounded px-3 py-1.5 text-muted hover:text-positive flex items-center gap-1"
               onClick={() => askAdvisorAboutForecast(forecast)}
             >
               <Sparkles size={13} />
@@ -669,7 +669,7 @@ export function Bills() {
               key={option}
               className={`text-xs border rounded px-3 py-1.5 ${
                 days === option
-                  ? 'border-green-50 bg-green-10 text-green'
+                  ? 'border-positive-5 bg-positive-10 text-positive'
                   : 'border-border text-muted hover:text-text'
               }`}
               onClick={() => setDays(option)}
@@ -691,8 +691,8 @@ export function Bills() {
       )}
 
       {reviewCount > 0 && (
-        <div className="border border-amber/30 bg-amber/10 rounded p-4 flex items-start gap-3">
-          <CircleAlert size={16} className="text-amber flex-shrink-0 mt-0.5" />
+        <div className="border border-warning/30 bg-warning/10 rounded p-4 flex items-start gap-3">
+          <CircleAlert size={16} className="text-warning flex-shrink-0 mt-0.5" />
           <div>
             <p className="text-sm text-text mb-1">Cash flow needs review</p>
             <p className="text-xs text-muted leading-relaxed">
@@ -710,7 +710,7 @@ export function Bills() {
               {liquidAccounts.length} liquid {liquidAccounts.length === 1 ? 'account' : 'accounts'}
             </p>
           </div>
-          <Wallet size={18} className="text-blue" />
+          <Wallet size={18} className="text-info" />
         </div>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-4">
           <div>
@@ -719,7 +719,7 @@ export function Bills() {
           </div>
           <div>
             <p className="text-xs text-muted mb-1">Lowest Point</p>
-            <p className={`font-mono text-lg ${lowestBalance >= 0 ? 'text-green' : 'text-rose'}`}>
+            <p className={`font-mono text-lg ${lowestBalance >= 0 ? 'text-positive' : 'text-negative'}`}>
               {formatCurrency(lowestBalance)}
             </p>
             {lowestPoint && (
@@ -728,7 +728,7 @@ export function Bills() {
           </div>
           <div>
             <p className="text-xs text-muted mb-1">Projected Ending</p>
-            <p className={`font-mono text-lg ${endingBalance >= startingBalance ? 'text-green' : 'text-rose'}`}>
+            <p className={`font-mono text-lg ${endingBalance >= startingBalance ? 'text-positive' : 'text-negative'}`}>
               {formatCurrency(endingBalance)}
             </p>
           </div>
@@ -738,7 +738,7 @@ export function Bills() {
             {projection.slice(0, 5).map((point) => (
               <div key={point.date} className="grid grid-cols-[120px_1fr_auto] gap-3 px-3 py-2 text-xs items-center">
                 <span className="font-mono text-muted">{formatDate(point.date)}</span>
-                <span className={point.delta >= 0 ? 'text-green' : 'text-rose'}>
+                <span className={point.delta >= 0 ? 'text-positive' : 'text-negative'}>
                   {formatCurrency(point.delta, { showSign: true })}
                 </span>
                 <span className="font-mono text-text">{formatCurrency(point.balance)}</span>
@@ -750,14 +750,14 @@ export function Bills() {
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <div className="border border-border bg-surface rounded p-4 flex items-center gap-3">
-          <CalendarDays size={18} className="text-blue" />
+          <CalendarDays size={18} className="text-info" />
           <div>
             <p className="text-xs text-muted">Scheduled</p>
             <p className="font-mono text-lg text-text">{occurrences.length}</p>
           </div>
         </div>
         <div className="border border-border bg-surface rounded p-4 flex items-center gap-3">
-          <CheckCircle2 size={18} className="text-green" />
+          <CheckCircle2 size={18} className="text-positive" />
           <div>
             <p className="text-xs text-muted">Confirmed</p>
             <p className="font-mono text-lg text-text">{confirmedCount}</p>
@@ -767,7 +767,7 @@ export function Bills() {
           </div>
         </div>
         <div className="border border-border bg-surface rounded p-4 flex items-center gap-3">
-          <Clock3 size={18} className="text-blue" />
+          <Clock3 size={18} className="text-info" />
           <div>
             <p className="text-xs text-muted">Likely</p>
             <p className="font-mono text-lg text-text">{likelyCount}</p>

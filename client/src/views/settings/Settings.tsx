@@ -40,7 +40,7 @@ import { PageLoader } from '../../components/LoadingSpinner';
 import type { Category, MerchantRule, MerchantRuleSuggestion, SyncRun } from '@shared/types';
 
 const CATEGORY_PRESET_COLORS = [
-  '#32bfa3', '#6487f0', '#ef6f8a', '#e2a53f', '#9b8dee',
+  '#c9963a', '#7c8b99', '#b5654a', '#ce8642', '#9b8dee',
   '#ee8d5b', '#70c4e0', '#e070b8', '#70e07a', '#a0a0b8',
   '#c4a86e', '#6e8ec4',
 ];
@@ -104,7 +104,7 @@ export function Settings() {
                     : 'text-muted hover:text-text'
                 }`}
               >
-                <Icon size={14} className={active ? 'text-green' : 'text-muted'} />
+                <Icon size={14} className={active ? 'text-positive' : 'text-muted'} />
                 {s.label}
               </button>
             );

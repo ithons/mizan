@@ -32,9 +32,9 @@ export function formatCurrencyColored(amount: number): { text: string; className
   }).format(Math.abs(amount));
 
   if (amount > 0) {
-    return { text: `+${formatted}`, className: 'text-green' };
+    return { text: `+${formatted}`, className: 'text-positive' };
   }
-  return { text: `\u2212${formatted}`, className: 'text-rose' };
+  return { text: `\u2212${formatted}`, className: 'text-negative' };
 }
 
 export function formatCrypto(amount: number, currency: string): string {

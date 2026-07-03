@@ -89,7 +89,7 @@ export function MergeAccountModal({ isOpen, onClose, targetAccount }: MergeAccou
           <button
             type="submit"
             disabled={mergeMutation.isPending || !sourceAccountId}
-            className="px-4 py-2 text-sm bg-rose text-background font-medium rounded hover:opacity-90 disabled:opacity-50"
+            className="px-4 py-2 text-sm bg-negative text-background font-medium rounded hover:opacity-90 disabled:opacity-50"
           >
             {mergeMutation.isPending ? 'Merging...' : 'Merge & Replace'}
           </button>

@@ -60,14 +60,14 @@ interface SectorDraft {
 }
 
 const INV_ACCOUNT_TYPES = ['brokerage', 'ira_traditional', 'ira_roth', 'crypto_wallet'];
-const CHART_BLUE = '#0090ff';
-const CHART_TICK = '#687076';
+const CHART_BLUE = '#7c8b99';
+const CHART_TICK = '#7a6c5d';
 
 const TX_TYPE_COLORS: Record<string, string> = {
-  buy: 'bg-green-10 text-green',
-  sell: 'bg-rose/10 text-rose',
-  dividend: 'bg-blue/10 text-blue',
-  transfer: 'bg-amber/10 text-amber',
+  buy: 'bg-positive-10 text-positive',
+  sell: 'bg-negative/10 text-negative',
+  dividend: 'bg-info/10 text-info',
+  transfer: 'bg-warning/10 text-warning',
   fee: 'bg-border text-muted',
   other: 'bg-border text-muted',
 };
@@ -89,28 +89,28 @@ function formatSignedCurrency(n: number): string {
 }
 
 function dataQualityToneClass(status: 'empty' | 'strong' | 'limited' | 'attention'): string {
-  if (status === 'strong') return 'text-green';
-  if (status === 'attention') return 'text-rose';
+  if (status === 'strong') return 'text-positive';
+  if (status === 'attention') return 'text-negative';
   if (status === 'empty') return 'text-muted';
-  return 'text-amber';
+  return 'text-warning';
 }
 
 function issueSeverityClass(severity: 'info' | 'warning' | 'attention'): string {
-  if (severity === 'attention') return 'border-rose/30 bg-rose/5';
-  if (severity === 'warning') return 'border-amber/30 bg-amber/5';
+  if (severity === 'attention') return 'border-negative/30 bg-negative/5';
+  if (severity === 'warning') return 'border-warning/30 bg-warning/5';
   return 'border-border bg-background';
 }
 
 function driftToneClass(label: 'No target' | 'On target' | 'Watch' | 'Drifting'): string {
-  if (label === 'On target') return 'text-green';
-  if (label === 'Drifting') return 'text-rose';
-  if (label === 'Watch') return 'text-amber';
+  if (label === 'On target') return 'text-positive';
+  if (label === 'Drifting') return 'text-negative';
+  if (label === 'Watch') return 'text-warning';
   return 'text-muted';
 }
 
 function returnToneClass(value: number | null): string {
   if (value == null) return 'text-muted';
-  return value >= 0 ? 'text-green' : 'text-rose';
+  return value >= 0 ? 'text-positive' : 'text-negative';
 }
 
 function costBasisQualityLabel(holding: Holding): string {
@@ -121,7 +121,7 @@ function costBasisQualityLabel(holding: Holding): string {
 
 function PnlCell({ value, pct }: { value: number | null; pct: number | null }) {
   if (value == null) return <span className="text-muted">-</span>;
-  const color = value >= 0 ? 'text-green' : 'text-rose';
+  const color = value >= 0 ? 'text-positive' : 'text-negative';
   return (
     <span className={`font-mono ${color}`}>
       {value >= 0 ? '+' : ''}{formatCurrency(value)}
@@ -182,7 +182,7 @@ function CostBasisModal({
         <div className="flex items-center justify-between gap-2">
           <button
             type="button"
-            className="rounded border border-border px-3 py-1.5 text-xs text-muted hover:text-rose disabled:opacity-50"
+            className="rounded border border-border px-3 py-1.5 text-xs text-muted hover:text-negative disabled:opacity-50"
             onClick={onClear}
             disabled={isSaving || draft.holding.manual_cost_basis == null}
           >
@@ -199,7 +199,7 @@ function CostBasisModal({
             </button>
             <button
               type="button"
-              className="rounded bg-green px-3 py-1.5 text-xs font-medium text-white disabled:opacity-50"
+              className="rounded bg-positive px-3 py-1.5 text-xs font-medium text-white disabled:opacity-50"
               onClick={onSubmit}
               disabled={isSaving}
             >
@@ -253,7 +253,7 @@ function SectorModal({
         <div className="flex items-center justify-between gap-2">
           <button
             type="button"
-            className="rounded border border-border px-3 py-1.5 text-xs text-muted hover:text-rose disabled:opacity-50"
+            className="rounded border border-border px-3 py-1.5 text-xs text-muted hover:text-negative disabled:opacity-50"
             onClick={onClear}
             disabled={isSaving || !draft.holding.sector}
           >
@@ -270,7 +270,7 @@ function SectorModal({
             </button>
             <button
               type="button"
-              className="rounded bg-green px-3 py-1.5 text-xs font-medium text-white disabled:opacity-50"
+              className="rounded bg-positive px-3 py-1.5 text-xs font-medium text-white disabled:opacity-50"
               onClick={onSubmit}
               disabled={isSaving}
             >
@@ -325,7 +325,7 @@ function ChartTooltip({ active, payload, label }: { active?: boolean; payload?: 
   return (
     <div className="bg-surface shadow-sm border border-border rounded px-3 py-2 text-xs">
       <p className="text-muted">{label}</p>
-      <p className="font-mono text-blue font-medium">{formatCurrency(payload[0].value)}</p>
+      <p className="font-mono text-info font-medium">{formatCurrency(payload[0].value)}</p>
     </div>
   );
 }
@@ -650,7 +650,7 @@ export function Investments() {
                 {hasCostBasis ? formatCurrency(totalCostBasis) : '-'}
               </p>
               {costBasisStats.missingCount > 0 && (
-                <p className="text-[11px] text-amber mt-1">
+                <p className="text-[11px] text-warning mt-1">
                   {costBasisStats.missingCount} holding{costBasisStats.missingCount === 1 ? '' : 's'} missing
                 </p>
               )}
@@ -732,7 +732,7 @@ export function Investments() {
             onClick={() => setSelectedAccountId(null)}
             className={`flex items-center justify-between px-3 py-2 text-xs rounded-full border transition-all ${
               selectedAccountId === null
-                ? 'bg-green-10 text-green border-green/40'
+                ? 'bg-positive-10 text-positive border-positive/40'
                 : 'text-muted border-border hover:text-text'
             }`}
           >
@@ -749,7 +749,7 @@ export function Investments() {
                 onClick={() => setSelectedAccountId(acct.id === selectedAccountId ? null : acct.id)}
                 className={`flex items-center justify-between px-3 py-2 text-xs rounded-full border transition-all ${
                   selectedAccountId === acct.id
-                    ? 'bg-green-10 text-green border-green/40'
+                    ? 'bg-positive-10 text-positive border-positive/40'
                     : 'text-muted border-border hover:text-text'
                 }`}
               >
@@ -809,7 +809,7 @@ export function Investments() {
             </div>
             <div className="flex flex-wrap items-center gap-2">
               <button
-                className="flex items-center gap-1.5 text-xs text-muted hover:text-blue transition-colors border border-border rounded-full px-3 py-1.5"
+                className="flex items-center gap-1.5 text-xs text-muted hover:text-info transition-colors border border-border rounded-full px-3 py-1.5"
                 onClick={() => askAdvisorAboutAllocation(allocationSlices)}
               >
                 <Sparkles size={12} />
@@ -822,7 +822,7 @@ export function Investments() {
                     onClick={() => setAllocationLens(lens.id)}
                     className={`px-3 py-1.5 text-xs rounded-full transition-colors ${
                       allocationLens === lens.id
-                        ? 'bg-green text-white'
+                        ? 'bg-positive text-white'
                         : 'text-muted hover:text-text hover:bg-surface'
                     }`}
                   >
@@ -996,7 +996,7 @@ export function Investments() {
                 return (
                   <tr
                     key={acct.id}
-                    className={`border-b border-border hover:bg-black/5 cursor-pointer ${selectedAccountId === acct.id ? 'bg-green/5' : ''}`}
+                    className={`border-b border-border hover:bg-black/5 cursor-pointer ${selectedAccountId === acct.id ? 'bg-positive/5' : ''}`}
                     onClick={() => setSelectedAccountId(acct.id === selectedAccountId ? null : acct.id)}
                   >
                     <td className="px-3 py-2.5 text-text font-medium">{acct.account_name}</td>
@@ -1008,7 +1008,7 @@ export function Investments() {
                         {acctStats.knownCount > 0 ? formatCurrency(acctStats.knownCostBasis) : 'Missing'}
                       </p>
                       {acctStats.missingCount > 0 && (
-                        <p className="text-[10px] text-amber">
+                        <p className="text-[10px] text-warning">
                           {acctStats.missingCount} missing
                         </p>
                       )}
@@ -1039,7 +1039,7 @@ export function Investments() {
                         {totalStats.knownCount > 0 ? formatCurrency(totalStats.knownCostBasis) : 'Missing'}
                       </p>
                       {totalStats.missingCount > 0 && (
-                        <p className="text-[10px] text-amber">{totalStats.missingCount} missing</p>
+                        <p className="text-[10px] text-warning">{totalStats.missingCount} missing</p>
                       )}
                     </td>
                     <td className="px-3 py-2.5 text-right font-bold">
@@ -1062,7 +1062,7 @@ export function Investments() {
           <button
             onClick={() => setActiveTab('holdings')}
             className={`px-4 py-2 text-sm rounded transition-colors ${
-              activeTab === 'holdings' ? 'bg-green-10 text-text' : 'text-muted hover:text-text'
+              activeTab === 'holdings' ? 'bg-positive-10 text-text' : 'text-muted hover:text-text'
             }`}
           >
             Holdings {filteredHoldings.length > 0 && `(${filteredHoldings.length})`}
@@ -1070,7 +1070,7 @@ export function Investments() {
           <button
             onClick={() => setActiveTab('transactions')}
             className={`px-4 py-2 text-sm rounded transition-colors ${
-              activeTab === 'transactions' ? 'bg-green-10 text-text' : 'text-muted hover:text-text'
+              activeTab === 'transactions' ? 'bg-positive-10 text-text' : 'text-muted hover:text-text'
             }`}
           >
             Transactions
@@ -1115,7 +1115,7 @@ export function Investments() {
                         <td className="px-3 py-2.5 text-muted max-w-[130px]">
                           <div className="flex items-center gap-2">
                             <div className="min-w-0">
-                              <span className={`truncate block ${h.sector ? 'text-text' : 'text-amber'}`}>
+                              <span className={`truncate block ${h.sector ? 'text-text' : 'text-warning'}`}>
                                 {h.sector ?? 'Not available'}
                               </span>
                               {h.sector_source && (
@@ -1124,7 +1124,7 @@ export function Investments() {
                             </div>
                             <button
                               type="button"
-                              className="text-muted hover:text-blue opacity-0 group-hover:opacity-100 transition-colors"
+                              className="text-muted hover:text-info opacity-0 group-hover:opacity-100 transition-colors"
                               onClick={() => openSectorEditor(h)}
                               title="Edit sector"
                             >
@@ -1146,13 +1146,13 @@ export function Investments() {
                               {h.cost_basis != null ? (
                                 <span className="text-muted">{formatCurrency(h.cost_basis)}</span>
                               ) : (
-                                <span className="text-amber">Missing</span>
+                                <span className="text-warning">Missing</span>
                               )}
                               <p className="text-[10px] text-muted">{costBasisQualityLabel(h)}</p>
                             </div>
                             <button
                               type="button"
-                              className="text-muted hover:text-blue opacity-0 group-hover:opacity-100 transition-colors"
+                              className="text-muted hover:text-info opacity-0 group-hover:opacity-100 transition-colors"
                               onClick={() => openCostBasisEditor(h)}
                               title="Edit cost basis"
                             >
@@ -1168,7 +1168,7 @@ export function Investments() {
                         </td>
                         <td className="px-2 py-2.5 text-right">
                           <button
-                            className="text-muted hover:text-blue opacity-0 group-hover:opacity-100 transition-colors"
+                            className="text-muted hover:text-info opacity-0 group-hover:opacity-100 transition-colors"
                             onClick={() => askAdvisorAboutHolding(h)}
                             title="Ask advisor"
                           >
@@ -1192,7 +1192,7 @@ export function Investments() {
                           {visibleStats.knownCount > 0 ? formatCurrency(visibleStats.knownCostBasis) : 'Missing'}
                         </p>
                         {visibleStats.missingCount > 0 && (
-                          <p className="text-[10px] text-amber">{visibleStats.missingCount} missing</p>
+                          <p className="text-[10px] text-warning">{visibleStats.missingCount} missing</p>
                         )}
                       </td>
                       <td className="px-3 py-2.5 text-right font-bold">
@@ -1226,7 +1226,7 @@ export function Investments() {
             {/* Transaction filters */}
             <div className="flex items-center gap-2 mb-3">
               <select
-                className="bg-background border border-border rounded px-2 py-1 text-xs text-text focus:outline-none focus:ring-1 focus:ring-green-50"
+                className="bg-background border border-border rounded px-2 py-1 text-xs text-text focus:outline-none focus:ring-1 focus:ring-positive-5"
                 value={txTypeFilter}
                 onChange={(e) => setTxTypeFilter(e.target.value)}
               >

@@ -1,12 +1,50 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap');
+@import url('https://api.fontshare.com/v2/css?f[]=switzer@400,500,600&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&display=swap');
 
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
+:root {
+  /* Balance — light (default) */
+  --color-bg: #f5efe6;
+  --color-surface: #fbf7ef;
+  --color-border: #e4d9c7;
+  --color-text: #2a2018;
+  --color-muted: #7a6c5d;
+
+  --color-positive: #c9963a;
+  --color-positive-5: rgba(201, 150, 58, 0.05);
+  --color-positive-10: rgba(201, 150, 58, 0.1);
+
+  --color-negative: #b5654a;
+  --color-negative-5: rgba(181, 101, 74, 0.05);
+  --color-negative-10: rgba(181, 101, 74, 0.1);
+
+  --color-warning: #ce8642;
+  --color-warning-5: rgba(206, 134, 66, 0.05);
+  --color-warning-10: rgba(206, 134, 66, 0.1);
+
+  --color-info: #7c8b99;
+  --color-info-5: rgba(124, 139, 153, 0.05);
+  --color-info-10: rgba(124, 139, 153, 0.1);
+}
+
+.dark {
+  /* Balance — dark */
+  --color-bg: #2a2320;
+  --color-surface: #332b26;
+  --color-border: #453b34;
+  --color-text: #f2eae0;
+  --color-muted: #b0a292;
+
+  /* Semantic accents stay the same hue in both modes; they're used as accents
+     against either background, not as body text, so contrast holds up. */
+}
+
 @layer base {
   body {
-    @apply bg-background text-text font-sans antialiased selection:bg-green-10;
+    @apply bg-background text-text font-sans antialiased selection:bg-positive-10;
   }
   * { box-sizing: border-box; }
 }
@@ -16,7 +54,7 @@
   background-color: theme('colors.border') !important;
 }
 [data-separator][data-active] {
-  background-color: theme('colors.green.DEFAULT') !important;
+  background-color: theme('colors.positive.DEFAULT') !important;
 }
 
 /* scrollbar styling */

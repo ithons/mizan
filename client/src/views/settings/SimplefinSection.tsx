@@ -62,7 +62,7 @@ export function SimplefinSection() {
       {status ? (
         <div className="flex items-center justify-between bg-background p-4 rounded border border-border">
           <div className="text-sm">
-            <span className="text-green-500 font-medium mr-2">● Connected</span>
+            <span className="text-positive font-medium mr-2">● Connected</span>
             <span className="text-muted">SimpleFIN active</span>
           </div>
           <button

@@ -108,7 +108,7 @@ export function EditAccountModal({
         <div>
           <label className="block text-xs text-muted mb-1">Account Name</label>
           <input
-            className="w-full bg-background border border-border rounded px-3 py-2 text-sm text-text focus:outline-none focus:ring-1 focus:ring-green-50"
+            className="w-full bg-background border border-border rounded px-3 py-2 text-sm text-text focus:outline-none focus:ring-1 focus:ring-positive-5"
             value={form.account_name}
             onChange={(e) => setForm({ ...form, account_name: e.target.value })}
           />
@@ -117,7 +117,7 @@ export function EditAccountModal({
           <div>
             <label className="block text-xs text-muted mb-1">Institution</label>
             <input
-              className="w-full bg-background border border-border rounded px-3 py-2 text-sm text-text focus:outline-none focus:ring-1 focus:ring-green-50"
+              className="w-full bg-background border border-border rounded px-3 py-2 text-sm text-text focus:outline-none focus:ring-1 focus:ring-positive-5"
               value={form.institution_name}
               onChange={(e) => setForm({ ...form, institution_name: e.target.value })}
               placeholder="Chase"
@@ -128,7 +128,7 @@ export function EditAccountModal({
           <div className="flex-1">
             <label className="block text-xs text-muted mb-1">Account Type</label>
             <select
-              className="w-full bg-background border border-border rounded px-3 py-2 text-sm text-text focus:outline-none focus:ring-1 focus:ring-green-50"
+              className="w-full bg-background border border-border rounded px-3 py-2 text-sm text-text focus:outline-none focus:ring-1 focus:ring-positive-5"
               value={form.type}
               onChange={(e) => setForm({ ...form, type: e.target.value })}
             >
@@ -143,7 +143,7 @@ export function EditAccountModal({
                 type="checkbox"
                 checked={form.is_liability}
                 onChange={(e) => setForm({ ...form, is_liability: e.target.checked })}
-                className="rounded border-border text-green focus:ring-green-50"
+                className="rounded border-border text-positive focus:ring-positive-5"
               />
               <span className="text-sm text-text">Liability</span>
             </label>
@@ -154,7 +154,7 @@ export function EditAccountModal({
             <label className="block text-xs text-muted mb-1">Current Balance</label>
             <input
               type="number"
-              className="w-full bg-background border border-border rounded px-3 py-2 text-sm text-text font-mono focus:outline-none focus:ring-1 focus:ring-green-50"
+              className="w-full bg-background border border-border rounded px-3 py-2 text-sm text-text font-mono focus:outline-none focus:ring-1 focus:ring-positive-5"
               value={form.current_balance}
               onChange={(e) => setForm({ ...form, current_balance: e.target.value })}
             />
@@ -239,7 +239,7 @@ export function AddManualAccountModal({ open, onClose }: { open: boolean; onClos
         <div>
           <label className="block text-xs text-muted mb-1">Account Name</label>
           <input
-            className="w-full bg-background border border-border rounded px-3 py-2 text-sm text-text focus:outline-none focus:ring-1 focus:ring-green-50"
+            className="w-full bg-background border border-border rounded px-3 py-2 text-sm text-text focus:outline-none focus:ring-1 focus:ring-positive-5"
             value={form.account_name}
             onChange={(e) => setForm({ ...form, account_name: e.target.value })}
             placeholder="My Savings"
@@ -248,7 +248,7 @@ export function AddManualAccountModal({ open, onClose }: { open: boolean; onClos
         <div>
           <label className="block text-xs text-muted mb-1">Institution (optional)</label>
           <input
-            className="w-full bg-background border border-border rounded px-3 py-2 text-sm text-text focus:outline-none focus:ring-1 focus:ring-green-50"
+            className="w-full bg-background border border-border rounded px-3 py-2 text-sm text-text focus:outline-none focus:ring-1 focus:ring-positive-5"
             value={form.institution_name}
             onChange={(e) => setForm({ ...form, institution_name: e.target.value })}
             placeholder="Chase"
@@ -258,7 +258,7 @@ export function AddManualAccountModal({ open, onClose }: { open: boolean; onClos
           <div className="flex-1">
             <label className="block text-xs text-muted mb-1">Account Type</label>
             <select
-              className="w-full bg-background border border-border rounded px-3 py-2 text-sm text-text focus:outline-none focus:ring-1 focus:ring-green-50"
+              className="w-full bg-background border border-border rounded px-3 py-2 text-sm text-text focus:outline-none focus:ring-1 focus:ring-positive-5"
               value={form.type}
               onChange={(e) => setForm({ ...form, type: e.target.value })}
             >
@@ -273,7 +273,7 @@ export function AddManualAccountModal({ open, onClose }: { open: boolean; onClos
                 type="checkbox"
                 checked={form.is_liability}
                 onChange={(e) => setForm({ ...form, is_liability: e.target.checked })}
-                className="rounded border-border text-green focus:ring-green-50"
+                className="rounded border-border text-positive focus:ring-positive-5"
               />
               <span className="text-sm text-text">Liability</span>
             </label>
@@ -283,7 +283,7 @@ export function AddManualAccountModal({ open, onClose }: { open: boolean; onClos
           <label className="block text-xs text-muted mb-1">Current Balance</label>
           <input
             type="number"
-            className="w-full bg-background border border-border rounded px-3 py-2 text-sm text-text font-mono focus:outline-none focus:ring-1 focus:ring-green-50"
+            className="w-full bg-background border border-border rounded px-3 py-2 text-sm text-text font-mono focus:outline-none focus:ring-1 focus:ring-positive-5"
             value={form.current_balance}
             onChange={(e) => setForm({ ...form, current_balance: e.target.value })}
             placeholder="0.00"

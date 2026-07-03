@@ -48,13 +48,13 @@ import type {
 } from '@shared/types';
 
 const queueTone = {
-  ai_insights: { color: '#32bfa3', icon: Sparkles },
-  uncategorized: { color: '#e2a53f', icon: Tag },
-  rule_suggestions: { color: '#6487f0', icon: Sparkles },
-  pending: { color: '#e2a53f', icon: Clock },
-  recurring_candidates: { color: '#32bfa3', icon: RefreshCw },
-  duplicate_candidates: { color: '#ef6f8a', icon: Trash2 },
-  transfer_candidates: { color: '#6487f0', icon: ArrowLeftRight },
+  ai_insights: { color: '#c9963a', icon: Sparkles },
+  uncategorized: { color: '#ce8642', icon: Tag },
+  rule_suggestions: { color: '#7c8b99', icon: Sparkles },
+  pending: { color: '#ce8642', icon: Clock },
+  recurring_candidates: { color: '#c9963a', icon: RefreshCw },
+  duplicate_candidates: { color: '#b5654a', icon: Trash2 },
+  transfer_candidates: { color: '#7c8b99', icon: ArrowLeftRight },
 } satisfies Record<TransactionReviewQueueId, { color: string; icon: LucideIcon }>;
 
 function categoryUpdateMessage(applied: number): string {
@@ -90,7 +90,7 @@ function QueueButton({
   return (
     <button
       className={`flex items-center gap-3 border rounded px-3 py-2 text-left transition-colors ${
-        active ? 'bg-green/5 border-green/40' : 'bg-surface border-border hover:border-green/40'
+        active ? 'bg-positive/5 border-positive/40' : 'bg-surface border-border hover:border-positive/40'
       }`}
       onClick={onClick}
     >
@@ -125,7 +125,7 @@ function TransactionRow({
 }) {
   return (
     <div className={`grid grid-cols-[96px_1fr_180px_120px_auto] gap-3 items-center px-3 py-2.5 border-b border-border last:border-0 ${
-      selected ? 'bg-green/5' : ''
+      selected ? 'bg-positive/5' : ''
     }`}>
       <span className="text-xs text-muted font-mono">{formatDate(transaction.date)}</span>
       <div className="min-w-0">
@@ -140,7 +140,7 @@ function TransactionRow({
       <AmountBadge amount={transaction.amount} />
       {onReviewed ? (
         <button
-          className="flex items-center gap-1.5 text-xs text-muted border border-border rounded px-2 py-1 hover:text-green disabled:opacity-40"
+          className="flex items-center gap-1.5 text-xs text-muted border border-border rounded px-2 py-1 hover:text-positive disabled:opacity-40"
           onClick={() => onReviewed(transaction.id)}
           disabled={reviewing}
         >
@@ -169,9 +169,9 @@ function AiDraftRow({
 }) {
   return (
     <div className={`flex items-center gap-3 px-3 py-3 border-b border-border last:border-0 ${
-      selected ? 'bg-green/5' : ''
+      selected ? 'bg-positive/5' : ''
     }`}>
-      <Sparkles size={14} className="text-green flex-shrink-0" />
+      <Sparkles size={14} className="text-positive flex-shrink-0" />
       <div className="min-w-0 flex-1">
         <p className="text-sm text-text truncate font-medium">{draft.label}</p>
         <p className="text-xs text-muted leading-relaxed mt-1">{draft.summary}</p>
@@ -217,9 +217,9 @@ function RuleSuggestionRow({
 }) {
   return (
     <div className={`flex items-center gap-3 px-3 py-3 border-b border-border last:border-0 ${
-      selected ? 'bg-green/5' : ''
+      selected ? 'bg-positive/5' : ''
     }`}>
-      <Sparkles size={14} className="text-blue flex-shrink-0" />
+      <Sparkles size={14} className="text-info flex-shrink-0" />
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-2 mb-1">
           <p className="text-sm text-text truncate">{suggestion.pattern}</p>
@@ -253,7 +253,7 @@ function RuleSuggestionRow({
         )}
       </div>
       <button
-        className="flex items-center gap-1.5 text-xs bg-blue text-white rounded px-2.5 py-1.5 hover:opacity-90 disabled:opacity-40"
+        className="flex items-center gap-1.5 text-xs bg-info text-white rounded px-2.5 py-1.5 hover:opacity-90 disabled:opacity-40"
         onClick={() => onApply(suggestion)}
         disabled={applying}
       >
@@ -279,9 +279,9 @@ function RecurringRow({
 }) {
   return (
     <div className={`flex items-center gap-3 px-3 py-3 border-b border-border last:border-0 ${
-      selected ? 'bg-green/5' : ''
+      selected ? 'bg-positive/5' : ''
     }`}>
-      <RefreshCw size={14} className="text-green flex-shrink-0" />
+      <RefreshCw size={14} className="text-positive flex-shrink-0" />
       <div className="min-w-0 flex-1">
         <p className="text-sm text-text truncate">{pattern.merchant_name}</p>
         <p className="text-xs text-muted">
@@ -320,9 +320,9 @@ function DuplicateRow({
 }) {
   return (
     <div className={`flex items-center gap-3 px-3 py-3 border-b border-border last:border-0 ${
-      selected ? 'bg-green/5' : ''
+      selected ? 'bg-positive/5' : ''
     }`}>
-      <AlertTriangle size={14} className="text-rose flex-shrink-0" />
+      <AlertTriangle size={14} className="text-negative flex-shrink-0" />
       <div className="min-w-0 flex-1">
         <p className="text-sm text-text truncate">{group.merchant_name}</p>
         <p className="text-xs text-muted">
@@ -355,9 +355,9 @@ function TransferRow({
 }) {
   return (
     <div className={`flex items-center gap-3 px-3 py-3 border-b border-border last:border-0 ${
-      selected ? 'bg-green/5' : ''
+      selected ? 'bg-positive/5' : ''
     }`}>
-      <ArrowLeftRight size={14} className="text-blue flex-shrink-0" />
+      <ArrowLeftRight size={14} className="text-info flex-shrink-0" />
       <div className="min-w-0 flex-1">
         <p className="text-sm text-text truncate">
           {pair.from_account_name} to {pair.to_account_name}
@@ -367,7 +367,7 @@ function TransferRow({
         </p>
       </div>
       <button
-        className="flex items-center gap-1.5 text-xs bg-blue text-white rounded px-2.5 py-1.5 hover:opacity-90 disabled:opacity-40"
+        className="flex items-center gap-1.5 text-xs bg-info text-white rounded px-2.5 py-1.5 hover:opacity-90 disabled:opacity-40"
         onClick={() => onConfirm(pair.pair_id)}
         disabled={busy}
       >
@@ -388,7 +388,7 @@ function TransferRow({
 function EmptyQueue() {
   return (
     <div className="h-64 flex flex-col items-center justify-center text-center">
-      <CheckCircle2 size={28} className="text-green mb-3" />
+      <CheckCircle2 size={28} className="text-positive mb-3" />
       <p className="text-sm text-text">Queue clear</p>
       <p className="text-xs text-muted mt-1">No open items in this queue.</p>
     </div>
@@ -930,7 +930,7 @@ export function ReviewInbox() {
         </div>
         {totalOpen === 0 && (
           <div className="flex items-center gap-3">
-            <div className="flex items-center gap-2 text-sm text-green">
+            <div className="flex items-center gap-2 text-sm text-positive">
               <CheckCircle2 size={16} />
               Review complete
             </div>

@@ -55,7 +55,7 @@ import type {
 } from '@shared/types';
 
 const CATEGORY_PRESET_COLORS = [
-  '#32bfa3', '#6487f0', '#ef6f8a', '#e2a53f', '#9b8dee',
+  '#c9963a', '#7c8b99', '#b5654a', '#ce8642', '#9b8dee',
   '#ee8d5b', '#70c4e0', '#e070b8', '#70e07a', '#a0a0b8',
   '#c4a86e', '#6e8ec4',
 ];
@@ -131,9 +131,9 @@ function parseCsvHeaders(text: string): string[] {
 }
 
 function importRunStatusClass(status: DataImportRun['status']): string {
-  if (status === 'succeeded') return 'text-green';
-  if (status === 'partial') return 'text-amber';
-  return 'text-rose';
+  if (status === 'succeeded') return 'text-positive';
+  if (status === 'partial') return 'text-warning';
+  return 'text-negative';
 }
 
 function importRunSourceLabel(source: DataImportRun['source']): string {
@@ -297,7 +297,7 @@ export function DataSection() {
             </div>
 
             <textarea
-              className="w-full min-h-28 bg-surface border border-border rounded px-3 py-2 text-xs text-text font-mono resize-y focus:outline-none focus:ring-1 focus:ring-green-50"
+              className="w-full min-h-28 bg-surface border border-border rounded px-3 py-2 text-xs text-text font-mono resize-y focus:outline-none focus:ring-1 focus:ring-positive-5"
               value={csvText}
               onChange={(event) => {
                 const nextText = event.target.value;
@@ -325,7 +325,7 @@ export function DataSection() {
                 <label key={key} className="space-y-1">
                   <span className="text-[11px] text-muted">{label}</span>
                   <input
-                    className="w-full bg-surface border border-border rounded px-2 py-1.5 text-xs text-text font-mono focus:outline-none focus:ring-1 focus:ring-green-50"
+                    className="w-full bg-surface border border-border rounded px-2 py-1.5 text-xs text-text font-mono focus:outline-none focus:ring-1 focus:ring-positive-5"
                     value={String(csvMapping[key as keyof typeof csvMapping] ?? '')}
                     onChange={(event) => {
                       setCsvMapping((mapping) => ({ ...mapping, [key]: event.target.value }));
@@ -337,7 +337,7 @@ export function DataSection() {
               <label className="flex items-center gap-2 pt-5 text-xs text-muted">
                 <input
                   type="checkbox"
-                  className="accent-green"
+                  className="accent-positive"
                   checked={csvMapping.amountNegate}
                   onChange={(event) => {
                     setCsvMapping((mapping) => ({ ...mapping, amountNegate: event.target.checked }));
@@ -380,7 +380,7 @@ export function DataSection() {
             </div>
 
             {csvParseError && (
-              <p className="text-xs text-rose">{csvParseError}</p>
+              <p className="text-xs text-negative">{csvParseError}</p>
             )}
 
             {csvPreview && (
@@ -388,19 +388,19 @@ export function DataSection() {
                 <div className="grid grid-cols-2 md:grid-cols-6 gap-3 text-xs">
                   <div>
                     <p className="text-muted mb-0.5">Valid</p>
-                    <p className="font-mono text-green">{csvPreview.valid_count}</p>
+                    <p className="font-mono text-positive">{csvPreview.valid_count}</p>
                   </div>
                   <div>
                     <p className="text-muted mb-0.5">Invalid</p>
-                    <p className="font-mono text-rose">{csvPreview.invalid_count}</p>
+                    <p className="font-mono text-negative">{csvPreview.invalid_count}</p>
                   </div>
                   <div>
                     <p className="text-muted mb-0.5">Duplicates</p>
-                    <p className="font-mono text-amber">{csvPreview.duplicate_candidate_count}</p>
+                    <p className="font-mono text-warning">{csvPreview.duplicate_candidate_count}</p>
                   </div>
                   <div>
                     <p className="text-muted mb-0.5">Transfers</p>
-                    <p className="font-mono text-blue">{csvPreview.transfer_candidate_count}</p>
+                    <p className="font-mono text-info">{csvPreview.transfer_candidate_count}</p>
                   </div>
                   <div>
                     <p className="text-muted mb-0.5">Balance impact</p>
@@ -408,14 +408,14 @@ export function DataSection() {
                   </div>
                   <div>
                     <p className="text-muted mb-0.5">Warnings</p>
-                    <p className="font-mono text-blue">{csvPreview.warnings.length}</p>
+                    <p className="font-mono text-info">{csvPreview.warnings.length}</p>
                   </div>
                 </div>
 
                 {(csvPreview.errors.length > 0 || csvPreview.warnings.length > 0) && (
                   <div className="max-h-28 overflow-y-auto space-y-1">
                     {[...csvPreview.errors, ...csvPreview.warnings].slice(0, 8).map((issue) => (
-                      <p key={`${issue.row_number}:${issue.message}`} className={`text-xs ${issue.severity === 'error' ? 'text-rose' : 'text-muted'}`}>
+                      <p key={`${issue.row_number}:${issue.message}`} className={`text-xs ${issue.severity === 'error' ? 'text-negative' : 'text-muted'}`}>
                         Row {issue.row_number}: {issue.message}
                       </p>
                     ))}
@@ -486,7 +486,7 @@ export function DataSection() {
               </div>
 
               <textarea
-                className="w-full min-h-28 bg-surface border border-border rounded px-3 py-2 text-xs text-text font-mono resize-y focus:outline-none focus:ring-1 focus:ring-green-50"
+                className="w-full min-h-28 bg-surface border border-border rounded px-3 py-2 text-xs text-text font-mono resize-y focus:outline-none focus:ring-1 focus:ring-positive-5"
                 value={backupText}
                 onChange={(event) => {
                   setBackupText(event.target.value);
@@ -498,7 +498,7 @@ export function DataSection() {
               />
 
               {backupParseError && (
-                <p className="text-xs text-rose">{backupParseError}</p>
+                <p className="text-xs text-negative">{backupParseError}</p>
               )}
 
               {backupPreview && (
@@ -506,7 +506,7 @@ export function DataSection() {
                   <div className="grid grid-cols-2 md:grid-cols-5 gap-3 text-xs">
                     <div>
                       <p className="text-muted mb-0.5">Status</p>
-                      <p className={backupPreview.valid ? 'font-mono text-green' : 'font-mono text-rose'}>
+                      <p className={backupPreview.valid ? 'font-mono text-positive' : 'font-mono text-negative'}>
                         {backupPreview.valid ? 'Ready' : 'Blocked'}
                       </p>
                     </div>
@@ -539,7 +539,7 @@ export function DataSection() {
                       {[...backupPreview.errors, ...backupPreview.warnings].slice(0, 8).map((issue, index) => (
                         <p
                           key={`${index}:${issue}`}
-                          className={`text-xs ${backupPreview.errors.includes(issue) ? 'text-rose' : 'text-muted'}`}
+                          className={`text-xs ${backupPreview.errors.includes(issue) ? 'text-negative' : 'text-muted'}`}
                         >
                           {issue}
                         </p>
@@ -563,10 +563,10 @@ export function DataSection() {
                   {backupPreview.valid && (
                     <label className="block space-y-1">
                       <span className="text-xs text-muted">
-                        Type <span className="font-mono text-rose">restore</span> to replace local data tables
+                        Type <span className="font-mono text-negative">restore</span> to replace local data tables
                       </span>
                       <input
-                        className="w-full bg-background border border-border rounded px-3 py-2 text-sm text-text font-mono focus:outline-none focus:ring-1 focus:ring-rose/50"
+                        className="w-full bg-background border border-border rounded px-3 py-2 text-sm text-text font-mono focus:outline-none focus:ring-1 focus:ring-negative/50"
                         value={backupConfirm}
                         onChange={(event) => setBackupConfirm(event.target.value)}
                         placeholder="restore"
@@ -585,7 +585,7 @@ export function DataSection() {
                   Preview Backup
                 </button>
                 <button
-                  className="flex items-center gap-2 px-4 py-2 text-sm border border-rose/40 text-rose rounded hover:bg-rose/10 disabled:opacity-40"
+                  className="flex items-center gap-2 px-4 py-2 text-sm border border-negative/40 text-negative rounded hover:bg-negative/10 disabled:opacity-40"
                   onClick={() => restoreBackupMutation.mutate()}
                   disabled={
                     restoreBackupMutation.isPending ||
@@ -631,7 +631,7 @@ export function DataSection() {
                   </p>
                 </div>
                 <button
-                  className="text-muted hover:text-blue transition-colors"
+                  className="text-muted hover:text-info transition-colors"
                   onClick={() => navigate('/advisor', {
                     state: advisorRouteState(buildImportRunAdvisorPrompt(run)),
                   })}
@@ -647,10 +647,10 @@ export function DataSection() {
 
       <SyncActivityPanel runs={syncRuns} showDetail />
 
-      <div className="border border-rose/30 rounded p-4 space-y-3">
+      <div className="border border-negative/30 rounded p-4 space-y-3">
         <div className="flex items-center gap-2 mb-2">
-          <AlertTriangle size={14} className="text-rose" />
-          <h3 className="text-sm font-medium text-rose">Danger Zone</h3>
+          <AlertTriangle size={14} className="text-negative" />
+          <h3 className="text-sm font-medium text-negative">Danger Zone</h3>
         </div>
         <div className="flex items-center justify-between py-2 border-b border-border">
           <div>
@@ -658,7 +658,7 @@ export function DataSection() {
             <p className="text-xs text-muted">Permanently delete accounts, transactions, budgets, goals, rules, snapshots, and sync history. Encrypted credentials stay on disk.</p>
           </div>
           <button
-            className="px-3 py-1.5 text-xs border border-rose/40 text-rose rounded hover:bg-rose/10"
+            className="px-3 py-1.5 text-xs border border-negative/40 text-negative rounded hover:bg-negative/10"
             onClick={() => setShowDangerModal(true)}
           >
             Delete All Data
@@ -673,18 +673,18 @@ export function DataSection() {
         title="Delete All Data"
       >
         <div className="space-y-4">
-          <div className="flex items-start gap-2 p-3 bg-rose/10 border border-rose/30 rounded">
-            <AlertTriangle size={14} className="text-rose mt-0.5 flex-shrink-0" />
+          <div className="flex items-start gap-2 p-3 bg-negative/10 border border-negative/30 rounded">
+            <AlertTriangle size={14} className="text-negative mt-0.5 flex-shrink-0" />
             <p className="text-xs text-muted">
               This permanently deletes local finance data from the database. Encrypted provider credentials are not deleted, so disconnect providers separately if needed.
             </p>
           </div>
           <div>
             <label className="block text-xs text-muted mb-1">
-              Type <span className="font-mono text-rose">delete</span> to confirm
+              Type <span className="font-mono text-negative">delete</span> to confirm
             </label>
             <input
-              className="w-full bg-background border border-border rounded px-3 py-2 text-sm text-text font-mono focus:outline-none focus:ring-1 focus:ring-rose/50"
+              className="w-full bg-background border border-border rounded px-3 py-2 text-sm text-text font-mono focus:outline-none focus:ring-1 focus:ring-negative/50"
               value={deleteConfirm}
               onChange={(e) => setDeleteConfirm(e.target.value)}
               placeholder="delete"
@@ -692,7 +692,7 @@ export function DataSection() {
           </div>
           <div className="flex gap-3">
             <button
-              className="flex-1 py-2 text-sm bg-rose text-white font-medium rounded hover:opacity-90 disabled:opacity-40"
+              className="flex-1 py-2 text-sm bg-negative text-white font-medium rounded hover:opacity-90 disabled:opacity-40"
               disabled={deleteConfirm !== 'delete' || deleteAllMutation.isPending}
               onClick={() => deleteAllMutation.mutate()}
             >

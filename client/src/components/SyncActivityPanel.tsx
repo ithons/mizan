@@ -18,10 +18,10 @@ import { buildSyncRunAdvisorPrompt } from '../lib/advisorPrompts';
 import { formatRelativeTime } from '../lib/formatters';
 
 const statusTone = {
-  running: { color: '#6487f0', icon: RefreshCw, label: 'Running' },
-  succeeded: { color: '#32bfa3', icon: CheckCircle2, label: 'Succeeded' },
-  partial: { color: '#e2a53f', icon: AlertTriangle, label: 'Partial' },
-  failed: { color: '#ef6f8a', icon: CircleAlert, label: 'Failed' },
+  running: { color: '#7c8b99', icon: RefreshCw, label: 'Running' },
+  succeeded: { color: '#c9963a', icon: CheckCircle2, label: 'Succeeded' },
+  partial: { color: '#ce8642', icon: AlertTriangle, label: 'Partial' },
+  failed: { color: '#b5654a', icon: CircleAlert, label: 'Failed' },
 } satisfies Record<SyncRunStatus, { color: string; icon: LucideIcon; label: string }>;
 
 const scopeLabel: Record<SyncRun['scope'], string> = {
@@ -46,7 +46,7 @@ function RunSummary({ run, selected, onSelect }: {
   return (
     <button
       className={`w-full flex items-center gap-3 px-3 py-2.5 text-left hover:bg-black/5 transition-colors ${
-        selected ? 'bg-green/5' : ''
+        selected ? 'bg-positive/5' : ''
       }`}
       onClick={onSelect}
     >
@@ -111,7 +111,7 @@ export function SyncActivityPanel({
     <div className="bg-surface shadow-sm border border-border rounded">
       <div className="px-4 py-3 border-b border-border flex items-center justify-between">
         <div className="flex items-center gap-2">
-          <Clock3 size={14} className="text-blue" />
+          <Clock3 size={14} className="text-info" />
           <h2 className="text-sm font-medium text-text">{title}</h2>
         </div>
         <div className="flex items-center gap-2">
@@ -120,7 +120,7 @@ export function SyncActivityPanel({
               <button
                 type="button"
                 onClick={askAdvisorAboutSync}
-                className="text-xs border border-border rounded px-2.5 py-1 text-muted hover:text-green flex items-center gap-1"
+                className="text-xs border border-border rounded px-2.5 py-1 text-muted hover:text-positive flex items-center gap-1"
               >
                 <Sparkles size={12} />
                 Ask advisor
@@ -161,15 +161,15 @@ export function SyncActivityPanel({
                     </div>
                     <div>
                       <p className="text-muted mb-0.5">Added</p>
-                      <p className="font-mono text-green">{detail.transactions_added}</p>
+                      <p className="font-mono text-positive">{detail.transactions_added}</p>
                     </div>
                     <div>
                       <p className="text-muted mb-0.5">Updated</p>
-                      <p className="font-mono text-blue">{detail.transactions_modified}</p>
+                      <p className="font-mono text-info">{detail.transactions_modified}</p>
                     </div>
                     <div>
                       <p className="text-muted mb-0.5">Removed</p>
-                      <p className="font-mono text-rose">{detail.transactions_removed}</p>
+                      <p className="font-mono text-negative">{detail.transactions_removed}</p>
                     </div>
                   </div>
 
@@ -177,18 +177,18 @@ export function SyncActivityPanel({
                     <div className="grid grid-cols-2 gap-3 text-xs">
                       <div className="bg-background border border-border rounded p-3">
                         <p className="text-muted mb-1">Duplicate groups</p>
-                        <p className="font-mono text-amber">{detail.duplicate_candidates}</p>
+                        <p className="font-mono text-warning">{detail.duplicate_candidates}</p>
                       </div>
                       <div className="bg-background border border-border rounded p-3">
                         <p className="text-muted mb-1">Transfer pairs</p>
-                        <p className="font-mono text-blue">{detail.transfer_candidates}</p>
+                        <p className="font-mono text-info">{detail.transfer_candidates}</p>
                       </div>
                     </div>
                   )}
 
                   {detail.error_message && (
-                    <div className="bg-rose/10 border border-rose/30 rounded p-3">
-                      <p className="text-xs text-rose font-medium mb-1">Issue</p>
+                    <div className="bg-negative/10 border border-negative/30 rounded p-3">
+                      <p className="text-xs text-negative font-medium mb-1">Issue</p>
                       <p className="text-xs text-muted leading-relaxed">{detail.error_message}</p>
                       {detail.recovery_action && (
                         <p className="text-xs text-muted leading-relaxed mt-1">{detail.recovery_action}</p>
@@ -200,12 +200,12 @@ export function SyncActivityPanel({
                     <p className="text-xs font-medium text-text">Providers</p>
                     {detail.items.map((item) => {
                       const tone = item.status === 'succeeded'
-                        ? '#32bfa3'
+                        ? '#c9963a'
                         : item.status === 'reauth_required'
-                          ? '#e2a53f'
+                          ? '#ce8642'
                           : item.status === 'failed'
-                            ? '#ef6f8a'
-                            : '#6487f0';
+                            ? '#b5654a'
+                            : '#7c8b99';
                       return (
                         <div key={item.id} className="bg-background border border-border rounded p-3">
                           <div className="flex items-center justify-between gap-3">
@@ -240,7 +240,7 @@ export function SyncActivityPanel({
                       <p className="text-xs font-medium text-text">Detected changes</p>
                       {detail.changes.map((change) => (
                         <div key={change.id} className="text-xs text-muted flex items-start gap-2">
-                          <span className="w-1.5 h-1.5 rounded-full bg-blue mt-1.5 flex-shrink-0" />
+                          <span className="w-1.5 h-1.5 rounded-full bg-info mt-1.5 flex-shrink-0" />
                           <span>{change.description}</span>
                         </div>
                       ))}

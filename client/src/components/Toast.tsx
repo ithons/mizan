@@ -15,15 +15,15 @@ function ToastItem({ toast, onRemove }: ToastItemProps) {
   }, [toast.id, onRemove]);
 
   const icons = {
-    success: <CheckCircle size={16} className="text-green flex-shrink-0" />,
-    error: <XCircle size={16} className="text-rose flex-shrink-0" />,
-    info: <Info size={16} className="text-blue flex-shrink-0" />,
+    success: <CheckCircle size={16} className="text-positive flex-shrink-0" />,
+    error: <XCircle size={16} className="text-negative flex-shrink-0" />,
+    info: <Info size={16} className="text-info flex-shrink-0" />,
   };
 
   const borderColors = {
-    success: 'border-l-green',
-    error: 'border-l-rose',
-    info: 'border-l-blue',
+    success: 'border-l-positive',
+    error: 'border-l-negative',
+    info: 'border-l-info',
   };
 
   return (

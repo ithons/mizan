@@ -1,4 +1,5 @@
 import type { Account, NetWorthSnapshot } from '@shared/types';
+import { CHART_COLORS } from './chartColors';
 
 export interface NetWorthClassAttribution {
   id: 'liquid' | 'investments' | 'crypto' | 'other_assets' | 'liabilities';
@@ -124,11 +125,11 @@ export function buildNetWorthAttribution({
     .sort((a, b) => Math.abs(b.net_worth_delta) - Math.abs(a.net_worth_delta));
 
   const classDeltas = [
-    classDelta('liquid', 'Liquid', numeric(previous.liquid_assets), numeric(current.liquid_assets), '#32bfa3'),
-    classDelta('investments', 'Investments', numeric(previous.investment_assets), numeric(current.investment_assets), '#6487f0'),
-    classDelta('crypto', 'Crypto', numeric(previous.crypto_assets), numeric(current.crypto_assets), '#e2a53f'),
-    classDelta('other_assets', 'Other assets', snapshotOtherAssets(previous), snapshotOtherAssets(current), '#a78bfa'),
-    classDelta('liabilities', 'Liabilities', previous.total_liabilities, current.total_liabilities, '#ef6f8a', true),
+    classDelta('liquid', 'Liquid', numeric(previous.liquid_assets), numeric(current.liquid_assets), CHART_COLORS[0]),
+    classDelta('investments', 'Investments', numeric(previous.investment_assets), numeric(current.investment_assets), CHART_COLORS[1]),
+    classDelta('crypto', 'Crypto', numeric(previous.crypto_assets), numeric(current.crypto_assets), CHART_COLORS[2]),
+    classDelta('other_assets', 'Other assets', snapshotOtherAssets(previous), snapshotOtherAssets(current), CHART_COLORS[4]),
+    classDelta('liabilities', 'Liabilities', previous.total_liabilities, current.total_liabilities, CHART_COLORS[3], true),
   ].filter((item) => item.previous !== 0 || item.current !== 0 || item.balance_delta !== 0);
 
   return {

@@ -270,7 +270,7 @@ export function Accounts() {
           </div>
           <div className="relative" ref={addMenuRef}>
             <button
-              className="flex items-center gap-1 text-xs text-green hover:opacity-80"
+              className="flex items-center gap-1 text-xs text-positive hover:opacity-80"
               onClick={() => setAddMenuOpen((v) => !v)}
             >
               <Plus size={14} /> Add
@@ -281,14 +281,14 @@ export function Accounts() {
                   className="flex items-center gap-2 w-full px-3 py-2 text-xs text-text hover:bg-black/5"
                   onClick={() => navigate('/settings?section=connections')}
                 >
-                  <Link size={12} className="text-green" />
+                  <Link size={12} className="text-positive" />
                   Connect Bank or Card
                 </button>
                 <button
                   className="flex items-center gap-2 w-full px-3 py-2 text-xs text-text hover:bg-black/5"
                   onClick={connectCoinbase}
                 >
-                  <Link size={12} className="text-blue" />
+                  <Link size={12} className="text-info" />
                   Connect Coinbase
                 </button>
                 <button
@@ -439,7 +439,7 @@ export function Accounts() {
           {leftCollapsed && (
             <button
               onClick={toggleLeft}
-              className="absolute top-3 left-3 z-20 w-7 h-7 flex items-center justify-center rounded bg-surface shadow-sm border border-border text-muted hover:text-text hover:border-green-50 transition-colors"
+              className="absolute top-3 left-3 z-20 w-7 h-7 flex items-center justify-center rounded bg-surface shadow-sm border border-border text-muted hover:text-text hover:border-positive-5 transition-colors"
               title="Show accounts panel"
             >
               <PanelLeftOpen size={14} />

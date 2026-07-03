@@ -10,16 +10,8 @@ export const ALLOCATION_LENSES: Array<{ id: AllocationLens; label: string }> = [
   { id: 'symbol', label: 'Symbol' },
 ];
 
-export const ALLOCATION_COLORS = [
-  '#6487f0',
-  '#32bfa3',
-  '#ef6f8a',
-  '#e2a53f',
-  '#9b7ef2',
-  '#5bbad5',
-  '#f08c6d',
-  '#7bbf6a',
-];
+import { CHART_COLORS as ALLOCATION_COLORS } from './chartColors';
+export { ALLOCATION_COLORS };
 
 export const STARTER_ASSET_TARGETS = [
   { key: 'asset:etf', label: 'ETF', targetPct: 60 },
@@ -179,9 +171,9 @@ export function getCostBasisStats(holdings: Holding[]): CostBasisStats {
 }
 
 export function costBasisTone(label: CostBasisStats['label']): string {
-  if (label === 'Complete') return 'text-green';
+  if (label === 'Complete') return 'text-positive';
   if (label === 'No holdings') return 'text-muted';
-  return 'text-amber';
+  return 'text-warning';
 }
 
 function getTaxTreatmentLabel(type: Account['type'] | undefined): string {
