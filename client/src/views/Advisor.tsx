@@ -131,7 +131,7 @@ export function Advisor() {
   ];
 
   return (
-    <Screen>
+    <Screen size="wide">
       <ScreenHeader
         title="Advisor"
         sub={
@@ -147,9 +147,9 @@ export function Advisor() {
         className="mb-7"
       />
 
-      <div className="flex min-h-0 flex-1 gap-12">
+      <div className="flex min-h-0 flex-1 flex-col gap-10 lg:flex-row lg:gap-12">
         {/* Conversation */}
-        <div className="flex min-w-0 max-w-[680px] flex-1 flex-col">
+        <div className="flex min-h-[50vh] min-w-0 max-w-[760px] flex-1 flex-col">
           <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto pr-2">
             {messages.length === 0 && (
               <div className="pt-4 font-serif text-[19px] font-light leading-relaxed text-muted">
@@ -209,7 +209,7 @@ export function Advisor() {
         </div>
 
         {/* Context card */}
-        <div className="w-[240px] flex-shrink-0">
+        <div className="w-full flex-shrink-0 self-start border-t border-line-2 pt-6 lg:sticky lg:top-6 lg:w-[240px] lg:border-t-0 lg:pt-0">
           <SectionLabel className="mb-4">Context</SectionLabel>
           {contextRows.map((row, i) => (
             <div

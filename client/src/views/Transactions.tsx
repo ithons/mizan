@@ -105,7 +105,7 @@ function ReviewPanel({
   useEffect(() => setPickedCategory(''), [focus?.key]);
 
   return (
-    <div className="w-[300px] flex-shrink-0">
+    <div className="w-full flex-shrink-0 self-start border-t border-line-2 pt-6 lg:sticky lg:top-6 lg:w-[300px] lg:border-t-0 lg:pt-0">
       <div className="mb-4 flex items-baseline justify-between">
         <span className="font-serif text-xl text-ink">Review</span>
         <span className="text-[12.5px] text-muted">
@@ -577,7 +577,7 @@ export function Transactions() {
   });
 
   return (
-    <Screen>
+    <Screen size="wide">
       <ScreenHeader
         title="Transactions"
         sub={
@@ -650,8 +650,8 @@ export function Transactions() {
       </div>
 
       {/* Two-pane: ledger + review */}
-      <div className="flex min-h-0 flex-1 gap-12">
-        <div className="min-w-0 max-w-[640px] flex-1 overflow-y-auto">
+      <div className="flex min-h-0 flex-1 flex-col gap-10 lg:flex-row lg:gap-12">
+        <div className="min-w-0 flex-1">
           {/* Column header */}
           <div className="flex items-center px-3 pb-2 text-[11px] uppercase tracking-[0.1em] text-faint">
             <span className="flex-1">Merchant</span>

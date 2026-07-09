@@ -207,7 +207,7 @@ export function Goals() {
         className="mb-8"
       />
 
-      <div className="grid flex-1 content-start gap-x-12 gap-y-5 overflow-y-auto md:grid-cols-2 xl:max-w-[840px]">
+      <div className="grid flex-1 content-start gap-x-12 gap-y-5 md:grid-cols-2">
         {active.map((g) => {
           const fraction = g.target_amount > 0 ? g.progress_amount / g.target_amount : 0;
           const pct = Math.round(Math.min(100, Math.max(0, fraction * 100)));

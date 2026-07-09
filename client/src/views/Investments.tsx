@@ -74,7 +74,7 @@ export function Investments() {
   const accountNameById = useMemo(() => new Map((accounts ?? []).map((a) => [a.id, a.account_name])), [accounts]);
 
   return (
-    <Screen>
+    <Screen size="wide">
       <div className="mb-3 flex flex-shrink-0 items-end justify-between">
         <div>
           <h1 className="font-serif text-[27px] font-normal leading-tight text-ink">Investments</h1>
@@ -129,9 +129,9 @@ export function Investments() {
         )}
       </div>
 
-      <div className="flex min-h-0 flex-1 gap-12">
+      <div className="flex min-h-0 flex-1 flex-col gap-10 lg:flex-row lg:gap-12">
         {/* Holdings */}
-        <div className="min-w-0 max-w-[620px] flex-1 overflow-y-auto">
+        <div className="min-w-0 flex-1">
           <SectionLabel className="mb-2">Holdings</SectionLabel>
           {allHoldings
             .slice()
@@ -164,7 +164,7 @@ export function Investments() {
         </div>
 
         {/* Allocation */}
-        <div className="w-[260px] flex-shrink-0">
+        <div className="w-full flex-shrink-0 self-start border-t border-line-2 pt-6 lg:sticky lg:top-6 lg:w-[260px] lg:border-t-0 lg:pt-0">
           <SectionLabel className="mb-4">Allocation</SectionLabel>
           {slices.length > 0 ? (
             <>

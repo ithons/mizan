@@ -81,9 +81,9 @@ export function Bills() {
         className="mb-7"
       />
 
-      <div className="flex min-h-0 flex-1 gap-12">
+      <div className="flex min-h-0 flex-1 flex-col gap-10 lg:flex-row lg:gap-12">
         {/* Upcoming list */}
-        <div className="min-w-0 max-w-[680px] flex-[1.5] overflow-y-auto">
+        <div className="min-w-0 lg:flex-[1.5]">
           <SectionLabel className="mb-2.5">Upcoming · next 30 days</SectionLabel>
           {upcoming.map((o) => {
             const d = parseISO(o.adjusted_date ?? o.expected_date);
@@ -122,7 +122,7 @@ export function Bills() {
         </div>
 
         {/* Monthly total card */}
-        <div className="min-w-0 flex-1">
+        <div className="min-w-0 self-start lg:sticky lg:top-6 lg:flex-1">
           <div className="rounded-xl border border-line-2 bg-card p-[22px]">
             <SectionLabel className="mb-3">Monthly total</SectionLabel>
             <div className="font-serif text-[34px] font-light leading-tight tabular-nums text-ink">

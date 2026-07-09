@@ -200,7 +200,7 @@ export function Budget() {
         className="mb-7"
       />
 
-      <div className="max-w-[720px] flex-1 overflow-y-auto">
+      <div className="flex-1">
         {grouped.map((section) => (
           <div key={section.name} className="mb-7">
             <SectionLabel summary={groupSummary(section.rows)} className="mb-3">

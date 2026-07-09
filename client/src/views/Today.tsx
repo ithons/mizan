@@ -86,7 +86,7 @@ export function Today() {
   });
 
   return (
-    <Screen>
+    <Screen size="wide">
       {/* Header: wordmark + date, search-or-ask */}
       <div className="flex flex-shrink-0 items-center justify-between">
         <div className="flex items-baseline gap-4">

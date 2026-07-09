@@ -20,16 +20,21 @@ const settingsItem = { to: '/settings', label: 'Settings', shortcut: '0' };
 
 function RailItem({ to, label }: { to: string; label: string }) {
   return (
-    <NavLink to={to} end={to === '/'} className="group flex items-center gap-[11px] px-[22px] py-[9px]">
+    <NavLink
+      to={to}
+      end={to === '/'}
+      title={label}
+      className="group flex items-center justify-center gap-[11px] px-2 py-[9px] xl:justify-start xl:px-[22px]"
+    >
       {({ isActive }) => (
         <>
           <span
-            className={`h-[7px] w-[7px] flex-shrink-0 rounded-full ${
-              isActive ? 'bg-ink' : 'border-[1.5px] border-dot bg-transparent'
+            className={`h-[7px] w-[7px] flex-shrink-0 rounded-full transition-colors ${
+              isActive ? 'bg-ink' : 'border-[1.5px] border-dot bg-transparent group-hover:border-muted'
             }`}
           />
           <span
-            className={`text-sm transition-colors ${
+            className={`hidden text-sm transition-colors xl:block ${
               isActive ? 'font-medium text-ink' : 'text-muted group-hover:text-ink'
             }`}
           >
@@ -64,13 +69,25 @@ export function NavRail() {
     return () => window.removeEventListener('keydown', handleKey);
   }, [addToast, navigate]);
 
+  const syncTitle =
+    syncStatus === 'syncing'
+      ? 'Syncing…'
+      : syncStatus === 'error'
+        ? 'Sync error'
+        : lastSynced
+          ? `Synced ${formatCompactRelative(lastSynced)}`
+          : 'Not synced yet';
+
   return (
-    <nav className="flex h-full w-[148px] flex-shrink-0 flex-col border-l border-line-2 bg-rail py-[26px]">
-      <div className="flex items-center gap-[9px] px-[22px] pb-[22px]">
+    <nav
+      aria-label="Primary"
+      className="flex h-full w-14 flex-shrink-0 flex-col border-l border-line-2 bg-rail py-[26px] xl:w-[148px]"
+    >
+      <div className="flex items-center justify-center gap-[9px] px-2 pb-[22px] xl:justify-start xl:px-[22px]">
         <span className="flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-md bg-ink text-sm font-semibold text-paper">
           م
         </span>
-        <span className="font-serif text-[17px] text-ink">mizān</span>
+        <span className="hidden font-serif text-[17px] text-ink xl:block">mizān</span>
       </div>
 
       <div className="flex flex-1 flex-col gap-0.5 overflow-y-auto py-2">
@@ -79,17 +96,21 @@ export function NavRail() {
         ))}
       </div>
 
-      <div className="px-[22px] pt-[18px]">
-        <NavLink to={settingsItem.to} className="group mb-3.5 flex items-center gap-[11px]">
+      <div className="px-2 pt-[18px] xl:px-[22px]">
+        <NavLink
+          to={settingsItem.to}
+          title="Settings"
+          className="group mb-3.5 flex items-center justify-center gap-[11px] xl:justify-start"
+        >
           {({ isActive }) => (
             <>
               <span
-                className={`h-[7px] w-[7px] flex-shrink-0 rounded-full ${
-                  isActive ? 'bg-ink' : 'border-[1.5px] border-dot bg-transparent'
+                className={`h-[7px] w-[7px] flex-shrink-0 rounded-full transition-colors ${
+                  isActive ? 'bg-ink' : 'border-[1.5px] border-dot bg-transparent group-hover:border-muted'
                 }`}
               />
               <span
-                className={`text-sm transition-colors ${
+                className={`hidden text-sm transition-colors xl:block ${
                   isActive ? 'font-medium text-ink' : 'text-muted group-hover:text-ink'
                 }`}
               >
@@ -98,21 +119,13 @@ export function NavRail() {
             </>
           )}
         </NavLink>
-        <div className="flex items-center gap-2 text-xs text-muted-2">
+        <div className="flex items-center justify-center gap-2 text-xs text-muted-2 xl:justify-start" title={syncTitle}>
           <span
             className={`h-[7px] w-[7px] flex-shrink-0 rounded-full ${
               syncStatus === 'error' ? 'bg-clay' : 'bg-sage-soft'
             } ${syncStatus === 'syncing' ? 'animate-pulse' : ''}`}
           />
-          <span className="truncate">
-            {syncStatus === 'syncing'
-              ? 'Syncing…'
-              : syncStatus === 'error'
-                ? 'Sync error'
-                : lastSynced
-                  ? `Synced ${formatCompactRelative(lastSynced)}`
-                  : 'Not synced yet'}
-          </span>
+          <span className="hidden truncate xl:block">{syncTitle}</span>
         </div>
       </div>
     </nav>

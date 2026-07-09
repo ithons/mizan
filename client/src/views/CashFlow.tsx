@@ -74,7 +74,7 @@ export function CashFlow() {
       />
 
       {/* 3-up summary for the selected period */}
-      <div className="mb-8 grid max-w-[720px] flex-shrink-0 grid-cols-3 gap-4">
+      <div className="mb-8 grid flex-shrink-0 grid-cols-3 gap-3 lg:gap-4">
         {[
           { label: 'Income', value: formatWholeCurrency(income), tone: 'text-sage-deep' },
           { label: 'Expenses', value: formatWholeCurrency(-expenses), tone: 'text-clay' },
@@ -88,7 +88,7 @@ export function CashFlow() {
       </div>
 
       {/* Paired bar chart */}
-      <div className="mb-9 max-w-[720px] flex-shrink-0">
+      <div className="mb-9 flex-shrink-0">
         <div className="flex h-[150px] items-end gap-7">
           {series.map((m) => (
             <div key={m.month} className="flex flex-1 flex-col items-center gap-2">
@@ -122,7 +122,7 @@ export function CashFlow() {
       </div>
 
       {/* Top spending */}
-      <div className="max-w-[720px] flex-1 overflow-y-auto">
+      <div className="flex-1">
         <SectionLabel className="mb-2.5">Top spending · {format(new Date(), 'MMMM')}</SectionLabel>
         {topCategories.map((c) => (
           <div key={c.category_id} className="flex items-center gap-5 border-b border-line px-1 py-3">

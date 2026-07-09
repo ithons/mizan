@@ -118,13 +118,13 @@ export function Settings() {
     connected ? <span className="text-sage-deep">Connected</span> : <span className="text-muted">Connect →</span>;
 
   return (
-    <Screen editorial>
+    <Screen size="editorial">
       <div className="mb-8 flex-shrink-0">
         <h1 className="font-serif text-[27px] font-normal leading-tight text-ink">Settings</h1>
         <div className="mt-1 text-[13.5px] text-muted">Everything runs on your machine · no account, no cloud</div>
       </div>
 
-      <div className="max-w-[680px] flex-1 overflow-y-auto pb-8">
+      <div className="flex-1 pb-8">
         {/* Connections */}
         <div className="mb-8">
           <SectionLabel className="mb-1.5">Connections</SectionLabel>
