@@ -12,15 +12,17 @@ const sizes = {
 interface ScreenProps {
   children: ReactNode;
   size?: keyof typeof sizes;
+  /** Cap the screen to the viewport on lg+ so an inner region scrolls (chat-style views). */
+  contained?: boolean;
   className?: string;
 }
 
-export function Screen({ children, size = 'reading', className = '' }: ScreenProps) {
+export function Screen({ children, size = 'reading', contained = false, className = '' }: ScreenProps) {
   return (
     <div
       className={`mz-screen flex min-h-full flex-col px-6 py-6 lg:px-9 lg:py-9 xl:px-12 ${
         size === 'editorial' ? 'lg:py-12' : ''
-      }`}
+      } ${contained ? 'lg:h-full lg:overflow-hidden' : ''}`}
     >
       <div className={`mx-auto flex w-full min-h-0 flex-1 flex-col ${sizes[size]} ${className}`}>{children}</div>
     </div>

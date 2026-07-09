@@ -114,7 +114,7 @@ export function Today() {
       </div>
 
       {/* Hero: scale + net worth + advisor */}
-      <div className="mz-stagger my-3 flex min-h-0 flex-1 flex-col items-center gap-8 py-6 md:flex-row md:gap-12">
+      <div className="mz-stagger flex flex-col items-center gap-8 py-10 md:flex-row md:gap-14 lg:py-14">
         <BalanceScale
           assets={totalAssets}
           liabilities={totalLiabilities}
@@ -166,7 +166,7 @@ export function Today() {
       </div>
 
       {/* Stat strip */}
-      <div className="mz-stagger flex flex-shrink-0 flex-wrap gap-x-16 gap-y-5 border-t border-line-2 pt-6">
+      <div className="mz-stagger mt-auto flex flex-shrink-0 flex-wrap gap-x-16 gap-y-5 border-t border-line-2 pt-6">
         <StatLink to="/budget" label="Safe to spend">
           <div className="font-serif text-[22px] leading-tight text-ink tabular-nums">{formatWholeCurrency(safeToSpend)}</div>
         </StatLink>

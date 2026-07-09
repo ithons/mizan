@@ -131,7 +131,7 @@ export function Advisor() {
   ];
 
   return (
-    <Screen size="wide">
+    <Screen size="wide" contained>
       <ScreenHeader
         title="Advisor"
         sub={

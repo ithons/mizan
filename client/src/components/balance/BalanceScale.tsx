@@ -40,12 +40,20 @@ export function BalanceScale({ assets, liabilities, className = '' }: BalanceSca
 
   return (
     <svg
-      viewBox="0 0 620 300"
+      viewBox="0 42 620 252"
       className={className}
-      style={{ animation: 'mz-breathe 8s ease-in-out infinite', transformOrigin: `${PIVOT_X}px ${PIVOT_Y}px` }}
       role="img"
       aria-label={`Balance scale: assets ${formatWholeCurrency(assets)}, owed ${formatWholeCurrency(owed)}`}
     >
+      {/* Breathe on an inner group: SVG-internal transforms never extend page
+          layout/scroll bounds, so the ambient motion can't wobble the viewport. */}
+      <g
+        style={{
+          animation: 'mz-breathe 8s ease-in-out infinite',
+          transformOrigin: `${PIVOT_X}px ${PIVOT_Y - 42}px`,
+          transformBox: 'view-box',
+        }}
+      >
       {/* stand */}
       <line x1={PIVOT_X} y1={PIVOT_Y} x2={PIVOT_X} y2="250" stroke="var(--mz-beam)" strokeWidth="4" strokeLinecap="round" />
       <path d="M258 250 Q310 236 362 250" fill="none" stroke="var(--mz-beam)" strokeWidth="4" strokeLinecap="round" />
@@ -86,6 +94,7 @@ export function BalanceScale({ assets, liabilities, className = '' }: BalanceSca
       <text x={rightX} y={rightPanY + 102} textAnchor="middle" fontFamily="Newsreader" fontSize="20" fill="var(--mz-clay)">
         {formatWholeCurrency(owed)}
       </text>
+      </g>
     </svg>
   );
 }
