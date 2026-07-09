@@ -570,18 +570,12 @@ export function ReviewInbox() {
   });
   
   const dismissAiDraftMutation = useMutation({
-    mutationFn: async (draftId: string) => {
-      // For now we don't have a specific API to dismiss a draft, so we could just fake it locally 
-      // or add a quick route. In mizan local state is fine to just drop it if we mutate the server state.
-      // But since we are reading from DB, we'll need an endpoint.
-      // For this step I'll just skip the backend mutation and rely on the AI worker cleaning it up later
-      // or we can add a delete endpoint. For now, let's just make it a dummy success since we didn't build the endpoint.
-      return { success: true };
-    },
+    mutationFn: (draftId: string) => aiApi.dismissDraft(draftId),
     onSuccess: () => {
       invalidateReview();
       addToast({ type: 'success', message: 'Insight dismissed' });
     },
+    onError: (err: Error) => addToast({ type: 'error', message: err.message }),
   });
 
   const confirmRecurringMutation = useMutation({
@@ -725,44 +719,64 @@ export function ReviewInbox() {
     }
   };
 
+  const reportBatchOutcome = (
+    verb: string,
+    succeeded: number,
+    failed: number,
+    label: (n: number) => string
+  ) => {
+    const total = succeeded + failed;
+    if (failed === 0) {
+      addToast({ type: 'success', message: `${verb} ${succeeded} ${label(succeeded)}` });
+      return;
+    }
+    addToast({
+      type: 'error',
+      message: `${verb} ${succeeded} of ${total} ${label(total)}, ${failed} failed`,
+    });
+  };
+
+  const settleBatch = async <T,>(items: T[], action: (item: T) => Promise<unknown>) => {
+    const results = await Promise.allSettled(items.map(action));
+    const succeeded = results.filter((r) => r.status === 'fulfilled').length;
+    return { succeeded, failed: results.length - succeeded };
+  };
+
   const runBatchPrimaryAction = async () => {
     if (activeItemCount === 0 || batchActionBusy) return;
 
     try {
       setBatchBusy(true);
       if (activeQueue === 'ai_insights') {
-        await Promise.all(aiDrafts.map((draft) => aiApi.confirmDraft(draft)));
-        addToast({ type: 'success', message: `Approved ${aiDrafts.length} AI insight${aiDrafts.length === 1 ? '' : 's'}` });
+        const { succeeded, failed } = await settleBatch(aiDrafts, (draft) => aiApi.confirmDraft(draft));
+        reportBatchOutcome('Approved', succeeded, failed, (n) => `AI insight${n === 1 ? '' : 's'}`);
       } else if (activeQueue === 'pending') {
-        await Promise.all(activeItems.map((transaction) =>
+        const { succeeded, failed } = await settleBatch(activeItems, (transaction) =>
           transactionsApi.markReview(transaction.id, 'reviewed')
-        ));
-        addToast({ type: 'success', message: `Marked ${activeItems.length} pending transaction${activeItems.length === 1 ? '' : 's'} reviewed` });
+        );
+        reportBatchOutcome('Marked', succeeded, failed, (n) => `pending transaction${n === 1 ? '' : 's'} reviewed`);
       } else if (activeQueue === 'rule_suggestions') {
-        await Promise.all(ruleSuggestions.map((suggestion) =>
+        const { succeeded, failed } = await settleBatch(ruleSuggestions, (suggestion) =>
           rulesApi.create({
             pattern: suggestion.pattern,
             category_id: suggestion.category_id,
             apply_existing: true,
           })
-        ));
-        addToast({ type: 'success', message: `Applied ${ruleSuggestions.length} rule suggestion${ruleSuggestions.length === 1 ? '' : 's'}` });
+        );
+        reportBatchOutcome('Applied', succeeded, failed, (n) => `rule suggestion${n === 1 ? '' : 's'}`);
       } else if (activeQueue === 'recurring_candidates') {
-        await Promise.all(recurringCandidates.map((pattern) => recurringApi.confirm(pattern.id)));
-        addToast({ type: 'success', message: `Confirmed ${recurringCandidates.length} recurring candidate${recurringCandidates.length === 1 ? '' : 's'}` });
+        const { succeeded, failed } = await settleBatch(recurringCandidates, (pattern) => recurringApi.confirm(pattern.id));
+        reportBatchOutcome('Confirmed', succeeded, failed, (n) => `recurring candidate${n === 1 ? '' : 's'}`);
       } else if (activeQueue === 'transfer_candidates') {
-        await Promise.all(transferCandidates.map((pair) =>
+        const { succeeded, failed } = await settleBatch(transferCandidates, (pair) =>
           transactionsApi.confirmTransferPair(pair.pair_id)
-        ));
-        addToast({ type: 'success', message: `Confirmed ${transferCandidates.length} transfer match${transferCandidates.length === 1 ? '' : 'es'}` });
+        );
+        reportBatchOutcome('Confirmed', succeeded, failed, (n) => `transfer match${n === 1 ? '' : 'es'}`);
       } else {
         return;
       }
-
-      invalidateReview();
-    } catch (err) {
-      addToast({ type: 'error', message: err instanceof Error ? err.message : 'Batch action failed' });
     } finally {
+      invalidateReview();
       setBatchBusy(false);
     }
   };
@@ -798,29 +812,26 @@ export function ReviewInbox() {
     try {
       setBatchBusy(true);
       if (activeQueue === 'ai_insights') {
-        await Promise.all(aiDrafts.map((draft) => dismissAiDraftMutation.mutateAsync(draft.id)));
-        addToast({ type: 'success', message: `Dismissed ${aiDrafts.length} AI insight${aiDrafts.length === 1 ? '' : 's'}` });
+        const { succeeded, failed } = await settleBatch(aiDrafts, (draft) => dismissAiDraftMutation.mutateAsync(draft.id));
+        reportBatchOutcome('Dismissed', succeeded, failed, (n) => `AI insight${n === 1 ? '' : 's'}`);
       } else if (activeQueue === 'recurring_candidates') {
-        await Promise.all(recurringCandidates.map((pattern) => recurringApi.dismiss(pattern.id)));
-        addToast({ type: 'success', message: `Dismissed ${recurringCandidates.length} recurring candidate${recurringCandidates.length === 1 ? '' : 's'}` });
+        const { succeeded, failed } = await settleBatch(recurringCandidates, (pattern) => recurringApi.dismiss(pattern.id));
+        reportBatchOutcome('Dismissed', succeeded, failed, (n) => `recurring candidate${n === 1 ? '' : 's'}`);
       } else if (activeQueue === 'duplicate_candidates') {
-        await Promise.all(duplicateCandidates.map((group) =>
+        const { succeeded, failed } = await settleBatch(duplicateCandidates, (group) =>
           transactionsApi.dismissDuplicateGroup(group.group_id)
-        ));
-        addToast({ type: 'success', message: `Dismissed ${duplicateCandidates.length} duplicate group${duplicateCandidates.length === 1 ? '' : 's'}` });
+        );
+        reportBatchOutcome('Dismissed', succeeded, failed, (n) => `duplicate group${n === 1 ? '' : 's'}`);
       } else if (activeQueue === 'transfer_candidates') {
-        await Promise.all(transferCandidates.map((pair) =>
+        const { succeeded, failed } = await settleBatch(transferCandidates, (pair) =>
           transactionsApi.dismissTransferPair(pair.pair_id)
-        ));
-        addToast({ type: 'success', message: `Dismissed ${transferCandidates.length} transfer match${transferCandidates.length === 1 ? '' : 'es'}` });
+        );
+        reportBatchOutcome('Dismissed', succeeded, failed, (n) => `transfer match${n === 1 ? '' : 'es'}`);
       } else {
         return;
       }
-
-      invalidateReview();
-    } catch (err) {
-      addToast({ type: 'error', message: err instanceof Error ? err.message : 'Batch action failed' });
     } finally {
+      invalidateReview();
       setBatchBusy(false);
     }
   };

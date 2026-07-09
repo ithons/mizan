@@ -1027,6 +1027,17 @@ function confirmSectorMetadata(
   return { changed: 1, result: { security_id: security.id, sector: security.sector } };
 }
 
+export function dismissAdvisorDraft(db: Database.Database, id: string): { changed: number } {
+  const result = db.prepare(`
+    UPDATE advisor_drafts
+    SET status = 'dismissed',
+        updated_at = ?
+    WHERE id = ? AND status = 'open'
+  `).run(new Date().toISOString(), id);
+
+  return { changed: result.changes };
+}
+
 export function confirmAdvisorDraft(
   db: Database.Database,
   draftAction: AdvisorDraftAction,
@@ -1037,34 +1048,46 @@ export function confirmAdvisorDraft(
   if (draftAction.kind !== draftAction.payload.kind) throw new Error('Draft kind does not match payload');
 
   const apply = db.transaction(() => {
+    let result: { changed: number; result: unknown };
     switch (draftAction.payload.kind) {
       case 'create_merchant_rule':
-        return confirmMerchantRule(db, draftAction.payload);
+        result = confirmMerchantRule(db, draftAction.payload); break;
       case 'categorize_transaction':
-        return confirmCategorizeTransaction(db, draftAction.payload);
+        result = confirmCategorizeTransaction(db, draftAction.payload); break;
       case 'update_budget':
-        return confirmBudget(db, draftAction.payload);
+        result = confirmBudget(db, draftAction.payload); break;
       case 'update_goal_target':
-        return confirmGoalTarget(db, draftAction.payload);
+        result = confirmGoalTarget(db, draftAction.payload); break;
       case 'allocate_goal_funds':
-        return confirmAllocateGoalFunds(db, draftAction.payload);
+        result = confirmAllocateGoalFunds(db, draftAction.payload); break;
       case 'create_goal':
-        return confirmCreateGoal(db, draftAction.payload);
+        result = confirmCreateGoal(db, draftAction.payload); break;
       case 'confirm_recurring':
-        return confirmRecurring(db, draftAction.payload);
+        result = confirmRecurring(db, draftAction.payload); break;
       case 'create_budget_group':
-        return confirmCreateBudgetGroup(db, draftAction.payload);
+        result = confirmCreateBudgetGroup(db, draftAction.payload); break;
       case 'rename_budget_group':
-        return confirmRenameBudgetGroup(db, draftAction.payload);
+        result = confirmRenameBudgetGroup(db, draftAction.payload); break;
       case 'assign_category_to_budget_group':
-        return confirmAssignCategoryToBudgetGroup(db, draftAction.payload);
+        result = confirmAssignCategoryToBudgetGroup(db, draftAction.payload); break;
       case 'create_recurring_adjustment':
-        return confirmRecurringAdjustment(db, draftAction.payload);
+        result = confirmRecurringAdjustment(db, draftAction.payload); break;
       case 'set_manual_cost_basis':
-        return confirmManualCostBasis(db, draftAction.payload);
+        result = confirmManualCostBasis(db, draftAction.payload); break;
       case 'set_sector_metadata':
-        return confirmSectorMetadata(db, draftAction.payload);
+        result = confirmSectorMetadata(db, draftAction.payload); break;
+      default:
+        throw new Error(`Unhandled draft kind: ${(draftAction.payload as { kind: string }).kind}`);
     }
+
+    // Marks the persisted background-worker row (if this draft came from one) as confirmed,
+    // so getTransactionReviewSummary() stops returning it. No-op for ephemeral chat-drafts
+    // whose id isn't a real advisor_drafts row.
+    db.prepare(`
+      UPDATE advisor_drafts SET status = 'confirmed', updated_at = ? WHERE id = ? AND status = 'open'
+    `).run(new Date().toISOString(), draftAction.id);
+
+    return result;
   });
   const result = apply();
 

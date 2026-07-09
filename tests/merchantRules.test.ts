@@ -3,6 +3,8 @@ import assert from 'node:assert/strict';
 import Database from 'better-sqlite3';
 import {
   applyMerchantRuleToMatchingTransactions,
+  applyMerchantRulesToExistingTransactions,
+  autoCategorizeTransactions,
   merchantMatchesRulePattern,
   upsertMerchantRule,
 } from '../server/src/services/rules';
@@ -14,6 +16,8 @@ function setupDb(): Database.Database {
     CREATE TABLE categories (
       id TEXT PRIMARY KEY
     );
+
+    INSERT OR IGNORE INTO categories (id) VALUES ('cat_shop_amazon'), ('cat_ent_streaming');
 
     CREATE TABLE merchant_rules (
       id TEXT PRIMARY KEY,
@@ -118,5 +122,61 @@ test('single transaction categorization propagates to matching uncategorized mer
       review_status: 'reviewed',
       updated_at: '2026-06-01',
     },
+  ]);
+});
+
+test('applyMerchantRulesToExistingTransactions marks matched transactions reviewed, used by the rule-suggestion Apply button', (t) => {
+  const db = setupDb();
+  t.after(() => db.close());
+
+  db.prepare(`
+    INSERT INTO transactions (id, merchant_name, original_name, category_id, review_status, updated_at)
+    VALUES
+      ('matched', 'Starbucks Store 123', 'STARBUCKS 123', NULL, 'open', '2026-06-01'),
+      ('no_match', 'Some Random Merchant', 'SOME RANDOM MERCHANT', NULL, 'open', '2026-06-01')
+  `).run();
+
+  upsertMerchantRule(db, 'Starbucks Store 123', 'cat_food_coffee', '2026-06-30T12:00:00.000Z');
+
+  const result = applyMerchantRulesToExistingTransactions(db, { onlyUncategorized: true });
+  assert.equal(result.updated, 1);
+
+  const rows = db.prepare(`
+    SELECT id, category_id, review_status FROM transactions ORDER BY id
+  `).all() as Array<{ id: string; category_id: string | null; review_status: string }>;
+
+  assert.deepEqual(rows, [
+    { id: 'matched', category_id: 'cat_food_coffee', review_status: 'reviewed' },
+    { id: 'no_match', category_id: null, review_status: 'open' },
+  ]);
+});
+
+test('autoCategorizeTransactions applies merchant rules first, then falls back to the text heuristic, and never touches already-categorized rows', (t) => {
+  const db = setupDb();
+  t.after(() => db.close());
+
+  db.prepare(`
+    INSERT INTO transactions (id, merchant_name, original_name, category_id, review_status, updated_at)
+    VALUES
+      ('rule_match', 'Starbucks Store 123', 'STARBUCKS 123', NULL, 'open', '2026-06-01'),
+      ('heuristic_match', 'AMAZON.COM*A1B2C3', 'AMAZON.COM*A1B2C3', NULL, 'open', '2026-06-01'),
+      ('no_match', 'Some Random Merchant', 'SOME RANDOM MERCHANT', NULL, 'open', '2026-06-01'),
+      ('already_set', 'Netflix.com', 'NETFLIX.COM', 'cat_travel', 'reviewed', '2026-06-01')
+  `).run();
+
+  upsertMerchantRule(db, 'Starbucks Store 123', 'cat_food_coffee', '2026-06-30T12:00:00.000Z');
+
+  const result = autoCategorizeTransactions(db);
+  assert.equal(result.updated, 2);
+
+  const rows = db.prepare(`
+    SELECT id, category_id FROM transactions ORDER BY id
+  `).all() as Array<{ id: string; category_id: string | null }>;
+
+  assert.deepEqual(rows, [
+    { id: 'already_set', category_id: 'cat_travel' }, // untouched despite matching the streaming heuristic
+    { id: 'heuristic_match', category_id: 'cat_shop_amazon' },
+    { id: 'no_match', category_id: null },
+    { id: 'rule_match', category_id: 'cat_food_coffee' },
   ]);
 });

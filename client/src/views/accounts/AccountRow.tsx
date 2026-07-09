@@ -161,7 +161,7 @@ export function AccountRow({
                 Edit Account
               </button>
             )}
-            {account.is_manual && onDelete && (
+            {Boolean(account.is_manual) && onDelete && (
               <>
                 <div className="border-t border-border my-1" />
                 <button

@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import Database from 'better-sqlite3';
 import {
+  getHoldingHistory,
   listHoldingsWithMetadata,
   setManualCostBasis,
   setSecurityMetadata,
@@ -35,6 +36,19 @@ function setupDb(): Database.Database {
       manual_cost_basis_updated_at TEXT,
       currency TEXT NOT NULL DEFAULT 'USD',
       updated_at TEXT NOT NULL
+    );
+
+    CREATE TABLE holdings_history (
+      id TEXT PRIMARY KEY,
+      account_id TEXT NOT NULL,
+      security_id TEXT NOT NULL,
+      date TEXT NOT NULL,
+      quantity REAL NOT NULL,
+      institution_price REAL NOT NULL,
+      institution_value REAL NOT NULL,
+      cost_basis REAL,
+      created_at TEXT NOT NULL,
+      UNIQUE(account_id, security_id, date)
     );
   `);
 
@@ -107,4 +121,30 @@ test('security metadata updates sector fields without touching holdings', (t) =>
   const cleared = setSecurityMetadata(db, 'sec_vti', { sector: null });
   assert.equal(cleared.sector, null);
   assert.equal(cleared.sector_source, null);
+});
+
+test('getHoldingHistory returns a holding\'s value-over-time series in date order, scoped to its account+security', (t) => {
+  const db = setupDb();
+  t.after(() => db.close());
+
+  db.prepare(`
+    INSERT INTO holdings_history (id, account_id, security_id, date, quantity, institution_price, institution_value, cost_basis, created_at)
+    VALUES
+      ('h1', 'acct', 'sec_vti', '2026-06-28', 10, 110, 1100, 1000, '2026-06-28T00:00:00.000Z'),
+      ('h2', 'acct', 'sec_vti', '2026-06-30', 10, 120, 1200, 1000, '2026-06-30T00:00:00.000Z'),
+      ('h3', 'acct', 'sec_cash', '2026-06-30', 1, 50, 50, NULL, '2026-06-30T00:00:00.000Z')
+  `).run();
+
+  const history = getHoldingHistory(db, 'hold_vti', 90);
+  assert.deepEqual(history, [
+    { date: '2026-06-28', quantity: 10, institution_price: 110, institution_value: 1100, cost_basis: 1000 },
+    { date: '2026-06-30', quantity: 10, institution_price: 120, institution_value: 1200, cost_basis: 1000 },
+  ]);
+});
+
+test('getHoldingHistory throws for an unknown holding id', (t) => {
+  const db = setupDb();
+  t.after(() => db.close());
+
+  assert.throws(() => getHoldingHistory(db, 'nonexistent'), /Holding not found/);
 });

@@ -128,7 +128,7 @@ export function CategoryRow({
                   />
                 ))}
               </div>
-              {category.is_income && (
+              {Boolean(category.is_income) && (
                 <label className="flex items-center gap-1.5 text-[11px] text-muted cursor-pointer">
                   <input
                     type="checkbox"
@@ -144,9 +144,9 @@ export function CategoryRow({
         ) : (
           <>
             <span className="text-sm text-text flex-1">{category.name}</span>
-            {category.is_income && <span className="text-xs text-positive bg-positive-10 px-1.5 py-0.5 rounded flex-shrink-0">income</span>}
-            {category.taxable && <span className="text-xs text-negative bg-negative/10 px-1.5 py-0.5 rounded flex-shrink-0">taxable</span>}
-            {category.is_system && <span className="text-xs text-muted bg-border/50 px-1.5 py-0.5 rounded flex-shrink-0">system</span>}
+            {Boolean(category.is_income) && <span className="text-xs text-positive bg-positive-10 px-1.5 py-0.5 rounded flex-shrink-0">income</span>}
+            {Boolean(category.taxable) && <span className="text-xs text-negative bg-negative/10 px-1.5 py-0.5 rounded flex-shrink-0">taxable</span>}
+            {Boolean(category.is_system) && <span className="text-xs text-muted bg-border/50 px-1.5 py-0.5 rounded flex-shrink-0">system</span>}
           </>
         )}
         {!editing && (

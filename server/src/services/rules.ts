@@ -5,6 +5,7 @@ import type {
   MerchantRuleSuggestion,
   MerchantRuleSuggestionPreview,
 } from '../../../shared/types';
+import { guessCategoryFromText } from './textCategorization';
 
 export interface RuleApplicationResult {
   updated: number;
@@ -148,7 +149,7 @@ export function applyMerchantRulesToExistingTransactions(
   const now = new Date().toISOString();
   let updated = 0;
   const update = db.prepare(
-    'UPDATE transactions SET category_id = ?, updated_at = ? WHERE id = ?'
+    "UPDATE transactions SET category_id = ?, review_status = 'reviewed', updated_at = ? WHERE id = ?"
   );
 
   for (const transaction of transactions) {
@@ -163,6 +164,36 @@ export function applyMerchantRulesToExistingTransactions(
   }
 
   return { updated };
+}
+
+// Runs after every sync (and once as a startup backlog pass) so providers that don't supply
+// their own category (SimpleFIN, Coinbase) don't leave transactions permanently uncategorized.
+// User merchant rules take precedence; the text heuristic is only a fallback for whatever
+// rules don't cover. Only ever touches category_id IS NULL rows, so manual categorizations
+// (and prior rule/heuristic hits) are never overwritten.
+export function autoCategorizeTransactions(db: Database.Database): RuleApplicationResult {
+  const ruleResult = applyMerchantRulesToExistingTransactions(db, { onlyUncategorized: true });
+
+  const remaining = db.prepare(`
+    SELECT id, merchant_name, original_name
+    FROM transactions
+    WHERE category_id IS NULL
+  `).all() as Array<{ id: string; merchant_name: string | null; original_name: string }>;
+
+  const now = new Date().toISOString();
+  const update = db.prepare(
+    'UPDATE transactions SET category_id = ?, updated_at = ? WHERE id = ?'
+  );
+
+  let heuristicUpdated = 0;
+  for (const transaction of remaining) {
+    const categoryId = guessCategoryFromText(transaction.merchant_name, transaction.original_name);
+    if (!categoryId) continue;
+    update.run(categoryId, now, transaction.id);
+    heuristicUpdated++;
+  }
+
+  return { updated: ruleResult.updated + heuristicUpdated };
 }
 
 export function applyMerchantRuleToMatchingTransactions(

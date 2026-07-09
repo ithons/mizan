@@ -4,12 +4,14 @@ import { useNavigate } from 'react-router-dom';
 import {
   AreaChart,
   Area,
+  LineChart,
+  Line,
   XAxis,
   YAxis,
   Tooltip,
   ResponsiveContainer,
 } from 'recharts';
-import { ChevronUp, ChevronDown, Pencil, Sparkles } from 'lucide-react';
+import { ChevronUp, ChevronDown, Pencil, Sparkles, History } from 'lucide-react';
 import { format, subMonths } from 'date-fns';
 import { investmentsApi, reportsApi, accountsApi } from '../lib/api';
 import { formatCurrency, formatDate } from '../lib/formatters';
@@ -127,6 +129,41 @@ function PnlCell({ value, pct }: { value: number | null; pct: number | null }) {
       {value >= 0 ? '+' : ''}{formatCurrency(value)}
       {pct != null && <span className="text-xs ml-1 opacity-70">{formatPct(pct)}</span>}
     </span>
+  );
+}
+
+function HoldingHistoryChart({ holdingId }: { holdingId: string }) {
+  const { data: history = [], isLoading } = useQuery({
+    queryKey: ['holding-history', holdingId],
+    queryFn: () => investmentsApi.holdingHistory(holdingId),
+  });
+
+  if (isLoading) {
+    return <p className="text-xs text-muted py-3">Loading history...</p>;
+  }
+  if (history.length < 2) {
+    return (
+      <p className="text-xs text-muted py-3">
+        Not enough history yet - this builds up one data point per day as you sync, starting from today.
+      </p>
+    );
+  }
+
+  return (
+    <div className="py-2">
+      <ResponsiveContainer width="100%" height={140}>
+        <LineChart data={history}>
+          <XAxis dataKey="date" tick={{ fill: '#7a6c5d', fontSize: 10, fontFamily: 'JetBrains Mono' }} axisLine={false} tickLine={false} tickFormatter={(d) => formatDate(d)} />
+          <YAxis tick={{ fill: '#7a6c5d', fontSize: 10, fontFamily: 'JetBrains Mono' }} axisLine={false} tickLine={false} width={56} tickFormatter={(v) => formatCurrency(v)} />
+          <Tooltip
+            formatter={(value: number) => formatCurrency(value)}
+            labelFormatter={(d) => formatDate(d as string)}
+            contentStyle={{ fontSize: 11, fontFamily: 'JetBrains Mono' }}
+          />
+          <Line dataKey="institution_value" name="Value" stroke="#c9963a" strokeWidth={2} dot={false} activeDot={{ r: 3 }} />
+        </LineChart>
+      </ResponsiveContainer>
+    </div>
   );
 }
 
@@ -340,6 +377,7 @@ export function Investments() {
   const [activeTab, setActiveTab] = useState<ActiveTab>('holdings');
   const [sortBy, setSortBy] = useState<SortCol>('value');
   const [sortDir, setSortDir] = useState<SortDir>('desc');
+  const [expandedHoldingId, setExpandedHoldingId] = useState<string | null>(null);
   const [txTypeFilter, setTxTypeFilter] = useState<string>('');
   const [allocationLens, setAllocationLens] = useState<AllocationLens>('asset_type');
   const [costBasisDraft, setCostBasisDraft] = useState<CostBasisDraft | null>(null);
@@ -1107,7 +1145,8 @@ export function Investments() {
                     const acct = accounts.find((a) => a.id === h.account_id);
                     const isCash = h.security_type === 'cash';
                     return (
-                      <tr key={h.id} className={`border-b border-border hover:bg-black/5 group ${isCash ? 'opacity-60' : ''}`}>
+                    <React.Fragment key={h.id}>
+                      <tr className={`border-b border-border hover:bg-black/5 group ${isCash ? 'opacity-60' : ''}`}>
                         <td className="px-3 py-2.5 font-mono font-bold text-text">{h.ticker ?? '-'}</td>
                         <td className="px-3 py-2.5 text-muted max-w-[140px]">
                           <span className="truncate block" title={h.security_name ?? undefined}>{h.security_name}</span>
@@ -1167,15 +1206,32 @@ export function Investments() {
                           {isCash ? '-' : pct == null ? '-' : formatPct(pct)}
                         </td>
                         <td className="px-2 py-2.5 text-right">
-                          <button
-                            className="text-muted hover:text-info opacity-0 group-hover:opacity-100 transition-colors"
-                            onClick={() => askAdvisorAboutHolding(h)}
-                            title="Ask advisor"
-                          >
-                            <Sparkles size={12} />
-                          </button>
+                          <div className="flex items-center justify-end gap-1">
+                            <button
+                              className={`transition-colors ${expandedHoldingId === h.id ? 'text-info' : 'text-muted opacity-0 group-hover:opacity-100 hover:text-info'}`}
+                              onClick={() => setExpandedHoldingId(expandedHoldingId === h.id ? null : h.id)}
+                              title="Value history"
+                            >
+                              <History size={12} />
+                            </button>
+                            <button
+                              className="text-muted hover:text-info opacity-0 group-hover:opacity-100 transition-colors"
+                              onClick={() => askAdvisorAboutHolding(h)}
+                              title="Ask advisor"
+                            >
+                              <Sparkles size={12} />
+                            </button>
+                          </div>
                         </td>
                       </tr>
+                      {expandedHoldingId === h.id && (
+                        <tr className="border-b border-border bg-background/30">
+                          <td colSpan={selectedAccountId ? 10 : 11} className="px-3">
+                            <HoldingHistoryChart holdingId={h.id} />
+                          </td>
+                        </tr>
+                      )}
+                    </React.Fragment>
                     );
                   })
                 )}

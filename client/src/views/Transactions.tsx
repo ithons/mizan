@@ -646,7 +646,7 @@ export function Transactions() {
                     </td>
                     <td className="px-3 py-2.5 text-text max-w-[180px]">
                       <div className="flex items-center gap-1.5">
-                        {tx.pending && (
+                        {Boolean(tx.pending) && (
                           <span className="w-1.5 h-1.5 rounded-full bg-warning flex-shrink-0" title="Pending" />
                         )}
                         {tx.recurring_id && <RefreshCw size={10} className="text-muted flex-shrink-0" />}
@@ -698,7 +698,7 @@ export function Transactions() {
                         >
                           <Sparkles size={12} />
                         </button>
-                        {tx.is_manual && (
+                        {Boolean(tx.is_manual) && (
                           <button
                             className="text-muted hover:text-negative transition-colors opacity-0 group-hover:opacity-100"
                             onClick={() => deleteMutation.mutate(tx.id)}

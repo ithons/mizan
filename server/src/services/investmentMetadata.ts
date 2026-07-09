@@ -171,6 +171,32 @@ export function setManualCostBasis(
   return holding;
 }
 
+export interface HoldingHistoryPoint {
+  date: string;
+  quantity: number;
+  institution_price: number;
+  institution_value: number;
+  cost_basis: number | null;
+}
+
+export function getHoldingHistory(
+  db: Database.Database,
+  holdingId: string,
+  days = 90
+): HoldingHistoryPoint[] {
+  const holding = db.prepare('SELECT account_id, security_id FROM holdings WHERE id = ?').get(holdingId) as
+    | { account_id: string; security_id: string }
+    | undefined;
+  if (!holding) throw httpError('Holding not found', 404);
+
+  return db.prepare(`
+    SELECT date, quantity, institution_price, institution_value, cost_basis
+    FROM holdings_history
+    WHERE account_id = ? AND security_id = ? AND date >= date('now', ?)
+    ORDER BY date ASC
+  `).all(holding.account_id, holding.security_id, `-${days} days`) as HoldingHistoryPoint[];
+}
+
 export function setSecurityMetadata(
   db: Database.Database,
   securityId: string,

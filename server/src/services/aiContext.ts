@@ -439,6 +439,10 @@ export function buildFinancialContext(): string {
   }
 
   // ── Investment Portfolio ─────────────────────────────────────────────────
+  // Excludes crypto_wallet accounts: their value is already reported under the Net Worth
+  // section's separate "Crypto" bucket (from accounts.current_balance), so including their
+  // holdings here too would present the same crypto value under two different totals in
+  // the same context blob.
   const holdings = db.prepare(`
     SELECT
       s.ticker, s.name AS sec_name, s.type AS sec_type,
@@ -446,7 +450,7 @@ export function buildFinancialContext(): string {
     FROM holdings h
     JOIN securities s ON s.id = h.security_id
     JOIN accounts a ON a.id = h.account_id
-    WHERE a.is_hidden = 0
+    WHERE a.is_hidden = 0 AND a.type != 'crypto_wallet'
     ORDER BY h.institution_value DESC
     LIMIT 15
   `).all() as Array<{

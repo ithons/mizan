@@ -4,6 +4,7 @@ import type { SyncEvent } from '../../../shared/types';
 import { syncCoinbase } from './coinbase';
 import { syncSimplefin } from './simplefin';
 import { detectRecurring } from './recurring';
+import { autoCategorizeTransactions } from './rules';
 import { takeSnapshot } from './snapshot';
 import { getCredentials } from './credentials';
 import { getDb } from '../db/index';
@@ -56,12 +57,14 @@ export function emitSyncEvent(event: SyncEvent): void {
 export interface PostSyncStageFns {
   detectRecurring: () => void;
   refreshTransactionIntegrity: (db: Database.Database) => TransactionIntegrityResult;
+  autoCategorizeTransactions: (db: Database.Database) => { updated: number };
   takeSnapshot: () => void;
 }
 
 const defaultPostSyncStages: PostSyncStageFns = {
   detectRecurring,
   refreshTransactionIntegrity,
+  autoCategorizeTransactions,
   takeSnapshot,
 };
 
@@ -137,6 +140,29 @@ export function runPostSyncStages(
     nextDeferredError = nextDeferredError ?? new Error(message);
   }
 
+  emitSyncEvent({ type: 'sync_progress', message: 'Categorizing transactions...', progress: 85 });
+  try {
+    const result = stages.autoCategorizeTransactions(db);
+    recordSyncRunItem(db, runId, {
+      provider: 'system',
+      connection_id: 'auto-categorization',
+      institution_name: 'Auto-categorization',
+      status: 'succeeded',
+      transactions_modified: result.updated,
+    });
+  } catch (err) {
+    const message = (err as Error).message || 'Auto-categorization failed';
+    recordSyncRunItem(db, runId, {
+      provider: 'system',
+      connection_id: 'auto-categorization',
+      institution_name: 'Auto-categorization',
+      status: 'failed',
+      error_message: message,
+      recovery_action: 'Retry sync. Auto-categorization will run again next sync.',
+    });
+    nextDeferredError = nextDeferredError ?? new Error(message);
+  }
+
   emitSyncEvent({ type: 'sync_progress', message: 'Taking net worth snapshot...', progress: 90 });
   try {
     stages.takeSnapshot();
@@ -154,6 +180,14 @@ export function runPostSyncStages(
   }
 
   return { integrity, deferredError: nextDeferredError };
+}
+
+// Callers that need to mutate connection state right before triggering a sync (e.g. a
+// forced resync nulling last_synced_at) must check this first: runFullSync() silently
+// reuses the in-flight promise when a sync is already running, so a mutation made after
+// that in-flight sync already read the old state would have no effect on it.
+export function isSyncActive(): boolean {
+  return _activeSyncPromise !== null;
 }
 
 export async function runFullSync(): Promise<void> {
@@ -188,6 +222,28 @@ export function stopSyncScheduler(): void {
   _schedulerHandle = null;
 }
 
+// Used to gate startup sync: `tsx watch` (npm run dev) restarts the whole process on
+// every file save, so firing a full sync unconditionally on every boot would mean a
+// real SimpleFIN + Coinbase + AI-worker sync on every single save while coding. Only
+// treat the server as needing a fresh pull if every configured connection's last sync
+// is older than the threshold (or has never synced).
+export function isSyncStale(db: Database.Database, thresholdMinutes: number): boolean {
+  const connections = db.prepare(`
+    SELECT last_synced_at FROM simplefin_connections WHERE status = 'active'
+    UNION ALL
+    SELECT last_synced_at FROM coinbase_connections WHERE status = 'active'
+  `).all() as Array<{ last_synced_at: string | null }>;
+
+  if (connections.length === 0) return false;
+
+  const thresholdMs = thresholdMinutes * 60_000;
+  const now = Date.now();
+  return connections.some((c) => {
+    if (!c.last_synced_at) return true;
+    return now - new Date(c.last_synced_at).getTime() > thresholdMs;
+  });
+}
+
 async function _runFullSyncInternal(): Promise<void> {
   const db = getDb();
   const run = startSyncRun(db, 'full', 'Full sync started');
@@ -206,16 +262,23 @@ async function _runFullSyncInternal(): Promise<void> {
       emitSyncEvent({ type: 'sync_progress', message: 'Syncing SimpleFIN...', progress: 30 });
       try {
         const simplefinResult = await withRetry(() => syncSimplefin());
+        // SimpleFIN reports per-institution problems (e.g. reauth needed) inside a
+        // successful HTTP response's `errors` array rather than as an HTTP failure, so a
+        // sync can return fewer/no accounts for an affected institution while still
+        // "succeeding" unless this is surfaced explicitly.
+        const hasProviderErrors = simplefinResult.errors.length > 0;
         const runItem = recordSyncRunItem(db, run.id, {
           provider: 'simplefin',
           connection_id: 'simplefin_primary',
           institution_name: 'SimpleFIN',
-          status: 'succeeded',
+          status: hasProviderErrors ? 'reauth_required' : 'succeeded',
           accounts_seen: simplefinResult.accountCount,
           transactions_added: simplefinResult.added,
           transactions_modified: simplefinResult.modified,
           transactions_removed: simplefinResult.removed,
           transactions_skipped: simplefinResult.skipped,
+          error_message: hasProviderErrors ? simplefinResult.errors.join('; ') : undefined,
+          recovery_action: hasProviderErrors ? 'Reconnect SimpleFIN in Settings to restore access for the affected institution.' : undefined,
         });
 
         for (const change of simplefinResult.balanceChanges) {

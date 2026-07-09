@@ -369,16 +369,43 @@ function CitationList({ analysis }: { analysis?: AdvisorAnalysis }) {
   );
 }
 
+function ThinkingPanel({ thinking, active }: { thinking?: string; active?: boolean }) {
+  const [expanded, setExpanded] = useState(false);
+  if (!thinking && !active) return null;
+
+  return (
+    <div className="mb-2">
+      <button
+        onClick={() => setExpanded((e) => !e)}
+        className="flex items-center gap-1 text-[11px] text-muted hover:text-text transition-colors"
+      >
+        {expanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+        <span>{active ? 'Thinking…' : 'Thought process'}</span>
+        {active && <span className="inline-block w-1 h-1 bg-positive rounded-full animate-pulse ml-1" />}
+      </button>
+      {expanded && thinking && (
+        <div className="mt-1 pl-4 border-l-2 border-border text-[11px] text-muted whitespace-pre-wrap leading-relaxed">
+          {thinking}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function MessageBubble({
   role,
   content,
   streaming,
   analysis,
+  thinking,
+  thinkingActive,
 }: {
   role: string;
   content: string;
   streaming?: boolean;
   analysis?: AdvisorAnalysis;
+  thinking?: string;
+  thinkingActive?: boolean;
 }) {
   const isUser = role === 'user';
   return (
@@ -399,6 +426,7 @@ function MessageBubble({
           <p className="text-sm whitespace-pre-wrap">{content}</p>
         ) : (
           <div className="text-muted space-y-0.5">
+            <ThinkingPanel thinking={thinking} active={thinkingActive} />
             {content ? renderMarkdown(content) : null}
             {streaming && !content && (
               <span className="inline-block w-1.5 h-3.5 bg-positive animate-pulse rounded-sm ml-0.5" />
@@ -614,6 +642,8 @@ export function Advisor() {
                     content={msg.content}
                     streaming={msg.streaming}
                     analysis={msg.analysis}
+                    thinking={msg.thinking}
+                    thinkingActive={msg.thinkingActive}
                   />
                 ))}
                 <div ref={bottomRef} />

@@ -113,7 +113,7 @@ export function EditAccountModal({
             onChange={(e) => setForm({ ...form, account_name: e.target.value })}
           />
         </div>
-        {account.is_manual && (
+        {Boolean(account.is_manual) && (
           <div>
             <label className="block text-xs text-muted mb-1">Institution</label>
             <input
@@ -149,7 +149,7 @@ export function EditAccountModal({
             </label>
           </div>
         </div>
-        {account.is_manual && (
+        {Boolean(account.is_manual) && (
           <div>
             <label className="block text-xs text-muted mb-1">Current Balance</label>
             <input

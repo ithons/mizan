@@ -127,11 +127,13 @@ router.patch(
         return;
       }
 
+      // institution_name/currency are provider-sourced and only editable on manual
+      // accounts. `type`/`is_liability` are editable on any account — a synced account's
+      // type is only ever a sync-time guess (see accountClassification.ts), and the user
+      // correcting it is exactly the intended escape hatch for a misclassified account.
       const manualOnlyFields = [
         body.institution_name,
-        body.type,
         body.currency,
-        body.is_liability,
       ];
       if (!existing.is_manual && manualOnlyFields.some((field) => field !== undefined)) {
         res.status(400).json({ error: 'Only manual accounts can be edited directly' });
@@ -152,6 +154,8 @@ router.patch(
       if (body.type !== undefined) {
         updates.push('type = ?');
         values.push(body.type);
+        updates.push('type_source = ?');
+        values.push('manual');
       }
       if (body.currency !== undefined) {
         updates.push('currency = ?');

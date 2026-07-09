@@ -1,5 +1,6 @@
 import { v4 as uuidv4 } from 'uuid';
 import { format, subMonths, parseISO, startOfMonth } from 'date-fns';
+import type Database from 'better-sqlite3';
 import { getDb } from '../db/index';
 
 export function takeSnapshot(): void {
@@ -61,6 +62,36 @@ export function takeSnapshot(): void {
       VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?)
     `).run(uuidv4(), today, total_assets, total_liabilities, net_worth, JSON.stringify(breakdown),
            liquid_assets, investment_assets, crypto_assets, now);
+  }
+
+  takeHoldingsSnapshot(db, today, now);
+}
+
+// Mirrors net_worth_snapshots' one-row-per-day pattern above, at the individual holding
+// level, so a position's value over time can be charted (holdings itself is overwritten
+// on every sync and only ever reflects the current state).
+export function takeHoldingsSnapshot(db: Database.Database, today: string, now: string): void {
+  const holdings = db.prepare(`
+    SELECT account_id, security_id, quantity, institution_price, institution_value, cost_basis
+    FROM holdings
+  `).all() as Array<{
+    account_id: string; security_id: string; quantity: number;
+    institution_price: number; institution_value: number; cost_basis: number | null;
+  }>;
+
+  const upsert = db.prepare(`
+    INSERT INTO holdings_history
+      (id, account_id, security_id, date, quantity, institution_price, institution_value, cost_basis, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(account_id, security_id, date) DO UPDATE SET
+      quantity = excluded.quantity,
+      institution_price = excluded.institution_price,
+      institution_value = excluded.institution_value,
+      cost_basis = excluded.cost_basis
+  `);
+
+  for (const h of holdings) {
+    upsert.run(uuidv4(), h.account_id, h.security_id, today, h.quantity, h.institution_price, h.institution_value, h.cost_basis, now);
   }
 }
 

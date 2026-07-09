@@ -96,7 +96,7 @@ function BudgetRow({
           >
             <Sparkles size={12} />
           </button>
-          {budget.rollover && onLedger && (
+          {Boolean(budget.rollover) && onLedger && (
             <button
               className="font-mono text-xs text-muted hover:text-text"
               onClick={() => onLedger(budget)}
@@ -591,7 +591,7 @@ function RecurringTab() {
                           Confirm
                         </button>
                       )}
-                      {r.is_active && (
+                      {Boolean(r.is_active) && (
                         <button
                           className="text-xs text-muted hover:text-negative"
                           onClick={() => dismissMutation.mutate(r.id)}

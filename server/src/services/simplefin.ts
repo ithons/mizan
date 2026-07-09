@@ -1,34 +1,93 @@
 import axios from 'axios';
 import { format } from 'date-fns';
 import { v4 as uuidv4 } from 'uuid';
+import type Database from 'better-sqlite3';
 import { getCredentials } from './credentials';
 import { getDb } from '../db/index';
-import type { AccountType } from '../../../shared/types';
 import { balancesDiffer, type AccountBalanceChange } from './balanceChanges';
+import { guessAccountTypeAndLiability } from './accountClassification';
 
-function guessAccountTypeAndLiability(name: string, orgName: string): { type: AccountType; isLiability: boolean } {
-  const combined = `${name} ${orgName}`.toLowerCase();
-  
-  if (combined.includes('credit') || combined.includes('card')) {
-    return { type: 'credit', isLiability: true };
-  }
-  if (combined.includes('loan') || combined.includes('mortgage')) {
-    return { type: 'other', isLiability: true };
-  }
-  if (combined.includes('savings')) {
-    return { type: 'savings', isLiability: false };
-  }
-  if (combined.includes('brokerage') || combined.includes('investment')) {
-    return { type: 'brokerage', isLiability: false };
-  }
-  if (combined.includes('ira') || combined.includes('roth') || combined.includes('401k')) {
-    return { type: 'ira_traditional', isLiability: false };
-  }
-  
-  return { type: 'checking', isLiability: false };
+interface SimplefinHolding {
+  symbol?: string | null;
+  description?: string | null;
+  shares?: string | number | null;
+  market_value?: string | number | null;
+  cost_basis?: string | number | null;
+  purchase_price?: string | number | null;
+  currency?: string | null;
 }
 
-export async function syncSimplefin() {
+// Confirmed against a live SimpleFIN Bridge response (Fidelity brokerage/IRA accounts):
+// `holdings[]` is populated with {id, created, currency, cost_basis, description,
+// market_value, purchase_price, shares, symbol}. cost_basis/market_value are totals for
+// the whole position, matching how holdings.cost_basis is already interpreted elsewhere
+// (see investmentMetadata.ts, AccountDetail.tsx: institution_value - cost_basis).
+export function upsertHoldingsFromSimplefin(db: Database.Database, accountId: string, holdings: SimplefinHolding[], now: string): void {
+  const findSecurityByTicker = db.prepare('SELECT id FROM securities WHERE ticker = ? LIMIT 1');
+  const insertSecurity = db.prepare(`
+    INSERT INTO securities (id, ticker, name, type, currency)
+    VALUES (?, ?, ?, 'equity', ?)
+  `);
+  const upsertHolding = db.prepare(`
+    INSERT INTO holdings (id, account_id, security_id, quantity, institution_price, institution_value, cost_basis, currency, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(account_id, security_id) DO UPDATE SET
+      quantity = excluded.quantity,
+      institution_price = excluded.institution_price,
+      institution_value = excluded.institution_value,
+      cost_basis = excluded.cost_basis,
+      currency = excluded.currency,
+      updated_at = excluded.updated_at
+  `);
+
+  for (const holding of holdings) {
+    const ticker = holding.symbol?.trim() || null;
+    const name = holding.description?.trim() || ticker || 'Unknown security';
+    const currency = holding.currency || 'USD';
+    const shares = parseFloat(String(holding.shares ?? 0)) || 0;
+    const marketValue = parseFloat(String(holding.market_value ?? 0)) || 0;
+    const rawCostBasis = holding.cost_basis != null ? parseFloat(String(holding.cost_basis)) : null;
+    const purchasePrice = holding.purchase_price != null ? parseFloat(String(holding.purchase_price)) : null;
+    // SimpleFIN frequently returns cost_basis as 0/missing even when it does provide a
+    // real per-share purchase_price (confirmed against a live Fidelity payload) - fall
+    // back to shares * purchase_price rather than showing a false $0 cost basis.
+    const costBasis = (!rawCostBasis) && purchasePrice != null && purchasePrice > 0 && shares !== 0
+      ? shares * purchasePrice
+      : rawCostBasis;
+    const price = shares !== 0 ? marketValue / shares : 0;
+
+    let securityId: string | undefined;
+    if (ticker) {
+      const existing = findSecurityByTicker.get(ticker) as { id: string } | undefined;
+      securityId = existing?.id;
+    }
+    if (!securityId) {
+      securityId = uuidv4();
+      insertSecurity.run(securityId, ticker, name, currency);
+    }
+
+    upsertHolding.run(uuidv4(), accountId, securityId, shares, price, marketValue, costBasis, currency, now);
+  }
+}
+
+const INCREMENTAL_LOOKBACK_DAYS = 30;
+// On a connection's very first sync there's no local history yet, so request as much
+// backlog as SimpleFIN Bridge will serve instead of the normal incremental window.
+// Institutions still cap what they actually return regardless of what's requested.
+const INITIAL_LOOKBACK_DAYS = 730;
+
+export interface SimplefinSyncResult {
+  status: string;
+  accountCount: number;
+  added: number;
+  modified: number;
+  removed: number;
+  skipped: number;
+  balanceChanges: AccountBalanceChange[];
+  errors: string[];
+}
+
+export async function syncSimplefin(): Promise<SimplefinSyncResult> {
   const creds = getCredentials();
   if (!creds.simplefin?.accessUrl) {
     throw new Error('Missing SimpleFIN access URL');
@@ -45,14 +104,24 @@ export async function syncSimplefin() {
   const balanceChanges: AccountBalanceChange[] = [];
   const now = new Date().toISOString();
 
-  // Fetch accounts and transactions (request past 30 days or so, SimpleFIN uses start-date epoch)
-  const startDate = Math.floor(Date.now() / 1000) - (30 * 86400);
+  const connection = db.prepare(
+    'SELECT last_synced_at FROM simplefin_connections WHERE access_url = ?'
+  ).get(accessUrl) as { last_synced_at: string | null } | undefined;
+  // last_synced_at IS NULL means either a brand-new connection or an explicit
+  // user-requested "force full resync" (routes/simplefin.ts POST /resync nulls it).
+  const isFirstSync = !connection?.last_synced_at;
+  const lookbackDays = isFirstSync ? INITIAL_LOOKBACK_DAYS : INCREMENTAL_LOOKBACK_DAYS;
+
+  const startDate = Math.floor(Date.now() / 1000) - (lookbackDays * 86400);
   const res = await client.get(`/accounts?start-date=${startDate}`);
   const data = res.data;
 
   const accountCount = data.accounts?.length || 0;
+  const errors: string[] = Array.isArray(data.errors) ? data.errors : [];
+  const seenAccountIds = new Set<string>();
 
   for (const acct of (data.accounts || [])) {
+    seenAccountIds.add(acct.id);
     const currency = acct.currency || 'USD';
     const institutionName = acct.org?.name || 'SimpleFIN';
 
@@ -138,20 +207,23 @@ export async function syncSimplefin() {
       const amount = parseFloat(txn.amount); // already negative for expenses
       const merchantName = txn.payee || null;
       const originalName = txn.description || '';
+      // Not every institution reports this via SimpleFIN Bridge - defaults to posted (0)
+      // when the field is absent from the payload, matching the column's schema default.
+      const pending = txn.pending === true ? 1 : 0;
 
       if (existingTxn) {
         db.prepare(`
           UPDATE transactions
-          SET date = ?, amount = ?, merchant_name = ?, original_name = ?, updated_at = ?
+          SET date = ?, amount = ?, merchant_name = ?, original_name = ?, pending = ?, updated_at = ?
           WHERE simplefin_transaction_id = ?
-        `).run(date, amount, merchantName, originalName, now, txn.id);
+        `).run(date, amount, merchantName, originalName, pending, now, txn.id);
         modified++;
       } else {
         db.prepare(`
           INSERT INTO transactions
             (id, simplefin_transaction_id, account_id, date, amount, merchant_name,
-             original_name, is_manual, source_type, created_at, updated_at)
-          VALUES (?, ?, ?, ?, ?, ?, ?, 0, 'simplefin', ?, ?)
+             original_name, pending, is_manual, source_type, created_at, updated_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, 'simplefin', ?, ?)
         `).run(
           uuidv4(),
           txn.id,
@@ -160,12 +232,44 @@ export async function syncSimplefin() {
           amount,
           merchantName,
           originalName,
+          pending,
           now,
           now
         );
         added++;
       }
     }
+
+    if (Array.isArray(acct.holdings) && acct.holdings.length > 0) {
+      upsertHoldingsFromSimplefin(db, accountId, acct.holdings, now);
+    }
+  }
+
+  // Accounts closed/removed at the institution no longer appear in the response at all;
+  // zero them out (mirrors coinbase.ts's stale-account handling) instead of leaving a
+  // stale nonzero balance in net worth forever.
+  const staleAccounts = db.prepare(`
+    SELECT id, simplefin_account_id, account_name, current_balance, is_liability, currency
+    FROM accounts
+    WHERE connection_type = 'simplefin' AND simplefin_account_id IS NOT NULL
+  `).all() as Array<{ id: string; simplefin_account_id: string; account_name: string; current_balance: number; is_liability: number; currency: string }>;
+
+  for (const account of staleAccounts) {
+    if (seenAccountIds.has(account.simplefin_account_id)) continue;
+    if (balancesDiffer(account.current_balance, 0)) {
+      balanceChanges.push({
+        accountId: account.id,
+        accountName: account.account_name,
+        provider: 'simplefin',
+        previousBalance: account.current_balance,
+        newBalance: 0,
+        isLiability: Boolean(account.is_liability),
+        currency: account.currency ?? 'USD',
+      });
+    }
+    db.prepare(`
+      UPDATE accounts SET current_balance = 0, updated_at = ? WHERE id = ?
+    `).run(now, account.id);
   }
 
   // Update simplefin_connections last_synced_at
@@ -175,5 +279,5 @@ export async function syncSimplefin() {
     WHERE access_url = ?
   `).run(now, accessUrl);
 
-  return { status: 'synced', accountCount, added, modified, removed, skipped, balanceChanges };
+  return { status: 'synced', accountCount, added, modified, removed, skipped, balanceChanges, errors };
 }

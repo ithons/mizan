@@ -1,6 +1,7 @@
 import jwt from 'jsonwebtoken';
 import axios from 'axios';
 import { v4 as uuidv4 } from 'uuid';
+import type Database from 'better-sqlite3';
 import { getCredentials } from './credentials';
 import { getDb } from '../db/index';
 import { balancesDiffer, type AccountBalanceChange } from './balanceChanges';
@@ -30,6 +31,42 @@ export class CoinbaseApiError extends Error {
     super(message);
     this.name = 'CoinbaseApiError';
   }
+}
+
+// Mirrors upsertHoldingsFromSimplefin (simplefin.ts): each crypto_wallet account holds exactly
+// one coin, so unlike SimpleFIN there's no array of positions, just one security per account.
+// cost_basis is left null for v1 - the Coinbase brokerage accounts API doesn't return it, and
+// mining it from trade history is a separate feature, not part of this fix.
+export function upsertCoinbaseHolding(
+  db: Database.Database,
+  accountId: string,
+  currency: string,
+  quantity: number,
+  price: number,
+  value: number,
+  now: string
+): void {
+  const existing = db.prepare(
+    "SELECT id FROM securities WHERE ticker = ? AND type = 'crypto' LIMIT 1"
+  ).get(currency) as { id: string } | undefined;
+
+  const securityId = existing?.id ?? uuidv4();
+  if (!existing) {
+    db.prepare(`
+      INSERT INTO securities (id, ticker, name, type, currency)
+      VALUES (?, ?, ?, 'crypto', 'USD')
+    `).run(securityId, currency, currency);
+  }
+
+  db.prepare(`
+    INSERT INTO holdings (id, account_id, security_id, quantity, institution_price, institution_value, cost_basis, currency, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, NULL, 'USD', ?)
+    ON CONFLICT(account_id, security_id) DO UPDATE SET
+      quantity = excluded.quantity,
+      institution_price = excluded.institution_price,
+      institution_value = excluded.institution_value,
+      updated_at = excluded.updated_at
+  `).run(uuidv4(), accountId, securityId, quantity, price, value, now);
 }
 
 function parseCoinbaseNumber(value: string | undefined, label: string): number {
@@ -215,6 +252,7 @@ export async function syncCoinbase(): Promise<CoinbaseSyncResult> {
 
       const spotPrice = balanceValue === 0 ? 0 : await getUsdSpotPrice(currency);
       const currentBalance = balanceValue * spotPrice;
+      const accountId = existing?.id ?? uuidv4();
 
       if (existing) {
         if (balancesDiffer(existing.current_balance, currentBalance)) {
@@ -244,7 +282,7 @@ export async function syncCoinbase(): Promise<CoinbaseSyncResult> {
              currency, is_manual, is_hidden, is_liability, sort_order, created_at, updated_at)
           VALUES (?, ?, ?, 'coinbase', 'Coinbase', ?, 'crypto_wallet', ?, ?, ?, 'USD', 0, 0, 0, 0, ?, ?)
         `).run(
-          uuidv4(),
+          accountId,
           account.uuid,
           activeConnectionId,
           account.name || currency,
@@ -256,6 +294,7 @@ export async function syncCoinbase(): Promise<CoinbaseSyncResult> {
         );
       }
 
+      upsertCoinbaseHolding(db, accountId, currency, balanceValue, spotPrice, currentBalance, now);
       syncedCount++;
     }
 

@@ -7,9 +7,11 @@ import fs from 'fs';
 import { createWriteStream } from 'fs';
 import ViteExpress from 'vite-express';
 
-import { runMigrations, closeDb, MIZAN_DIR } from './db/index';
+import { runMigrations, closeDb, getDb, MIZAN_DIR } from './db/index';
 import { loadCredentials } from './services/credentials';
-import { runFullSync, startSyncScheduler, stopSyncScheduler } from './services/syncManager';
+import { isSyncStale, runFullSync, startSyncScheduler, stopSyncScheduler } from './services/syncManager';
+import { autoCategorizeTransactions } from './services/rules';
+import { reclassifyAutoAccountTypes } from './services/accountClassification';
 import { errorHandler } from './middleware/errorHandler';
 
 import accountsRouter from './routes/accounts';
@@ -36,6 +38,24 @@ const IS_PROD = process.env.NODE_ENV === 'production';
 async function main() {
   // 1. Run DB migrations
   runMigrations();
+
+  // One-time backlog pass: catches transactions left uncategorized by earlier server
+  // versions (e.g. before auto-categorization was wired into sync). Runs on every boot,
+  // but is a no-op once nothing has a NULL category_id left to fix.
+  try {
+    autoCategorizeTransactions(getDb());
+  } catch (err) {
+    console.error('[startup] Auto-categorization backfill failed:', err);
+  }
+
+  // One-time backlog pass: fixes accounts whose `type` was frozen by an older, weaker
+  // classifier and never re-derived since. Only touches accounts still marked 'auto'
+  // (never a manually-overridden type), so it's safe to run on every boot.
+  try {
+    reclassifyAutoAccountTypes(getDb());
+  } catch (err) {
+    console.error('[startup] Account type reclassification failed:', err);
+  }
 
   // 2. Load credentials (pre-warm cache)
   loadCredentials();
@@ -107,10 +127,18 @@ async function main() {
     ? app.listen(PORT, '0.0.0.0', announce)
     : ViteExpress.listen(app, PORT, announce);
 
-  // Startup sync is opt-in because it calls external providers.
+  // Startup sync is opt-in because it calls external providers. Gated on staleness
+  // (not just "did it ever sync") because `npm run dev` restarts this whole process on
+  // every file save (tsx watch) - without this check, every save while coding would
+  // trigger a real SimpleFIN + Coinbase + background-AI-worker sync.
   // It intentionally runs asynchronously without awaiting so the UI can paint immediately.
+  const STARTUP_SYNC_STALE_MINUTES = 10;
   if (process.env.MIZAN_AUTO_SYNC_ON_STARTUP === 'true') {
     setTimeout(() => {
+      if (!isSyncStale(getDb(), STARTUP_SYNC_STALE_MINUTES)) {
+        console.log(`[startup] Skipping auto-sync: last sync was within ${STARTUP_SYNC_STALE_MINUTES} minutes.`);
+        return;
+      }
       runFullSync().catch((err) => {
         console.error('[startup] Sync failed:', (err as Error).message);
       });

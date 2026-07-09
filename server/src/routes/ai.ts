@@ -2,7 +2,7 @@ import { Router, Request, Response, NextFunction } from 'express';
 import Anthropic from '@anthropic-ai/sdk';
 import { getDb } from '../db/index';
 import { buildAdvisorContextSnapshot, ADVISOR_SYSTEM_PROMPT } from '../services/aiContext';
-import { confirmAdvisorDraft } from '../services/advisorDrafts';
+import { confirmAdvisorDraft, dismissAdvisorDraft } from '../services/advisorDrafts';
 import { analyzeAdvisorQuestion } from '../services/advisorTools';
 import type { AdvisorConfirmRequest, ChatMessage } from '../../../shared/types';
 
@@ -62,6 +62,21 @@ router.post('/confirm', (req: Request, res: Response, next: NextFunction): void 
   }
 });
 
+// POST /api/ai/drafts/:id/dismiss - dismiss a persisted background-worker draft
+router.post('/drafts/:id/dismiss', (req: Request, res: Response, next: NextFunction): void => {
+  try {
+    const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+    const result = dismissAdvisorDraft(getDb(), id);
+    if (result.changed === 0) {
+      res.status(404).json({ error: 'Draft not found or already resolved' });
+      return;
+    }
+    res.json({ data: { success: true } });
+  } catch (err) {
+    next(err);
+  }
+});
+
 // POST /api/ai/chat - streaming chat with financial advisor
 router.post('/chat', async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   const { messages } = req.body as { messages: ChatMessage[] };
@@ -90,7 +105,15 @@ router.post('/chat', async (req: Request, res: Response, next: NextFunction): Pr
 
     const stream = anthropic.messages.stream({
       model: 'claude-sonnet-5',
-      max_tokens: 2048,
+      // Thinking tokens count against max_tokens; adaptive thinking at medium effort can
+      // spend most of a smaller budget reasoning before ever writing the answer, truncating
+      // the response (same class of bug fixed once already in aiWorker.ts, 1024->4096).
+      max_tokens: 8192,
+      // 'adaptive' is the only valid thinking mode for claude-sonnet-5 (budget_tokens 400s).
+      // display: 'summarized' is required to get visible reasoning text back - the default
+      // 'omitted' returns empty thinking blocks, making "thinking on" invisible to the user.
+      thinking: { type: 'adaptive', display: 'summarized' },
+      output_config: { effort: 'medium' },
       system: [
         {
           type: 'text',
@@ -101,12 +124,20 @@ router.post('/chat', async (req: Request, res: Response, next: NextFunction): Pr
       messages: messages.map((m) => ({ role: m.role, content: m.content })),
     });
 
+    let thinkingBlockIndex: number | null = null;
+
     for await (const event of stream) {
-      if (
-        event.type === 'content_block_delta' &&
-        event.delta.type === 'text_delta'
-      ) {
-        res.write(`data: ${JSON.stringify({ type: 'chunk', text: event.delta.text })}\n\n`);
+      if (event.type === 'content_block_start' && event.content_block.type === 'thinking') {
+        thinkingBlockIndex = event.index;
+        res.write(`data: ${JSON.stringify({ type: 'thinking_start' })}\n\n`);
+      } else if (event.type === 'content_block_delta') {
+        if (event.delta.type === 'text_delta') {
+          res.write(`data: ${JSON.stringify({ type: 'chunk', text: event.delta.text })}\n\n`);
+        } else if (event.delta.type === 'thinking_delta') {
+          res.write(`data: ${JSON.stringify({ type: 'thinking', text: event.delta.thinking })}\n\n`);
+        }
+      } else if (event.type === 'content_block_stop' && event.index === thinkingBlockIndex) {
+        res.write(`data: ${JSON.stringify({ type: 'thinking_end' })}\n\n`);
       }
     }
 

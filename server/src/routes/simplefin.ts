@@ -3,6 +3,8 @@ import { getDb } from '../db/index';
 import { validate } from '../middleware/validate';
 import { SimplefinCredentialsSchema } from '../../../shared/schemas';
 import { updateSimplefin, removeSimplefin } from '../services/credentials';
+import { runFullSync, isSyncActive } from '../services/syncManager';
+import { listSyncRuns } from '../services/syncHistory';
 import axios from 'axios';
 
 const router = Router();
@@ -30,6 +32,14 @@ router.post(
       ).run('simplefin_primary', accessUrl, 'active', now);
 
       res.json({ data: { success: true } });
+
+      // Kick off a sync immediately so the user sees real data right after connecting,
+      // instead of an empty app until they separately find and click "Sync now".
+      // Fire-and-forget: the connection itself is already valid at this point, so a
+      // transient sync failure shouldn't fail the setup response the client already got.
+      runFullSync().catch((err) => {
+        console.error('[simplefin] Post-setup sync failed:', (err as Error).message);
+      });
     } catch (err) {
       next(err);
     }
@@ -45,6 +55,49 @@ router.get('/connection', (_req: Request, res: Response, next: NextFunction): vo
     ).get();
 
     res.json({ data: item || null });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// POST /resync — force a fresh 730-day lookback by nulling last_synced_at, then sync.
+router.post('/resync', async (_req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const db = getDb();
+    const connection = db.prepare(
+      "SELECT id FROM simplefin_connections WHERE status = 'active' LIMIT 1"
+    ).get() as { id: string } | undefined;
+
+    if (!connection) {
+      res.status(404).json({ error: 'No active SimpleFIN connection to resync' });
+      return;
+    }
+
+    if (isSyncActive()) {
+      res.status(409).json({ error: 'A sync is already running — try again in a moment' });
+      return;
+    }
+
+    db.prepare("UPDATE simplefin_connections SET last_synced_at = NULL WHERE status = 'active'").run();
+    await runFullSync();
+
+    // Read the SimpleFIN-specific item, not the run's overall totals — the run total
+    // also sums in unrelated stages (auto-categorization, Coinbase) that would make the
+    // "N new transactions" toast misleading about what the deep pull itself found.
+    const [latestRun] = listSyncRuns(db, 1);
+    const simplefinItem = latestRun
+      ? (db.prepare(
+          "SELECT transactions_added, transactions_modified FROM sync_run_items WHERE run_id = ? AND connection_id = 'simplefin_primary'"
+        ).get(latestRun.id) as { transactions_added: number; transactions_modified: number } | undefined)
+      : undefined;
+
+    res.json({
+      data: {
+        success: true,
+        transactionsAdded: simplefinItem?.transactions_added ?? 0,
+        transactionsModified: simplefinItem?.transactions_modified ?? 0,
+      },
+    });
   } catch (err) {
     next(err);
   }

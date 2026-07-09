@@ -51,6 +51,7 @@ export function AccountDetail({ account }: { account: Account }) {
   const isInvestment = ['brokerage', 'ira_traditional', 'ira_roth'].includes(account.type);
   const isCrypto = account.type === 'crypto_wallet';
   const isCredit = account.type === 'credit';
+  const hasHoldings = isInvestment || isCrypto;
 
   const { data: txs, isLoading: txLoading } = useQuery({
     queryKey: ['transactions', 'account', account.id],
@@ -61,7 +62,7 @@ export function AccountDetail({ account }: { account: Account }) {
   const { data: holdings = [], isLoading: holdingsLoading } = useQuery({
     queryKey: ['holdings', account.id],
     queryFn: () => investmentsApi.holdingsByAccount(account.id),
-    enabled: isInvestment,
+    enabled: hasHoldings,
   });
 
   const { data: invTxs, isLoading: invTxLoading } = useQuery({
@@ -92,6 +93,15 @@ export function AccountDetail({ account }: { account: Account }) {
   }[account.type as string] ?? ACCOUNT_TYPE_LABELS[account.type] ?? account.type;
 
   const [mergeModalOpen, setMergeModalOpen] = useState(false);
+  const [editingType, setEditingType] = useState(false);
+  const qc = useQueryClient();
+  const updateTypeMutation = useMutation({
+    mutationFn: (type: string) => accountsApi.update(account.id, { type: type as Account['type'] }),
+    onSuccess: () => {
+      invalidateFinancialData(qc);
+      setEditingType(false);
+    },
+  });
 
   return (
     <div className="flex flex-col h-full">
@@ -101,7 +111,29 @@ export function AccountDetail({ account }: { account: Account }) {
             <div className="flex items-center gap-3">
               <span className="w-3 h-3 rounded-full flex-shrink-0" style={{ backgroundColor: account.color || '#7a6c5d' }} />
               <h2 className="text-base font-semibold text-text">{account.account_name}</h2>
-              <AccountTypeBadge type={account.type} />
+              {editingType ? (
+                <select
+                  autoFocus
+                  defaultValue={account.type}
+                  disabled={updateTypeMutation.isPending}
+                  onChange={(e) => updateTypeMutation.mutate(e.target.value)}
+                  onBlur={() => setEditingType(false)}
+                  className="text-xs bg-background border border-border rounded px-1.5 py-0.5"
+                >
+                  {Object.entries(ACCOUNT_TYPE_LABELS).map(([value, label]) => (
+                    <option key={value} value={value}>{label}</option>
+                  ))}
+                </select>
+              ) : (
+                <button
+                  onClick={() => setEditingType(true)}
+                  className="flex items-center gap-1 group"
+                  title="Correct this account's type if it was misclassified by sync"
+                >
+                  <AccountTypeBadge type={account.type} />
+                  <Edit2 size={10} className="text-muted opacity-0 group-hover:opacity-100 transition-opacity" />
+                </button>
+              )}
               {(account.type === 'ira_traditional' || account.type === 'ira_roth') && (
                 <span className="text-xs bg-info/20 text-info px-2 py-0.5 rounded">Tax-Advantaged</span>
               )}
@@ -229,10 +261,10 @@ export function AccountDetail({ account }: { account: Account }) {
         )}
       </div>
 
-      {/* Tabs (investment only) */}
-      {isInvestment && (
+      {/* Tabs (investment/crypto only) */}
+      {hasHoldings && (
         <div className="flex gap-1 px-6 py-2 border-b border-border">
-          {(['holdings', 'transactions', 'inv-transactions'] as const).map((t) => (
+          {(isInvestment ? ['holdings', 'transactions', 'inv-transactions'] as const : ['holdings', 'transactions'] as const).map((t) => (
             <button
               key={t}
               onClick={() => setTab(t)}
@@ -247,7 +279,7 @@ export function AccountDetail({ account }: { account: Account }) {
       {/* Content */}
       <div className="flex-1 overflow-y-auto">
         {/* Holdings */}
-        {tab === 'holdings' && isInvestment && (
+        {tab === 'holdings' && hasHoldings && (
           <table className="w-full text-xs">
             <thead className="sticky top-0 bg-surface border-b border-border z-10">
               <tr>

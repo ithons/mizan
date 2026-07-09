@@ -3,6 +3,7 @@ import { getDb } from '../db/index';
 import { validate } from '../middleware/validate';
 import { UpdateHoldingCostBasisSchema, UpdateSecurityMetadataSchema } from '../../../shared/schemas';
 import {
+  getHoldingHistory,
   listHoldingsWithMetadata,
   setManualCostBasis,
   setSecurityMetadata,
@@ -61,6 +62,23 @@ router.put(
     }
   }
 );
+
+// GET /holdings/:id/history - value-over-time series for a single holding
+router.get('/holdings/:id/history', (req: Request, res: Response, next: NextFunction): void => {
+  try {
+    const db = getDb();
+    const id = routeParam(req.params.id);
+    if (!id) {
+      res.status(400).json({ error: 'Invalid holding id' });
+      return;
+    }
+
+    const days = req.query.days ? parseInt(req.query.days as string, 10) : undefined;
+    res.json({ data: getHoldingHistory(db, id, days) });
+  } catch (err) {
+    next(err);
+  }
+});
 
 // GET /holdings/:accountId - holdings for specific account
 router.get('/holdings/:accountId', (req: Request, res: Response, next: NextFunction): void => {

@@ -31,6 +31,7 @@ import type {
   NetWorthHistory,
   CredentialStatus,
   Holding,
+  HoldingHistoryPoint,
   Security,
   InvestmentTransaction,
   TransactionReviewSummary,
@@ -179,6 +180,8 @@ export const investmentsApi = {
   holdings: () => apiFetch<Holding[]>('/api/investments/holdings'),
   holdingsByAccount: (accountId: string) =>
     apiFetch<Holding[]>(`/api/investments/holdings/${accountId}`),
+  holdingHistory: (holdingId: string, days?: number) =>
+    apiFetch<HoldingHistoryPoint[]>(`/api/investments/holdings/${holdingId}/history${days ? `?days=${days}` : ''}`),
   updateHoldingCostBasis: (
     holdingId: string,
     body: { manual_cost_basis: number | null; manual_cost_basis_note?: string | null }
@@ -500,8 +503,16 @@ export const simplefinApi = {
       method: 'POST',
       body: JSON.stringify(body),
     }),
-  connection: () => apiFetch<{ id: string; status: string } | null>('/api/simplefin/connection'),
+  connection: () =>
+    apiFetch<{ id: string; status: string; last_synced_at: string | null; created_at: string } | null>(
+      '/api/simplefin/connection'
+    ),
   disconnect: () => apiFetch<void>('/api/simplefin/connection', { method: 'DELETE' }),
+  resync: () =>
+    apiFetch<{ success: boolean; transactionsAdded: number; transactionsModified: number }>(
+      '/api/simplefin/resync',
+      { method: 'POST' }
+    ),
 };
 
 export const coinbaseApi = {
@@ -632,13 +643,20 @@ export const aiApi = {
       method: 'POST',
       body: JSON.stringify({ draft, confirm: true }),
     }),
+  dismissDraft: (id: string) =>
+    apiFetch<{ success: boolean }>(`/api/ai/drafts/${id}/dismiss`, {
+      method: 'POST',
+    }),
 
   streamChat: async (
     messages: ChatMessage[],
     onChunk: (text: string) => void,
     onDone: () => void,
     onError: (msg: string) => void,
-    signal?: AbortSignal
+    signal?: AbortSignal,
+    onThinkingStart?: () => void,
+    onThinkingChunk?: (text: string) => void,
+    onThinkingEnd?: () => void
   ): Promise<void> => {
     const res = await fetch('/api/ai/chat', {
       method: 'POST',
@@ -676,6 +694,9 @@ export const aiApi = {
         try {
           const ev = JSON.parse(line.slice(6)) as AiStreamEvent;
           if (ev.type === 'chunk' && ev.text) onChunk(ev.text);
+          else if (ev.type === 'thinking_start') onThinkingStart?.();
+          else if (ev.type === 'thinking' && ev.text) onThinkingChunk?.(ev.text);
+          else if (ev.type === 'thinking_end') onThinkingEnd?.();
           else if (ev.type === 'done') onDone();
           else if (ev.type === 'error') onError(ev.message ?? 'Unknown error');
         } catch (err) {

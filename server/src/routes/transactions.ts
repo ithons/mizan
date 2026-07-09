@@ -663,7 +663,7 @@ router.post(
         }
 
         db.prepare(
-          `UPDATE transactions SET category_id = ?, updated_at = ? WHERE id IN (${placeholders})`
+          `UPDATE transactions SET category_id = ?, review_status = 'reviewed', updated_at = ? WHERE id IN (${placeholders})`
         ).run(body.categoryId, now, ...transactionIds);
 
         const patterns = new Set(

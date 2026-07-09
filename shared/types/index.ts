@@ -152,6 +152,14 @@ export interface Holding {
   sector_source?: string | null;
 }
 
+export interface HoldingHistoryPoint {
+  date: string;
+  quantity: number;
+  institution_price: number;
+  institution_value: number;
+  cost_basis: number | null;
+}
+
 export interface Category {
   id: string;
   name: string;
@@ -594,7 +602,7 @@ export interface ChatMessage {
 }
 
 export interface AiStreamEvent {
-  type: 'chunk' | 'done' | 'error';
+  type: 'chunk' | 'thinking_start' | 'thinking' | 'thinking_end' | 'done' | 'error';
   text?: string;
   message?: string;
 }
