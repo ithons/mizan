@@ -152,13 +152,13 @@ function getDateRange(preset: DatePreset, customStart?: string, customEnd?: stri
 function ChartTooltip({ active, payload, label }: ChartTooltipProps) {
   if (!active || !payload?.length) return null;
   return (
-    <div className="bg-surface shadow-sm border border-border rounded px-3 py-2 text-xs">
-      <p className="text-muted mb-1 font-mono">{label}</p>
+    <div className="bg-surface border border-border rounded px-3 py-2 text-xs">
+      <p className="text-muted mb-1 font-serif tabular-nums">{label}</p>
       {payload.map((p) => (
         <div key={p.dataKey} className="flex items-center gap-2">
-          <span className="w-2 h-2 rounded-full" style={{ backgroundColor: p.color ?? '#7a6c5d' }} />
+          <span className="w-2 h-2 rounded-full" style={{ backgroundColor: p.color ?? '#8c8272' }} />
           <span className="text-text">{p.name ?? p.dataKey}:</span>
-          <span className="font-mono" style={{ color: p.color ?? '#7a6c5d' }}>{formatCurrency(Math.abs(p.value))}</span>
+          <span className="font-serif tabular-nums" style={{ color: p.color ?? '#8c8272' }}>{formatCurrency(Math.abs(p.value))}</span>
         </div>
       ))}
     </div>
@@ -173,7 +173,7 @@ function getTreemapProps(rawProps: unknown): Required<TreemapContentProps> {
     width: props.width ?? 0,
     height: props.height ?? 0,
     name: props.name ?? '',
-    color: props.color ?? '#7a6c5d',
+    color: props.color ?? '#8c8272',
     value: props.value ?? 0,
   };
 }
@@ -197,7 +197,7 @@ function SpendingTreemapContent({ categories = [], onDrill, ...rawProps }: Spend
         <>
           <text x={x + 8} y={y + 18} fill="#e4d9c7" fontSize={11} fontWeight={500}>{name}</text>
           {height > 50 && (
-            <text x={x + 8} y={y + 34} fill="#7a6c5d" fontSize={10} fontFamily="JetBrains Mono">
+            <text x={x + 8} y={y + 34} fill="#8c8272" fontSize={10} fontFamily="JetBrains Mono">
               {formatCurrency(value)}
             </text>
           )}
@@ -251,7 +251,7 @@ function findDrillCategory(categories: DrillCategory[], categoryId: string): Dri
 }
 
 function metricColor(metric: ReportMetricSummary, lowerIsBetter = false): string {
-  if (metric.delta === 0) return '#7a6c5d';
+  if (metric.delta === 0) return '#8c8272';
   const good = lowerIsBetter ? metric.delta < 0 : metric.delta > 0;
   return good ? '#c9963a' : '#b5654a';
 }
@@ -302,10 +302,10 @@ function ReportMetricCard({
   return (
     <div className="border border-border bg-surface rounded p-4">
       <p className="text-xs text-muted mb-1">{label}</p>
-      <p className="font-mono text-xl" style={{ color: tone }}>
+      <p className="font-serif tabular-nums text-xl" style={{ color: tone }}>
         {isRate ? `${metric.current.toFixed(1)}%` : formatCurrency(metric.current)}
       </p>
-      <p className="text-xs font-mono mt-2" style={{ color: metricColor(metric, lowerIsBetter) }}>
+      <p className="text-xs font-serif tabular-nums mt-2" style={{ color: metricColor(metric, lowerIsBetter) }}>
         {formatDelta(metric, isRate)}
       </p>
     </div>
@@ -335,7 +335,7 @@ function ReportSummaryPanel({
           Compared with <span className="text-text">{summary.comparison_label}</span>
         </span>
         <div className="flex items-center gap-3">
-          <span className="font-mono">{comparisonRange}</span>
+          <span className="font-serif tabular-nums">{comparisonRange}</span>
           {onAsk && (
             <button
               className="text-muted hover:text-positive flex items-center gap-1"
@@ -360,10 +360,10 @@ function ReportSummaryPanel({
           {topMover ? (
             <div>
               <div className="flex items-center gap-2 mb-1">
-                <span className="w-2 h-2 rounded-full" style={{ backgroundColor: topMover.color ?? '#7a6c5d' }} />
+                <span className="w-2 h-2 rounded-full" style={{ backgroundColor: topMover.color ?? '#8c8272' }} />
                 <span className="text-sm text-text">{topMover.category_name}</span>
               </div>
-              <p className="font-mono text-sm" style={{ color: metricColor(topMover) }}>
+              <p className="font-serif tabular-nums text-sm" style={{ color: metricColor(topMover) }}>
                 {formatDelta(topMover)}
               </p>
             </div>
@@ -378,7 +378,7 @@ function ReportSummaryPanel({
             {summary.top_spending.slice(0, 3).map((category) => (
               <div key={category.category_id} className="flex items-center justify-between gap-3 text-xs">
                 <span className="text-text truncate">{category.category_name}</span>
-                <span className="font-mono text-negative">{formatCurrency(category.current)}</span>
+                <span className="font-serif tabular-nums text-negative">{formatCurrency(category.current)}</span>
               </div>
             ))}
             {summary.top_spending.length === 0 && <p className="text-sm text-muted">No spending</p>}
@@ -396,7 +396,7 @@ function ReportSummaryPanel({
                 onClick={() => onExcludedFlow?.(flow)}
               >
                 <span className="text-text capitalize">{flow.flow_type}</span>
-                <span className="font-mono text-muted">
+                <span className="font-serif tabular-nums text-muted">
                   {flow.count} tx, {formatCurrency(flow.net, { showSign: true })}
                 </span>
               </button>
@@ -452,14 +452,14 @@ function ReportDrilldownModal({
         <div className="flex items-center justify-between gap-3">
           <div>
             <p className="text-xs text-muted mb-1">Backed by</p>
-            <p className="font-mono text-lg text-text">
+            <p className="font-serif tabular-nums text-lg text-text">
               {data ? `${data.count} transaction${data.count === 1 ? '' : 's'}` : 'Loading'}
             </p>
           </div>
           <div className="text-right">
             <p className="text-xs text-muted mb-1">Total</p>
             <p
-              className="font-mono text-lg"
+              className="font-serif tabular-nums text-lg"
               style={{ color: target?.kind === 'income' ? '#c9963a' : '#b5654a' }}
             >
               {data ? formatCurrency(data.total) : '-'}
@@ -474,7 +474,7 @@ function ReportDrilldownModal({
             <div className="divide-y divide-border">
               {data.transactions.map((transaction) => (
                 <div key={transaction.id} className="grid grid-cols-[88px_1fr_150px_96px] gap-3 items-center px-3 py-2.5">
-                  <span className="text-xs text-muted font-mono">{formatDate(transaction.date)}</span>
+                  <span className="text-xs text-muted font-serif tabular-nums">{formatDate(transaction.date)}</span>
                   <div className="min-w-0">
                     <p className="text-sm text-text truncate">{transaction.merchant_name || transaction.original_name}</p>
                     <p className="text-xs text-muted truncate">{transaction.account_name}</p>
@@ -545,21 +545,21 @@ function ReportEvidenceModal({
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs">
           <div>
             <p className="text-muted mb-1">Backed by</p>
-            <p className="font-mono text-lg text-text">
+            <p className="font-serif tabular-nums text-lg text-text">
               {data ? `${data.count} transaction${data.count === 1 ? '' : 's'}` : 'Loading'}
             </p>
           </div>
           <div>
             <p className="text-muted mb-1">Income</p>
-            <p className="font-mono text-lg text-positive">{data ? formatCurrency(data.income) : '-'}</p>
+            <p className="font-serif tabular-nums text-lg text-positive">{data ? formatCurrency(data.income) : '-'}</p>
           </div>
           <div>
             <p className="text-muted mb-1">Spending</p>
-            <p className="font-mono text-lg text-negative">{data ? formatCurrency(data.expenses) : '-'}</p>
+            <p className="font-serif tabular-nums text-lg text-negative">{data ? formatCurrency(data.expenses) : '-'}</p>
           </div>
           <div>
             <p className="text-muted mb-1">Net</p>
-            <p className="font-mono text-lg" style={{ color: (data?.net ?? 0) >= 0 ? '#c9963a' : '#b5654a' }}>
+            <p className="font-serif tabular-nums text-lg" style={{ color: (data?.net ?? 0) >= 0 ? '#c9963a' : '#b5654a' }}>
               {data ? formatCurrency(data.net, { showSign: true }) : '-'}
             </p>
           </div>
@@ -572,7 +572,7 @@ function ReportEvidenceModal({
             <div className="divide-y divide-border">
               {data.transactions.map((transaction) => (
                 <div key={transaction.id} className="grid grid-cols-[88px_1fr_150px_96px] gap-3 items-center px-3 py-2.5">
-                  <span className="text-xs text-muted font-mono">{formatDate(transaction.date)}</span>
+                  <span className="text-xs text-muted font-serif tabular-nums">{formatDate(transaction.date)}</span>
                   <div className="min-w-0">
                     <p className="text-sm text-text truncate">{transaction.merchant_name || transaction.original_name}</p>
                     <p className="text-xs text-muted truncate">{transaction.account_name}</p>
@@ -633,25 +633,25 @@ function NetWorthEvidenceModal({
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs">
           <div>
             <p className="text-muted mb-1">Assets</p>
-            <p className="font-mono text-lg text-positive">
+            <p className="font-serif tabular-nums text-lg text-positive">
               {data ? formatCurrency(data.snapshot.total_assets) : '-'}
             </p>
           </div>
           <div>
             <p className="text-muted mb-1">Liabilities</p>
-            <p className="font-mono text-lg text-negative">
+            <p className="font-serif tabular-nums text-lg text-negative">
               {data ? formatCurrency(data.snapshot.total_liabilities) : '-'}
             </p>
           </div>
           <div>
             <p className="text-muted mb-1">Net Worth</p>
-            <p className="font-mono text-lg text-text">
+            <p className="font-serif tabular-nums text-lg text-text">
               {data ? formatCurrency(data.snapshot.net_worth) : '-'}
             </p>
           </div>
           <div>
             <p className="text-muted mb-1">Change</p>
-            <p className="font-mono text-lg" style={{ color: (data?.delta ?? 0) >= 0 ? '#c9963a' : '#b5654a' }}>
+            <p className="font-serif tabular-nums text-lg" style={{ color: (data?.delta ?? 0) >= 0 ? '#c9963a' : '#b5654a' }}>
               {data?.delta != null ? formatCurrency(data.delta, { showSign: true }) : '-'}
             </p>
           </div>
@@ -661,17 +661,17 @@ function NetWorthEvidenceModal({
           <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-xs border border-border rounded p-3 bg-background/50">
             <div>
               <p className="text-muted mb-1">Compared with</p>
-              <p className="font-mono text-text">{formatDate(data.previous_snapshot.date)}</p>
+              <p className="font-serif tabular-nums text-text">{formatDate(data.previous_snapshot.date)}</p>
             </div>
             <div>
               <p className="text-muted mb-1">Asset change</p>
-              <p className="font-mono text-text">
+              <p className="font-serif tabular-nums text-text">
                 {data.asset_delta != null ? formatCurrency(data.asset_delta, { showSign: true }) : '-'}
               </p>
             </div>
             <div>
               <p className="text-muted mb-1">Liability change</p>
-              <p className="font-mono text-text">
+              <p className="font-serif tabular-nums text-text">
                 {data.liability_delta != null ? formatCurrency(data.liability_delta, { showSign: true }) : '-'}
               </p>
             </div>
@@ -694,7 +694,7 @@ function NetWorthEvidenceModal({
                   </div>
                   <span className="hidden md:block text-muted capitalize">{account.type ?? 'unknown'}</span>
                   <span
-                    className="font-mono text-right"
+                    className="font-serif tabular-nums text-right"
                     style={{ color: account.is_liability ? '#b5654a' : '#c9963a' }}
                   >
                     {formatCurrency(account.balance)}
@@ -756,7 +756,7 @@ function SpendingTab({ startDate, endDate }: { startDate: string; endDate: strin
       </div>
 
       {treemapData.length > 0 ? (
-        <div className="bg-surface shadow-sm border border-border rounded p-4">
+        <div className="bg-surface border border-border rounded p-4">
           <ResponsiveContainer width="100%" height={280}>
             <Treemap
               data={treemapData}
@@ -787,7 +787,7 @@ function SpendingTab({ startDate, endDate }: { startDate: string; endDate: strin
       )}
 
       {/* Data table */}
-      <div className="bg-surface shadow-sm border border-border rounded overflow-hidden">
+      <div className="bg-surface border border-border rounded overflow-hidden">
         <table className="w-full text-xs">
           <thead className="border-b border-border">
             <tr>
@@ -813,8 +813,8 @@ function SpendingTab({ startDate, endDate }: { startDate: string; endDate: strin
                     <span className="text-text">{c.category_name}</span>
                   </div>
                 </td>
-                <td className="px-4 py-2 font-mono text-right text-negative">{formatCurrency(c.amount ?? 0)}</td>
-                <td className="px-4 py-2 font-mono text-right text-muted">{formatPercent(c.percentage ?? 0)}</td>
+                <td className="px-4 py-2 font-serif tabular-nums text-right text-negative">{formatCurrency(c.amount ?? 0)}</td>
+                <td className="px-4 py-2 font-serif tabular-nums text-right text-muted">{formatPercent(c.percentage ?? 0)}</td>
               </tr>
             ))}
           </tbody>
@@ -822,7 +822,7 @@ function SpendingTab({ startDate, endDate }: { startDate: string; endDate: strin
             <tfoot className="border-t border-border bg-background/30">
               <tr>
                 <td className="px-4 py-2 text-sm font-medium text-text">Total</td>
-                <td className="px-4 py-2 font-mono text-right text-negative font-medium">{formatCurrency(spending.total)}</td>
+                <td className="px-4 py-2 font-serif tabular-nums text-right text-negative font-medium">{formatCurrency(spending.total)}</td>
                 <td />
               </tr>
             </tfoot>
@@ -861,7 +861,7 @@ function IncomeTab({ startDate, endDate }: { startDate: string; endDate: string 
   return (
     <div className="space-y-6">
       {treemapData.length > 0 ? (
-        <div className="bg-surface shadow-sm border border-border rounded p-4">
+        <div className="bg-surface border border-border rounded p-4">
           <ResponsiveContainer width="100%" height={280}>
             <Treemap
               data={treemapData}
@@ -881,7 +881,7 @@ function IncomeTab({ startDate, endDate }: { startDate: string; endDate: string 
           secondaryActionLabel="Connect Account"
         />
       )}
-      <div className="bg-surface shadow-sm border border-border rounded overflow-hidden">
+      <div className="bg-surface border border-border rounded overflow-hidden">
         <table className="w-full text-xs">
           <thead className="border-b border-border">
             <tr>
@@ -907,8 +907,8 @@ function IncomeTab({ startDate, endDate }: { startDate: string; endDate: string 
                     <span className="text-text">{c.category_name}</span>
                   </div>
                 </td>
-                <td className="px-4 py-2 font-mono text-right text-positive">{formatCurrency(c.amount)}</td>
-                <td className="px-4 py-2 font-mono text-right text-muted">{formatPercent(c.percentage)}</td>
+                <td className="px-4 py-2 font-serif tabular-nums text-right text-positive">{formatCurrency(c.amount)}</td>
+                <td className="px-4 py-2 font-serif tabular-nums text-right text-muted">{formatPercent(c.percentage)}</td>
               </tr>
             ))}
           </tbody>
@@ -916,7 +916,7 @@ function IncomeTab({ startDate, endDate }: { startDate: string; endDate: string 
             <tfoot className="border-t border-border bg-background/30">
               <tr>
                 <td className="px-4 py-2 text-sm font-medium text-text">Total</td>
-                <td className="px-4 py-2 font-mono text-right text-positive font-medium">{formatCurrency(income.total)}</td>
+                <td className="px-4 py-2 font-serif tabular-nums text-right text-positive font-medium">{formatCurrency(income.total)}</td>
                 <td />
               </tr>
             </tfoot>
@@ -996,7 +996,7 @@ function TrendsTab({
               style={{
                 borderColor: isSelected ? color : '#e4d9c7',
                 backgroundColor: isSelected ? `${color}15` : 'transparent',
-                color: isSelected ? color : '#7a6c5d',
+                color: isSelected ? color : '#8c8272',
               }}
             >
               <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: color }} />
@@ -1007,20 +1007,20 @@ function TrendsTab({
       </div>
 
       {selectedCats.length === 0 ? (
-        <div className="bg-surface shadow-sm border border-border rounded p-12 text-center text-muted text-sm">
+        <div className="bg-surface border border-border rounded p-12 text-center text-muted text-sm">
           Select categories above to see spending trends
         </div>
       ) : isLoading ? (
         <PageLoader />
       ) : (
-        <div className="bg-surface shadow-sm border border-border rounded p-4">
+        <div className="bg-surface border border-border rounded p-4">
           <ResponsiveContainer width="100%" height={280}>
             <LineChart data={chartData}>
               <CartesianGrid vertical={false} stroke="#e4d9c7" />
-              <XAxis dataKey="month" tick={{ fill: '#7a6c5d', fontSize: 11, fontFamily: 'JetBrains Mono' }} axisLine={false} tickLine={false} />
-              <YAxis tick={{ fill: '#7a6c5d', fontSize: 11, fontFamily: 'JetBrains Mono' }} axisLine={false} tickLine={false} tickFormatter={(v) => `$${(v / 1000).toFixed(0)}k`} />
+              <XAxis dataKey="month" tick={{ fill: '#8c8272', fontSize: 11, fontFamily: 'JetBrains Mono' }} axisLine={false} tickLine={false} />
+              <YAxis tick={{ fill: '#8c8272', fontSize: 11, fontFamily: 'JetBrains Mono' }} axisLine={false} tickLine={false} tickFormatter={(v) => `$${(v / 1000).toFixed(0)}k`} />
               <Tooltip content={<ChartTooltip />} />
-              <Legend wrapperStyle={{ fontSize: 11, color: '#7a6c5d' }} />
+              <Legend wrapperStyle={{ fontSize: 11, color: '#8c8272' }} />
               {trends?.series.map((s, i) => (
                 <Line
                   key={s.category_id}
@@ -1098,7 +1098,7 @@ function CashflowTab({ startDate, endDate }: { startDate: string; endDate: strin
         />
       </div>
 
-      <div className="bg-surface shadow-sm border border-border rounded p-4">
+      <div className="bg-surface border border-border rounded p-4">
         <ResponsiveContainer width="100%" height={260}>
           <AreaChart data={chartData}>
             <defs>
@@ -1112,8 +1112,8 @@ function CashflowTab({ startDate, endDate }: { startDate: string; endDate: strin
               </linearGradient>
             </defs>
             <CartesianGrid vertical={false} stroke="#e4d9c7" />
-            <XAxis dataKey="month" tick={{ fill: '#7a6c5d', fontSize: 11, fontFamily: 'JetBrains Mono' }} axisLine={false} tickLine={false} />
-            <YAxis tick={{ fill: '#7a6c5d', fontSize: 11, fontFamily: 'JetBrains Mono' }} axisLine={false} tickLine={false} tickFormatter={(v) => `$${(Number(v) / 1000).toFixed(0)}k`} />
+            <XAxis dataKey="month" tick={{ fill: '#8c8272', fontSize: 11, fontFamily: 'JetBrains Mono' }} axisLine={false} tickLine={false} />
+            <YAxis tick={{ fill: '#8c8272', fontSize: 11, fontFamily: 'JetBrains Mono' }} axisLine={false} tickLine={false} tickFormatter={(v) => `$${(Number(v) / 1000).toFixed(0)}k`} />
             <Tooltip content={<ChartTooltip />} />
             <Area type="monotone" dataKey="income" name="Income" stroke="#c9963a" fill="url(#cashIncomeGrad)" strokeWidth={2} dot={false} />
             <Area type="monotone" dataKey="expenses" name="Spending" stroke="#b5654a" fill="url(#cashExpenseGrad)" strokeWidth={2} dot={false} />
@@ -1121,7 +1121,7 @@ function CashflowTab({ startDate, endDate }: { startDate: string; endDate: strin
         </ResponsiveContainer>
       </div>
 
-      <div className="bg-surface shadow-sm border border-border rounded overflow-hidden">
+      <div className="bg-surface border border-border rounded overflow-hidden">
         <table className="w-full text-xs">
           <thead className="border-b border-border">
             <tr>
@@ -1153,10 +1153,10 @@ function CashflowTab({ startDate, endDate }: { startDate: string; endDate: strin
                   }
                 }}
               >
-                <td className="px-4 py-2 font-mono text-muted">{formatMonth(month.month)}</td>
-                <td className="px-4 py-2 font-mono text-positive">{formatCurrency(month.income)}</td>
-                <td className="px-4 py-2 font-mono text-negative">{formatCurrency(month.expenses)}</td>
-                <td className="px-4 py-2 font-mono" style={{ color: month.net >= 0 ? '#c9963a' : '#b5654a' }}>
+                <td className="px-4 py-2 font-serif tabular-nums text-muted">{formatMonth(month.month)}</td>
+                <td className="px-4 py-2 font-serif tabular-nums text-positive">{formatCurrency(month.income)}</td>
+                <td className="px-4 py-2 font-serif tabular-nums text-negative">{formatCurrency(month.expenses)}</td>
+                <td className="px-4 py-2 font-serif tabular-nums" style={{ color: month.net >= 0 ? '#c9963a' : '#b5654a' }}>
                   {formatCurrency(month.net, { showSign: true })}
                 </td>
               </tr>
@@ -1176,11 +1176,11 @@ function CashflowTab({ startDate, endDate }: { startDate: string; endDate: strin
 
 // ─── Net Worth Tab ────────────────────────────────────────────────────────────
 
-const PIE_COLORS = { liquid: '#c9963a', investments: '#7c8b99', crypto: '#ce8642', liabilities: '#b5654a' };
+const PIE_COLORS = { liquid: '#c9963a', investments: '#7c8b99', crypto: '#c9963a', liabilities: '#b5654a' };
 
 function AssetPieChart({ data, title }: { data: Array<{ name: string; value: number; color: string }>; title: string }) {
   return (
-    <div className="flex-1 bg-surface shadow-sm border border-border rounded p-4">
+    <div className="flex-1 bg-surface border border-border rounded p-4">
       <p className="text-xs text-muted font-medium uppercase tracking-wider mb-3">{title}</p>
       <ResponsiveContainer width="100%" height={160}>
         <PieChart>
@@ -1200,7 +1200,7 @@ function AssetPieChart({ data, title }: { data: Array<{ name: string; value: num
                 <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: entry.color }} />
                 <span className="text-muted capitalize">{entry.name}</span>
               </div>
-              <span className="font-mono text-text">{formatCurrency(entry.value)} <span className="text-muted">({pct}%)</span></span>
+              <span className="font-serif tabular-nums text-text">{formatCurrency(entry.value)} <span className="text-muted">({pct}%)</span></span>
             </div>
           );
         })}
@@ -1212,7 +1212,7 @@ function AssetPieChart({ data, title }: { data: Array<{ name: string; value: num
 function signedTone(value: number) {
   if (value > 0) return '#c9963a';
   if (value < 0) return '#b5654a';
-  return '#7a6c5d';
+  return '#8c8272';
 }
 
 function NetWorthClassRow({ item }: { item: NetWorthClassAttribution }) {
@@ -1228,7 +1228,7 @@ function NetWorthClassRow({ item }: { item: NetWorthClassAttribution }) {
         </p>
       </div>
       <div className="text-right">
-        <p className="font-mono" style={{ color: signedTone(item.net_worth_delta) }}>
+        <p className="font-serif tabular-nums" style={{ color: signedTone(item.net_worth_delta) }}>
           {formatCurrency(item.net_worth_delta, { showSign: true })}
         </p>
         <p className="text-[11px] text-muted">net impact</p>
@@ -1247,7 +1247,7 @@ function NetWorthAccountRow({ item }: { item: NetWorthAccountAttribution }) {
         </p>
       </div>
       <div className="text-right">
-        <p className="font-mono" style={{ color: signedTone(item.net_worth_delta) }}>
+        <p className="font-serif tabular-nums" style={{ color: signedTone(item.net_worth_delta) }}>
           {formatCurrency(item.net_worth_delta, { showSign: true })}
         </p>
         <p className="text-[11px] text-muted">
@@ -1261,7 +1261,7 @@ function NetWorthAccountRow({ item }: { item: NetWorthAccountAttribution }) {
 function NetWorthAttributionPanel({ attribution }: { attribution: NetWorthAttribution | null }) {
   if (!attribution) {
     return (
-      <div className="bg-surface shadow-sm border border-border rounded p-4">
+      <div className="bg-surface border border-border rounded p-4">
         <h2 className="text-sm font-medium text-text">Change Attribution</h2>
         <p className="text-xs text-muted mt-2">At least two snapshots are needed to attribute net worth changes.</p>
       </div>
@@ -1269,7 +1269,7 @@ function NetWorthAttributionPanel({ attribution }: { attribution: NetWorthAttrib
   }
 
   return (
-    <div className="bg-surface shadow-sm border border-border rounded p-4">
+    <div className="bg-surface border border-border rounded p-4">
       <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between mb-4">
         <div>
           <h2 className="text-sm font-medium text-text">Change Attribution</h2>
@@ -1279,7 +1279,7 @@ function NetWorthAttributionPanel({ attribution }: { attribution: NetWorthAttrib
         </div>
         <div className="text-left md:text-right">
           <p className="text-xs text-muted mb-1">Net change</p>
-          <p className="font-mono text-lg" style={{ color: signedTone(attribution.net_worth_delta) }}>
+          <p className="font-serif tabular-nums text-lg" style={{ color: signedTone(attribution.net_worth_delta) }}>
             {formatCurrency(attribution.net_worth_delta, { showSign: true })}
           </p>
         </div>
@@ -1391,7 +1391,7 @@ function NetWorthTab() {
             style={{
               borderColor: t.val ? t.color : '#e4d9c7',
               backgroundColor: t.val ? `${t.color}15` : 'transparent',
-              color: t.val ? t.color : '#7a6c5d',
+              color: t.val ? t.color : '#8c8272',
             }}
           >
             {t.label}
@@ -1400,7 +1400,7 @@ function NetWorthTab() {
       </div>
 
       {/* Area chart */}
-      <div className="bg-surface shadow-sm border border-border rounded p-4">
+      <div className="bg-surface border border-border rounded p-4">
         <ResponsiveContainer width="100%" height={240}>
           <AreaChart data={chartData}>
             <defs>
@@ -1418,8 +1418,8 @@ function NetWorthTab() {
               </linearGradient>
             </defs>
             <CartesianGrid vertical={false} stroke="#e4d9c7" />
-            <XAxis dataKey="date" tick={{ fill: '#7a6c5d', fontSize: 11, fontFamily: 'JetBrains Mono' }} axisLine={false} tickLine={false} />
-            <YAxis tick={{ fill: '#7a6c5d', fontSize: 11, fontFamily: 'JetBrains Mono' }} axisLine={false} tickLine={false} tickFormatter={(v) => `$${(v / 1000).toFixed(0)}k`} />
+            <XAxis dataKey="date" tick={{ fill: '#8c8272', fontSize: 11, fontFamily: 'JetBrains Mono' }} axisLine={false} tickLine={false} />
+            <YAxis tick={{ fill: '#8c8272', fontSize: 11, fontFamily: 'JetBrains Mono' }} axisLine={false} tickLine={false} tickFormatter={(v) => `$${(v / 1000).toFixed(0)}k`} />
             <Tooltip content={<ChartTooltip />} />
             {showAssets && (
               <Area type="monotone" dataKey="assets" name="Assets" stroke="#c9963a" fill="url(#assetsGrad)" strokeWidth={2} dot={false} />
@@ -1433,7 +1433,7 @@ function NetWorthTab() {
       </div>
 
       {/* Monthly table */}
-      <div className="bg-surface shadow-sm border border-border rounded overflow-hidden">
+      <div className="bg-surface border border-border rounded overflow-hidden">
         <table className="w-full text-xs">
           <thead className="border-b border-border">
             <tr>
@@ -1460,11 +1460,11 @@ function NetWorthTab() {
                     }
                   }}
                 >
-                  <td className="px-4 py-2 font-mono text-muted">{formatDate(s.date)}</td>
-                  <td className="px-4 py-2 font-mono text-positive">{formatCurrency(s.total_assets)}</td>
-                  <td className="px-4 py-2 font-mono text-negative">{formatCurrency(s.total_liabilities)}</td>
-                  <td className="px-4 py-2 font-mono text-text">{formatCurrency(s.net_worth)}</td>
-                  <td className="px-4 py-2 font-mono" style={{ color: delta != null ? (delta >= 0 ? '#c9963a' : '#b5654a') : '#7a6c5d' }}>
+                  <td className="px-4 py-2 font-serif tabular-nums text-muted">{formatDate(s.date)}</td>
+                  <td className="px-4 py-2 font-serif tabular-nums text-positive">{formatCurrency(s.total_assets)}</td>
+                  <td className="px-4 py-2 font-serif tabular-nums text-negative">{formatCurrency(s.total_liabilities)}</td>
+                  <td className="px-4 py-2 font-serif tabular-nums text-text">{formatCurrency(s.net_worth)}</td>
+                  <td className="px-4 py-2 font-serif tabular-nums" style={{ color: delta != null ? (delta >= 0 ? '#c9963a' : '#b5654a') : '#8c8272' }}>
                     {delta != null ? `${delta >= 0 ? '+' : ''}${formatCurrency(delta)}` : '-'}
                   </td>
                 </tr>
@@ -1539,9 +1539,9 @@ function InvestmentsTab() {
       {/* Summary + Pie */}
       <div className="grid grid-cols-2 gap-4">
         {/* Portfolio history */}
-        <div className="bg-surface shadow-sm border border-border rounded p-4">
+        <div className="bg-surface border border-border rounded p-4">
           <p className="text-xs text-muted mb-1">Portfolio Value</p>
-          <p className="font-mono text-2xl text-info mb-3">{formatCurrency(totalValue)}</p>
+          <p className="font-serif tabular-nums text-2xl text-info mb-3">{formatCurrency(totalValue)}</p>
           {historyData.length > 0 && (
             <ResponsiveContainer width="100%" height={120}>
               <AreaChart data={historyData}>
@@ -1561,7 +1561,7 @@ function InvestmentsTab() {
         </div>
 
         {/* Allocation pie */}
-        <div className="bg-surface shadow-sm border border-border rounded p-4">
+        <div className="bg-surface border border-border rounded p-4">
           <p className="text-sm font-medium text-text mb-3">Allocation</p>
           {pieData.length > 0 ? (
             <ResponsiveContainer width="100%" height={160}>
@@ -1582,7 +1582,7 @@ function InvestmentsTab() {
       </div>
 
       {/* P&L table */}
-      <div className="bg-surface shadow-sm border border-border rounded overflow-hidden">
+      <div className="bg-surface border border-border rounded overflow-hidden">
         <table className="w-full text-xs">
           <thead className="border-b border-border">
             <tr>
@@ -1597,16 +1597,16 @@ function InvestmentsTab() {
               const pnlPct = h.cost_basis && h.cost_basis > 0 ? ((h.institution_value - h.cost_basis) / h.cost_basis) * 100 : null;
               return (
                 <tr key={h.id} className="border-b border-border hover:bg-black/5">
-                  <td className="px-4 py-2 font-mono text-info font-medium">{h.ticker ?? '-'}</td>
+                  <td className="px-4 py-2 font-serif tabular-nums text-info font-medium">{h.ticker ?? '-'}</td>
                   <td className="px-4 py-2 text-text max-w-[160px] truncate">{h.security_name}</td>
-                  <td className="px-4 py-2 font-mono text-muted">{h.quantity.toFixed(4)}</td>
-                  <td className="px-4 py-2 font-mono text-muted">{formatCurrency(h.institution_price)}</td>
-                  <td className="px-4 py-2 font-mono text-text">{formatCurrency(h.institution_value)}</td>
-                  <td className="px-4 py-2 font-mono text-muted">{h.cost_basis != null ? formatCurrency(h.cost_basis) : '-'}</td>
-                  <td className="px-4 py-2 font-mono" style={{ color: unrealized != null ? (unrealized >= 0 ? '#c9963a' : '#b5654a') : '#7a6c5d' }}>
+                  <td className="px-4 py-2 font-serif tabular-nums text-muted">{h.quantity.toFixed(4)}</td>
+                  <td className="px-4 py-2 font-serif tabular-nums text-muted">{formatCurrency(h.institution_price)}</td>
+                  <td className="px-4 py-2 font-serif tabular-nums text-text">{formatCurrency(h.institution_value)}</td>
+                  <td className="px-4 py-2 font-serif tabular-nums text-muted">{h.cost_basis != null ? formatCurrency(h.cost_basis) : '-'}</td>
+                  <td className="px-4 py-2 font-serif tabular-nums" style={{ color: unrealized != null ? (unrealized >= 0 ? '#c9963a' : '#b5654a') : '#8c8272' }}>
                     {unrealized != null ? `${unrealized >= 0 ? '+' : ''}${formatCurrency(unrealized)}` : '-'}
                   </td>
-                  <td className="px-4 py-2 font-mono" style={{ color: pnlPct != null ? (pnlPct >= 0 ? '#c9963a' : '#b5654a') : '#7a6c5d' }}>
+                  <td className="px-4 py-2 font-serif tabular-nums" style={{ color: pnlPct != null ? (pnlPct >= 0 ? '#c9963a' : '#b5654a') : '#8c8272' }}>
                     {pnlPct != null ? `${pnlPct >= 0 ? '+' : ''}${formatPercent(pnlPct)}` : '-'}
                   </td>
                 </tr>
@@ -1623,11 +1623,11 @@ function InvestmentsTab() {
               <tfoot className="border-t-2 border-border">
                 <tr>
                   <td className="px-4 py-2 font-bold text-text" colSpan={5}>TOTAL</td>
-                  <td className="px-4 py-2 font-mono font-bold text-muted">{hasCB ? formatCurrency(totalCB) : '-'}</td>
-                  <td className="px-4 py-2 font-mono font-bold" style={{ color: hasCB ? (totalPnl >= 0 ? '#c9963a' : '#b5654a') : '#7a6c5d' }}>
+                  <td className="px-4 py-2 font-serif tabular-nums font-bold text-muted">{hasCB ? formatCurrency(totalCB) : '-'}</td>
+                  <td className="px-4 py-2 font-serif tabular-nums font-bold" style={{ color: hasCB ? (totalPnl >= 0 ? '#c9963a' : '#b5654a') : '#8c8272' }}>
                     {hasCB ? `${totalPnl >= 0 ? '+' : ''}${formatCurrency(totalPnl)}` : '-'}
                   </td>
-                  <td className="px-4 py-2 font-mono font-bold" style={{ color: totalPct != null ? (totalPct >= 0 ? '#c9963a' : '#b5654a') : '#7a6c5d' }}>
+                  <td className="px-4 py-2 font-serif tabular-nums font-bold" style={{ color: totalPct != null ? (totalPct >= 0 ? '#c9963a' : '#b5654a') : '#8c8272' }}>
                     {totalPct != null ? `${totalPct >= 0 ? '+' : ''}${formatPercent(totalPct)}` : '-'}
                   </td>
                 </tr>
@@ -1819,9 +1819,9 @@ export function Reports() {
   };
 
   return (
-    <div className="p-6 space-y-6">
+    <div className="mz-screen space-y-6 px-12 py-9">
       <div className="flex items-center justify-between">
-        <h1 className="text-xl font-semibold text-text">Reports</h1>
+        <h1 className="font-serif text-[27px] font-normal text-ink">Reports</h1>
       </div>
 
       <div className="space-y-2">
@@ -1896,14 +1896,14 @@ export function Reports() {
               <div className="flex items-center gap-2">
                 <input
                   type="date"
-                  className="bg-background border border-border rounded px-2 py-1 text-xs text-text font-mono focus:outline-none"
+                  className="bg-background border border-border rounded px-2 py-1 text-xs text-text font-serif tabular-nums focus:outline-none"
                   value={customStart}
                   onChange={(e) => setCustomStart(e.target.value)}
                 />
                 <span className="text-muted text-xs">to</span>
                 <input
                   type="date"
-                  className="bg-background border border-border rounded px-2 py-1 text-xs text-text font-mono focus:outline-none"
+                  className="bg-background border border-border rounded px-2 py-1 text-xs text-text font-serif tabular-nums focus:outline-none"
                   value={customEnd}
                   onChange={(e) => setCustomEnd(e.target.value)}
                 />
@@ -1949,7 +1949,7 @@ export function Reports() {
       />
 
       {/* Tab selector */}
-      <div className="flex gap-1 bg-surface shadow-sm border border-border rounded p-0.5 w-fit">
+      <div className="flex gap-1 bg-surface border border-border rounded p-0.5 w-fit">
         {(['spending', 'income', 'trends', 'cashflow', 'networth', 'investments'] as ReportTab[]).map((t) => (
           <button
             key={t}

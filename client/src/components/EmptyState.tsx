@@ -34,7 +34,7 @@ export function EmptyState({
           {action && actionLabel && (
             <button
               onClick={action}
-              className="px-4 py-2 text-xs bg-text text-surface font-medium rounded hover:opacity-90 shadow-sm"
+              className="px-4 py-2 text-xs bg-text text-surface font-medium rounded hover:opacity-90"
             >
               {actionLabel}
             </button>

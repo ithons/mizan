@@ -49,9 +49,9 @@ import type {
 
 const queueTone = {
   ai_insights: { color: '#c9963a', icon: Sparkles },
-  uncategorized: { color: '#ce8642', icon: Tag },
+  uncategorized: { color: '#c9963a', icon: Tag },
   rule_suggestions: { color: '#7c8b99', icon: Sparkles },
-  pending: { color: '#ce8642', icon: Clock },
+  pending: { color: '#c9963a', icon: Clock },
   recurring_candidates: { color: '#c9963a', icon: RefreshCw },
   duplicate_candidates: { color: '#b5654a', icon: Trash2 },
   transfer_candidates: { color: '#7c8b99', icon: ArrowLeftRight },
@@ -102,7 +102,7 @@ function QueueButton({
       </div>
       <div className="min-w-0 flex-1">
         <p className="text-xs text-muted truncate">{label}</p>
-        <p className="font-mono text-sm text-text">{count}</p>
+        <p className="font-serif tabular-nums text-sm text-text">{count}</p>
       </div>
     </button>
   );
@@ -127,7 +127,7 @@ function TransactionRow({
     <div className={`grid grid-cols-[96px_1fr_180px_120px_auto] gap-3 items-center px-3 py-2.5 border-b border-border last:border-0 ${
       selected ? 'bg-positive/5' : ''
     }`}>
-      <span className="text-xs text-muted font-mono">{formatDate(transaction.date)}</span>
+      <span className="text-xs text-muted font-serif tabular-nums">{formatDate(transaction.date)}</span>
       <div className="min-w-0">
         <p className="text-sm text-text truncate">{transaction.merchant_name || transaction.original_name}</p>
         <p className="text-xs text-muted truncate">{transaction.account_name}</p>
@@ -239,7 +239,7 @@ function RuleSuggestionRow({
               <div key={transaction.id} className="border border-border rounded px-2 py-1.5 bg-background/45">
                 <div className="flex items-center justify-between gap-2">
                   <span className="text-[11px] text-text truncate">{transaction.merchant_name}</span>
-                  <span className="text-[11px] font-mono text-muted">{formatCurrency(transaction.amount)}</span>
+                  <span className="text-[11px] font-serif tabular-nums text-muted">{formatCurrency(transaction.amount)}</span>
                 </div>
                 <p className="text-[11px] text-muted truncate">
                   {transaction.will_apply ? 'Will update' : transaction.category_name ?? 'Evidence'}
@@ -450,7 +450,7 @@ function BatchToolbar({
 
   return (
     <div className="flex items-center justify-between gap-3 px-3 py-2 border-b border-border bg-background/45">
-      <p className="text-xs text-muted font-mono">{itemCount} visible</p>
+      <p className="text-xs text-muted font-serif tabular-nums">{itemCount} visible</p>
       <div className="flex items-center gap-2">
         {actions.map((action) => (
           <button
@@ -933,11 +933,11 @@ export function ReviewInbox() {
   ]);
 
   return (
-    <div className="p-6 h-full flex flex-col gap-5">
+    <div className="mz-screen flex h-full flex-col gap-5 px-12 py-9">
       <div className="flex items-center justify-between gap-3">
         <div>
-          <h1 className="text-xl font-semibold text-text">Review Inbox</h1>
-          <p className="text-sm text-muted font-mono">{totalOpen} open</p>
+          <h1 className="font-serif text-[27px] font-normal text-ink">Review Inbox</h1>
+          <p className="text-sm text-muted font-serif tabular-nums">{totalOpen} open</p>
         </div>
         {totalOpen === 0 && (
           <div className="flex items-center gap-3">
@@ -969,7 +969,7 @@ export function ReviewInbox() {
         ))}
       </div>
 
-      <div className="bg-surface shadow-sm border border-border rounded flex-1 overflow-hidden">
+      <div className="bg-surface border border-border rounded flex-1 overflow-hidden">
         {loading ? (
           <SkeletonList rows={10} cols={5} />
         ) : activeQueue === 'uncategorized' ? (

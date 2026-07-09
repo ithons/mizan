@@ -30,7 +30,7 @@ const STEP_ICONS: Record<OnboardingStepId, LucideIcon> = {
 function stepTone(step: OnboardingStep): string {
   if (step.status === 'complete') return '#c9963a';
   if (step.status === 'active') return '#7c8b99';
-  return '#7a6c5d';
+  return '#8c8272';
 }
 
 function OnboardingStepRow({ step, index, onSelect }: {
@@ -111,10 +111,10 @@ export function Onboarding() {
   const CurrentIcon = STEP_ICONS[current.id];
 
   return (
-    <div className="p-6 max-w-6xl mx-auto space-y-6">
+    <div className="mz-screen mx-auto max-w-6xl space-y-6 px-12 py-9">
       <div className="flex items-start justify-between gap-4">
         <div>
-          <h1 className="text-xl font-semibold text-text">First Setup</h1>
+          <h1 className="font-serif text-[27px] font-normal text-ink">First Setup</h1>
           <p className="text-sm text-muted mt-1">
             {plan.completedCount} of {plan.totalCount} setup steps complete
           </p>

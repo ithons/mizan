@@ -28,7 +28,7 @@ function ToastItem({ toast, onRemove }: ToastItemProps) {
 
   return (
     <div
-      className={`flex items-start gap-3 bg-surface shadow-sm border border-border border-l-2 ${borderColors[toast.type]} rounded px-4 py-3 shadow-lg min-w-[280px] max-w-[380px]`}
+      className={`flex items-start gap-3 bg-surface border border-border border-l-2 ${borderColors[toast.type]} rounded px-4 py-3 min-w-[280px] max-w-[380px]`}
       style={{ animation: 'slideInRight 0.2s ease-out' }}
     >
       <style>{`

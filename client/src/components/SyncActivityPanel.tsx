@@ -108,7 +108,7 @@ export function SyncActivityPanel({
   };
 
   return (
-    <div className="bg-surface shadow-sm border border-border rounded">
+    <div className="bg-surface border border-border rounded">
       <div className="px-4 py-3 border-b border-border flex items-center justify-between">
         <div className="flex items-center gap-2">
           <Clock3 size={14} className="text-info" />

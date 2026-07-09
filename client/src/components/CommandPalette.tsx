@@ -91,13 +91,13 @@ export function CommandPalette() {
         className="fixed inset-0 bg-background/80 backdrop-blur-sm z-50 transition-opacity" 
         onClick={() => setOpen(false)}
       />
-      <div className="fixed left-1/2 top-[20%] -translate-x-1/2 w-full max-w-2xl bg-surface shadow-2xl border border-border rounded-xl z-50 overflow-hidden flex flex-col max-h-[60vh]">
+      <div className="fixed left-1/2 top-[20%] -translate-x-1/2 w-full max-w-2xl border border-line-2 bg-card rounded-xl z-50 overflow-hidden flex flex-col max-h-[60vh]">
         <div className="flex items-center px-4 py-3 border-b border-border">
           <Search size={18} className="text-muted mr-3 flex-shrink-0" />
           <input
             ref={inputRef}
             type="text"
-            className="flex-1 bg-transparent border-none text-text text-lg focus:outline-none placeholder:text-muted/50"
+            className="flex-1 bg-transparent border-none text-text text-lg focus:outline-none placeholder:text-faint"
             placeholder="Type a command or ask Mizān... (e.g. 'Categorize Uber as Transport')"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
