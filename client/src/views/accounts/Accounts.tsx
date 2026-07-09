@@ -9,6 +9,7 @@ import { invalidateFinancialData } from '../../lib/queryInvalidation';
 import { useAppStore } from '../../store';
 import { Screen, ScreenHeader, SectionLabel, Row, TextButton } from '../../components/balance';
 import { ConfirmRemoveModal } from '../../components/ConfirmRemoveModal';
+import { SkeletonRows } from '../../components/SkeletonLoader';
 import { AddManualAccountModal, EditAccountModal } from './Modals';
 
 const GROUPS: Array<{ name: string; match: (a: Account) => boolean }> = [
@@ -175,13 +176,7 @@ export function Accounts() {
       <div className="flex min-h-0 flex-1 flex-col gap-10 lg:flex-row lg:gap-12">
         {/* Grouped account list */}
         <div className="min-w-0 flex-1">
-          {isLoading && (
-            <div className="space-y-3">
-              {[0, 1, 2, 3].map((i) => (
-                <div key={i} className="h-16 animate-pulse rounded-lg bg-line/60" />
-              ))}
-            </div>
-          )}
+          {isLoading && <SkeletonRows rows={5} />}
           {!isLoading && visible.length === 0 && (
             <div className="py-10 text-[14px] text-muted">
               No accounts yet.{' '}

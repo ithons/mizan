@@ -75,6 +75,11 @@
     @apply bg-paper text-ink font-sans antialiased selection:bg-sage-tint;
   }
   * { box-sizing: border-box; }
+  :focus-visible {
+    outline: 2px solid var(--mz-sage);
+    outline-offset: 2px;
+    border-radius: 2px;
+  }
 }
 
 @layer components {
@@ -100,8 +105,38 @@
   50%, 100% { opacity: 0; }
 }
 .mz-screen { animation: mz-rise 0.35s ease both; }
+.mz-rise-fast { animation: mz-rise 0.2s ease both; }
+
+/* Staggered rise for hero/card children */
+.mz-stagger > * { animation: mz-rise 0.35s ease both; }
+.mz-stagger > *:nth-child(2) { animation-delay: 75ms; }
+.mz-stagger > *:nth-child(3) { animation-delay: 150ms; }
+.mz-stagger > *:nth-child(4) { animation-delay: 225ms; }
+.mz-stagger > *:nth-child(5) { animation-delay: 300ms; }
+.mz-stagger > *:nth-child(n + 6) { animation-delay: 375ms; }
+
+/* SVG line draw-in: pair with pathLength=1 and stroke-dasharray 1 */
+@keyframes mz-draw {
+  from { stroke-dashoffset: 1; }
+  to { stroke-dashoffset: 0; }
+}
+.mz-draw {
+  stroke-dasharray: 1;
+  animation: mz-draw 0.9s ease-out both;
+}
+
+/* Bar grow-in */
+@keyframes mz-grow {
+  from { transform: scaleY(0); }
+  to { transform: scaleY(1); }
+}
+.mz-grow {
+  transform-origin: bottom;
+  animation: mz-grow 0.5s ease-out both;
+}
+
 @media (prefers-reduced-motion: reduce) {
-  .mz-screen { animation: none; }
+  .mz-screen, .mz-rise-fast, .mz-stagger > *, .mz-draw, .mz-grow { animation: none; }
   .mz-breathe { animation: none !important; }
 }
 

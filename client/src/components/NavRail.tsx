@@ -83,12 +83,17 @@ export function NavRail() {
       aria-label="Primary"
       className="flex h-full w-14 flex-shrink-0 flex-col border-l border-line-2 bg-rail py-[26px] xl:w-[148px]"
     >
-      <div className="flex items-center justify-center gap-[9px] px-2 pb-[22px] xl:justify-start xl:px-[22px]">
+      <button
+        type="button"
+        onClick={() => window.dispatchEvent(new Event('mizan:open-palette'))}
+        title="Search or ask (⌘K)"
+        className="flex items-center justify-center gap-[9px] px-2 pb-[22px] xl:justify-start xl:px-[22px]"
+      >
         <span className="flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-md bg-ink text-sm font-semibold text-paper">
           م
         </span>
         <span className="hidden font-serif text-[17px] text-ink xl:block">mizān</span>
-      </div>
+      </button>
 
       <div className="flex flex-1 flex-col gap-0.5 overflow-y-auto py-2">
         {navItems.map((item) => (

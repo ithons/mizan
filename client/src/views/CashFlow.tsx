@@ -14,6 +14,7 @@ type RangeId = (typeof RANGES)[number]['id'];
 
 export function CashFlow() {
   const [range, setRange] = useState<RangeId>('six-months');
+  const [hovered, setHovered] = useState<string | null>(null);
   const months = RANGES.find((r) => r.id === range)!.months;
   const currentMonth = format(new Date(), 'yyyy-MM');
 
@@ -90,23 +91,39 @@ export function CashFlow() {
       {/* Paired bar chart */}
       <div className="mb-8 flex-shrink-0">
         <div className="flex h-[150px] items-end gap-7">
-          {series.map((m) => (
-            <div key={m.month} className="flex flex-1 flex-col items-center gap-2">
-              <div className="flex h-[120px] items-end gap-[5px]">
-                <div
-                  className="w-[15px] rounded-t-[3px] bg-sage"
-                  style={{ height: `${Math.max(2, (m.income / maxBar) * 120)}px` }}
-                  title={`Income ${formatWholeCurrency(m.income)}`}
-                />
-                <div
-                  className="w-[15px] rounded-t-[3px] bg-tan"
-                  style={{ height: `${Math.max(2, (Math.abs(m.expenses) / maxBar) * 120)}px` }}
-                  title={`Expenses ${formatWholeCurrency(Math.abs(m.expenses))}`}
-                />
+          {series.map((m) => {
+            const monthNet = m.income - Math.abs(m.expenses);
+            const dimmed = hovered != null && hovered !== m.month;
+            return (
+              <div
+                key={m.month}
+                className={`relative flex flex-1 flex-col items-center gap-2 transition-opacity duration-150 ${dimmed ? 'opacity-40' : ''}`}
+                onMouseEnter={() => setHovered(m.month)}
+                onMouseLeave={() => setHovered(null)}
+              >
+                {hovered === m.month && (
+                  <div className="pointer-events-none absolute bottom-full left-1/2 z-20 mb-1 -translate-x-1/2 whitespace-nowrap rounded-lg border border-line-2 bg-card px-3 py-2 text-xs">
+                    <div className="mb-0.5 font-medium text-ink">{format(parseISO(`${m.month}-01`), 'MMMM yyyy')}</div>
+                    <div className="tabular-nums text-muted">
+                      <span className="text-sage-deep">{formatWholeCurrency(m.income)}</span> in ·{' '}
+                      <span className="text-clay">{formatWholeCurrency(Math.abs(m.expenses))}</span> out ·{' '}
+                      <span className={monthNet >= 0 ? 'text-sage-deep' : 'text-clay'}>
+                        {formatWholeCurrency(monthNet, { showSign: monthNet > 0 })}
+                      </span>
+                    </div>
+                  </div>
+                )}
+                <div className="flex h-[120px] items-end gap-[5px]">
+                  <div className="mz-grow w-[15px] rounded-t-[3px] bg-sage" style={{ height: `${Math.max(2, (m.income / maxBar) * 120)}px` }} />
+                  <div
+                    className="mz-grow w-[15px] rounded-t-[3px] bg-tan"
+                    style={{ height: `${Math.max(2, (Math.abs(m.expenses) / maxBar) * 120)}px` }}
+                  />
+                </div>
+                <span className="text-[11.5px] text-muted-2">{format(parseISO(`${m.month}-01`), 'MMM')}</span>
               </div>
-              <span className="text-[11.5px] text-muted-2">{format(parseISO(`${m.month}-01`), months > 6 ? 'MMM' : 'MMM')}</span>
-            </div>
-          ))}
+            );
+          })}
           {series.length === 0 && <div className="pb-10 text-[13.5px] text-muted-2">No cash flow recorded for this period.</div>}
         </div>
         <div className="mt-3.5 flex gap-5 text-xs text-muted">

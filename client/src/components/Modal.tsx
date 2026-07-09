@@ -39,6 +39,7 @@ export function Modal({ open, onClose, title, children, maxWidth = '480px' }: Mo
           <h2 className="font-serif text-[19px] text-ink">{title}</h2>
           <button
             onClick={onClose}
+            aria-label="Close"
             className="rounded p-1 text-muted transition-colors hover:bg-rail hover:text-ink"
           >
             <X size={18} />

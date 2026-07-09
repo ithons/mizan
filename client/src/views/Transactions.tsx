@@ -16,7 +16,8 @@ import { invalidateFinancialData } from '../lib/queryInvalidation';
 import { parseDecimalInput } from '../lib/numberInput';
 import { useAppStore } from '../store';
 import { Modal } from '../components/Modal';
-import { Screen, ScreenHeader, CategoryPill, InkButton, TextButton } from '../components/balance';
+import { SkeletonRows } from '../components/SkeletonLoader';
+import { Screen, ScreenHeader, CategoryPill, InkButton, Select, TextButton } from '../components/balance';
 
 // ─── Date-range presets ───────────────────────────────────────────────────────
 
@@ -87,6 +88,7 @@ function ReviewPanel({
   totalOpen,
   items,
   categories,
+  leavingKey,
   batchCount,
   onBatchConfirm,
   batchPending,
@@ -94,6 +96,7 @@ function ReviewPanel({
   totalOpen: number;
   items: QueueItem[];
   categories: Category[];
+  leavingKey: string | null;
   batchCount: number;
   onBatchConfirm: () => void;
   batchPending: boolean;
@@ -101,6 +104,7 @@ function ReviewPanel({
   const [pickedCategory, setPickedCategory] = useState('');
   const focus = items[0];
   const rest = items.slice(1, 4);
+  const leaving = focus != null && leavingKey === focus.key;
 
   useEffect(() => setPickedCategory(''), [focus?.key]);
 
@@ -115,19 +119,26 @@ function ReviewPanel({
 
       {focus ? (
         <>
-          <div className="border-l-2 border-sage-soft pl-[18px]">
+          <div
+            key={focus.key}
+            className={`mz-rise-fast border-l-2 border-sage-soft pl-[18px] transition-all duration-150 ${
+              leaving ? '-translate-y-1 opacity-0' : ''
+            }`}
+          >
             <div className="mb-1.5 text-[11px] uppercase tracking-[0.15em] text-muted-2">{focus.kind}</div>
             <div className="mb-0.5 text-[15.5px] text-ink">{focus.title}</div>
             <div className="text-[13px] leading-normal text-muted">{focus.sub}</div>
             {focus.needsCategory && (
-              <select
-                className="mz-field mt-3 !py-1.5 text-[13px]"
+              <Select
+                className="mt-3"
                 value={pickedCategory}
-                onChange={(e) => setPickedCategory(e.target.value)}
-              >
-                <option value="">Pick a category…</option>
-                {categoryOptions(categories)}
-              </select>
+                onChange={setPickedCategory}
+                placeholder="Pick a category…"
+                options={flattenCategories(categories).map((c) => ({
+                  value: c.id,
+                  label: c.parent_id ? `· ${c.name}` : c.name,
+                }))}
+              />
             )}
             <div className="mt-3.5 flex items-center gap-5 text-[13.5px]">
               <button
@@ -394,12 +405,20 @@ export function Transactions() {
   const [reviewOnly, setReviewOnly] = useState(false);
   const [showAddModal, setShowAddModal] = useState(false);
   const [editing, setEditing] = useState<Transaction | null>(null);
-  const [skippedKeys, setSkippedKeys] = useState<Set<string>>(new Set());
+  const [hiddenKeys, setHiddenKeys] = useState<Set<string>>(new Set());
+  const [leavingKey, setLeavingKey] = useState<string | null>(null);
 
   useEffect(() => {
     const t = setTimeout(() => setDebouncedSearch(search.trim()), 250);
     return () => clearTimeout(t);
   }, [search]);
+
+  // Command palette "Add transaction" action
+  useEffect(() => {
+    const open = () => setShowAddModal(true);
+    window.addEventListener('mizan:add-transaction', open);
+    return () => window.removeEventListener('mizan:add-transaction', open);
+  }, []);
 
   const filters = useMemo(
     () => ({
@@ -445,8 +464,25 @@ export function Transactions() {
     qc.invalidateQueries({ queryKey: ['transactions'] });
     qc.invalidateQueries({ queryKey: ['recurring'] });
   };
-  const skip = (key: string) => setSkippedKeys((prev) => new Set(prev).add(key));
   const onError = (err: Error) => addToast({ type: 'error', message: err.message });
+
+  // Optimistic queue advance: the focused item animates out and the next one
+  // takes over immediately; the server call reconciles in the background and
+  // a failure restores the item.
+  const unhide = (key: string) =>
+    setHiddenKeys((prev) => {
+      const next = new Set(prev);
+      next.delete(key);
+      return next;
+    });
+  const resolve = (key: string, run?: (onErrorRestore: () => void) => void) => {
+    setLeavingKey(key);
+    window.setTimeout(() => {
+      setHiddenKeys((prev) => new Set(prev).add(key));
+      setLeavingKey((k) => (k === key ? null : k));
+    }, 160);
+    run?.(() => unhide(key));
+  };
 
   const confirmDraft = useMutation({ mutationFn: (d: AdvisorDraftAction) => aiApi.confirmDraft(d), onSuccess: invalidateReview, onError });
   const dismissDraft = useMutation({ mutationFn: (id: string) => aiApi.dismissDraft(id), onSuccess: invalidateReview, onError });
@@ -478,33 +514,35 @@ export function Transactions() {
     onError,
   });
 
-  const queueItems = useMemo<QueueItem[]>(() => {
+  const allQueueItems = useMemo<QueueItem[]>(() => {
     const items: QueueItem[] = [];
 
     for (const draft of reviewSummary?.ai_drafts ?? []) {
+      const key = `draft:${draft.id}`;
       items.push({
-        key: `draft:${draft.id}`,
+        key,
         kind: 'Suggestion',
         title: draft.label,
         sub: draft.summary,
         primaryLabel: 'Confirm',
-        onPrimary: () => confirmDraft.mutate(draft),
+        onPrimary: () => resolve(key, (restore) => confirmDraft.mutate(draft, { onError: restore })),
         secondaryLabel: 'Dismiss',
-        onSecondary: () => dismissDraft.mutate(draft.id),
+        onSecondary: () => resolve(key, (restore) => dismissDraft.mutate(draft.id, { onError: restore })),
       });
     }
     for (const t of uncategorizedPage?.data ?? []) {
+      const key = `categorize:${t.id}`;
       items.push({
-        key: `categorize:${t.id}`,
+        key,
         kind: 'Categorize',
         title: `${merchantLabel(t)} · ${formatCurrency(t.amount)}`,
         sub: `${format(parseISO(t.date), 'MMM d')} · ${t.account_name ?? 'unknown account'}`,
         primaryLabel: 'Confirm',
         onPrimary: () => {},
         needsCategory: true,
-        onPickCategory: (categoryId) => categorize.mutate({ id: t.id, categoryId }),
+        onPickCategory: (categoryId) => resolve(key, (restore) => categorize.mutate({ id: t.id, categoryId }, { onError: restore })),
         secondaryLabel: 'Skip',
-        onSecondary: () => skip(`categorize:${t.id}`),
+        onSecondary: () => resolve(key),
       });
     }
     for (const s of reviewSummary?.rule_suggestions ?? []) {
@@ -515,51 +553,58 @@ export function Transactions() {
         title: `${s.pattern} → ${s.category_name}`,
         sub: `applies to ${s.affected_transaction_ids.length} transaction${s.affected_transaction_ids.length === 1 ? '' : 's'}`,
         primaryLabel: 'Confirm',
-        onPrimary: () => createRule.mutate(s),
+        onPrimary: () => resolve(key, (restore) => createRule.mutate(s, { onError: restore })),
         secondaryLabel: 'Skip',
-        onSecondary: () => skip(key),
+        onSecondary: () => resolve(key),
       });
     }
     for (const p of reviewSummary?.recurring_candidates ?? []) {
+      const key = `recurring:${p.id}`;
       items.push({
-        key: `recurring:${p.id}`,
+        key,
         kind: 'Confirm recurring',
         title: `${p.merchant_name} · ${formatCurrency(p.average_amount)}`,
         sub: `${p.frequency} · seen ${p.transaction_count} times`,
         primaryLabel: 'Confirm',
-        onPrimary: () => confirmRecurring.mutate(p),
+        onPrimary: () => resolve(key, (restore) => confirmRecurring.mutate(p, { onError: restore })),
         secondaryLabel: 'Not recurring',
-        onSecondary: () => dismissRecurring.mutate(p),
+        onSecondary: () => resolve(key, (restore) => dismissRecurring.mutate(p, { onError: restore })),
       });
     }
     for (const g of reviewSummary?.duplicate_candidates ?? []) {
+      const key = `dupe:${g.group_id}`;
       items.push({
-        key: `dupe:${g.group_id}`,
+        key,
         kind: 'Possible duplicate',
         title: `${g.merchant_name} · ${formatCurrency(g.amount)}`,
         sub: `${format(parseISO(g.date), 'MMM d')} · ${g.count} identical charges on ${g.account_name}`,
         primaryLabel: 'Keep both',
-        onPrimary: () => dismissDuplicate.mutate(g),
+        onPrimary: () => resolve(key, (restore) => dismissDuplicate.mutate(g, { onError: restore })),
         secondaryLabel: 'Skip',
-        onSecondary: () => skip(`dupe:${g.group_id}`),
+        onSecondary: () => resolve(key),
       });
     }
     for (const p of reviewSummary?.transfer_candidates ?? []) {
+      const key = `transfer:${p.pair_id}`;
       items.push({
-        key: `transfer:${p.pair_id}`,
+        key,
         kind: 'Transfer pair',
         title: `${formatCurrency(Math.abs(p.amount))} · ${p.from_account_name} → ${p.to_account_name}`,
         sub: `${format(parseISO(p.date), 'MMM d')} · looks like a transfer, not spending`,
         primaryLabel: 'Confirm',
-        onPrimary: () => confirmTransfer.mutate(p),
+        onPrimary: () => resolve(key, (restore) => confirmTransfer.mutate(p, { onError: restore })),
         secondaryLabel: 'Not a transfer',
-        onSecondary: () => dismissTransfer.mutate(p),
+        onSecondary: () => resolve(key, (restore) => dismissTransfer.mutate(p, { onError: restore })),
       });
     }
 
-    return items.filter((i) => !skippedKeys.has(i.key));
+    return items;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [reviewSummary, uncategorizedPage, skippedKeys]);
+  }, [reviewSummary, uncategorizedPage]);
+
+  const queueItems = useMemo(() => allQueueItems.filter((i) => !hiddenKeys.has(i.key)), [allQueueItems, hiddenKeys]);
+  // Optimistically decrement the count by items hidden this session that the server still reports.
+  const displayedReviewCount = Math.max(0, reviewCount - (allQueueItems.length - queueItems.length));
 
   // Batch: apply all high-confidence rule suggestions in one go.
   const highConfidenceRules = (reviewSummary?.rule_suggestions ?? []).filter((s) => s.confidence >= 0.9);
@@ -605,39 +650,30 @@ export function Transactions() {
             onChange={(e) => setSearch(e.target.value)}
           />
         </div>
-        <select
-          className="cursor-pointer border-none bg-transparent p-0 pr-7 text-[13.5px] text-muted transition-colors hover:text-ink focus:ring-0"
+        <Select
           value={accountFilter}
-          onChange={(e) => setAccountFilter(e.target.value)}
-        >
-          <option value="">All accounts</option>
-          {(accounts ?? [])
+          onChange={setAccountFilter}
+          placeholder="All accounts"
+          options={(accounts ?? [])
             .filter((a) => !a.is_hidden)
-            .map((a) => (
-              <option key={a.id} value={a.id}>
-                {a.account_name}
-              </option>
-            ))}
-        </select>
-        <select
-          className="cursor-pointer border-none bg-transparent p-0 pr-7 text-[13.5px] text-muted transition-colors hover:text-ink focus:ring-0"
+            .map((a) => ({ value: a.id, label: a.account_name }))}
+        />
+        <Select
           value={categoryFilter}
-          onChange={(e) => setCategoryFilter(e.target.value)}
-        >
-          <option value="">Category</option>
-          {categoryOptions(categories ?? [])}
-        </select>
-        <select
-          className="cursor-pointer border-none bg-transparent p-0 pr-7 text-[13.5px] text-muted transition-colors hover:text-ink focus:ring-0"
+          onChange={setCategoryFilter}
+          placeholder="Category"
+          options={flattenCategories(categories ?? []).map((c) => ({
+            value: c.id,
+            label: c.parent_id ? `· ${c.name}` : c.name,
+          }))}
+        />
+        <Select
           value={range}
-          onChange={(e) => setRange(e.target.value as RangeId)}
-        >
-          {RANGES.map((r) => (
-            <option key={r.id} value={r.id}>
-              {r.label}
-            </option>
-          ))}
-        </select>
+          onChange={(v) => setRange(v as RangeId)}
+          placeholder="This month"
+          clearable={false}
+          options={RANGES.map((r) => ({ value: r.id, label: r.label }))}
+        />
         <button
           type="button"
           onClick={() => setReviewOnly((v) => !v)}
@@ -645,7 +681,7 @@ export function Transactions() {
             reviewOnly ? 'rounded-md bg-review-active px-2.5 py-1' : 'hover:opacity-75'
           }`}
         >
-          Needs review · {reviewCount}
+          Needs review · {displayedReviewCount}
         </button>
       </div>
 
@@ -653,19 +689,13 @@ export function Transactions() {
       <div className="flex min-h-0 flex-1 flex-col gap-10 lg:flex-row lg:gap-12">
         <div className="min-w-0 flex-1">
           {/* Column header */}
-          <div className="flex items-center px-3 pb-2 text-[11px] uppercase tracking-[0.1em] text-faint">
+          <div className="flex items-center px-3 pb-2 text-[11px] uppercase tracking-[0.1em] text-muted-2">
             <span className="flex-1">Merchant</span>
             <span className="w-[130px]">Account</span>
             <span className="w-[110px] text-right">Amount</span>
           </div>
 
-          {isLoading && (
-            <div className="space-y-2">
-              {[0, 1, 2, 3, 4].map((i) => (
-                <div key={i} className="h-14 animate-pulse rounded-lg bg-line/60" />
-              ))}
-            </div>
-          )}
+          {isLoading && <SkeletonRows rows={6} />}
 
           {!isLoading && dayGroups.length === 0 && (
             <div className="px-3 py-10 text-[14px] text-muted">
@@ -701,9 +731,10 @@ export function Transactions() {
         </div>
 
         <ReviewPanel
-          totalOpen={reviewCount}
+          totalOpen={displayedReviewCount}
           items={queueItems}
           categories={categories ?? []}
+          leavingKey={leavingKey}
           batchCount={highConfidenceRules.length}
           onBatchConfirm={() => batchConfirm.mutate()}
           batchPending={batchConfirm.isPending}

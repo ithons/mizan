@@ -6,3 +6,5 @@ export { CategoryPill } from './CategoryPill';
 export { BalanceScale } from './BalanceScale';
 export { Row } from './Row';
 export { TextButton, InkButton } from './buttons';
+export { Select, type SelectOption } from './Select';
+export { Tooltip } from './Tooltip';
