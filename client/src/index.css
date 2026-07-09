@@ -1,64 +1,112 @@
-@import url('https://api.fontshare.com/v2/css?f[]=switzer@400,500,600&display=swap');
-@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Newsreader:opsz,wght@6..72,300;6..72,400;6..72,500&family=Instrument+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap');
 
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
 :root {
-  /* Balance — light (default) */
-  --color-bg: #f5efe6;
-  --color-surface: #fbf7ef;
-  --color-border: #e4d9c7;
-  --color-text: #2a2018;
-  --color-muted: #7a6c5d;
+  /* Balance palette — paper / warm-neutral + sage accent */
+  --mz-paper: #f3ede1;
+  --mz-rail: #efe8da;
+  --mz-card: #faf5ea;
+  --mz-card-alt: #fbf7ef;
+  --mz-card-white: #ffffff;
 
-  --color-positive: #c9963a;
-  --color-positive-5: rgba(201, 150, 58, 0.05);
-  --color-positive-10: rgba(201, 150, 58, 0.1);
+  --mz-ink: #2a241c;
+  --mz-ink-soft: #4a4234;
+  --mz-muted: #8c8272;
+  --mz-muted-2: #a89a84;
+  --mz-faint: #b3a894;
 
-  --color-negative: #b5654a;
-  --color-negative-5: rgba(181, 101, 74, 0.05);
-  --color-negative-10: rgba(181, 101, 74, 0.1);
+  --mz-line: #ece3d3;
+  --mz-line-2: #e4d9c7;
+  --mz-line-3: #ddd2bf;
+  --mz-dot: #c4b8a2;
 
-  --color-warning: #ce8642;
-  --color-warning-5: rgba(206, 134, 66, 0.05);
-  --color-warning-10: rgba(206, 134, 66, 0.1);
+  --mz-sage: #7c8b6f;
+  --mz-sage-deep: #5c7050;
+  --mz-sage-soft: #8a9a76;
+  --mz-sage-tint: #eef1e8;
+  --mz-sage-tint-border: #dbe1d0;
+  --mz-sage-panel: #f0f2eb;
+  --mz-sage-panel-border: #d7ddc9;
+  --mz-pill-text: #5c6a52;
+
+  --mz-clay: #8a4a38;
+  --mz-clay-scale: #b5654a;
+  --mz-gold: #c9963a;
+  --mz-tan: #cbb08a;
+  --mz-beam: #c9bda6;
+
+  --mz-pill-muted-bg: #efe8da;
+  --mz-pill-muted-border: #e0d5c1;
+
+  --mz-review-bg: #f6edd8;
+  --mz-review-border: #e2cfa9;
+  --mz-review-text: #8a6a3a;
+  --mz-review-active: #f2e6cf;
+
+  /* Legacy aliases so not-yet-converted components inherit the Balance look */
+  --color-bg: var(--mz-paper);
+  --color-surface: var(--mz-card);
+  --color-border: var(--mz-line-2);
+  --color-text: var(--mz-ink);
+  --color-muted: var(--mz-muted);
+
+  --color-positive: var(--mz-sage-deep);
+  --color-positive-5: rgba(92, 112, 80, 0.05);
+  --color-positive-10: rgba(92, 112, 80, 0.1);
+
+  --color-negative: var(--mz-clay);
+  --color-negative-5: rgba(138, 74, 56, 0.05);
+  --color-negative-10: rgba(138, 74, 56, 0.1);
+
+  --color-warning: var(--mz-gold);
+  --color-warning-5: rgba(201, 150, 58, 0.05);
+  --color-warning-10: rgba(201, 150, 58, 0.1);
 
   --color-info: #7c8b99;
   --color-info-5: rgba(124, 139, 153, 0.05);
   --color-info-10: rgba(124, 139, 153, 0.1);
 }
 
-.dark {
-  /* Balance — dark */
-  --color-bg: #2a2320;
-  --color-surface: #332b26;
-  --color-border: #453b34;
-  --color-text: #f2eae0;
-  --color-muted: #b0a292;
-
-  /* Semantic accents stay the same hue in both modes; they're used as accents
-     against either background, not as body text, so contrast holds up. */
-}
-
 @layer base {
   body {
-    @apply bg-background text-text font-sans antialiased selection:bg-positive-10;
+    @apply bg-paper text-ink font-sans antialiased selection:bg-sage-tint;
   }
   * { box-sizing: border-box; }
 }
 
-/* resize panel separator hover */
-[data-separator]:hover {
-  background-color: theme('colors.border') !important;
+@layer components {
+  .mz-field {
+    @apply w-full rounded-lg border border-line-2 bg-card-alt px-3 py-2 text-sm text-ink placeholder:text-faint focus:border-line-3 focus:outline-none focus:ring-0;
+  }
+  .mz-label {
+    @apply mb-1 block text-xs text-muted;
+  }
 }
-[data-separator][data-active] {
-  background-color: theme('colors.positive.DEFAULT') !important;
+
+/* Signature motion */
+@keyframes mz-breathe {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.025); }
+}
+@keyframes mz-rise {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@keyframes mz-blink {
+  0%, 49% { opacity: 1; }
+  50%, 100% { opacity: 0; }
+}
+.mz-screen { animation: mz-rise 0.35s ease both; }
+@media (prefers-reduced-motion: reduce) {
+  .mz-screen { animation: none; }
+  .mz-breathe { animation: none !important; }
 }
 
 /* scrollbar styling */
-::-webkit-scrollbar { width: 4px; height: 4px; }
+::-webkit-scrollbar { width: 5px; height: 5px; }
 ::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: theme('colors.border'); border-radius: 2px; }
-::-webkit-scrollbar-thumb:hover { background: theme('colors.muted'); }
+::-webkit-scrollbar-thumb { background: var(--mz-line-3); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: var(--mz-muted-2); }

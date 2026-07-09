@@ -1,19 +1,19 @@
-// Balance categorical palette — warm-harmonious hues extending off the
-// semantic anchors (gold/slate/amber/clay), for charts with more series
-// than the four status colors alone can distinguish. Single source of
-// truth so every chart/legend uses the same category-to-color mapping.
+// Balance categorical palette — sage anchors the positive/asset side, clay the
+// negative, gold the caution/crypto slot, then warm tans and muted neighbors
+// for charts with more series. Single source of truth so every chart/legend
+// uses the same category-to-color mapping.
 export const CHART_COLORS = [
-  '#c9963a', // gold (positive)
-  '#7c8b99', // warm slate (info)
-  '#ce8642', // amber (warning)
-  '#b5654a', // clay/rust (negative)
-  '#a78bfa', // muted violet
-  '#f472b6', // dusty pink
-  '#34d399', // soft moss
-  '#fb923c', // burnt orange
-  '#60a5fa', // dusty blue
-  '#f87171', // soft red
+  '#7c8b6f', // sage (primary accent)
+  '#c9963a', // gold
+  '#b5654a', // clay scale
+  '#a7bb92', // light sage
+  '#cbb08a', // tan
+  '#8a4a38', // deep clay
+  '#5c7050', // deep sage
+  '#cdbfa6', // warm sand
+  '#a89a84', // muted stone
+  '#7c8b99', // warm slate
 ];
 
 // 4-color subset for asset-class-style breakdowns (liquid / investments / crypto / other).
-export const ASSET_COLORS = [CHART_COLORS[0], CHART_COLORS[1], CHART_COLORS[2], '#9b8dee'];
+export const ASSET_COLORS = ['#7c8b6f', '#a7bb92', '#c9963a', '#cdbfa6'];

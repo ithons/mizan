@@ -1,11 +1,10 @@
 import { lazy, Suspense, type ReactNode } from 'react';
-import { Routes, Route } from 'react-router-dom';
+import { Routes, Route, Navigate } from 'react-router-dom';
 import { Layout } from './components/Layout';
 import { ToastContainer } from './components/Toast';
 import { useSyncStatus } from './hooks/useSyncStatus';
-import { useAppStore } from './store';
 
-const Dashboard = lazy(() => import('./views/Dashboard').then((module) => ({ default: module.Dashboard })));
+const Today = lazy(() => import('./views/Today').then((module) => ({ default: module.Today })));
 const Onboarding = lazy(() => import('./views/Onboarding').then((module) => ({ default: module.Onboarding })));
 const Accounts = lazy(() => import('./views/accounts/Accounts').then((module) => ({ default: module.Accounts })));
 const Transactions = lazy(() => import('./views/Transactions').then((module) => ({ default: module.Transactions })));
@@ -21,12 +20,12 @@ const Advisor = lazy(() => import('./views/Advisor').then((module) => ({ default
 
 function ViewFallback() {
   return (
-    <div className="p-6 space-y-4">
-      <div className="h-8 w-48 rounded bg-border/60 animate-pulse" />
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-        <div className="h-28 rounded border border-border bg-surface animate-pulse" />
-        <div className="h-28 rounded border border-border bg-surface animate-pulse" />
-        <div className="h-28 rounded border border-border bg-surface animate-pulse" />
+    <div className="space-y-4 px-12 py-9">
+      <div className="h-8 w-48 animate-pulse rounded bg-line" />
+      <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+        <div className="h-28 animate-pulse rounded-xl border border-line-2 bg-card" />
+        <div className="h-28 animate-pulse rounded-xl border border-line-2 bg-card" />
+        <div className="h-28 animate-pulse rounded-xl border border-line-2 bg-card" />
       </div>
     </div>
   );
@@ -43,12 +42,13 @@ function AppRoutes() {
     <>
       <Routes>
         <Route element={<Layout />}>
-          <Route path="/" element={lazyView(<Dashboard />)} />
+          <Route path="/" element={lazyView(<Today />)} />
           <Route path="/onboarding" element={lazyView(<Onboarding />)} />
           <Route path="/accounts" element={lazyView(<Accounts />)} />
           <Route path="/review" element={lazyView(<ReviewInbox />)} />
           <Route path="/transactions" element={lazyView(<Transactions />)} />
-          <Route path="/cashflow" element={lazyView(<CashFlow />)} />
+          <Route path="/cash-flow" element={lazyView(<CashFlow />)} />
+          <Route path="/cashflow" element={<Navigate to="/cash-flow" replace />} />
           <Route path="/bills" element={lazyView(<Bills />)} />
           <Route path="/budget" element={lazyView(<Budget />)} />
           <Route path="/goals" element={lazyView(<Goals />)} />

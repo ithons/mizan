@@ -20,6 +20,17 @@ export function formatCurrency(
   return val < 0 ? `\u2212${formatted}` : formatted;
 }
 
+export function formatWholeCurrency(amount: number, options: { showSign?: boolean } = {}): string {
+  const formatted = new Intl.NumberFormat('en-US', {
+    style: 'currency',
+    currency: 'USD',
+    maximumFractionDigits: 0,
+  }).format(Math.abs(amount));
+
+  if (options.showSign && amount > 0) return `+${formatted}`;
+  return amount < 0 ? `−${formatted}` : formatted;
+}
+
 export function formatCurrencyColored(amount: number): { text: string; className: string } {
   if (amount === 0) {
     return { text: '$0.00', className: 'text-muted' };
@@ -67,6 +78,18 @@ export function formatMonth(yearMonth: string): string {
 
 export function formatPercent(value: number, decimals = 1): string {
   return `${value.toFixed(decimals)}%`;
+}
+
+/** "just now" / "2m ago" / "3h ago" / "5d ago" — the rail/meta variant. */
+export function formatCompactRelative(isoStr: string): string {
+  const then = new Date(isoStr).getTime();
+  if (Number.isNaN(then)) return '';
+  const mins = Math.max(0, Math.floor((Date.now() - then) / 60_000));
+  if (mins < 1) return 'just now';
+  if (mins < 60) return `${mins}m ago`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `${hours}h ago`;
+  return `${Math.floor(hours / 24)}d ago`;
 }
 
 export function formatRelativeTime(isoStr: string): string {
