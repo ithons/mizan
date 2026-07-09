@@ -1,828 +1,157 @@
-import { useMemo, useState } from 'react';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
-import {
-  ArrowDownCircle,
-  ArrowUpCircle,
-  Ban,
-  CalendarDays,
-  CalendarClock,
-  CheckCircle2,
-  Clock3,
-  CircleAlert,
-  Pencil,
-  RefreshCw,
-  RotateCcw,
-  Sparkles,
-  TrendingUp,
-  Wallet,
-  XCircle,
-} from 'lucide-react';
-import { addDays, format, parseISO } from 'date-fns';
-import type { Account, RecurringForecast, RecurringForecastOccurrence, SubscriptionInsights } from '@shared/types';
-import { accountsApi, recurringApi } from '../lib/api';
-import { advisorRouteState } from '../lib/advisorRouteState';
-import {
-  buildRecurringForecastAdvisorPrompt,
-  buildRecurringOccurrenceAdvisorPrompt,
-} from '../lib/advisorPrompts';
-import { formatCurrency, formatDate } from '../lib/formatters';
-import { PageLoader } from '../components/LoadingSpinner';
-import { EmptyState } from '../components/EmptyState';
-import { Modal } from '../components/Modal';
-import { invalidateFinancialData } from '../lib/queryInvalidation';
-import { parseDecimalInput } from '../lib/numberInput';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { format, parseISO } from 'date-fns';
+import type { RecurringForecastOccurrence, RecurringPattern } from '@shared/types';
+import { recurringApi } from '../lib/api';
+import { formatCurrency, formatWholeCurrency } from '../lib/formatters';
 import { useAppStore } from '../store';
+import { Screen, ScreenHeader, SectionLabel, TextButton } from '../components/balance';
 
-const FREQUENCY_LABELS: Record<RecurringForecastOccurrence['frequency'], string> = {
-  weekly: 'Weekly',
-  biweekly: 'Biweekly',
-  monthly: 'Monthly',
-  quarterly: 'Quarterly',
-  annual: 'Annual',
+const FREQUENCY_PER_MONTH: Record<RecurringPattern['frequency'], number> = {
+  weekly: 52 / 12,
+  biweekly: 26 / 12,
+  monthly: 1,
+  quarterly: 1 / 3,
+  annual: 1 / 12,
 };
 
-const LIQUID_ACCOUNT_TYPES = new Set(['checking', 'savings', 'cash']);
-const confidenceTone: Record<RecurringForecastOccurrence['confidence_label'], { text: string; border: string }> = {
-  confirmed: { text: 'text-positive', border: 'border-positive/40' },
-  likely: { text: 'text-info', border: 'border-info/40' },
-  uncertain: { text: 'text-warning', border: 'border-warning/40' },
-};
-
-interface ProjectionPoint {
-  date: string;
-  delta: number;
-  balance: number;
+function monthlyAmount(p: RecurringPattern): number {
+  return Math.abs(p.average_amount) * FREQUENCY_PER_MONTH[p.frequency];
 }
 
-type AdjustmentMode = 'snooze' | 'adjust';
-
-interface AdjustmentDraft {
-  occurrence: RecurringForecastOccurrence;
-  mode: AdjustmentMode;
-  dateValue: string;
-  amountValue: string;
-  note: string;
+function isBillPattern(p: RecurringPattern): boolean {
+  const signed = p.average_signed_amount ?? -Math.abs(p.average_amount);
+  return p.is_active && signed < 0;
 }
 
-function originalOccurrenceDate(occurrence: RecurringForecastOccurrence): string {
-  return occurrence.original_expected_date ?? occurrence.expected_date;
-}
-
-function isLiquidAccount(account: Account): boolean {
-  return !account.is_hidden && !account.is_liability && LIQUID_ACCOUNT_TYPES.has(account.type);
-}
-
-function buildProjection(
-  startingBalance: number,
-  occurrences: RecurringForecastOccurrence[]
-): ProjectionPoint[] {
-  const deltaByDate = new Map<string, number>();
-  const today = format(new Date(), 'yyyy-MM-dd');
-
-  for (const occurrence of occurrences) {
-    const projectionDate = occurrence.status === 'overdue' ? today : occurrence.expected_date;
-    deltaByDate.set(
-      projectionDate,
-      (deltaByDate.get(projectionDate) ?? 0) + occurrence.amount
-    );
-  }
-
-  let balance = startingBalance;
-  return Array.from(deltaByDate.entries())
-    .sort(([a], [b]) => a.localeCompare(b))
-    .map(([date, delta]) => {
-      balance += delta;
-      return { date, delta, balance };
-    });
-}
-
-function Stat({
-  label,
-  value,
-  tone,
-}: {
-  label: string;
-  value: number;
-  tone: 'income' | 'bill' | 'net';
-}) {
-  const valueClass = tone === 'bill' ? 'text-negative' : value >= 0 ? 'text-positive' : 'text-negative';
-
-  return (
-    <div className="border border-border bg-surface rounded p-4">
-      <p className="text-xs text-muted mb-1">{label}</p>
-      <p className={`font-mono text-xl ${valueClass}`}>
-        {formatCurrency(value)}
-      </p>
-    </div>
-  );
-}
-
-function SubscriptionInsightPanel({ insights }: { insights: SubscriptionInsights }) {
-  return (
-    <div className="border border-border bg-surface rounded p-4">
-      <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between mb-4">
-        <div>
-          <h2 className="text-sm font-medium text-text">Subscriptions</h2>
-          <p className="text-xs text-muted mt-1">{insights.subscription_count} recurring bills</p>
-        </div>
-        <span className="text-xs text-muted font-mono">{insights.days} days</span>
-      </div>
-
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-        <div>
-          <p className="text-xs text-muted mb-1">Monthly</p>
-          <p className="font-mono text-lg text-text">{formatCurrency(insights.total_monthly_amount)}</p>
-        </div>
-        <div>
-          <p className="text-xs text-muted mb-1">Upcoming</p>
-          <p className="font-mono text-lg text-negative">{formatCurrency(insights.total_upcoming_amount)}</p>
-        </div>
-        <div>
-          <p className="text-xs text-muted mb-1">Increases</p>
-          <p className="font-mono text-lg text-warning">{insights.increase_count}</p>
-        </div>
-        <div>
-          <p className="text-xs text-muted mb-1">Needs review</p>
-          <p className="font-mono text-lg text-info">{insights.unconfirmed_count}</p>
-        </div>
-      </div>
-
-      <div className="grid grid-cols-1 xl:grid-cols-3 gap-3 mt-4">
-        <div className="border border-border rounded bg-background/40">
-          <div className="px-3 py-2 border-b border-border flex items-center gap-2">
-            <TrendingUp size={13} className="text-warning" />
-            <p className="text-xs font-medium text-text">Price increases</p>
-          </div>
-          {insights.increases.length > 0 ? (
-            <div className="divide-y divide-border">
-              {insights.increases.slice(0, 3).map((item) => (
-                <div key={item.pattern_id} className="px-3 py-2 text-xs flex items-center justify-between gap-3">
-                  <span className="text-text truncate">{item.merchant_name}</span>
-                  <span className="font-mono text-warning flex-shrink-0">
-                    +{formatCurrency(item.increase_amount ?? 0)}
-                  </span>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <div className="px-3 py-5 text-xs text-muted">No increases detected</div>
-          )}
-        </div>
-
-        <div className="border border-border rounded bg-background/40">
-          <div className="px-3 py-2 border-b border-border flex items-center gap-2">
-            <CircleAlert size={13} className="text-info" />
-            <p className="text-xs font-medium text-text">Needs review</p>
-          </div>
-          {insights.unconfirmed.length > 0 ? (
-            <div className="divide-y divide-border">
-              {insights.unconfirmed.slice(0, 3).map((item) => (
-                <div key={item.pattern_id} className="px-3 py-2 text-xs flex items-center justify-between gap-3">
-                  <span className="text-text truncate">{item.merchant_name}</span>
-                  <span className="font-mono text-muted flex-shrink-0">{Math.round(item.confidence * 100)}%</span>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <div className="px-3 py-5 text-xs text-muted">All subscriptions confirmed</div>
-          )}
-        </div>
-
-        <div className="border border-border rounded bg-background/40">
-          <div className="px-3 py-2 border-b border-border flex items-center gap-2">
-            <CalendarDays size={13} className="text-positive" />
-            <p className="text-xs font-medium text-text">Upcoming renewals</p>
-          </div>
-          {insights.upcoming.length > 0 ? (
-            <div className="divide-y divide-border">
-              {insights.upcoming.slice(0, 3).map((item) => (
-                <div key={item.pattern_id} className="px-3 py-2 text-xs flex items-center justify-between gap-3">
-                  <div className="min-w-0">
-                    <p className="text-text truncate">{item.merchant_name}</p>
-                    <p className="text-[11px] text-muted">
-                      {formatDate(item.next_expected)} · {FREQUENCY_LABELS[item.frequency]}
-                    </p>
-                  </div>
-                  <span className="font-mono text-negative flex-shrink-0">{formatCurrency(item.average_amount)}</span>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <div className="px-3 py-5 text-xs text-muted">No renewals in this window</div>
-          )}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function AdjustmentModal({
-  draft,
-  isSaving,
-  onChange,
-  onClose,
-  onSubmit,
-}: {
-  draft: AdjustmentDraft | null;
-  isSaving: boolean;
-  onChange: (draft: AdjustmentDraft) => void;
-  onClose: () => void;
-  onSubmit: () => void;
-}) {
-  if (!draft) return null;
-
-  const isSnooze = draft.mode === 'snooze';
-  const title = isSnooze ? 'Snooze Occurrence' : 'Adjust Amount';
-
-  return (
-    <Modal open={Boolean(draft)} onClose={onClose} title={title}>
-      <div className="space-y-4">
-        <div className="border border-border rounded bg-background/50 px-3 py-2">
-          <p className="text-sm text-text">{draft.occurrence.merchant_name}</p>
-          <p className="text-xs text-muted mt-1">
-            {formatDate(originalOccurrenceDate(draft.occurrence))} · {formatCurrency(draft.occurrence.amount)}
-          </p>
-        </div>
-
-        {isSnooze ? (
-          <label className="block">
-            <span className="text-xs text-muted">New expected date</span>
-            <input
-              type="date"
-              className="mt-1 w-full rounded border border-border bg-surface px-3 py-2 text-sm text-text"
-              value={draft.dateValue}
-              onChange={(event) => onChange({ ...draft, dateValue: event.target.value })}
-            />
-          </label>
-        ) : (
-          <label className="block">
-            <span className="text-xs text-muted">One-time amount</span>
-            <input
-              type="text"
-              inputMode="decimal"
-              className="mt-1 w-full rounded border border-border bg-surface px-3 py-2 text-sm text-text font-mono"
-              value={draft.amountValue}
-              onChange={(event) => onChange({ ...draft, amountValue: event.target.value })}
-            />
-          </label>
-        )}
-
-        <label className="block">
-          <span className="text-xs text-muted">Note</span>
-          <input
-            type="text"
-            className="mt-1 w-full rounded border border-border bg-surface px-3 py-2 text-sm text-text"
-            value={draft.note}
-            onChange={(event) => onChange({ ...draft, note: event.target.value })}
-            placeholder="Optional"
-          />
-        </label>
-
-        <div className="flex items-center justify-end gap-2">
-          <button
-            type="button"
-            className="rounded border border-border px-3 py-1.5 text-xs text-muted hover:text-text"
-            onClick={onClose}
-            disabled={isSaving}
-          >
-            Cancel
-          </button>
-          <button
-            type="button"
-            className="rounded bg-positive px-3 py-1.5 text-xs font-medium text-white disabled:opacity-50"
-            onClick={onSubmit}
-            disabled={isSaving}
-          >
-            Save
-          </button>
-        </div>
-      </div>
-    </Modal>
-  );
-}
-
-function ScheduleRow({
-  occurrence,
-  isMutating,
-  onConfirm,
-  onDismiss,
-  onAsk,
-  onSkip,
-  onSnooze,
-  onAdjust,
-  onRevert,
-}: {
-  occurrence: RecurringForecastOccurrence;
-  isMutating: boolean;
-  onConfirm: (patternId: string) => void;
-  onDismiss: (patternId: string) => void;
-  onAsk: (occurrence: RecurringForecastOccurrence) => void;
-  onSkip: (occurrence: RecurringForecastOccurrence) => void;
-  onSnooze: (occurrence: RecurringForecastOccurrence) => void;
-  onAdjust: (occurrence: RecurringForecastOccurrence) => void;
-  onRevert: (occurrence: RecurringForecastOccurrence) => void;
-}) {
-  const Icon = occurrence.is_income ? ArrowUpCircle : ArrowDownCircle;
-  const amountClass = occurrence.is_income ? 'text-positive' : 'text-negative';
-  const confidenceClass = confidenceTone[occurrence.confidence_label];
-  const needsAction = occurrence.needs_review || occurrence.status === 'overdue';
-  const hasAdjustment = Boolean(occurrence.adjustment_id);
-
-  return (
-    <div className="grid grid-cols-[120px_1fr_auto] gap-4 px-4 py-3 border-b border-border last:border-b-0 items-center">
-      <div className="font-mono text-xs text-muted whitespace-nowrap">
-        {formatDate(occurrence.expected_date)}
-      </div>
-      <div className="flex items-center gap-3 min-w-0">
-        <Icon size={16} className={`flex-shrink-0 ${amountClass}`} />
-        <div className="min-w-0">
-          <div className="flex items-center gap-2">
-            <p className="text-sm text-text truncate">{occurrence.merchant_name}</p>
-            {occurrence.status === 'overdue' && (
-              <span className="text-[10px] text-negative border border-negative/40 rounded px-1.5 py-0.5">
-                overdue
-              </span>
-            )}
-            {!occurrence.is_confirmed && (
-              <span
-                className={`text-[10px] border rounded px-1.5 py-0.5 ${confidenceClass.text} ${confidenceClass.border}`}
-              >
-                {occurrence.confidence_label}
-              </span>
-            )}
-            {hasAdjustment && (
-              <span className="text-[10px] text-info border border-info/40 rounded px-1.5 py-0.5">
-                adjusted
-              </span>
-            )}
-          </div>
-          <div className="flex items-center gap-2 text-xs text-muted mt-0.5">
-            <span>{FREQUENCY_LABELS[occurrence.frequency]}</span>
-            <span>·</span>
-            <span>{Math.round(occurrence.confidence * 100)}%</span>
-            {occurrence.original_expected_date && occurrence.original_expected_date !== occurrence.expected_date && (
-              <>
-                <span>·</span>
-                <span>from {formatDate(occurrence.original_expected_date)}</span>
-              </>
-            )}
-            {occurrence.category_name && (
-              <>
-                <span>·</span>
-                <span>{occurrence.category_name}</span>
-              </>
-            )}
-          </div>
-        </div>
-      </div>
-      <div className="flex items-center justify-end gap-2">
-        <div className="flex items-center gap-1">
-          <button
-            type="button"
-            className="p-1 text-muted hover:text-warning disabled:opacity-30"
-            onClick={() => onSkip(occurrence)}
-            disabled={isMutating}
-            title="Skip once"
-          >
-            <Ban size={13} />
-          </button>
-          <button
-            type="button"
-            className="p-1 text-muted hover:text-info disabled:opacity-30"
-            onClick={() => onSnooze(occurrence)}
-            disabled={isMutating}
-            title="Snooze once"
-          >
-            <CalendarClock size={13} />
-          </button>
-          <button
-            type="button"
-            className="p-1 text-muted hover:text-positive disabled:opacity-30"
-            onClick={() => onAdjust(occurrence)}
-            disabled={isMutating}
-            title="Adjust amount once"
-          >
-            <Pencil size={13} />
-          </button>
-          {occurrence.adjustment_id && (
-            <button
-              type="button"
-              className="p-1 text-muted hover:text-negative disabled:opacity-30"
-              onClick={() => onRevert(occurrence)}
-              disabled={isMutating}
-              title="Revert adjustment"
-            >
-              <RotateCcw size={13} />
-            </button>
-          )}
-        </div>
-        <button
-          type="button"
-          className="p-1 text-muted hover:text-positive"
-          onClick={() => onAsk(occurrence)}
-          title="Ask advisor"
-        >
-          <Sparkles size={13} />
-        </button>
-        <p className={`font-mono text-sm text-right ${amountClass}`}>
-          {formatCurrency(occurrence.amount)}
-        </p>
-        {needsAction && (
-          <div className="flex items-center gap-1">
-            {!occurrence.is_confirmed && (
-              <button
-                className="p-1 text-muted hover:text-positive disabled:opacity-30"
-                onClick={() => onConfirm(occurrence.pattern_id)}
-                disabled={isMutating}
-                title="Confirm recurring pattern"
-              >
-                <CheckCircle2 size={13} />
-              </button>
-            )}
-            <button
-              className="p-1 text-muted hover:text-negative disabled:opacity-30"
-              onClick={() => onDismiss(occurrence.pattern_id)}
-              disabled={isMutating}
-              title="Dismiss recurring pattern"
-            >
-              <XCircle size={13} />
-            </button>
-          </div>
-        )}
-      </div>
-    </div>
-  );
+function occurrenceMeta(o: RecurringForecastOccurrence): string {
+  const freq = o.frequency.charAt(0).toUpperCase() + o.frequency.slice(1);
+  return `${freq} · ${o.confidence_label}${o.status === 'overdue' ? ' · overdue' : ''}`;
 }
 
 export function Bills() {
   const navigate = useNavigate();
   const qc = useQueryClient();
   const { addToast } = useAppStore();
-  const [days, setDays] = useState(60);
-  const [adjustmentDraft, setAdjustmentDraft] = useState<AdjustmentDraft | null>(null);
 
-  const { data: forecast, isLoading } = useQuery({
-    queryKey: ['recurring', 'forecast', days],
-    queryFn: () => recurringApi.forecast(days),
-  });
+  const { data: forecast } = useQuery({ queryKey: ['recurring', 'forecast', 30], queryFn: () => recurringApi.forecast(30) });
+  const { data: patterns } = useQuery({ queryKey: ['recurring'], queryFn: () => recurringApi.list() });
 
-  const { data: subscriptionInsights } = useQuery({
-    queryKey: ['recurring', 'subscriptions', days],
-    queryFn: () => recurringApi.subscriptions(days),
-  });
+  const bills = useMemo(() => (patterns ?? []).filter(isBillPattern), [patterns]);
+  const monthlyTotal = bills.reduce((s, p) => s + monthlyAmount(p), 0);
 
-  const { data: accounts = [] } = useQuery({
-    queryKey: ['accounts'],
-    queryFn: accountsApi.list,
-  });
+  const upcoming = (forecast?.occurrences ?? []).filter((o) => !o.is_income && o.adjustment_action !== 'skip');
 
-  const confirmMutation = useMutation({
-    mutationFn: (patternId: string) => recurringApi.confirm(patternId),
-    onSuccess: () => {
-      invalidateFinancialData(qc);
-      addToast({ type: 'success', message: 'Recurring pattern confirmed' });
-    },
-    onError: (err: Error) => addToast({ type: 'error', message: err.message }),
-  });
+  const breakdown = useMemo(() => {
+    const byCategory = new Map<string, number>();
+    for (const p of bills) {
+      const key = p.category_name ?? 'Other';
+      byCategory.set(key, (byCategory.get(key) ?? 0) + monthlyAmount(p));
+    }
+    return [...byCategory.entries()].sort((a, b) => b[1] - a[1]);
+  }, [bills]);
 
-  const dismissMutation = useMutation({
-    mutationFn: (patternId: string) => recurringApi.dismiss(patternId),
-    onSuccess: () => {
-      invalidateFinancialData(qc);
-      addToast({ type: 'success', message: 'Recurring pattern dismissed' });
-    },
-    onError: (err: Error) => addToast({ type: 'error', message: err.message }),
-  });
-
-  const adjustmentMutation = useMutation({
-    mutationFn: (params: {
-      patternId: string;
-      body: Parameters<typeof recurringApi.upsertAdjustment>[1];
-    }) => recurringApi.upsertAdjustment(params.patternId, params.body),
-    onSuccess: (_data, variables) => {
-      invalidateFinancialData(qc);
-      setAdjustmentDraft(null);
-      const action = variables.body.action === 'skip'
-        ? 'skipped'
-        : variables.body.action === 'snooze'
-          ? 'snoozed'
-          : 'adjusted';
-      addToast({ type: 'success', message: `Occurrence ${action}` });
-    },
-    onError: (err: Error) => addToast({ type: 'error', message: err.message }),
-  });
-
-  const deleteAdjustmentMutation = useMutation({
-    mutationFn: (params: { patternId: string; adjustmentId: string }) =>
-      recurringApi.deleteAdjustment(params.patternId, params.adjustmentId),
-    onSuccess: () => {
-      invalidateFinancialData(qc);
-      addToast({ type: 'success', message: 'Occurrence adjustment reverted' });
-    },
-    onError: (err: Error) => addToast({ type: 'error', message: err.message }),
-  });
-
-  const occurrences = forecast?.occurrences ?? [];
-  const confirmedCount = occurrences.filter((occurrence) => occurrence.is_confirmed).length;
-  const likelyCount = occurrences.filter((occurrence) => occurrence.confidence_label === 'likely').length;
-  const reviewCount = forecast?.review_count ?? 0;
-  const liquidAccounts = accounts.filter(isLiquidAccount);
-  const startingBalance = liquidAccounts.reduce((sum, account) => sum + account.current_balance, 0);
-  const projection = useMemo(
-    () => buildProjection(startingBalance, occurrences),
-    [occurrences, startingBalance]
-  );
-  const endingBalance = projection.at(-1)?.balance ?? startingBalance;
-  const lowestPoint = projection.reduce<ProjectionPoint | null>(
-    (lowest, point) => (!lowest || point.balance < lowest.balance ? point : lowest),
-    null
-  );
-  const lowestBalance = lowestPoint?.balance ?? startingBalance;
-  const askAdvisorAboutForecast = (currentForecast: RecurringForecast) => {
-    navigate('/advisor', {
-      state: advisorRouteState(buildRecurringForecastAdvisorPrompt(currentForecast, {
-        startingBalance,
-        endingBalance,
-        lowestBalance,
-        lowestDate: lowestPoint?.date ?? null,
-        liquidAccountCount: liquidAccounts.length,
-      })),
-    });
-  };
-  const askAdvisorAboutOccurrence = (occurrence: RecurringForecastOccurrence) => {
-    navigate('/advisor', {
-      state: advisorRouteState(buildRecurringOccurrenceAdvisorPrompt(occurrence)),
-    });
-  };
-  const skipOccurrence = (occurrence: RecurringForecastOccurrence) => {
-    adjustmentMutation.mutate({
-      patternId: occurrence.pattern_id,
-      body: {
-        original_date: originalOccurrenceDate(occurrence),
+  const skipOccurrence = useMutation({
+    mutationFn: (o: RecurringForecastOccurrence) =>
+      recurringApi.upsertAdjustment(o.pattern_id, {
+        original_date: o.original_expected_date ?? o.expected_date,
         action: 'skip',
-      },
-    });
-  };
-  const snoozeOccurrence = (occurrence: RecurringForecastOccurrence) => {
-    setAdjustmentDraft({
-      occurrence,
-      mode: 'snooze',
-      dateValue: format(addDays(parseISO(occurrence.expected_date), 1), 'yyyy-MM-dd'),
-      amountValue: '',
-      note: occurrence.adjustment_note ?? '',
-    });
-  };
-  const adjustOccurrence = (occurrence: RecurringForecastOccurrence) => {
-    setAdjustmentDraft({
-      occurrence,
-      mode: 'adjust',
-      dateValue: '',
-      amountValue: Math.abs(occurrence.amount).toFixed(2),
-      note: occurrence.adjustment_note ?? '',
-    });
-  };
-  const revertOccurrenceAdjustment = (occurrence: RecurringForecastOccurrence) => {
-    if (!occurrence.adjustment_id) return;
-    deleteAdjustmentMutation.mutate({
-      patternId: occurrence.pattern_id,
-      adjustmentId: occurrence.adjustment_id,
-    });
-  };
-  const submitAdjustmentDraft = () => {
-    if (!adjustmentDraft) return;
-
-    if (adjustmentDraft.mode === 'snooze') {
-      adjustmentMutation.mutate({
-        patternId: adjustmentDraft.occurrence.pattern_id,
-        body: {
-          original_date: originalOccurrenceDate(adjustmentDraft.occurrence),
-          action: 'snooze',
-          adjusted_date: adjustmentDraft.dateValue,
-          note: adjustmentDraft.note || null,
-        },
-      });
-      return;
-    }
-
-    const parsed = parseDecimalInput(adjustmentDraft.amountValue);
-    if (parsed === null) {
-      addToast({ type: 'error', message: 'Enter a valid amount' });
-      return;
-    }
-    const adjustedAmount = adjustmentDraft.occurrence.amount < 0
-      ? -Math.abs(parsed)
-      : Math.abs(parsed);
-    adjustmentMutation.mutate({
-      patternId: adjustmentDraft.occurrence.pattern_id,
-      body: {
-        original_date: originalOccurrenceDate(adjustmentDraft.occurrence),
-        action: 'adjust',
-        adjusted_amount: adjustedAmount,
-        note: adjustmentDraft.note || null,
-      },
-    });
-  };
-
-  const nextOccurrence = occurrences[0];
-  const grouped = useMemo(() => {
-    const groups = new Map<string, RecurringForecastOccurrence[]>();
-    for (const occurrence of occurrences) {
-      const items = groups.get(occurrence.expected_date) ?? [];
-      items.push(occurrence);
-      groups.set(occurrence.expected_date, items);
-    }
-    return Array.from(groups.entries());
-  }, [occurrences]);
-
-  if (isLoading) return <PageLoader />;
-
-  const isScheduleMutating = confirmMutation.isPending
-    || dismissMutation.isPending
-    || adjustmentMutation.isPending
-    || deleteAdjustmentMutation.isPending;
+      }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['recurring'] });
+      addToast({ type: 'success', message: 'Occurrence skipped' });
+    },
+    onError: (err: Error) => addToast({ type: 'error', message: err.message }),
+  });
 
   return (
-    <div className="p-6 space-y-6">
-      <div className="flex items-center justify-between gap-3">
-        <div>
-          <h1 className="text-xl font-semibold text-text">Bills and Income</h1>
-          <p className="text-xs text-muted mt-1">
-            {nextOccurrence
-              ? `Next: ${nextOccurrence.merchant_name} on ${formatDate(nextOccurrence.expected_date)}`
-              : 'No upcoming recurring activity'}
-          </p>
-        </div>
-        <div className="flex items-center gap-2">
-          {forecast && (
-            <button
-              type="button"
-              className="text-xs border border-border rounded px-3 py-1.5 text-muted hover:text-positive flex items-center gap-1"
-              onClick={() => askAdvisorAboutForecast(forecast)}
-            >
-              <Sparkles size={13} />
-              Ask advisor
-            </button>
-          )}
-          {[30, 60, 90].map((option) => (
-            <button
-              key={option}
-              className={`text-xs border rounded px-3 py-1.5 ${
-                days === option
-                  ? 'border-positive-5 bg-positive-10 text-positive'
-                  : 'border-border text-muted hover:text-text'
-              }`}
-              onClick={() => setDays(option)}
-            >
-              {option}d
-            </button>
-          ))}
-        </div>
-      </div>
-
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <Stat label="Incoming" value={forecast?.income ?? 0} tone="income" />
-        <Stat label="Bills" value={-(forecast?.bills ?? 0)} tone="bill" />
-        <Stat label="Net Impact" value={forecast?.net ?? 0} tone="net" />
-      </div>
-
-      {subscriptionInsights && (
-        <SubscriptionInsightPanel insights={subscriptionInsights} />
-      )}
-
-      {reviewCount > 0 && (
-        <div className="border border-warning/30 bg-warning/10 rounded p-4 flex items-start gap-3">
-          <CircleAlert size={16} className="text-warning flex-shrink-0 mt-0.5" />
-          <div>
-            <p className="text-sm text-text mb-1">Cash flow needs review</p>
-            <p className="text-xs text-muted leading-relaxed">
-              {forecast?.overdue_count ?? 0} overdue and {reviewCount} recurring items need review before this projection is fully reliable.
-            </p>
-          </div>
-        </div>
-      )}
-
-      <div className="border border-border bg-surface rounded p-4">
-        <div className="flex items-center justify-between gap-3 mb-4">
-          <div>
-            <h2 className="text-sm font-medium text-text">Cash Projection</h2>
-            <p className="text-xs text-muted mt-1">
-              {liquidAccounts.length} liquid {liquidAccounts.length === 1 ? 'account' : 'accounts'}
-            </p>
-          </div>
-          <Wallet size={18} className="text-info" />
-        </div>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-4">
-          <div>
-            <p className="text-xs text-muted mb-1">Starting Cash</p>
-            <p className="font-mono text-lg text-text">{formatCurrency(startingBalance)}</p>
-          </div>
-          <div>
-            <p className="text-xs text-muted mb-1">Lowest Point</p>
-            <p className={`font-mono text-lg ${lowestBalance >= 0 ? 'text-positive' : 'text-negative'}`}>
-              {formatCurrency(lowestBalance)}
-            </p>
-            {lowestPoint && (
-              <p className="text-xs text-muted mt-0.5">{formatDate(lowestPoint.date)}</p>
-            )}
-          </div>
-          <div>
-            <p className="text-xs text-muted mb-1">Projected Ending</p>
-            <p className={`font-mono text-lg ${endingBalance >= startingBalance ? 'text-positive' : 'text-negative'}`}>
-              {formatCurrency(endingBalance)}
-            </p>
-          </div>
-        </div>
-        {projection.length > 0 && (
-          <div className="divide-y divide-border border border-border rounded bg-background">
-            {projection.slice(0, 5).map((point) => (
-              <div key={point.date} className="grid grid-cols-[120px_1fr_auto] gap-3 px-3 py-2 text-xs items-center">
-                <span className="font-mono text-muted">{formatDate(point.date)}</span>
-                <span className={point.delta >= 0 ? 'text-positive' : 'text-negative'}>
-                  {formatCurrency(point.delta, { showSign: true })}
-                </span>
-                <span className="font-mono text-text">{formatCurrency(point.balance)}</span>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
-
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <div className="border border-border bg-surface rounded p-4 flex items-center gap-3">
-          <CalendarDays size={18} className="text-info" />
-          <div>
-            <p className="text-xs text-muted">Scheduled</p>
-            <p className="font-mono text-lg text-text">{occurrences.length}</p>
-          </div>
-        </div>
-        <div className="border border-border bg-surface rounded p-4 flex items-center gap-3">
-          <CheckCircle2 size={18} className="text-positive" />
-          <div>
-            <p className="text-xs text-muted">Confirmed</p>
-            <p className="font-mono text-lg text-text">{confirmedCount}</p>
-            <p className="text-[11px] text-muted">
-              {formatCurrency((forecast?.confirmed_income ?? 0) - (forecast?.confirmed_bills ?? 0))}
-            </p>
-          </div>
-        </div>
-        <div className="border border-border bg-surface rounded p-4 flex items-center gap-3">
-          <Clock3 size={18} className="text-info" />
-          <div>
-            <p className="text-xs text-muted">Likely</p>
-            <p className="font-mono text-lg text-text">{likelyCount}</p>
-            <p className="text-[11px] text-muted">
-              {formatCurrency((forecast?.likely_income ?? 0) - (forecast?.likely_bills ?? 0))}
-            </p>
-          </div>
-        </div>
-      </div>
-
-      <div className="border border-border bg-surface rounded overflow-hidden">
-        <div className="flex items-center justify-between px-4 py-3 border-b border-border">
-          <h2 className="text-sm font-medium text-text">Upcoming Schedule</h2>
-          <span className="text-xs text-muted font-mono">{days} days</span>
-        </div>
-        {occurrences.length === 0 ? (
-          <EmptyState
-            icon={RefreshCw}
-            title="No recurring activity scheduled"
-            description="Confirm recurring candidates from review, or inspect transactions for missing bills and income."
-            action={() => navigate('/review?queue=recurring_candidates')}
-            actionLabel="Review Candidates"
-            secondaryAction={() => navigate('/transactions')}
-            secondaryActionLabel="View Transactions"
-          />
-        ) : (
-          <div>
-            {grouped.map(([date, items]) => (
-              <div key={date}>
-                {items.map((occurrence) => (
-                  <ScheduleRow
-                    key={occurrence.id}
-                    occurrence={occurrence}
-                    isMutating={isScheduleMutating}
-                    onConfirm={(patternId) => confirmMutation.mutate(patternId)}
-                    onDismiss={(patternId) => dismissMutation.mutate(patternId)}
-                    onAsk={askAdvisorAboutOccurrence}
-                    onSkip={skipOccurrence}
-                    onSnooze={snoozeOccurrence}
-                    onAdjust={adjustOccurrence}
-                    onRevert={revertOccurrenceAdjustment}
-                  />
-                ))}
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
-      <AdjustmentModal
-        draft={adjustmentDraft}
-        isSaving={adjustmentMutation.isPending}
-        onChange={setAdjustmentDraft}
-        onClose={() => setAdjustmentDraft(null)}
-        onSubmit={submitAdjustmentDraft}
+    <Screen>
+      <ScreenHeader
+        title="Bills & subscriptions"
+        sub={
+          bills.length > 0 ? (
+            <>
+              <span className="tabular-nums">{formatWholeCurrency(monthlyTotal)}</span> per month · {bills.length} recurring
+            </>
+          ) : (
+            'Recurring charges are detected automatically from your transactions'
+          )
+        }
+        className="mb-7"
       />
-    </div>
+
+      <div className="flex min-h-0 flex-1 gap-12">
+        {/* Upcoming list */}
+        <div className="min-w-0 max-w-[680px] flex-[1.5] overflow-y-auto">
+          <SectionLabel className="mb-2.5">Upcoming · next 30 days</SectionLabel>
+          {upcoming.map((o) => {
+            const d = parseISO(o.adjusted_date ?? o.expected_date);
+            return (
+              <div
+                key={o.id}
+                className="group flex items-center gap-5 rounded-lg border-b border-line px-3 py-3.5 transition-colors hover:bg-rail"
+              >
+                <div className="w-[38px] flex-shrink-0 text-center">
+                  <div className="text-[10.5px] uppercase tracking-[0.1em] text-muted-2">{format(d, 'MMM')}</div>
+                  <div className="font-serif text-[19px] leading-none text-ink">{format(d, 'd')}</div>
+                </div>
+                <div className="min-w-0 flex-1">
+                  <div className="truncate text-[15px] text-ink">{o.merchant_name}</div>
+                  <div className="mt-0.5 text-[12.5px] text-muted-2">{occurrenceMeta(o)}</div>
+                </div>
+                <span className="font-serif text-[18px] tabular-nums text-ink">
+                  {formatCurrency(Math.abs(o.adjusted_amount ?? o.amount))}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => skipOccurrence.mutate(o)}
+                  disabled={skipOccurrence.isPending}
+                  className="rounded-md border border-pill-border bg-pill-bg px-2.5 py-1 text-[12px] text-muted opacity-0 transition-opacity hover:text-ink group-hover:opacity-100"
+                >
+                  Skip
+                </button>
+              </div>
+            );
+          })}
+          {upcoming.length === 0 && (
+            <div className="py-6 text-[14px] text-muted">
+              Nothing due in the next 30 days. New recurring charges appear here once they are detected and confirmed.
+            </div>
+          )}
+        </div>
+
+        {/* Monthly total card */}
+        <div className="min-w-0 flex-1">
+          <div className="rounded-xl border border-line-2 bg-card p-[22px]">
+            <SectionLabel className="mb-3">Monthly total</SectionLabel>
+            <div className="font-serif text-[34px] font-light leading-tight tabular-nums text-ink">
+              {formatWholeCurrency(monthlyTotal)}
+            </div>
+            <div className="mt-5">
+              {breakdown.map(([name, amount], i) => (
+                <div
+                  key={name}
+                  className={`flex items-baseline justify-between py-2.5 ${i < breakdown.length - 1 ? 'border-b border-line' : ''}`}
+                >
+                  <span className="text-[13.5px] text-muted">{name}</span>
+                  <span className="text-[14px] tabular-nums text-ink">{formatWholeCurrency(amount)}</span>
+                </div>
+              ))}
+              {breakdown.length === 0 && <div className="py-2 text-[13px] text-muted-2">No recurring charges yet.</div>}
+            </div>
+          </div>
+          {forecast && forecast.review_count > 0 && (
+            <div className="mt-4 text-[13px] text-muted">
+              {forecast.review_count} recurring suggestion{forecast.review_count === 1 ? '' : 's'} waiting in{' '}
+              <TextButton className="!text-[13px] underline underline-offset-2" onClick={() => navigate('/transactions')}>
+                review
+              </TextButton>
+              .
+            </div>
+          )}
+        </div>
+      </div>
+    </Screen>
   );
 }
