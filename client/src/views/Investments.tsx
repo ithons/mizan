@@ -143,8 +143,8 @@ export function Investments() {
                   <div className="min-w-0 flex-1 pr-3">
                     <div className="truncate text-[15px] text-ink">{holdingName(h)}</div>
                     <div className="mt-0.5 text-xs text-muted-2">
-                      {accountNameById.get(h.account_id) ?? 'Investment account'} · {h.quantity.toLocaleString()} share
-                      {h.quantity === 1 ? '' : 's'}
+                      {accountNameById.get(h.account_id) ?? 'Investment account'} ·{' '}
+                      {h.quantity.toLocaleString('en-US', { maximumFractionDigits: 4 })} share{h.quantity === 1 ? '' : 's'}
                     </div>
                   </div>
                   <div className="text-right">
