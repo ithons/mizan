@@ -1,90 +1,222 @@
-import React, { useState } from 'react';
-import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query';
-import { useNavigate } from 'react-router-dom';
-import {
-  Plus,
-  Download,
-  RefreshCw,
-  ChevronLeft,
-  ChevronRight,
-  X,
-  Trash2,
-  SlidersHorizontal,
-  Sparkles,
-  FileText,
-} from 'lucide-react';
-import { format, subMonths } from 'date-fns';
-import { transactionsApi, accountsApi, categoriesApi, settingsApi, flattenCategories, rulesApi } from '../lib/api';
-import { formatDate, formatCurrency } from '../lib/formatters';
-import { useAppStore } from '../store';
-import { Modal } from '../components/Modal';
-import { AmountBadge } from '../components/AmountBadge';
-import { EmptyState } from '../components/EmptyState';
-import { InlineEdit } from '../components/InlineEdit';
-import { SkeletonList } from '../components/SkeletonLoader';
+import { useEffect, useMemo, useState } from 'react';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { format, isToday, isYesterday, parseISO, startOfMonth, endOfMonth, subMonths, startOfYear } from 'date-fns';
+import type {
+  AdvisorDraftAction,
+  Category,
+  DuplicateCandidateGroup,
+  MerchantRuleSuggestion,
+  RecurringPattern,
+  Transaction,
+  TransferCandidatePair,
+} from '@shared/types';
+import { aiApi, categoriesApi, accountsApi, flattenCategories, recurringApi, rulesApi, transactionsApi } from '../lib/api';
+import { formatCurrency } from '../lib/formatters';
 import { invalidateFinancialData } from '../lib/queryInvalidation';
 import { parseDecimalInput } from '../lib/numberInput';
-import { advisorRouteState } from '../lib/advisorRouteState';
-import { buildTransactionAdvisorPrompt } from '../lib/advisorPrompts';
-import {
-  BulkCategoryDropdown,
-  CategoryDropdown,
-  FilterChip,
-  SortableHeader,
-  type SortCol,
-  type SortDir,
-} from './transactions/TransactionControls';
-import { TransactionReviewPanel } from './transactions/TransactionReviewPanel';
-import type {
-  MerchantRuleSuggestion,
-  TransactionFilters,
-  TransactionReviewQueueId,
-  Category,
-  Transaction,
-} from '@shared/types';
+import { useAppStore } from '../store';
+import { Modal } from '../components/Modal';
+import { Screen, ScreenHeader, CategoryPill, InkButton, TextButton } from '../components/balance';
 
-const PAGE_SIZE = 50;
+// ─── Date-range presets ───────────────────────────────────────────────────────
 
-function categoryUpdateMessage(applied: number): string {
-  if (applied <= 0) return 'Transaction categorized';
-  return `Transaction categorized and applied to ${applied} similar transaction${applied === 1 ? '' : 's'}`;
+const RANGES = [
+  { id: 'this-month', label: 'This month' },
+  { id: 'last-month', label: 'Last month' },
+  { id: 'three-months', label: 'Last 3 months' },
+  { id: 'this-year', label: 'This year' },
+  { id: 'all', label: 'All time' },
+] as const;
+type RangeId = (typeof RANGES)[number]['id'];
+
+function rangeDates(id: RangeId): { startDate?: string; endDate?: string } {
+  const now = new Date();
+  const fmt = (d: Date) => format(d, 'yyyy-MM-dd');
+  switch (id) {
+    case 'this-month':
+      return { startDate: fmt(startOfMonth(now)), endDate: fmt(endOfMonth(now)) };
+    case 'last-month': {
+      const prev = subMonths(now, 1);
+      return { startDate: fmt(startOfMonth(prev)), endDate: fmt(endOfMonth(prev)) };
+    }
+    case 'three-months':
+      return { startDate: fmt(startOfMonth(subMonths(now, 2))), endDate: fmt(endOfMonth(now)) };
+    case 'this-year':
+      return { startDate: fmt(startOfYear(now)), endDate: fmt(now) };
+    case 'all':
+      return {};
+  }
 }
 
-// ─── Add Transaction Modal ────────────────────────────────────────────────────
+function dayLabel(dateStr: string): string {
+  const d = parseISO(dateStr);
+  if (isToday(d)) return `Today · ${format(d, 'MMM d')}`;
+  if (isYesterday(d)) return `Yesterday · ${format(d, 'MMM d')}`;
+  return format(d, 'EEEE · MMM d');
+}
 
-function AddTransactionModal({
-  open,
-  onClose,
-  accounts,
+function merchantLabel(t: Transaction): string {
+  return (t.merchant_name || t.original_name).trim();
+}
+
+function categoryOptions(categories: Category[]) {
+  return flattenCategories(categories).map((c) => (
+    <option key={c.id} value={c.id}>
+      {c.parent_id ? `· ${c.name}` : c.name}
+    </option>
+  ));
+}
+
+// ─── Review queue model ───────────────────────────────────────────────────────
+
+interface QueueItem {
+  key: string;
+  kind: string;
+  title: string;
+  sub: string;
+  primaryLabel: string;
+  onPrimary: () => void;
+  /** Set for uncategorized transactions: Confirm needs a category picked inline. */
+  needsCategory?: boolean;
+  onPickCategory?: (categoryId: string) => void;
+  secondaryLabel?: string;
+  onSecondary?: () => void;
+}
+
+function ReviewPanel({
+  totalOpen,
+  items,
   categories,
+  batchCount,
+  onBatchConfirm,
+  batchPending,
 }: {
-  open: boolean;
-  onClose: () => void;
-  accounts: Array<{ id: string; account_name: string }>;
+  totalOpen: number;
+  items: QueueItem[];
   categories: Category[];
+  batchCount: number;
+  onBatchConfirm: () => void;
+  batchPending: boolean;
 }) {
+  const [pickedCategory, setPickedCategory] = useState('');
+  const focus = items[0];
+  const rest = items.slice(1, 4);
+
+  useEffect(() => setPickedCategory(''), [focus?.key]);
+
+  return (
+    <div className="w-[300px] flex-shrink-0">
+      <div className="mb-4 flex items-baseline justify-between">
+        <span className="font-serif text-xl text-ink">Review</span>
+        <span className="text-[12.5px] text-muted">
+          {totalOpen} item{totalOpen === 1 ? '' : 's'}
+        </span>
+      </div>
+
+      {focus ? (
+        <>
+          <div className="border-l-2 border-sage-soft pl-[18px]">
+            <div className="mb-1.5 text-[11px] uppercase tracking-[0.15em] text-muted-2">{focus.kind}</div>
+            <div className="mb-0.5 text-[15.5px] text-ink">{focus.title}</div>
+            <div className="text-[13px] leading-normal text-muted">{focus.sub}</div>
+            {focus.needsCategory && (
+              <select
+                className="mz-field mt-3 !py-1.5 text-[13px]"
+                value={pickedCategory}
+                onChange={(e) => setPickedCategory(e.target.value)}
+              >
+                <option value="">Pick a category…</option>
+                {categoryOptions(categories)}
+              </select>
+            )}
+            <div className="mt-3.5 flex items-center gap-5 text-[13.5px]">
+              <button
+                type="button"
+                disabled={focus.needsCategory && !pickedCategory}
+                onClick={() => {
+                  if (focus.needsCategory) {
+                    if (pickedCategory) focus.onPickCategory?.(pickedCategory);
+                  } else {
+                    focus.onPrimary();
+                  }
+                }}
+                className="border-b border-ink pb-0.5 text-ink transition-opacity disabled:opacity-40"
+              >
+                {focus.primaryLabel}
+              </button>
+              {focus.secondaryLabel && focus.onSecondary && (
+                <button type="button" onClick={focus.onSecondary} className="text-muted transition-colors hover:text-ink">
+                  {focus.secondaryLabel}
+                </button>
+              )}
+            </div>
+          </div>
+
+          {rest.length > 0 && (
+            <div className="mt-6 flex flex-col">
+              {rest.map((item) => (
+                <div key={item.key} className="border-t border-line px-0.5 py-3">
+                  <div className="text-sm text-ink">
+                    {item.kind} · {item.title}
+                  </div>
+                  <div className="mt-0.5 text-xs text-muted-2">{item.sub}</div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {batchCount > 0 && (
+            <button
+              type="button"
+              onClick={onBatchConfirm}
+              disabled={batchPending}
+              className="mt-6 rounded-md border border-sage-tint-border bg-sage-tint px-3 py-1.5 text-[12.5px] text-sage-text transition-opacity hover:opacity-80 disabled:opacity-50"
+            >
+              {batchPending ? 'Applying…' : `Confirm all high-confidence (${batchCount})`}
+            </button>
+          )}
+        </>
+      ) : (
+        <div className="border-l-2 border-sage-soft pl-[18px]">
+          <div className="font-serif text-[19px] font-light text-sage">All caught up.</div>
+          <div className="mt-1.5 text-[13px] text-muted-2">Nothing left to review.</div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Add / edit transaction modals ────────────────────────────────────────────
+
+function AddTransactionModal({ open, onClose }: { open: boolean; onClose: () => void }) {
   const qc = useQueryClient();
   const { addToast } = useAppStore();
+  const { data: accounts } = useQuery({ queryKey: ['accounts'], queryFn: () => accountsApi.list() });
+  const { data: categories } = useQuery({ queryKey: ['categories'], queryFn: () => categoriesApi.list() });
   const [form, setForm] = useState({
-    account_id: accounts[0]?.id ?? '',
     date: format(new Date(), 'yyyy-MM-dd'),
+    merchant: '',
     amount: '',
-    merchant_name: '',
+    direction: 'expense' as 'expense' | 'income',
+    account_id: '',
     category_id: '',
     notes: '',
   });
 
   const mutation = useMutation({
     mutationFn: () => {
-      const amount = parseDecimalInput(form.amount);
-      if (amount === null) {
-        throw new Error('Enter a valid amount');
-      }
-
+      const parsed = parseDecimalInput(form.amount);
+      if (parsed === null || parsed <= 0) throw new Error('Enter a valid amount');
+      if (!form.account_id) throw new Error('Pick an account');
+      if (!form.merchant.trim()) throw new Error('Enter a merchant');
       return transactionsApi.createManual({
-        ...form,
-        amount,
-        original_name: form.merchant_name,
+        account_id: form.account_id,
+        date: form.date,
+        amount: form.direction === 'expense' ? -Math.abs(parsed) : Math.abs(parsed),
+        merchant_name: form.merchant.trim(),
+        original_name: form.merchant.trim(),
+        category_id: form.category_id || undefined,
+        notes: form.notes || undefined,
       });
     },
     onSuccess: () => {
@@ -96,667 +228,490 @@ function AddTransactionModal({
   });
 
   return (
-    <Modal open={open} onClose={onClose} title="Add Transaction">
-      <div className="space-y-3">
-        <div className="grid grid-cols-2 gap-3">
-          <div>
-            <label className="block text-xs text-muted mb-1">Date</label>
-            <input
-              type="date"
-              className="w-full bg-background border border-border rounded px-3 py-2 text-sm text-text font-mono focus:outline-none focus:ring-1 focus:ring-positive-5"
-              value={form.date}
-              onChange={(e) => setForm({ ...form, date: e.target.value })}
-            />
+    <Modal open={open} onClose={onClose} title="Add transaction">
+      <div className="space-y-4">
+        <div className="flex gap-4">
+          <div className="flex-1">
+            <label className="mz-label">Date</label>
+            <input type="date" className="mz-field" value={form.date} onChange={(e) => setForm({ ...form, date: e.target.value })} />
           </div>
-          <div>
-            <label className="block text-xs text-muted mb-1">Amount</label>
-            <input
-              type="number"
-              step="0.01"
-              className="w-full bg-background border border-border rounded px-3 py-2 text-sm text-text font-mono focus:outline-none focus:ring-1 focus:ring-positive-5"
-              value={form.amount}
-              onChange={(e) => setForm({ ...form, amount: e.target.value })}
-              placeholder="0.00"
-            />
+          <div className="flex-1">
+            <label className="mz-label">Amount</label>
+            <div className="flex gap-2">
+              <select
+                className="mz-field !w-[64px]"
+                value={form.direction}
+                onChange={(e) => setForm({ ...form, direction: e.target.value as 'expense' | 'income' })}
+              >
+                <option value="expense">−</option>
+                <option value="income">+</option>
+              </select>
+              <input
+                type="number"
+                className="mz-field tabular-nums"
+                placeholder="0.00"
+                value={form.amount}
+                onChange={(e) => setForm({ ...form, amount: e.target.value })}
+              />
+            </div>
           </div>
         </div>
         <div>
-          <label className="block text-xs text-muted mb-1">Merchant</label>
+          <label className="mz-label">Merchant</label>
           <input
-            className="w-full bg-background border border-border rounded px-3 py-2 text-sm text-text focus:outline-none focus:ring-1 focus:ring-positive-5"
-            value={form.merchant_name}
-            onChange={(e) => setForm({ ...form, merchant_name: e.target.value })}
-            placeholder="Amazon"
+            className="mz-field"
+            placeholder="Blue Bottle Coffee"
+            value={form.merchant}
+            onChange={(e) => setForm({ ...form, merchant: e.target.value })}
           />
         </div>
-        <div>
-          <label className="block text-xs text-muted mb-1">Account</label>
-          <select
-            className="w-full bg-background border border-border rounded px-3 py-2 text-sm text-text focus:outline-none focus:ring-1 focus:ring-positive-5"
-            value={form.account_id}
-            onChange={(e) => setForm({ ...form, account_id: e.target.value })}
-          >
-            {accounts.map((a) => (
-              <option key={a.id} value={a.id}>{a.account_name}</option>
-            ))}
-          </select>
+        <div className="flex gap-4">
+          <div className="flex-1">
+            <label className="mz-label">Account</label>
+            <select className="mz-field" value={form.account_id} onChange={(e) => setForm({ ...form, account_id: e.target.value })}>
+              <option value="">Pick an account…</option>
+              {(accounts ?? [])
+                .filter((a) => !a.is_hidden)
+                .map((a) => (
+                  <option key={a.id} value={a.id}>
+                    {a.account_name}
+                  </option>
+                ))}
+            </select>
+          </div>
+          <div className="flex-1">
+            <label className="mz-label">Category</label>
+            <select className="mz-field" value={form.category_id} onChange={(e) => setForm({ ...form, category_id: e.target.value })}>
+              <option value="">Uncategorized</option>
+              {categoryOptions(categories ?? [])}
+            </select>
+          </div>
         </div>
         <div>
-          <label className="block text-xs text-muted mb-1">Category</label>
-          <select
-            className="w-full bg-background border border-border rounded px-3 py-2 text-sm text-text focus:outline-none focus:ring-1 focus:ring-positive-5"
-            value={form.category_id}
-            onChange={(e) => setForm({ ...form, category_id: e.target.value })}
-          >
-            <option value="">Uncategorized</option>
-            {categories.map((c) => (
-              <option key={c.id} value={c.id}>{c.name}</option>
-            ))}
-          </select>
+          <label className="mz-label">Notes</label>
+          <input className="mz-field" value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} />
         </div>
-        <div>
-          <label className="block text-xs text-muted mb-1">Notes</label>
-          <input
-            className="w-full bg-background border border-border rounded px-3 py-2 text-sm text-text focus:outline-none focus:ring-1 focus:ring-positive-5"
-            value={form.notes}
-            onChange={(e) => setForm({ ...form, notes: e.target.value })}
-            placeholder="Optional"
-          />
-        </div>
-        <div className="flex gap-3 pt-1">
-          <button
-            className="flex-1 py-2 text-sm bg-text text-surface font-medium rounded hover:opacity-90"
-            onClick={() => mutation.mutate()}
-            disabled={mutation.isPending}
-          >
-            {mutation.isPending ? 'Adding...' : 'Add Transaction'}
-          </button>
-          <button
-            className="px-4 py-2 text-sm border border-border rounded text-muted hover:text-text"
-            onClick={onClose}
-          >
-            Cancel
-          </button>
+        <div className="flex items-center gap-5 pt-1">
+          <InkButton onClick={() => mutation.mutate()} disabled={mutation.isPending}>
+            {mutation.isPending ? 'Adding…' : 'Add transaction'}
+          </InkButton>
+          <TextButton onClick={onClose}>Cancel</TextButton>
         </div>
       </div>
     </Modal>
   );
 }
 
-export function Transactions() {
+function EditTransactionModal({ transaction, onClose }: { transaction: Transaction | null; onClose: () => void }) {
   const qc = useQueryClient();
-  const navigate = useNavigate();
   const { addToast } = useAppStore();
-  const [page, setPage] = useState(1);
-  const [showAddModal, setShowAddModal] = useState(false);
-  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
-  const [showFilters, setShowFilters] = useState(false);
-  const [sortBy, setSortBy] = useState<SortCol>('date');
-  const [sortDir, setSortDir] = useState<SortDir>('desc');
+  const { data: categories } = useQuery({ queryKey: ['categories'], queryFn: () => categoriesApi.list() });
+  const [categoryId, setCategoryId] = useState('');
+  const [notes, setNotes] = useState('');
 
-  const DEFAULT_START = format(subMonths(new Date(), 1), 'yyyy-MM-dd');
-  const DEFAULT_END = format(new Date(), 'yyyy-MM-dd');
+  useEffect(() => {
+    if (transaction) {
+      setCategoryId(transaction.category_id ?? '');
+      setNotes(transaction.notes ?? '');
+    }
+  }, [transaction]);
 
-  const [filters, setFilters] = useState<TransactionFilters>({
-    startDate: DEFAULT_START,
-    endDate: DEFAULT_END,
-    search: '',
-    type: '',
-    pending: undefined,
-    recurring: undefined,
-    uncategorized: undefined,
-  });
-
-  const queryFilters = { ...filters, page, limit: PAGE_SIZE, sortBy, sortDir };
-
-  const { data: txData, isLoading, isError } = useQuery({
-    queryKey: ['transactions', queryFilters],
-    queryFn: () => transactionsApi.list(queryFilters),
-  });
-
-  const { data: reviewSummary } = useQuery({
-    queryKey: ['transactions', 'review'],
-    queryFn: transactionsApi.review,
-  });
-
-  const { data: accounts = [] } = useQuery({
-    queryKey: ['accounts'],
-    queryFn: accountsApi.list,
-  });
-
-  const { data: categoriesTree = [] } = useQuery({
-    queryKey: ['categories'],
-    queryFn: categoriesApi.list,
-  });
-  const categories = flattenCategories(categoriesTree);
-
-  const updateCatMutation = useMutation({
-    mutationFn: ({ id, categoryId }: { id: string; categoryId: string }) =>
-      transactionsApi.update(id, { category_id: categoryId }),
-    onSuccess: (result) => {
-      invalidateFinancialData(qc);
-      addToast({
-        type: 'success',
-        message: categoryUpdateMessage(result.categorization.applied),
-      });
-    },
-    onError: (err: Error) => addToast({ type: 'error', message: err.message }),
-  });
-
-  const updateMerchantMutation = useMutation({
-    mutationFn: ({ id, merchant_name }: { id: string; merchant_name: string }) =>
-      transactionsApi.update(id, { merchant_name }),
-    onSuccess: () => invalidateFinancialData(qc),
-    onError: (err: Error) => addToast({ type: 'error', message: err.message }),
-  });
-
-  const updateNoteMutation = useMutation({
-    mutationFn: ({ id, notes }: { id: string; notes: string }) =>
-      transactionsApi.update(id, { notes }),
-    onSuccess: () => invalidateFinancialData(qc),
-  });
-
-  const deleteMutation = useMutation({
-    mutationFn: (id: string) => transactionsApi.delete(id),
-    onSuccess: () => {
-      invalidateFinancialData(qc);
-      setSelectedIds(new Set());
-      addToast({ type: 'success', message: 'Transaction deleted' });
-    },
-    onError: (err: Error) => addToast({ type: 'error', message: err.message }),
-  });
-
-  const bulkCatMutation = useMutation({
-    mutationFn: ({ ids, categoryId }: { ids: string[]; categoryId: string }) =>
-      transactionsApi.bulkCategory(ids, categoryId),
-    onSuccess: () => {
-      invalidateFinancialData(qc);
-      setSelectedIds(new Set());
-      addToast({ type: 'success', message: 'Categories updated' });
-    },
-  });
-
-  const createRuleMutation = useMutation({
-    mutationFn: ({ pattern, categoryId }: { pattern: string; categoryId: string }) =>
-      rulesApi.create({
-        pattern,
-        category_id: categoryId,
-        apply_existing: true,
+  const save = useMutation({
+    mutationFn: () =>
+      transactionsApi.update(transaction!.id, {
+        category_id: categoryId || null,
+        notes: notes || null,
       }),
-    onSuccess: (result) => {
+    onSuccess: () => {
       invalidateFinancialData(qc);
-      addToast({
-        type: 'success',
-        message: result.applied > 0
-          ? `Rule saved and applied to ${result.applied} transactions`
-          : 'Rule saved',
-      });
+      addToast({ type: 'success', message: 'Transaction updated' });
+      onClose();
     },
     onError: (err: Error) => addToast({ type: 'error', message: err.message }),
   });
 
-  const createRuleFromTransaction = (merchantName: string | null | undefined, categoryId: string | null | undefined) => {
-    const pattern = merchantName?.trim();
-    if (!pattern || !categoryId) return;
-    createRuleMutation.mutate({ pattern, categoryId });
-  };
+  const remove = useMutation({
+    mutationFn: () => transactionsApi.delete(transaction!.id),
+    onSuccess: () => {
+      invalidateFinancialData(qc);
+      addToast({ type: 'success', message: 'Transaction deleted' });
+      onClose();
+    },
+    onError: (err: Error) => addToast({ type: 'error', message: err.message }),
+  });
 
-  const applyRuleSuggestion = (suggestion: MerchantRuleSuggestion) => {
-    createRuleMutation.mutate({
-      pattern: suggestion.pattern,
-      categoryId: suggestion.category_id,
-    });
-  };
-
-  const askAdvisorAboutTransaction = (transaction: Transaction) => {
-    navigate('/advisor', {
-      state: advisorRouteState(buildTransactionAdvisorPrompt(transaction)),
-    });
-  };
-
-  const txs = txData?.data ?? [];
-  const total = txData?.total ?? 0;
-  const totalPages = Math.ceil(total / PAGE_SIZE);
-
-  const toggleSelect = (id: string) => {
-    setSelectedIds((prev) => {
-      const next = new Set(prev);
-      next.has(id) ? next.delete(id) : next.add(id);
-      return next;
-    });
-  };
-
-  const selectAll = () => {
-    if (selectedIds.size === txs.length) {
-      setSelectedIds(new Set());
-    } else {
-      setSelectedIds(new Set(txs.map((t) => t.id)));
-    }
-  };
-
-  const handleSort = (col: SortCol) => {
-    if (sortBy === col) {
-      setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'));
-    } else {
-      setSortBy(col);
-      setSortDir('desc');
-    }
-  };
-
-  const clearFilter = (key: keyof TransactionFilters) => {
-    setFilters((f) => ({
-      ...f,
-      [key]: key === 'pending' || key === 'recurring' || key === 'uncategorized' ? undefined : '',
-    }));
-    setPage(1);
-  };
-
-  const resetFilters = () => {
-    setFilters({
-      startDate: DEFAULT_START,
-      endDate: DEFAULT_END,
-      search: '',
-      type: '',
-      pending: undefined,
-      recurring: undefined,
-      uncategorized: undefined,
-    });
-    setPage(1);
-  };
-
-  const reviewUncategorized = () => {
-    setFilters({
-      startDate: '',
-      endDate: '',
-      search: '',
-      type: '',
-      pending: false,
-      recurring: undefined,
-      uncategorized: true,
-    });
-    setPage(1);
-    setSelectedIds(new Set());
-  };
-
-  const reviewPending = () => {
-    setFilters({
-      startDate: '',
-      endDate: '',
-      search: '',
-      type: '',
-      pending: true,
-      recurring: undefined,
-      uncategorized: undefined,
-    });
-    setPage(1);
-    setSelectedIds(new Set());
-  };
-
-  const selectReviewQueue = (queueId: TransactionReviewQueueId) => {
-    navigate(`/review?queue=${queueId}`);
-  };
-
-  const hasSearch = !!filters.search;
-  const hasType = !!filters.type;
-  const hasPending = filters.pending !== undefined;
-  const hasRecurring = filters.recurring !== undefined;
-  const hasUncategorized = filters.uncategorized !== undefined;
-  const isDefaultDateRange = filters.startDate === DEFAULT_START && filters.endDate === DEFAULT_END;
-  const hasDateRange = !isDefaultDateRange;
-  const hasActiveFilters = hasSearch || hasType || hasPending || hasRecurring || hasUncategorized || hasDateRange;
-  const dateRangeLabel = `${filters.startDate || 'Any'} → ${filters.endDate || 'Any'}`;
-  const hasNoAccountSetup = accounts.length === 0 && !hasActiveFilters;
-  const emptyTitle = hasNoAccountSetup
-    ? 'No accounts connected'
-    : hasActiveFilters
-      ? 'No transactions match these filters'
-      : 'No transactions yet';
-  const emptyDescription = hasNoAccountSetup
-    ? 'Connect a bank account or create a manual account before reviewing transactions.'
-    : hasActiveFilters
-      ? 'Clear the filters to return to the full ledger.'
-      : 'Add a manual transaction or connect another account to start building reports.';
-  const emptyAction = hasNoAccountSetup
-    ? () => navigate('/accounts?connect=bank')
-    : hasActiveFilters
-      ? resetFilters
-      : () => setShowAddModal(true);
-  const emptyActionLabel = hasNoAccountSetup
-    ? 'Connect Account'
-    : hasActiveFilters
-      ? 'Clear Filters'
-      : 'Add Transaction';
-  const emptySecondaryAction = hasNoAccountSetup
-    ? () => navigate('/accounts?manual=1')
-    : hasActiveFilters
-      ? () => setShowAddModal(true)
-      : () => navigate('/accounts?connect=bank');
-  const emptySecondaryActionLabel = hasNoAccountSetup
-    ? 'Add Manual Account'
-    : hasActiveFilters
-      ? 'Add Transaction'
-      : 'Connect Account';
+  if (!transaction) return null;
 
   return (
-    <div className="p-6 flex flex-col h-full">
-      {/* Header */}
-      <div className="flex items-center gap-2 mb-4 flex-wrap">
-        <h1 className="text-xl font-semibold text-text mr-auto">Transactions</h1>
-        {/* Active filter chips */}
-        {hasDateRange && (
-          <FilterChip
-            label={dateRangeLabel}
-            onRemove={() => { setFilters((f) => ({ ...f, startDate: DEFAULT_START, endDate: DEFAULT_END })); setPage(1); }}
-          />
-        )}
-        {hasSearch && <FilterChip label={`"${filters.search}"`} onRemove={() => clearFilter('search')} />}
-        {hasType && <FilterChip label={filters.type as string} onRemove={() => clearFilter('type')} />}
-        {hasPending && <FilterChip label={filters.pending ? 'Pending' : 'Posted'} onRemove={() => clearFilter('pending')} />}
-        {hasRecurring && <FilterChip label={filters.recurring ? 'Recurring' : 'One-time'} onRemove={() => clearFilter('recurring')} />}
-        {hasUncategorized && <FilterChip label={filters.uncategorized ? 'Needs category' : 'Categorized'} onRemove={() => clearFilter('uncategorized')} />}
-
-        <button
-          className={`flex items-center gap-1.5 text-xs border rounded px-3 py-1.5 transition-colors ${
-            showFilters
-              ? 'bg-positive-10 text-positive border-positive/40'
-              : 'text-muted border-border hover:text-text'
-          }`}
-          onClick={() => setShowFilters((v) => !v)}
-        >
-          <SlidersHorizontal size={13} /> Filters
-        </button>
-        <button
-          className="flex items-center gap-1.5 text-xs text-muted border border-border rounded px-3 py-1.5 hover:text-text"
-          onClick={() =>
-            settingsApi.exportCsv().catch((err: unknown) =>
-              addToast({ type: 'error', message: err instanceof Error ? err.message : 'Export failed' })
-            )
-          }
-        >
-          <Download size={13} /> Export
-        </button>
-        <button
-          className="flex items-center gap-1.5 text-xs bg-text text-surface font-medium rounded px-3 py-1.5 hover:opacity-90"
-          onClick={() => setShowAddModal(true)}
-        >
-          <Plus size={13} /> Add Transaction
-        </button>
-      </div>
-
-      {/* Collapsible filter panel */}
-      {showFilters && (
-        <div className="flex flex-wrap gap-2 mb-4 p-3 bg-surface shadow-sm border border-border rounded">
-          <input
-            type="date"
-            className="bg-background border border-border rounded px-2 py-1 text-xs text-text font-mono focus:outline-none focus:ring-1 focus:ring-positive-5"
-            value={filters.startDate ?? ''}
-            onChange={(e) => { setFilters({ ...filters, startDate: e.target.value }); setPage(1); }}
-          />
-          <span className="text-muted text-xs self-center">to</span>
-          <input
-            type="date"
-            className="bg-background border border-border rounded px-2 py-1 text-xs text-text font-mono focus:outline-none focus:ring-1 focus:ring-positive-5"
-            value={filters.endDate ?? ''}
-            onChange={(e) => { setFilters({ ...filters, endDate: e.target.value }); setPage(1); }}
-          />
-          <input
-            type="text"
-            placeholder="Search..."
-            className="bg-background border border-border rounded px-2 py-1 text-xs text-text focus:outline-none focus:ring-1 focus:ring-positive-5 flex-1 min-w-[160px]"
-            value={filters.search ?? ''}
-            onChange={(e) => { setFilters({ ...filters, search: e.target.value }); setPage(1); }}
-          />
-          <select
-            className="bg-background border border-border rounded px-2 py-1 text-xs text-text focus:outline-none focus:ring-1 focus:ring-positive-5"
-            value={filters.type ?? ''}
-            onChange={(e) => { setFilters({ ...filters, type: e.target.value }); setPage(1); }}
-          >
-            <option value="">All Types</option>
-            <option value="income">Income</option>
-            <option value="expense">Expense</option>
-          </select>
-          <select
-            className="bg-background border border-border rounded px-2 py-1 text-xs text-text focus:outline-none focus:ring-1 focus:ring-positive-5"
-            value={filters.pending === undefined ? '' : String(filters.pending)}
-            onChange={(e) => {
-              const v = e.target.value;
-              setFilters({ ...filters, pending: v === '' ? undefined : v === 'true' });
-              setPage(1);
-            }}
-          >
-            <option value="">All Status</option>
-            <option value="true">Pending</option>
-            <option value="false">Posted</option>
-          </select>
-          <select
-            className="bg-background border border-border rounded px-2 py-1 text-xs text-text focus:outline-none focus:ring-1 focus:ring-positive-5"
-            value={filters.recurring === undefined ? '' : String(filters.recurring)}
-            onChange={(e) => {
-              const v = e.target.value;
-              setFilters({ ...filters, recurring: v === '' ? undefined : v === 'true' });
-              setPage(1);
-            }}
-          >
-            <option value="">All</option>
-            <option value="true">Recurring</option>
-            <option value="false">One-time</option>
-          </select>
-          <select
-            className="bg-background border border-border rounded px-2 py-1 text-xs text-text focus:outline-none focus:ring-1 focus:ring-positive-5"
-            value={filters.uncategorized === undefined ? '' : String(filters.uncategorized)}
-            onChange={(e) => {
-              const v = e.target.value;
-              setFilters({ ...filters, uncategorized: v === '' ? undefined : v === 'true' });
-              setPage(1);
-            }}
-          >
-            <option value="">All Categories</option>
-            <option value="true">Needs Category</option>
-            <option value="false">Categorized</option>
-          </select>
-          {hasActiveFilters && (
-            <button
-              className="flex items-center gap-1 text-xs text-muted hover:text-text"
-              onClick={resetFilters}
-            >
-              <X size={12} /> Clear All
-            </button>
-          )}
-        </div>
-      )}
-
-      <TransactionReviewPanel
-        summary={reviewSummary}
-        onQueueSelect={selectReviewQueue}
-        onApplySuggestion={applyRuleSuggestion}
-        applyingPattern={createRuleMutation.variables?.pattern ?? null}
-      />
-
-      {/* Bulk Action Bar */}
-      {selectedIds.size > 0 && (
-        <div className="flex items-center gap-3 mb-3 px-3 py-2 bg-positive-10 border border-positive/30 rounded sticky top-0 z-10">
-          <input
-            type="checkbox"
-            className="accent-positive"
-            checked={selectedIds.size === txs.length && txs.length > 0}
-            onChange={selectAll}
-          />
-          <span className="text-xs text-positive font-medium">{selectedIds.size} selected</span>
-          <div className="ml-auto flex gap-2 items-center">
-            <BulkCategoryDropdown
-              categories={categories}
-              onSelect={(catId) => bulkCatMutation.mutate({ ids: Array.from(selectedIds), categoryId: catId })}
-            />
-            <button
-              className="text-xs text-muted hover:text-text"
-              onClick={() => setSelectedIds(new Set())}
-            >
-              Clear
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* Table */}
-      <div className="bg-surface shadow-sm border border-border rounded flex-1 overflow-hidden flex flex-col">
-        <div className="overflow-y-auto flex-1">
-          <table className="w-full text-xs">
-            <thead className="sticky top-0 bg-surface border-b border-border z-10">
-              <tr>
-                <th className="w-8 px-3 py-2.5">
-                  <input
-                    type="checkbox"
-                    className="accent-positive"
-                    checked={selectedIds.size === txs.length && txs.length > 0}
-                    onChange={selectAll}
-                  />
-                </th>
-                <SortableHeader label="Date" col="date" sortBy={sortBy} sortDir={sortDir} onSort={handleSort} />
-                <th className="text-left px-3 py-2.5 text-xs text-muted font-medium uppercase tracking-wider">Account</th>
-                <SortableHeader label="Merchant" col="merchant" sortBy={sortBy} sortDir={sortDir} onSort={handleSort} />
-                <th className="text-left px-3 py-2.5 text-xs text-muted font-medium uppercase tracking-wider">Category</th>
-                <SortableHeader label="Amount" col="amount" sortBy={sortBy} sortDir={sortDir} onSort={handleSort} />
-                <th className="text-left px-3 py-2.5 text-xs text-muted font-medium uppercase tracking-wider">Notes</th>
-                <th className="w-8" />
-              </tr>
-            </thead>
-            <tbody>
-              {isLoading ? (
-                <SkeletonList rows={12} cols={8} />
-              ) : isError ? (
-                <tr>
-                  <td colSpan={8} className="px-3 py-12 text-center text-muted text-sm">
-                    Failed to load transactions
-                  </td>
-                </tr>
-              ) : (
-                txs.map((tx) => (
-                  <tr key={tx.id} className={`border-b border-border hover:bg-black/5 group ${selectedIds.has(tx.id) ? 'bg-positive/5' : ''}`}>
-                    <td className="px-3 py-2.5">
-                      <input
-                        type="checkbox"
-                        className="accent-positive"
-                        checked={selectedIds.has(tx.id)}
-                        onChange={() => toggleSelect(tx.id)}
-                      />
-                    </td>
-                    <td className="px-3 py-2.5 font-mono text-muted whitespace-nowrap">{formatDate(tx.date)}</td>
-                    <td className="px-3 py-2.5 text-muted max-w-[120px]">
-                      <span className="truncate block" title={tx.account_name ?? undefined}>{tx.account_name}</span>
-                    </td>
-                    <td className="px-3 py-2.5 text-text max-w-[180px]">
-                      <div className="flex items-center gap-1.5">
-                        {Boolean(tx.pending) && (
-                          <span className="w-1.5 h-1.5 rounded-full bg-warning flex-shrink-0" title="Pending" />
-                        )}
-                        {tx.recurring_id && <RefreshCw size={10} className="text-muted flex-shrink-0" />}
-                        <InlineEdit
-                          value={tx.merchant_name || tx.original_name || ''}
-                          onSave={(v) => updateMerchantMutation.mutate({ id: tx.id, merchant_name: v })}
-                          className="truncate text-xs"
-                          inputClassName="w-32"
-                        />
-                      </div>
-                    </td>
-                    <td className="px-3 py-2.5">
-                      <div className="flex items-center gap-2">
-                        <CategoryDropdown
-                          value={tx.category_id}
-                          categories={categories}
-                          onChange={(catId) => updateCatMutation.mutate({ id: tx.id, categoryId: catId })}
-                        />
-                        {tx.category_id && (tx.merchant_name || tx.original_name) && (
-                          <button
-                            className="text-muted hover:text-warning opacity-0 group-hover:opacity-100 transition-colors disabled:opacity-30"
-                            onClick={() => createRuleFromTransaction(tx.merchant_name || tx.original_name, tx.category_id)}
-                            disabled={createRuleMutation.isPending}
-                            title="Create merchant rule"
-                          >
-                            <Sparkles size={12} />
-                          </button>
-                        )}
-                      </div>
-                    </td>
-                    <td className="px-3 py-2.5">
-                      <AmountBadge amount={tx.amount} />
-                    </td>
-                    <td className="px-3 py-2.5 max-w-[160px]">
-                      <InlineEdit
-                        value={tx.notes ?? ''}
-                        onSave={(v) => updateNoteMutation.mutate({ id: tx.id, notes: v })}
-                        placeholder="Add note..."
-                        className="text-muted text-xs truncate"
-                        inputClassName="w-32"
-                      />
-                    </td>
-                    <td className="px-2 py-2.5">
-                      <div className="flex items-center justify-end gap-1">
-                        <button
-                          className="text-muted hover:text-info transition-colors opacity-0 group-hover:opacity-100"
-                          onClick={() => askAdvisorAboutTransaction(tx)}
-                          title="Ask advisor"
-                        >
-                          <Sparkles size={12} />
-                        </button>
-                        {Boolean(tx.is_manual) && (
-                          <button
-                            className="text-muted hover:text-negative transition-colors opacity-0 group-hover:opacity-100"
-                            onClick={() => deleteMutation.mutate(tx.id)}
-                          >
-                            <Trash2 size={12} />
-                          </button>
-                        )}
-                      </div>
-                    </td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-          {!isLoading && !isError && txs.length === 0 && (
-            <EmptyState
-              icon={FileText}
-              title={emptyTitle}
-              description={emptyDescription}
-              action={emptyAction}
-              actionLabel={emptyActionLabel}
-              secondaryAction={emptySecondaryAction}
-              secondaryActionLabel={emptySecondaryActionLabel}
-            />
-          )}
-        </div>
-
-        {/* Pagination */}
-        <div className="flex items-center justify-between px-4 py-2.5 border-t border-border">
-          <span className="text-xs text-muted font-mono">
-            {total > 0 ? `${(page - 1) * PAGE_SIZE + 1}-${Math.min(page * PAGE_SIZE, total)} of ${total}` : '0 results'}
+    <Modal open onClose={onClose} title={merchantLabel(transaction)}>
+      <div className="space-y-4">
+        <div className="flex items-baseline justify-between">
+          <span className="text-[13px] text-muted">
+            {format(parseISO(transaction.date), 'MMM d, yyyy')} · {transaction.account_name}
           </span>
-          <div className="flex items-center gap-1">
-            <button
-              className="p-1 text-muted hover:text-text disabled:opacity-30"
-              disabled={page === 1}
-              onClick={() => setPage(page - 1)}
-            >
-              <ChevronLeft size={16} />
-            </button>
-            <span className="text-xs text-muted px-2">{page} / {Math.max(totalPages, 1)}</span>
-            <button
-              className="p-1 text-muted hover:text-text disabled:opacity-30"
-              disabled={page >= totalPages}
-              onClick={() => setPage(page + 1)}
-            >
-              <ChevronRight size={16} />
-            </button>
-          </div>
+          <span className={`font-serif text-[22px] tabular-nums ${transaction.amount > 0 ? 'text-sage-deep' : 'text-ink'}`}>
+            {formatCurrency(transaction.amount, { showSign: transaction.amount > 0 })}
+          </span>
+        </div>
+        <div>
+          <label className="mz-label">Category</label>
+          <select className="mz-field" value={categoryId} onChange={(e) => setCategoryId(e.target.value)}>
+            <option value="">Uncategorized</option>
+            {categoryOptions(categories ?? [])}
+          </select>
+        </div>
+        <div>
+          <label className="mz-label">Notes</label>
+          <input className="mz-field" value={notes} onChange={(e) => setNotes(e.target.value)} />
+        </div>
+        <div className="flex items-center gap-5 pt-1">
+          <InkButton onClick={() => save.mutate()} disabled={save.isPending}>
+            {save.isPending ? 'Saving…' : 'Save'}
+          </InkButton>
+          <TextButton onClick={onClose}>Cancel</TextButton>
+          {transaction.is_manual && (
+            <TextButton onClick={() => remove.mutate()} disabled={remove.isPending} className="ml-auto hover:!text-clay">
+              Delete
+            </TextButton>
+          )}
         </div>
       </div>
+    </Modal>
+  );
+}
 
-      <AddTransactionModal
-        open={showAddModal}
-        onClose={() => setShowAddModal(false)}
-        accounts={accounts}
-        categories={categories}
+// ─── Main view ────────────────────────────────────────────────────────────────
+
+export function Transactions() {
+  const qc = useQueryClient();
+  const { addToast } = useAppStore();
+
+  const [search, setSearch] = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
+  const [accountFilter, setAccountFilter] = useState('');
+  const [categoryFilter, setCategoryFilter] = useState('');
+  const [range, setRange] = useState<RangeId>('this-month');
+  const [reviewOnly, setReviewOnly] = useState(false);
+  const [showAddModal, setShowAddModal] = useState(false);
+  const [editing, setEditing] = useState<Transaction | null>(null);
+  const [skippedKeys, setSkippedKeys] = useState<Set<string>>(new Set());
+
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedSearch(search.trim()), 250);
+    return () => clearTimeout(t);
+  }, [search]);
+
+  const filters = useMemo(
+    () => ({
+      ...rangeDates(range),
+      search: debouncedSearch || undefined,
+      accountId: accountFilter ? [accountFilter] : undefined,
+      categoryId: categoryFilter ? [categoryFilter] : undefined,
+      uncategorized: reviewOnly || undefined,
+      reviewStatus: reviewOnly ? ('open' as const) : undefined,
+      limit: 200,
+    }),
+    [range, debouncedSearch, accountFilter, categoryFilter, reviewOnly]
+  );
+
+  const { data: page, isLoading } = useQuery({
+    queryKey: ['transactions', filters],
+    queryFn: () => transactionsApi.list(filters),
+  });
+  const { data: reviewSummary } = useQuery({ queryKey: ['transactions', 'review'], queryFn: () => transactionsApi.review() });
+  const { data: uncategorizedPage } = useQuery({
+    queryKey: ['transactions', 'review', 'uncategorized'],
+    queryFn: () => transactionsApi.list({ uncategorized: true, reviewStatus: 'open', limit: 10 }),
+  });
+  const { data: accounts } = useQuery({ queryKey: ['accounts'], queryFn: () => accountsApi.list() });
+  const { data: categories } = useQuery({ queryKey: ['categories'], queryFn: () => categoriesApi.list() });
+
+  const transactions = page?.data ?? [];
+  const totalCount = page?.total ?? 0;
+  const reviewCount = reviewSummary?.total_open ?? 0;
+
+  const dayGroups = useMemo(() => {
+    const map = new Map<string, Transaction[]>();
+    for (const t of transactions) {
+      const list = map.get(t.date) ?? [];
+      list.push(t);
+      map.set(t.date, list);
+    }
+    return [...map.entries()].sort((a, b) => b[0].localeCompare(a[0]));
+  }, [transactions]);
+
+  // ── Review mutations ──
+  const invalidateReview = () => {
+    qc.invalidateQueries({ queryKey: ['transactions'] });
+    qc.invalidateQueries({ queryKey: ['recurring'] });
+  };
+  const skip = (key: string) => setSkippedKeys((prev) => new Set(prev).add(key));
+  const onError = (err: Error) => addToast({ type: 'error', message: err.message });
+
+  const confirmDraft = useMutation({ mutationFn: (d: AdvisorDraftAction) => aiApi.confirmDraft(d), onSuccess: invalidateReview, onError });
+  const dismissDraft = useMutation({ mutationFn: (id: string) => aiApi.dismissDraft(id), onSuccess: invalidateReview, onError });
+  const categorize = useMutation({
+    mutationFn: ({ id, categoryId }: { id: string; categoryId: string }) => transactionsApi.update(id, { category_id: categoryId }),
+    onSuccess: () => invalidateFinancialData(qc),
+    onError,
+  });
+  const createRule = useMutation({
+    mutationFn: (s: MerchantRuleSuggestion) => rulesApi.create({ pattern: s.pattern, category_id: s.category_id, apply_existing: true }),
+    onSuccess: () => invalidateFinancialData(qc),
+    onError,
+  });
+  const confirmRecurring = useMutation({ mutationFn: (p: RecurringPattern) => recurringApi.confirm(p.id), onSuccess: invalidateReview, onError });
+  const dismissRecurring = useMutation({ mutationFn: (p: RecurringPattern) => recurringApi.dismiss(p.id), onSuccess: invalidateReview, onError });
+  const dismissDuplicate = useMutation({
+    mutationFn: (g: DuplicateCandidateGroup) => transactionsApi.dismissDuplicateGroup(g.group_id),
+    onSuccess: invalidateReview,
+    onError,
+  });
+  const confirmTransfer = useMutation({
+    mutationFn: (p: TransferCandidatePair) => transactionsApi.confirmTransferPair(p.pair_id),
+    onSuccess: invalidateReview,
+    onError,
+  });
+  const dismissTransfer = useMutation({
+    mutationFn: (p: TransferCandidatePair) => transactionsApi.dismissTransferPair(p.pair_id),
+    onSuccess: invalidateReview,
+    onError,
+  });
+
+  const queueItems = useMemo<QueueItem[]>(() => {
+    const items: QueueItem[] = [];
+
+    for (const draft of reviewSummary?.ai_drafts ?? []) {
+      items.push({
+        key: `draft:${draft.id}`,
+        kind: 'Suggestion',
+        title: draft.label,
+        sub: draft.summary,
+        primaryLabel: 'Confirm',
+        onPrimary: () => confirmDraft.mutate(draft),
+        secondaryLabel: 'Dismiss',
+        onSecondary: () => dismissDraft.mutate(draft.id),
+      });
+    }
+    for (const t of uncategorizedPage?.data ?? []) {
+      items.push({
+        key: `categorize:${t.id}`,
+        kind: 'Categorize',
+        title: `${merchantLabel(t)} · ${formatCurrency(t.amount)}`,
+        sub: `${format(parseISO(t.date), 'MMM d')} · ${t.account_name ?? 'unknown account'}`,
+        primaryLabel: 'Confirm',
+        onPrimary: () => {},
+        needsCategory: true,
+        onPickCategory: (categoryId) => categorize.mutate({ id: t.id, categoryId }),
+        secondaryLabel: 'Skip',
+        onSecondary: () => skip(`categorize:${t.id}`),
+      });
+    }
+    for (const s of reviewSummary?.rule_suggestions ?? []) {
+      const key = `rule:${s.pattern}:${s.category_id}`;
+      items.push({
+        key,
+        kind: 'New rule',
+        title: `${s.pattern} → ${s.category_name}`,
+        sub: `applies to ${s.affected_transaction_ids.length} transaction${s.affected_transaction_ids.length === 1 ? '' : 's'}`,
+        primaryLabel: 'Confirm',
+        onPrimary: () => createRule.mutate(s),
+        secondaryLabel: 'Skip',
+        onSecondary: () => skip(key),
+      });
+    }
+    for (const p of reviewSummary?.recurring_candidates ?? []) {
+      items.push({
+        key: `recurring:${p.id}`,
+        kind: 'Confirm recurring',
+        title: `${p.merchant_name} · ${formatCurrency(p.average_amount)}`,
+        sub: `${p.frequency} · seen ${p.transaction_count} times`,
+        primaryLabel: 'Confirm',
+        onPrimary: () => confirmRecurring.mutate(p),
+        secondaryLabel: 'Not recurring',
+        onSecondary: () => dismissRecurring.mutate(p),
+      });
+    }
+    for (const g of reviewSummary?.duplicate_candidates ?? []) {
+      items.push({
+        key: `dupe:${g.group_id}`,
+        kind: 'Possible duplicate',
+        title: `${g.merchant_name} · ${formatCurrency(g.amount)}`,
+        sub: `${format(parseISO(g.date), 'MMM d')} · ${g.count} identical charges on ${g.account_name}`,
+        primaryLabel: 'Keep both',
+        onPrimary: () => dismissDuplicate.mutate(g),
+        secondaryLabel: 'Skip',
+        onSecondary: () => skip(`dupe:${g.group_id}`),
+      });
+    }
+    for (const p of reviewSummary?.transfer_candidates ?? []) {
+      items.push({
+        key: `transfer:${p.pair_id}`,
+        kind: 'Transfer pair',
+        title: `${formatCurrency(Math.abs(p.amount))} · ${p.from_account_name} → ${p.to_account_name}`,
+        sub: `${format(parseISO(p.date), 'MMM d')} · looks like a transfer, not spending`,
+        primaryLabel: 'Confirm',
+        onPrimary: () => confirmTransfer.mutate(p),
+        secondaryLabel: 'Not a transfer',
+        onSecondary: () => dismissTransfer.mutate(p),
+      });
+    }
+
+    return items.filter((i) => !skippedKeys.has(i.key));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [reviewSummary, uncategorizedPage, skippedKeys]);
+
+  // Batch: apply all high-confidence rule suggestions in one go.
+  const highConfidenceRules = (reviewSummary?.rule_suggestions ?? []).filter((s) => s.confidence >= 0.9);
+  const batchConfirm = useMutation({
+    mutationFn: async () => {
+      await Promise.allSettled(
+        highConfidenceRules.map((s) => rulesApi.create({ pattern: s.pattern, category_id: s.category_id, apply_existing: true }))
+      );
+    },
+    onSuccess: () => {
+      invalidateFinancialData(qc);
+      addToast({ type: 'success', message: `Applied ${highConfidenceRules.length} rule${highConfidenceRules.length === 1 ? '' : 's'}` });
+    },
+    onError,
+  });
+
+  return (
+    <Screen>
+      <ScreenHeader
+        title="Transactions"
+        sub={
+          <>
+            <span className="tabular-nums">{totalCount.toLocaleString()}</span> transaction{totalCount === 1 ? '' : 's'} ·{' '}
+            {RANGES.find((r) => r.id === range)?.label.toLowerCase()}
+          </>
+        }
+        actions={
+          <button type="button" onClick={() => setShowAddModal(true)} className="text-[13.5px] text-ink transition-opacity hover:opacity-75">
+            + Add transaction
+          </button>
+        }
+        className="mb-6"
       />
-    </div>
+
+      {/* Controls row */}
+      <div className="mb-6 flex flex-shrink-0 flex-wrap items-center gap-5">
+        <div className="flex max-w-[420px] flex-1 items-center gap-2.5 border-b border-line-3 px-0.5 py-2">
+          <span className="text-sm text-muted-2">⌕</span>
+          <input
+            className="w-full border-none bg-transparent p-0 text-sm text-ink placeholder:text-muted-2 focus:outline-none focus:ring-0"
+            placeholder="Search merchant, note, or amount"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+          />
+        </div>
+        <select
+          className="cursor-pointer border-none bg-transparent p-0 pr-7 text-[13.5px] text-muted transition-colors hover:text-ink focus:ring-0"
+          value={accountFilter}
+          onChange={(e) => setAccountFilter(e.target.value)}
+        >
+          <option value="">All accounts</option>
+          {(accounts ?? [])
+            .filter((a) => !a.is_hidden)
+            .map((a) => (
+              <option key={a.id} value={a.id}>
+                {a.account_name}
+              </option>
+            ))}
+        </select>
+        <select
+          className="cursor-pointer border-none bg-transparent p-0 pr-7 text-[13.5px] text-muted transition-colors hover:text-ink focus:ring-0"
+          value={categoryFilter}
+          onChange={(e) => setCategoryFilter(e.target.value)}
+        >
+          <option value="">Category</option>
+          {categoryOptions(categories ?? [])}
+        </select>
+        <select
+          className="cursor-pointer border-none bg-transparent p-0 pr-7 text-[13.5px] text-muted transition-colors hover:text-ink focus:ring-0"
+          value={range}
+          onChange={(e) => setRange(e.target.value as RangeId)}
+        >
+          {RANGES.map((r) => (
+            <option key={r.id} value={r.id}>
+              {r.label}
+            </option>
+          ))}
+        </select>
+        <button
+          type="button"
+          onClick={() => setReviewOnly((v) => !v)}
+          className={`text-[13.5px] text-review-text transition-colors ${
+            reviewOnly ? 'rounded-md bg-review-active px-2.5 py-1' : 'hover:opacity-75'
+          }`}
+        >
+          Needs review · {reviewCount}
+        </button>
+      </div>
+
+      {/* Two-pane: ledger + review */}
+      <div className="flex min-h-0 flex-1 gap-12">
+        <div className="min-w-0 max-w-[640px] flex-1 overflow-y-auto">
+          {/* Column header */}
+          <div className="flex items-center px-3 pb-2 text-[11px] uppercase tracking-[0.1em] text-faint">
+            <span className="flex-1">Merchant</span>
+            <span className="w-[130px]">Account</span>
+            <span className="w-[110px] text-right">Amount</span>
+          </div>
+
+          {isLoading && (
+            <div className="space-y-2">
+              {[0, 1, 2, 3, 4].map((i) => (
+                <div key={i} className="h-14 animate-pulse rounded-lg bg-line/60" />
+              ))}
+            </div>
+          )}
+
+          {!isLoading && dayGroups.length === 0 && (
+            <div className="px-3 py-10 text-[14px] text-muted">
+              {debouncedSearch || accountFilter || categoryFilter || reviewOnly
+                ? 'Nothing matches these filters.'
+                : 'No transactions in this period.'}
+            </div>
+          )}
+
+          {dayGroups.map(([date, rows]) => (
+            <div key={date}>
+              <div className="px-1 pb-1 pt-5 text-[11px] uppercase tracking-[0.18em] text-muted-2 first:pt-0">{dayLabel(date)}</div>
+              {rows.map((t) => (
+                <div
+                  key={t.id}
+                  onClick={() => setEditing(t)}
+                  className="flex cursor-pointer items-center rounded-lg border-b border-line px-3 py-3.5 transition-colors hover:bg-rail"
+                >
+                  <div className="min-w-0 flex-1 pr-3">
+                    <div className="truncate text-[15px] text-ink">{merchantLabel(t)}</div>
+                    <div className="mt-1">
+                      <CategoryPill name={t.category_name} />
+                    </div>
+                  </div>
+                  <span className="w-[130px] truncate text-[13px] text-muted">{t.account_name}</span>
+                  <span className={`w-[110px] text-right font-serif text-[18px] tabular-nums ${t.amount > 0 ? 'text-sage-deep' : 'text-ink'}`}>
+                    {formatCurrency(t.amount, { showSign: t.amount > 0 })}
+                  </span>
+                </div>
+              ))}
+            </div>
+          ))}
+        </div>
+
+        <ReviewPanel
+          totalOpen={reviewCount}
+          items={queueItems}
+          categories={categories ?? []}
+          batchCount={highConfidenceRules.length}
+          onBatchConfirm={() => batchConfirm.mutate()}
+          batchPending={batchConfirm.isPending}
+        />
+      </div>
+
+      <AddTransactionModal open={showAddModal} onClose={() => setShowAddModal(false)} />
+      <EditTransactionModal transaction={editing} onClose={() => setEditing(null)} />
+    </Screen>
   );
 }

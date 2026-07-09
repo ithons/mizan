@@ -1,501 +1,274 @@
-import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { Group, Panel, Separator } from 'react-resizable-panels';
-import type { PanelImperativeHandle, PanelSize } from 'react-resizable-panels';
-import {
-  ChevronDown,
-  ChevronUp,
-  Plus,
-  RefreshCw,
-  Eye,
-  EyeOff,
-  Trash2,
-  Edit2,
-  MoreHorizontal,
-  Link,
-  Unlink,
-  AlertTriangle,
-  CheckCircle2,
-  CircleAlert,
-  CreditCard,
-  PanelLeftClose,
-  PanelLeftOpen,
-} from 'lucide-react';
-import type { LucideIcon } from 'lucide-react';
-import { accountsApi, coinbaseApi, transactionsApi, investmentsApi, syncApi } from '../../lib/api';
-import { formatCurrency, formatDate, formatRelativeTime } from '../../lib/formatters';
-import { ACCOUNT_TYPE_LABELS, CATEGORY_COLORS } from '../../lib/constants';
-import { useAppStore } from '../../store';
-import { Modal } from '../../components/Modal';
-import { AmountBadge } from '../../components/AmountBadge';
-import { CategoryBadge } from '../../components/CategoryBadge';
-import { EmptyState } from '../../components/EmptyState';
-import { SkeletonList } from '../../components/SkeletonLoader';
-import { ConfirmRemoveModal } from '../../components/ConfirmRemoveModal';
-import { SyncActivityPanel } from '../../components/SyncActivityPanel';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import type { Account } from '@shared/types';
+import { accountsApi, syncApi } from '../../lib/api';
+import { formatCompactRelative, formatWholeCurrency } from '../../lib/formatters';
+import { ACCOUNT_TYPE_LABELS } from '../../lib/constants';
 import { invalidateFinancialData } from '../../lib/queryInvalidation';
-import { parseDecimalInput } from '../../lib/numberInput';
-import { advisorRouteState } from '../../lib/advisorRouteState';
-import { buildAccountAdvisorPrompt } from '../../lib/advisorPrompts';
-import type { Account, Holding, SyncHealth, SyncHealthConnection, SyncRun } from '@shared/types';
-
-import { useOutsideClick, errorMessage } from "./utils";
-import { SyncTrustCenter } from './SyncTrustCenter';
-import { InstitutionGroup } from './InstitutionGroup';
-import { AccountDetail } from './AccountDetail';
+import { useAppStore } from '../../store';
+import { Screen, ScreenHeader, SectionLabel, Row, TextButton } from '../../components/balance';
+import { ConfirmRemoveModal } from '../../components/ConfirmRemoveModal';
 import { AddManualAccountModal, EditAccountModal } from './Modals';
 
+const GROUPS: Array<{ name: string; match: (a: Account) => boolean }> = [
+  { name: 'Cash', match: (a) => !a.is_liability && ['checking', 'savings', 'cash'].includes(a.type) },
+  { name: 'Investments', match: (a) => !a.is_liability && ['brokerage', 'ira_traditional', 'ira_roth'].includes(a.type) },
+  { name: 'Crypto', match: (a) => !a.is_liability && a.type === 'crypto_wallet' },
+  { name: 'Credit cards', match: (a) => a.type === 'credit' },
+  { name: 'Loans', match: (a) => a.is_liability && a.type !== 'credit' },
+  { name: 'Other', match: () => true },
+];
+
+function signedBalance(a: Account): number {
+  return a.is_liability ? -Math.abs(a.current_balance) : a.current_balance;
+}
+
+const CONNECTION_LABELS: Record<Account['connection_type'], string> = {
+  simplefin: 'SimpleFIN',
+  coinbase: 'Coinbase',
+  manual: 'Manual',
+};
+
+function accountMeta(a: Account): string {
+  const verb = a.connection_type === 'manual' ? 'updated' : 'synced';
+  return `${CONNECTION_LABELS[a.connection_type] ?? 'Manual'} · ${verb} ${formatCompactRelative(a.updated_at)}`;
+}
+
 export function Accounts() {
-  const qc = useQueryClient();
   const navigate = useNavigate();
-  const [searchParams] = useSearchParams();
+  const qc = useQueryClient();
   const { addToast } = useAppStore();
+  const [searchParams] = useSearchParams();
+  const handledSetupActionRef = useRef(false);
+
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [showHidden, setShowHidden] = useState(false);
-  const [showManualModal, setShowManualModal] = useState(false);
-  const [addMenuOpen, setAddMenuOpen] = useState(false);
-  const addMenuRef = useRef<HTMLDivElement>(null);
-  const handledSetupActionRef = useRef(false);
-  useOutsideClick(addMenuRef, addMenuOpen, () => setAddMenuOpen(false));
+  const [showAddModal, setShowAddModal] = useState(false);
+  const [editing, setEditing] = useState<Account | null>(null);
+  const [removing, setRemoving] = useState<Account | null>(null);
 
-  // Left panel collapse state (persisted)
-  const leftPanelRef = useRef<PanelImperativeHandle | null>(null);
-  const [leftCollapsed, setLeftCollapsed] = useState(() => {
-    try {
-      return JSON.parse(localStorage.getItem('mizan:accounts-panel') ?? 'false');
-    } catch (err) {
-      console.warn('Failed to load account panel preferences', err);
-      return false;
-    }
-  });
-  const lastLeftSizeRef = useRef('22');
+  const { data: accounts, isLoading } = useQuery({ queryKey: ['accounts'], queryFn: () => accountsApi.list() });
 
-  const onLeftResize = useCallback((panelSize: PanelSize) => {
-    const isNowCollapsed = panelSize.asPercentage === 0;
-    setLeftCollapsed(isNowCollapsed);
-    if (!isNowCollapsed) {
-      lastLeftSizeRef.current = String(Math.round(panelSize.asPercentage));
-      localStorage.setItem('mizan:accounts-panel', 'false');
-    } else {
-      localStorage.setItem('mizan:accounts-panel', 'true');
-    }
-  }, []);
-
-  const toggleLeft = useCallback(() => {
-    if (leftPanelRef.current?.isCollapsed()) {
-      leftPanelRef.current.expand();
-    } else {
-      leftPanelRef.current?.collapse();
-    }
-  }, []);
-
-  // Edit modal state
-  const [editAccount, setEditAccount] = useState<Account | null>(null);
-
-  // Confirm remove modals
-
-  const [confirmDisconnectCoinbase, setConfirmDisconnectCoinbase] = useState(false);
-  const [confirmDeleteAccount, setConfirmDeleteAccount] = useState<Account | null>(null);
-
-  const { data: accounts = [], isLoading } = useQuery({
-    queryKey: ['accounts'],
-    queryFn: accountsApi.list,
-  });
-
-  const { data: syncHealth } = useQuery({
-    queryKey: ['sync', 'health', 'accounts'],
-    queryFn: syncApi.health,
-  });
-
-  const { data: syncRuns } = useQuery<SyncRun[]>({
-    queryKey: ['sync', 'history', 'accounts'],
-    queryFn: () => syncApi.history(2),
-  });
-
-  const { data: allHoldings = [] } = useQuery({
-    queryKey: ['holdings'],
-    queryFn: investmentsApi.holdings,
-  });
-
-  // Group holdings by account_id for P&L display in rows
-  const holdingsByAccount = allHoldings.reduce<Record<string, Holding[]>>((acc, h) => {
-    if (!acc[h.account_id]) acc[h.account_id] = [];
-    acc[h.account_id].push(h);
-    return acc;
-  }, {});
-
-  const hideMutation = useMutation({
-    mutationFn: (id: string) => {
-      const acc = accounts.find((a) => a.id === id);
-      return accountsApi.update(id, { is_hidden: !acc?.is_hidden });
-    },
-    onSuccess: () => invalidateFinancialData(qc),
-  });
-
-  const deleteMutation = useMutation({
-    mutationFn: accountsApi.delete,
-    onSuccess: () => {
-      invalidateFinancialData(qc);
-      setSelectedId(null);
-      setConfirmDeleteAccount(null);
-      addToast({ type: 'success', message: 'Account deleted' });
-    },
-    onError: (err: Error) => addToast({ type: 'error', message: err.message }),
-  });
-
-  const syncAllMutation = useMutation({
-    mutationFn: syncApi.run,
-    onSuccess: () => {
-      invalidateFinancialData(qc);
-      addToast({ type: 'success', message: 'Sync complete' });
-    },
-    onError: (err: Error) => addToast({ type: 'error', message: err.message }),
-  });
-
-  const disconnectCoinbaseMutation = useMutation({
-    mutationFn: coinbaseApi.disconnect,
-    onSuccess: () => {
-      invalidateFinancialData(qc);
-      setConfirmDisconnectCoinbase(false);
-      addToast({ type: 'info', message: 'Coinbase disconnected' });
-    },
-    onError: (err: Error) => addToast({ type: 'error', message: err.message }),
-  });
-
-  const syncCoinbaseMutation = useMutation({
-    mutationFn: coinbaseApi.sync,
-    onSuccess: (result) => {
-      invalidateFinancialData(qc);
-      const changes = result.transactionCount + result.staleAccountCount;
-      const detail = changes > 0 ? `, ${changes} update(s)` : '';
-      addToast({ type: 'success', message: `Coinbase sync complete${detail}` });
-    },
-    onError: (err: Error) => addToast({ type: 'error', message: err.message }),
-  });
-
-  const connectCoinbase = () => {
-    setAddMenuOpen(false);
-    navigate('/settings?section=coinbase');
-  };
-
+  // Handle onboarding deep links: ?connect=bank routes to connections, ?manual=1 opens the add modal.
   useEffect(() => {
     if (handledSetupActionRef.current) return;
-
     const connect = searchParams.get('connect');
     const manual = searchParams.get('manual');
     if (connect !== 'bank' && manual !== '1') return;
-
     handledSetupActionRef.current = true;
     navigate('/accounts', { replace: true });
-
     if (connect === 'bank') {
       navigate('/settings?section=connections');
       return;
     }
-
-    setShowManualModal(true);
+    setShowAddModal(true);
   }, [navigate, searchParams]);
 
-  const handleConnectionAction = (connection: SyncHealthConnection) => {
-    if (connection.provider === 'coinbase') {
-      if (connection.recommended_action === 'connect' || connection.recommended_action === 'reconnect') {
-        connectCoinbase();
-        return;
-      }
-      syncCoinbaseMutation.mutate();
-      return;
-    }
+  const visible = useMemo(() => (accounts ?? []).filter((a) => !a.is_hidden), [accounts]);
+  const hidden = useMemo(() => (accounts ?? []).filter((a) => a.is_hidden), [accounts]);
 
-    if (connection.provider === 'simplefin') {
-      if (connection.recommended_action === 'connect' || connection.recommended_action === 'reconnect') {
-        navigate(`/settings?section=connections`);
-        return;
-      }
-      if (connection.recommended_action !== 'none') {
-        syncAllMutation.mutate();
-      }
-      return;
-    }
-  };
+  const groups = useMemo(() => {
+    const remaining = new Set(visible.map((a) => a.id));
+    return GROUPS.map((g) => {
+      const rows = visible.filter((a) => remaining.has(a.id) && g.match(a));
+      rows.forEach((a) => remaining.delete(a.id));
+      return { name: g.name, rows, total: rows.reduce((s, a) => s + signedBalance(a), 0) };
+    }).filter((g) => g.rows.length > 0);
+  }, [visible]);
 
-  const askAdvisorAboutAccount = (account: Account) => {
-    navigate('/advisor', {
-      state: advisorRouteState(buildAccountAdvisorPrompt(account)),
-    });
-  };
+  const assets = visible.reduce((s, a) => s + Math.max(0, signedBalance(a)), 0);
+  const liabilities = visible.reduce((s, a) => s + Math.min(0, signedBalance(a)), 0);
+  const netWorth = assets + liabilities;
 
-  const selectedAccount = accounts.find((a) => a.id === selectedId) ?? null;
-  const syncingCoinbaseConnection = syncHealth?.connections.find((connection) => connection.provider === 'coinbase');
-  const busyConnectionId = syncCoinbaseMutation.isPending && syncingCoinbaseConnection
-      ? `coinbase:${syncingCoinbaseConnection.id}`
-      : null;
+  const selected = (accounts ?? []).find((a) => a.id === selectedId) ?? null;
 
-  const coinbaseAccounts = accounts.filter((a) => a.connection_type === 'coinbase');
-  const manualAccounts = accounts.filter((a) => a.is_manual);
+  const syncAll = useMutation({
+    mutationFn: () => syncApi.run(),
+    onSuccess: () => addToast({ type: 'info', message: 'Sync started' }),
+    onError: (err: Error) => addToast({ type: 'error', message: err.message }),
+  });
 
-  const simplefinAccounts = accounts.filter((a) => a.connection_type === 'simplefin');
-  const simplefinGroups = simplefinAccounts.reduce<Record<string, Account[]>>((acc, a) => {
-    const key = a.institution_name || 'SimpleFIN';
-    if (!acc[key]) acc[key] = [];
-    acc[key].push(a);
-    return acc;
-  }, {});
+  const toggleHidden = useMutation({
+    mutationFn: (a: Account) => accountsApi.update(a.id, { is_hidden: !a.is_hidden }),
+    onSuccess: () => invalidateFinancialData(qc),
+    onError: (err: Error) => addToast({ type: 'error', message: err.message }),
+  });
 
-  const totalAccounts = showHidden ? accounts.length : accounts.filter((a) => !a.is_hidden).length;
+  const deleteAccount = useMutation({
+    mutationFn: (a: Account) => accountsApi.delete(a.id),
+    onSuccess: () => {
+      invalidateFinancialData(qc);
+      addToast({ type: 'success', message: 'Account removed' });
+      setRemoving(null);
+      setSelectedId(null);
+    },
+    onError: (err: Error) => addToast({ type: 'error', message: err.message }),
+  });
 
-  return (
-    <Group orientation="horizontal" style={{ width: '100%', height: '100%' }}>
-      {/* Left Panel */}
-      <Panel
-        panelRef={leftPanelRef}
-        defaultSize={leftCollapsed ? '0' : lastLeftSizeRef.current}
-        minSize="15"
-        maxSize="40"
-        collapsible
-        onResize={onLeftResize}
-        style={{ overflow: 'hidden' }}
-      >
-      <div className="border-r border-border bg-surface flex flex-col h-full overflow-hidden">
-        <div className="px-4 py-3 border-b border-border flex items-center justify-between flex-shrink-0">
-          <div className="flex items-center gap-2">
-            <span className="text-sm font-medium text-text">Accounts</span>
-            <button
-              onClick={toggleLeft}
-              className="w-5 h-5 flex items-center justify-center rounded text-muted hover:text-text hover:bg-black/5 transition-colors"
-              title="Hide panel"
-            >
-              <PanelLeftClose size={13} />
-            </button>
-          </div>
-          <div className="relative" ref={addMenuRef}>
-            <button
-              className="flex items-center gap-1 text-xs text-positive hover:opacity-80"
-              onClick={() => setAddMenuOpen((v) => !v)}
-            >
-              <Plus size={14} /> Add
-            </button>
-            {addMenuOpen && (
-              <div className="absolute right-0 top-6 bg-surface shadow-sm border border-border rounded shadow-lg z-20 w-52 py-1">
-                <button
-                  className="flex items-center gap-2 w-full px-3 py-2 text-xs text-text hover:bg-black/5"
-                  onClick={() => navigate('/settings?section=connections')}
-                >
-                  <Link size={12} className="text-positive" />
-                  Connect Bank or Card
-                </button>
-                <button
-                  className="flex items-center gap-2 w-full px-3 py-2 text-xs text-text hover:bg-black/5"
-                  onClick={connectCoinbase}
-                >
-                  <Link size={12} className="text-info" />
-                  Connect Coinbase
-                </button>
-                <button
-                  className="flex items-center gap-2 w-full px-3 py-2 text-xs text-text hover:bg-black/5"
-                  onClick={() => { setAddMenuOpen(false); setShowManualModal(true); }}
-                >
-                  <Plus size={12} className="text-muted" />
-                  Add Manual Account
-                </button>
-              </div>
-            )}
-          </div>
-        </div>
-
-        <SyncTrustCenter
-          health={syncHealth}
-          onSyncAll={() => syncAllMutation.mutate()}
-          onConnectBank={() => navigate('/settings?section=connections')}
-          onConnectCoinbase={connectCoinbase}
-          onConnectionAction={handleConnectionAction}
-          isSyncingAll={syncAllMutation.isPending}
-          busyConnectionId={busyConnectionId}
-        />
-
-        <div className="px-3 pb-2">
-          <SyncActivityPanel runs={syncRuns} title="Recent Sync" />
-        </div>
-
-        <div className="flex-1 overflow-y-auto py-2 min-h-0">
-          {isLoading ? (
-            <div className="px-3 py-2 space-y-2">
-              {[...Array(4)].map((_, i) => (
-                <div key={i} className="h-3 bg-border/60 rounded animate-pulse" style={{ width: `${55 + (i * 10) % 30}%` }} />
-              ))}
-            </div>
-          ) : (
-            <>
-              {/* Coinbase group */}
-              {coinbaseAccounts.length > 0 && (
-                <InstitutionGroup
-                  label="Coinbase"
-                  accounts={coinbaseAccounts}
-                  showHidden={showHidden}
-                  selectedId={selectedId}
-                  onSelect={setSelectedId}
-                  onHide={(id) => hideMutation.mutate(id)}
-                  onAsk={askAdvisorAboutAccount}
-                  onEdit={(id) => {
-                    const acc = accounts.find((a) => a.id === id);
-                    if (acc) setEditAccount(acc);
-                  }}
-                  holdingsByAccount={holdingsByAccount}
-                  groupType="coinbase"
-                  onSyncCoinbase={() => syncCoinbaseMutation.mutate()}
-                  onDisconnectCoinbase={() => setConfirmDisconnectCoinbase(true)}
-                />
-              )}
-
-              {/* SimpleFIN groups */}
-              {Object.entries(simplefinGroups).map(([institutionName, grpAccounts]) => (
-                <InstitutionGroup
-                  key={institutionName}
-                  label={institutionName}
-                  accounts={grpAccounts}
-                  showHidden={showHidden}
-                  selectedId={selectedId}
-                  onSelect={setSelectedId}
-                  onHide={(id) => hideMutation.mutate(id)}
-                  onAsk={askAdvisorAboutAccount}
-                  onEdit={(id) => {
-                    const acc = accounts.find((a) => a.id === id);
-                    if (acc) setEditAccount(acc);
-                  }}
-                  holdingsByAccount={holdingsByAccount}
-                  groupType="simplefin"
-                  onSyncItem={() => syncAllMutation.mutate()}
-                  onRemoveItem={() => navigate('/settings?section=connections')}
-                />
-              ))}
-
-              {/* Manual accounts */}
-              {manualAccounts.length > 0 && (
-                <InstitutionGroup
-                  label="Manual"
-                  accounts={manualAccounts}
-                  showHidden={showHidden}
-                  selectedId={selectedId}
-                  onSelect={setSelectedId}
-                  onHide={(id) => hideMutation.mutate(id)}
-                  onAsk={askAdvisorAboutAccount}
-                  onDelete={(id) => {
-                    const acc = accounts.find((a) => a.id === id);
-                    if (acc) setConfirmDeleteAccount(acc);
-                  }}
-                  onEdit={(id) => {
-                    const acc = accounts.find((a) => a.id === id);
-                    if (acc) setEditAccount(acc);
-                  }}
-                  holdingsByAccount={holdingsByAccount}
-                  groupType="manual"
-                />
-              )}
-
-              {totalAccounts === 0 && !isLoading && (
-                <EmptyState
-                  icon={CreditCard}
-                  title="No accounts yet"
-                  description="Connect a bank, configure Coinbase, or create a manual account to start building Mizān."
-                  action={() => navigate('/settings?section=connections')}
-                  actionLabel="Connect Bank"
-                  secondaryAction={() => setShowManualModal(true)}
-                  secondaryActionLabel="Add Manual"
-                />
-              )}
-            </>
-          )}
-        </div>
-
-        {/* Show hidden toggle */}
-        <div className="px-3 py-2 border-t border-border flex-shrink-0">
-          <button
-            onClick={() => setShowHidden((v) => !v)}
-            className="flex items-center gap-2 text-xs text-muted hover:text-text w-full"
-          >
-            {showHidden ? <EyeOff size={12} /> : <Eye size={12} />}
-            {showHidden ? 'Hide hidden accounts' : 'Show hidden accounts'}
-          </button>
+  const renderRow = (a: Account, dimmed = false) => (
+    <Row
+      key={a.id}
+      onClick={() => setSelectedId(a.id === selectedId ? null : a.id)}
+      className={`justify-between px-3 py-4 ${dimmed ? 'opacity-55' : ''} ${
+        selectedId === a.id ? 'bg-rail' : ''
+      }`}
+    >
+      <div className="flex min-w-0 items-center gap-3.5">
+        <span className="flex h-[34px] w-[34px] flex-shrink-0 items-center justify-center rounded-lg bg-rail font-serif text-[15px] text-muted">
+          {(a.institution_name || a.account_name).charAt(0).toUpperCase()}
+        </span>
+        <div className="min-w-0">
+          <div className="truncate text-[15.5px] text-ink">{a.account_name}</div>
+          <div className="mt-0.5 text-[12.5px] text-muted-2">{accountMeta(a)}</div>
         </div>
       </div>
-      </Panel>
+      <span className={`font-serif text-[19px] tabular-nums ${signedBalance(a) < 0 ? 'text-clay' : 'text-ink'}`}>
+        {formatWholeCurrency(signedBalance(a))}
+      </span>
+    </Row>
+  );
 
-      <Separator
-        className="group cursor-col-resize"
-        style={{ width: 5, flexShrink: 0, background: 'var(--color-border)', transition: 'background 0.15s', position: 'relative', overflow: 'visible', zIndex: 10 }}
-      >
-        <button
-          onClick={toggleLeft}
-          className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-5 h-8 flex items-center justify-center rounded bg-border border border-border text-muted opacity-0 group-hover:opacity-100 transition-opacity hover:text-text hover:bg-surface z-10"
-          title={leftCollapsed ? 'Show accounts panel' : 'Hide accounts panel'}
-        >
-          {leftCollapsed ? <PanelLeftOpen size={12} /> : <PanelLeftClose size={12} />}
-        </button>
-      </Separator>
-
-      {/* Right Panel */}
-      <Panel minSize="40" style={{ overflow: 'hidden' }}>
-        <div className="relative h-full overflow-y-auto bg-background">
-          {leftCollapsed && (
+  return (
+    <Screen>
+      <ScreenHeader
+        title="Accounts"
+        sub={
+          <>
+            {visible.length} account{visible.length === 1 ? '' : 's'} · net worth{' '}
+            <span className="tabular-nums">{formatWholeCurrency(netWorth)}</span>
+          </>
+        }
+        actions={
+          <>
+            <TextButton onClick={() => syncAll.mutate()} disabled={syncAll.isPending}>
+              Sync all
+            </TextButton>
             <button
-              onClick={toggleLeft}
-              className="absolute top-3 left-3 z-20 w-7 h-7 flex items-center justify-center rounded bg-surface shadow-sm border border-border text-muted hover:text-text hover:border-positive-5 transition-colors"
-              title="Show accounts panel"
+              type="button"
+              onClick={() => setShowAddModal(true)}
+              className="text-[13.5px] text-ink transition-opacity hover:opacity-75"
             >
-              <PanelLeftOpen size={14} />
+              + Add account
             </button>
-          )}
-          {selectedAccount ? (
-            <AccountDetail account={selectedAccount} />
-          ) : totalAccounts === 0 && !isLoading ? (
-            <div className="flex h-full items-center justify-center">
-              <EmptyState
-                icon={CreditCard}
-                title="Connect your first account"
-                description="Balances, reports, budgets, and review queues depend on account data."
-                action={() => navigate('/settings?section=connections')}
-                actionLabel="Connect Bank"
-                secondaryAction={() => setShowManualModal(true)}
-                secondaryActionLabel="Add Manual"
-              />
+          </>
+        }
+        className="mb-7"
+      />
+
+      {/* 3-up summary */}
+      <div className="mb-8 grid max-w-[720px] flex-shrink-0 grid-cols-3 gap-4">
+        {[
+          { label: 'Assets', value: assets, tone: 'text-ink' },
+          { label: 'Liabilities', value: liabilities, tone: liabilities < 0 ? 'text-clay' : 'text-ink' },
+          { label: 'Net worth', value: netWorth, tone: 'text-ink' },
+        ].map((s) => (
+          <div key={s.label} className="rounded-xl border border-line-2 bg-card p-4">
+            <div className="text-xs text-muted">{s.label}</div>
+            <div className={`mt-1.5 font-serif text-[22px] leading-tight tabular-nums ${s.tone}`}>
+              {formatWholeCurrency(s.value)}
             </div>
-          ) : (
-            <div className="flex flex-col items-center justify-center h-full text-muted">
-              <CreditCard size={48} className="mb-4 opacity-20" />
-              <p className="text-sm">Select an account to view details</p>
+          </div>
+        ))}
+      </div>
+
+      <div className="flex min-h-0 flex-1 gap-12">
+        {/* Grouped account list */}
+        <div className="min-w-0 max-w-[720px] flex-1 overflow-y-auto">
+          {isLoading && (
+            <div className="space-y-3">
+              {[0, 1, 2, 3].map((i) => (
+                <div key={i} className="h-16 animate-pulse rounded-lg bg-line/60" />
+              ))}
+            </div>
+          )}
+          {!isLoading && visible.length === 0 && (
+            <div className="py-10 text-[14px] text-muted">
+              No accounts yet.{' '}
+              <button
+                type="button"
+                onClick={() => navigate('/settings?section=connections')}
+                className="text-ink underline underline-offset-2"
+              >
+                Connect SimpleFIN or Coinbase
+              </button>{' '}
+              or add one manually.
+            </div>
+          )}
+          {groups.map((g) => (
+            <div key={g.name} className="mb-7">
+              <SectionLabel underline summary={formatWholeCurrency(g.total)} className="mb-1.5">
+                {g.name}
+              </SectionLabel>
+              {g.rows.map((a) => renderRow(a))}
+            </div>
+          ))}
+          {hidden.length > 0 && (
+            <div className="mb-7">
+              <button
+                type="button"
+                onClick={() => setShowHidden((v) => !v)}
+                className="mb-1.5 text-[12.5px] text-muted-2 transition-colors hover:text-ink"
+              >
+                {hidden.length} hidden account{hidden.length === 1 ? '' : 's'} · {showHidden ? 'collapse' : 'show'}
+              </button>
+              {showHidden && hidden.map((a) => renderRow(a, true))}
             </div>
           )}
         </div>
-      </Panel>
 
-      {/* Modals */}
-      <AddManualAccountModal open={showManualModal} onClose={() => setShowManualModal(false)} />
+        {/* Detail panel */}
+        {selected && (
+          <div className="w-[300px] flex-shrink-0">
+            <div className="mb-4 flex items-baseline justify-between">
+              <span className="font-serif text-xl text-ink">{selected.account_name}</span>
+            </div>
+            <div className={`font-serif text-[28px] tabular-nums ${signedBalance(selected) < 0 ? 'text-clay' : 'text-ink'}`}>
+              {formatWholeCurrency(signedBalance(selected))}
+            </div>
+            <div className="mt-6">
+              {[
+                { label: 'Institution', value: selected.institution_name || '—' },
+                { label: 'Type', value: ACCOUNT_TYPE_LABELS[selected.type] ?? selected.type },
+                { label: 'Connection', value: CONNECTION_LABELS[selected.connection_type] ?? 'Manual' },
+                { label: 'Updated', value: formatCompactRelative(selected.updated_at) },
+              ].map((row, i, arr) => (
+                <div
+                  key={row.label}
+                  className={`flex items-baseline justify-between py-2 ${i < arr.length - 1 ? 'border-b border-line' : ''}`}
+                >
+                  <span className="text-[13px] text-muted">{row.label}</span>
+                  <span className="text-[13.5px] text-ink">{row.value}</span>
+                </div>
+              ))}
+            </div>
+            <div className="mt-6 flex flex-col items-start gap-3">
+              <TextButton variant="primary" onClick={() => setEditing(selected)}>
+                Edit account
+              </TextButton>
+              <TextButton onClick={() => navigate('/transactions')}>View transactions →</TextButton>
+              <TextButton onClick={() => toggleHidden.mutate(selected)}>
+                {selected.is_hidden ? 'Unhide from lists' : 'Hide from lists'}
+              </TextButton>
+              <TextButton onClick={() => setRemoving(selected)} className="hover:!text-clay">
+                Remove…
+              </TextButton>
+            </div>
+          </div>
+        )}
+      </div>
 
-      <EditAccountModal
-        open={editAccount != null}
-        account={editAccount}
-        onClose={() => setEditAccount(null)}
-      />
-
+      <AddManualAccountModal open={showAddModal} onClose={() => setShowAddModal(false)} />
+      <EditAccountModal open={editing != null} account={editing} onClose={() => setEditing(null)} />
       <ConfirmRemoveModal
-        open={confirmDisconnectCoinbase}
-        onClose={() => setConfirmDisconnectCoinbase(false)}
-        title="Disconnect Coinbase?"
-        description="This will remove your Coinbase API credentials. Existing transactions and accounts will be hidden but not deleted."
-        confirmLabel="Disconnect Coinbase"
-        onConfirm={() => disconnectCoinbaseMutation.mutate()}
-        isPending={disconnectCoinbaseMutation.isPending}
+        open={removing != null}
+        onClose={() => setRemoving(null)}
+        title="Remove account"
+        description={`This removes "${removing?.account_name}" and all of its transactions from Mizān. It does not touch the real account.`}
+        confirmLabel="Remove account"
+        onConfirm={() => removing && deleteAccount.mutate(removing)}
+        isPending={deleteAccount.isPending}
       />
-
-      <ConfirmRemoveModal
-        open={confirmDeleteAccount != null}
-        onClose={() => setConfirmDeleteAccount(null)}
-        title={`Delete ${confirmDeleteAccount?.account_name ?? 'Account'}?`}
-        description="This will permanently delete this manual account and all its transactions. This cannot be undone."
-        confirmLabel="Delete Account"
-        onConfirm={() => confirmDeleteAccount && deleteMutation.mutate(confirmDeleteAccount.id)}
-        isPending={deleteMutation.isPending}
-      />
-    </Group>
+    </Screen>
   );
 }
