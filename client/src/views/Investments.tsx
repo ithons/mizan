@@ -111,7 +111,7 @@ export function Investments() {
               key={r.id}
               type="button"
               onClick={() => setRange(r.id)}
-              className={`px-2 py-1 text-[12.5px] transition-colors ${r.id === range ? 'text-ink' : 'text-muted hover:text-ink'}`}
+              className={`px-2 py-1 text-xs transition-colors ${r.id === range ? 'text-ink' : 'text-muted hover:text-ink'}`}
             >
               {r.id}
             </button>
@@ -139,7 +139,7 @@ export function Investments() {
             .map((h) => {
               const gain = holdingGain(h);
               return (
-                <div key={h.id} className="flex items-center rounded-lg border-b border-line px-1 py-3.5 transition-colors hover:bg-rail">
+                <div key={h.id} className="flex items-center rounded-lg border-b border-line px-1 py-3 transition-colors hover:bg-rail">
                   <div className="min-w-0 flex-1 pr-3">
                     <div className="truncate text-[15px] text-ink">{holdingName(h)}</div>
                     <div className="mt-0.5 text-xs text-muted-2">
@@ -150,7 +150,7 @@ export function Investments() {
                   <div className="text-right">
                     <div className="font-serif text-[18px] tabular-nums text-ink">{formatWholeCurrency(h.institution_value)}</div>
                     {gain && (
-                      <div className={`mt-0.5 text-[12.5px] tabular-nums ${gain.gain >= 0 ? 'text-sage-deep' : 'text-clay'}`}>
+                      <div className={`mt-0.5 text-xs tabular-nums ${gain.gain >= 0 ? 'text-sage-deep' : 'text-clay'}`}>
                         {formatWholeCurrency(gain.gain, { showSign: gain.gain > 0 })} · {formatPercent(Math.abs(gain.pct))}
                       </div>
                     )}

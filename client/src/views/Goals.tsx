@@ -224,7 +224,7 @@ export function Goals() {
               <div className="mb-3.5 flex items-baseline justify-between">
                 <div>
                   <div className="text-[16.5px] text-ink">{g.name}</div>
-                  <div className="mt-1 text-[12.5px] text-muted-2">{goalNote(g, insight?.projected_monthly_contribution ?? 0)}</div>
+                  <div className="mt-1 text-xs text-muted-2">{goalNote(g, insight?.projected_monthly_contribution ?? 0)}</div>
                 </div>
                 <span className="text-[13px] text-sage">{pct}%</span>
               </div>

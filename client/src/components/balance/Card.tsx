@@ -2,9 +2,9 @@ import type { ReactNode } from 'react';
 
 const paddings = {
   none: '',
-  sm: 'p-4',
-  md: 'p-5',
-  lg: 'p-[22px]',
+  sm: 'p-3.5',
+  md: 'p-[18px]',
+  lg: 'p-5',
 } as const;
 
 interface CardProps {

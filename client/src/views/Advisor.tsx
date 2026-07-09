@@ -144,7 +144,7 @@ export function Advisor() {
             <TextButton onClick={clearChat}>+ New chat</TextButton>
           ) : undefined
         }
-        className="mb-7"
+        className="mb-6"
       />
 
       <div className="flex min-h-0 flex-1 flex-col gap-10 lg:flex-row lg:gap-12">

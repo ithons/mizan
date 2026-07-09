@@ -110,7 +110,7 @@ export function Accounts() {
     <Row
       key={a.id}
       onClick={() => setSelectedId(a.id === selectedId ? null : a.id)}
-      className={`justify-between px-3 py-4 ${dimmed ? 'opacity-55' : ''} ${
+      className={`justify-between px-3 py-3.5 ${dimmed ? 'opacity-55' : ''} ${
         selectedId === a.id ? 'bg-rail' : ''
       }`}
     >
@@ -120,10 +120,10 @@ export function Accounts() {
         </span>
         <div className="min-w-0">
           <div className="truncate text-[15.5px] text-ink">{a.account_name}</div>
-          <div className="mt-0.5 text-[12.5px] text-muted-2">{accountMeta(a)}</div>
+          <div className="mt-0.5 text-xs text-muted-2">{accountMeta(a)}</div>
         </div>
       </div>
-      <span className={`font-serif text-[19px] tabular-nums ${signedBalance(a) < 0 ? 'text-clay' : 'text-ink'}`}>
+      <span className={`font-serif text-[18px] tabular-nums ${signedBalance(a) < 0 ? 'text-clay' : 'text-ink'}`}>
         {formatWholeCurrency(signedBalance(a))}
       </span>
     </Row>
@@ -153,11 +153,11 @@ export function Accounts() {
             </button>
           </>
         }
-        className="mb-7"
+        className="mb-6"
       />
 
       {/* 3-up summary */}
-      <div className="mb-8 grid flex-shrink-0 grid-cols-3 gap-3 lg:gap-4">
+      <div className="mb-6 grid flex-shrink-0 grid-cols-3 gap-3 lg:gap-4">
         {[
           { label: 'Assets', value: assets, tone: 'text-ink' },
           { label: 'Liabilities', value: liabilities, tone: liabilities < 0 ? 'text-clay' : 'text-ink' },
@@ -196,7 +196,7 @@ export function Accounts() {
             </div>
           )}
           {groups.map((g) => (
-            <div key={g.name} className="mb-7">
+            <div key={g.name} className="mb-6">
               <SectionLabel underline summary={formatWholeCurrency(g.total)} className="mb-1.5">
                 {g.name}
               </SectionLabel>
@@ -204,11 +204,11 @@ export function Accounts() {
             </div>
           ))}
           {hidden.length > 0 && (
-            <div className="mb-7">
+            <div className="mb-6">
               <button
                 type="button"
                 onClick={() => setShowHidden((v) => !v)}
-                className="mb-1.5 text-[12.5px] text-muted-2 transition-colors hover:text-ink"
+                className="mb-1.5 text-xs text-muted-2 transition-colors hover:text-ink"
               >
                 {hidden.length} hidden account{hidden.length === 1 ? '' : 's'} · {showHidden ? 'collapse' : 'show'}
               </button>

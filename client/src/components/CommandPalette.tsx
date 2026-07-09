@@ -34,8 +34,13 @@ export function CommandPalette() {
         setOpen(false);
       }
     };
+    const handleOpenEvent = () => setOpen(true);
     document.addEventListener('keydown', handleKeyDown);
-    return () => document.removeEventListener('keydown', handleKeyDown);
+    window.addEventListener('mizan:open-palette', handleOpenEvent);
+    return () => {
+      document.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener('mizan:open-palette', handleOpenEvent);
+    };
   }, [open]);
 
   // Auto-focus input when opened

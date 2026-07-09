@@ -70,11 +70,11 @@ export function CashFlow() {
             {r.label}
           </button>
         ))}
-        className="mb-7"
+        className="mb-6"
       />
 
       {/* 3-up summary for the selected period */}
-      <div className="mb-8 grid flex-shrink-0 grid-cols-3 gap-3 lg:gap-4">
+      <div className="mb-6 grid flex-shrink-0 grid-cols-3 gap-3 lg:gap-4">
         {[
           { label: 'Income', value: formatWholeCurrency(income), tone: 'text-sage-deep' },
           { label: 'Expenses', value: formatWholeCurrency(-expenses), tone: 'text-clay' },
@@ -88,7 +88,7 @@ export function CashFlow() {
       </div>
 
       {/* Paired bar chart */}
-      <div className="mb-9 flex-shrink-0">
+      <div className="mb-8 flex-shrink-0">
         <div className="flex h-[150px] items-end gap-7">
           {series.map((m) => (
             <div key={m.month} className="flex flex-1 flex-col items-center gap-2">

@@ -108,7 +108,7 @@ function ReviewPanel({
     <div className="w-full flex-shrink-0 self-start border-t border-line-2 pt-6 lg:sticky lg:top-6 lg:w-[300px] lg:border-t-0 lg:pt-0">
       <div className="mb-4 flex items-baseline justify-between">
         <span className="font-serif text-xl text-ink">Review</span>
-        <span className="text-[12.5px] text-muted">
+        <span className="text-xs text-muted">
           {totalOpen} item{totalOpen === 1 ? '' : 's'}
         </span>
       </div>
@@ -170,7 +170,7 @@ function ReviewPanel({
               type="button"
               onClick={onBatchConfirm}
               disabled={batchPending}
-              className="mt-6 rounded-md border border-sage-tint-border bg-sage-tint px-3 py-1.5 text-[12.5px] text-sage-text transition-opacity hover:opacity-80 disabled:opacity-50"
+              className="mt-6 rounded-md border border-sage-tint-border bg-sage-tint px-3 py-1.5 text-xs text-sage-text transition-opacity hover:opacity-80 disabled:opacity-50"
             >
               {batchPending ? 'Applying…' : `Confirm all high-confidence (${batchCount})`}
             </button>
@@ -682,7 +682,7 @@ export function Transactions() {
                 <div
                   key={t.id}
                   onClick={() => setEditing(t)}
-                  className="flex cursor-pointer items-center rounded-lg border-b border-line px-3 py-3.5 transition-colors hover:bg-rail"
+                  className="flex cursor-pointer items-center rounded-lg border-b border-line px-3 py-3 transition-colors hover:bg-rail"
                 >
                   <div className="min-w-0 flex-1 pr-3">
                     <div className="truncate text-[15px] text-ink">{merchantLabel(t)}</div>

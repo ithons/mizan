@@ -197,12 +197,12 @@ export function Budget() {
             </button>
           </>
         }
-        className="mb-7"
+        className="mb-6"
       />
 
       <div className="flex-1">
         {grouped.map((section) => (
-          <div key={section.name} className="mb-7">
+          <div key={section.name} className="mb-6">
             <SectionLabel summary={groupSummary(section.rows)} className="mb-3">
               {section.name}
             </SectionLabel>

@@ -78,7 +78,7 @@ export function Bills() {
             'Recurring charges are detected automatically from your transactions'
           )
         }
-        className="mb-7"
+        className="mb-6"
       />
 
       <div className="flex min-h-0 flex-1 flex-col gap-10 lg:flex-row lg:gap-12">
@@ -90,7 +90,7 @@ export function Bills() {
             return (
               <div
                 key={o.id}
-                className="group flex items-center gap-5 rounded-lg border-b border-line px-3 py-3.5 transition-colors hover:bg-rail"
+                className="group flex items-center gap-5 rounded-lg border-b border-line px-3 py-3 transition-colors hover:bg-rail"
               >
                 <div className="w-[38px] flex-shrink-0 text-center">
                   <div className="text-[10.5px] uppercase tracking-[0.1em] text-muted-2">{format(d, 'MMM')}</div>
@@ -98,7 +98,7 @@ export function Bills() {
                 </div>
                 <div className="min-w-0 flex-1">
                   <div className="truncate text-[15px] text-ink">{o.merchant_name}</div>
-                  <div className="mt-0.5 text-[12.5px] text-muted-2">{occurrenceMeta(o)}</div>
+                  <div className="mt-0.5 text-xs text-muted-2">{occurrenceMeta(o)}</div>
                 </div>
                 <span className="font-serif text-[18px] tabular-nums text-ink">
                   {formatCurrency(Math.abs(o.adjusted_amount ?? o.amount))}

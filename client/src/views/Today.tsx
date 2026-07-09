@@ -1,28 +1,30 @@
 import { useMemo } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { format, differenceInCalendarDays, parseISO } from 'date-fns';
 import type { AdvisorDraftAction, Insight } from '@shared/types';
-import {
-  accountsApi,
-  aiApi,
-  budgetsApi,
-  goalsApi,
-  insightsApi,
-  networthApi,
-  recurringApi,
-  reportsApi,
-  transactionsApi,
-} from '../lib/api';
+import { aiApi, budgetsApi, goalsApi, insightsApi, networthApi, recurringApi, transactionsApi } from '../lib/api';
 import { formatWholeCurrency } from '../lib/formatters';
 import { computeSafeToSpend } from '../lib/safeToSpend';
+import { useEasedValue } from '../lib/useEasedValue';
 import { useAppStore } from '../store';
-import { Screen, SectionLabel, Card, KpiTile, BalanceScale, Row, TextButton, InkButton } from '../components/balance';
+import { Screen, BalanceScale, TextButton } from '../components/balance';
 
-function reviewSummaryLine(queues: Array<{ label: string; count: number }>): string {
-  const parts = queues.filter((q) => q.count > 0).slice(0, 3);
-  if (parts.length === 0) return 'Nothing waiting on you.';
-  return parts.map((q) => `${q.count} ${q.label.toLowerCase()}`).join(' · ');
+function greeting(): string {
+  const hour = new Date().getHours();
+  if (hour < 5) return 'Up late.';
+  if (hour < 12) return 'Good morning.';
+  if (hour < 18) return 'Good afternoon.';
+  return 'Good evening.';
+}
+
+function StatLink({ to, label, children }: { to: string; label: string; children: React.ReactNode }) {
+  return (
+    <Link to={to} className="group block">
+      <div className="mb-1 text-xs text-muted transition-colors group-hover:text-ink">{label}</div>
+      {children}
+    </Link>
+  );
 }
 
 export function Today() {
@@ -33,9 +35,7 @@ export function Today() {
 
   const { data: snapshot } = useQuery({ queryKey: ['networth', 'snapshot'], queryFn: () => networthApi.snapshot(), retry: false });
   const { data: history } = useQuery({ queryKey: ['networth', 'history', 1], queryFn: () => networthApi.history(1), retry: false });
-  const { data: cashflow } = useQuery({ queryKey: ['cashflow', 'today'], queryFn: () => reportsApi.cashflow() });
   const { data: reviewSummary } = useQuery({ queryKey: ['transactions', 'review'], queryFn: () => transactionsApi.review() });
-  const { data: accounts } = useQuery({ queryKey: ['accounts'], queryFn: () => accountsApi.list() });
   const { data: forecast } = useQuery({ queryKey: ['recurring', 'forecast', 30], queryFn: () => recurringApi.forecast(30) });
   const { data: budgets } = useQuery({ queryKey: ['budgets', currentMonth], queryFn: () => budgetsApi.getMonth(currentMonth) });
   const { data: goals } = useQuery({ queryKey: ['goals'], queryFn: () => goalsApi.list() });
@@ -44,6 +44,7 @@ export function Today() {
   const netWorth = snapshot?.net_worth ?? 0;
   const totalAssets = snapshot?.total_assets ?? 0;
   const totalLiabilities = snapshot?.total_liabilities ?? 0;
+  const easedNetWorth = useEasedValue(netWorth, 900);
 
   const weekDelta = useMemo(() => {
     const snapshots = history ?? [];
@@ -55,18 +56,19 @@ export function Today() {
     return weekAgo ? latest.net_worth - weekAgo.net_worth : null;
   }, [history]);
 
-  const monthCF = (cashflow?.months ?? []).find((m) => m.month === currentMonth);
-  const safeToSpend = computeSafeToSpend({ snapshot, forecast, budgets, goals });
   const reviewCount = reviewSummary?.total_open ?? 0;
+  const overdueCount = forecast?.overdue_count ?? 0;
+  const safeToSpend = computeSafeToSpend({ snapshot, forecast, budgets, goals });
 
-  const visibleAccounts = (accounts ?? []).filter((a) => !a.is_hidden);
-  const topAccounts = [...visibleAccounts]
-    .sort((a, b) => Math.abs(b.current_balance) - Math.abs(a.current_balance))
-    .slice(0, 4);
+  const nextBill = (forecast?.occurrences ?? []).find((o) => !o.is_income && o.adjustment_action !== 'skip');
+  const topGoal = (goals ?? []).find((g) => !g.is_archived && g.target_amount > 0 && g.remaining_amount > 0);
 
-  const upcomingBills = (forecast?.occurrences ?? [])
-    .filter((o) => !o.is_income && o.days_until <= 14 && o.adjustment_action !== 'skip')
-    .slice(0, 4);
+  const statusLine =
+    reviewCount > 0
+      ? `${reviewCount} to review · ${overdueCount > 0 ? `${overdueCount} bill${overdueCount === 1 ? '' : 's'} overdue` : 'nothing urgent'} →`
+      : overdueCount > 0
+        ? `${overdueCount} bill${overdueCount === 1 ? '' : 's'} overdue →`
+        : 'Nothing to review · all caught up →';
 
   const draft: AdvisorDraftAction | undefined = reviewSummary?.ai_drafts?.[0];
   const insight: Insight | undefined = insights?.[0];
@@ -88,158 +90,62 @@ export function Today() {
   return (
     <Screen size="wide">
       {/* Header: wordmark + date, search-or-ask */}
-      <div className="flex flex-shrink-0 items-center justify-between">
+      <div className="flex flex-shrink-0 items-center justify-between gap-4">
         <div className="flex items-baseline gap-4">
           <span className="font-serif text-2xl text-ink">mizān</span>
           <span className="text-[13px] text-muted">{format(new Date(), 'EEEE, MMMM d')}</span>
         </div>
         <button
           type="button"
-          onClick={() => navigate('/advisor')}
-          className="flex items-center gap-2.5 rounded-lg border border-line-2 bg-card-alt px-3.5 py-2 text-[13px] text-muted transition-colors hover:text-ink"
+          onClick={() => window.dispatchEvent(new Event('mizan:open-palette'))}
+          className="flex items-center gap-2.5 text-[13px] text-muted transition-colors hover:text-ink"
         >
-          Search or ask a question
+          Search or ask
           <span className="font-mono text-[11px] text-faint">⌘K</span>
         </button>
       </div>
 
-      {/* KPI row */}
-      <div className="mt-7 grid flex-shrink-0 grid-cols-2 gap-4 xl:grid-cols-4">
-        <KpiTile
-          label="Net worth"
-          value={formatWholeCurrency(netWorth)}
-          delta={weekDelta != null ? `${weekDelta >= 0 ? '▲' : '▼'} ${formatWholeCurrency(Math.abs(weekDelta))} this week` : undefined}
-          deltaTone={weekDelta != null && weekDelta < 0 ? 'clay' : 'sage'}
-          to="/accounts"
-        />
-        <KpiTile label="Safe to spend" value={formatWholeCurrency(safeToSpend)} delta="after bills & budgets" to="/budget" />
-        <KpiTile
-          label={`Cash flow · ${format(new Date(), 'MMMM')}`}
-          value={
-            <span className={monthCF && monthCF.net < 0 ? 'text-clay' : 'text-sage-deep'}>
-              {formatWholeCurrency(monthCF?.net ?? 0, { showSign: true })}
-            </span>
-          }
-          delta={`${formatWholeCurrency(monthCF?.income ?? 0)} in · ${formatWholeCurrency(Math.abs(monthCF?.expenses ?? 0))} out`}
-          to="/cash-flow"
-        />
-        <KpiTile
-          label="To review"
-          value={String(reviewCount)}
-          delta={reviewCount === 0 ? 'all caught up' : 'transactions & suggestions'}
-          to="/transactions"
-        />
+      {/* Greeting */}
+      <div className="mt-7 flex-shrink-0">
+        <div className="font-serif text-[30px] font-light text-ink">{greeting()}</div>
+        <Link to="/transactions" className="mt-1.5 inline-block text-sm text-muted transition-colors hover:text-ink">
+          {statusLine}
+        </Link>
       </div>
 
-      {/* Two-column grid */}
-      <div className="mt-5 grid flex-1 grid-cols-1 items-start gap-5 xl:grid-cols-[1.15fr,1fr]">
-        <div className="flex min-w-0 flex-col gap-5">
-          {/* Balance scale card */}
-          <Card padding="lg">
-            <div className="flex items-center gap-6">
-              <BalanceScale assets={totalAssets} liabilities={totalLiabilities} className="w-[46%] min-w-[220px] flex-shrink" />
-              <div className="min-w-0 flex-1">
-                {[
-                  { label: 'Assets', value: formatWholeCurrency(totalAssets), tone: 'text-ink' },
-                  { label: 'Liabilities', value: formatWholeCurrency(-Math.abs(totalLiabilities)), tone: 'text-clay' },
-                  { label: 'Net worth', value: formatWholeCurrency(netWorth), tone: 'text-ink' },
-                ].map((row, i) => (
-                  <div
-                    key={row.label}
-                    className={`flex items-baseline justify-between py-2.5 ${i < 2 ? 'border-b border-line' : ''}`}
-                  >
-                    <span className="text-[13.5px] text-muted">{row.label}</span>
-                    <span className={`font-serif text-[19px] tabular-nums ${row.tone}`}>{row.value}</span>
-                  </div>
-                ))}
-              </div>
+      {/* Hero: scale + net worth + advisor */}
+      <div className="my-3 flex min-h-0 flex-1 flex-col items-center gap-8 py-6 md:flex-row md:gap-12">
+        <BalanceScale
+          assets={totalAssets}
+          liabilities={totalLiabilities}
+          className="h-auto w-full max-w-[420px] flex-shrink md:w-[46%] md:max-w-[500px]"
+        />
+        <div className="min-w-0 flex-1">
+          <div className="mb-2 text-xs uppercase tracking-[0.2em] text-muted">Net worth</div>
+          <div
+            className="font-serif font-light leading-[0.98] tracking-[-0.01em] text-ink tabular-nums"
+            style={{ fontSize: 'clamp(44px, 5.6vw, 68px)' }}
+          >
+            {formatWholeCurrency(easedNetWorth)}
+          </div>
+          {weekDelta != null && (
+            <div className={`mt-2.5 text-[15px] tabular-nums ${weekDelta >= 0 ? 'text-sage' : 'text-clay'}`}>
+              {weekDelta >= 0 ? '▲' : '▼'} {formatWholeCurrency(Math.abs(weekDelta))} this week
             </div>
-          </Card>
+          )}
 
-          {/* Accounts card */}
-          <Card padding="lg">
-            <SectionLabel
-              summary={
-                <button type="button" onClick={() => navigate('/accounts')} className="text-muted transition-colors hover:text-ink">
-                  All {visibleAccounts.length} →
-                </button>
-              }
-              className="mb-2"
-            >
-              Accounts
-            </SectionLabel>
-            {topAccounts.map((a, i) => (
-              <Row
-                key={a.id}
-                onClick={() => navigate('/accounts')}
-                className={`justify-between px-1 py-3 ${i === topAccounts.length - 1 ? 'border-b-0' : ''}`}
-              >
-                <div className="min-w-0">
-                  <div className="truncate text-[14.5px] text-ink">{a.account_name}</div>
-                  <div className="mt-0.5 text-xs text-muted-2">{a.institution_name}</div>
-                </div>
-                <span className={`font-serif text-[17px] tabular-nums ${a.current_balance < 0 || a.is_liability ? 'text-clay' : 'text-ink'}`}>
-                  {formatWholeCurrency(a.is_liability ? -Math.abs(a.current_balance) : a.current_balance)}
-                </span>
-              </Row>
-            ))}
-            {topAccounts.length === 0 && (
-              <div className="py-3 text-[13.5px] text-muted-2">
-                No accounts yet.{' '}
-                <button type="button" onClick={() => navigate('/settings')} className="text-muted underline hover:text-ink">
-                  Connect one in Settings.
-                </button>
-              </div>
-            )}
-          </Card>
-        </div>
-
-        <div className="flex min-w-0 flex-col gap-5">
-          {/* Upcoming bills */}
-          <Card padding="lg">
-            <SectionLabel className="mb-2">Upcoming bills · 14 days</SectionLabel>
-            {upcomingBills.map((o, i) => (
-              <Row
-                key={o.id}
-                onClick={() => navigate('/bills')}
-                className={`justify-between px-1 py-3 ${i === upcomingBills.length - 1 ? 'border-b-0' : ''}`}
-              >
-                <div className="min-w-0">
-                  <div className="truncate text-[14.5px] text-ink">{o.merchant_name}</div>
-                  <div className="mt-0.5 text-xs text-muted-2">
-                    {o.days_until <= 0 ? 'due today' : o.days_until === 1 ? 'in 1 day' : `in ${o.days_until} days`}
-                  </div>
-                </div>
-                <span className="font-serif text-[17px] tabular-nums text-ink">{formatWholeCurrency(Math.abs(o.amount))}</span>
-              </Row>
-            ))}
-            {upcomingBills.length === 0 && <div className="py-3 text-[13.5px] text-muted-2">Nothing due in the next two weeks.</div>}
-          </Card>
-
-          {/* Needs review */}
-          <Card padding="lg" onClick={() => navigate('/transactions')}>
-            <SectionLabel summary={reviewCount > 0 ? String(reviewCount) : undefined} className="mb-2">
-              Needs review
-            </SectionLabel>
-            <p className="text-[14px] leading-relaxed text-ink-soft">
-              {reviewCount === 0 ? 'All caught up.' : reviewSummaryLine(reviewSummary?.queues ?? [])}
-            </p>
-            {reviewCount > 0 && <div className="mt-2 text-[13px] text-muted">Review in Transactions →</div>}
-          </Card>
-
-          {/* Advisor suggestion */}
           {(draft || insight) && (
-            <div className="rounded-xl border border-sage-panel-border bg-sage-panel p-[22px]">
+            <div className="mt-7 max-w-[420px] border-l-2 border-sage-soft pl-[18px]">
               <div className="mb-2 text-[11px] uppercase tracking-[0.2em] text-sage-soft">Advisor</div>
-              <p className="font-serif text-[18px] font-light leading-normal text-ink">
+              <p className="font-serif text-[19px] font-light leading-normal text-ink">
                 {draft ? draft.summary : `${insight!.title}. ${insight!.message}`}
               </p>
-              <div className="mt-3.5 flex items-center gap-5">
+              <div className="mt-3.5 flex items-center gap-5 text-sm">
                 {draft ? (
                   <>
-                    <InkButton onClick={() => confirmDraft.mutate(draft)} disabled={confirmDraft.isPending}>
+                    <TextButton variant="primary" onClick={() => confirmDraft.mutate(draft)} disabled={confirmDraft.isPending}>
                       {draft.label}
-                    </InkButton>
+                    </TextButton>
                     <TextButton onClick={() => navigate('/advisor')}>Ask advisor</TextButton>
                     <TextButton onClick={() => dismissDraft.mutate(draft.id)}>Dismiss</TextButton>
                   </>
@@ -257,6 +163,33 @@ export function Today() {
             </div>
           )}
         </div>
+      </div>
+
+      {/* Stat strip */}
+      <div className="flex flex-shrink-0 flex-wrap gap-x-16 gap-y-5 border-t border-line-2 pt-6">
+        <StatLink to="/budget" label="Safe to spend">
+          <div className="font-serif text-[22px] leading-tight text-ink tabular-nums">{formatWholeCurrency(safeToSpend)}</div>
+        </StatLink>
+        {nextBill && (
+          <StatLink to="/bills" label="Next bill">
+            <div className="mt-[5px] text-base text-ink">
+              {nextBill.merchant_name} ·{' '}
+              {nextBill.days_until <= 0 ? 'due today' : nextBill.days_until === 1 ? 'in 1 day' : `in ${nextBill.days_until} days`} ·{' '}
+              <span className="tabular-nums">{formatWholeCurrency(Math.abs(nextBill.adjusted_amount ?? nextBill.amount))}</span>
+            </div>
+          </StatLink>
+        )}
+        {topGoal && (
+          <StatLink to="/goals" label={topGoal.name}>
+            <div className="mt-[5px] text-base text-ink">
+              {Math.round(Math.min(100, Math.max(0, topGoal.progress_percent)))}% of{' '}
+              <span className="tabular-nums">{formatWholeCurrency(topGoal.target_amount)}</span>
+            </div>
+          </StatLink>
+        )}
+        <StatLink to="/transactions" label="To review">
+          <div className="font-serif text-[22px] leading-tight text-ink tabular-nums">{reviewCount}</div>
+        </StatLink>
       </div>
     </Screen>
   );

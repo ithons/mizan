@@ -32,13 +32,13 @@ function SettingsRow({
   return (
     <div
       onClick={onClick}
-      className={`flex items-center justify-between rounded-lg px-3 py-4 transition-colors ${
+      className={`flex items-center justify-between rounded-lg px-3 py-3.5 transition-colors ${
         onClick ? 'cursor-pointer hover:bg-rail' : ''
       } ${last ? '' : 'border-b border-line'}`}
     >
       <div>
         <div className="text-[15.5px] text-ink">{title}</div>
-        {sub && <div className="mt-0.5 text-[12.5px] text-muted-2">{sub}</div>}
+        {sub && <div className="mt-0.5 text-xs text-muted-2">{sub}</div>}
       </div>
       <div className="flex-shrink-0 pl-4 text-[13px]">{trailing}</div>
     </div>
@@ -126,7 +126,7 @@ export function Settings() {
 
       <div className="flex-1 pb-8">
         {/* Connections */}
-        <div className="mb-8">
+        <div className="mb-7">
           <SectionLabel className="mb-1.5">Connections</SectionLabel>
           <SettingsRow
             title="SimpleFIN"
@@ -175,7 +175,7 @@ export function Settings() {
         </div>
 
         {/* Advisor */}
-        <div className="mb-8">
+        <div className="mb-7">
           <SectionLabel className="mb-1.5">Advisor</SectionLabel>
           <SettingsRow
             title="Anthropic API key"
@@ -197,7 +197,7 @@ export function Settings() {
         </div>
 
         {/* Preferences */}
-        <div className="mb-8">
+        <div className="mb-7">
           <SectionLabel className="mb-1.5">Preferences</SectionLabel>
           <SettingsRow
             title="Categories & rules"
@@ -247,7 +247,7 @@ export function Settings() {
           />
         </div>
 
-        <div className="mt-8 text-[12.5px] leading-relaxed text-muted-2">
+        <div className="mt-8 text-xs leading-relaxed text-muted-2">
           Mizān v1.0 · data stored in <span className="font-mono text-xs">.mizan/</span> · MIT licensed
         </div>
       </div>
