@@ -375,7 +375,8 @@ export const recurringApi = {
 // ─── Goals ──────────────────────────────────────────────────────────────────
 
 export const goalsApi = {
-  list: () => apiFetch<Goal[]>('/api/goals'),
+  list: (opts?: { includeArchived?: boolean }) =>
+    apiFetch<Goal[]>(`/api/goals${opts?.includeArchived ? '?includeArchived=true' : ''}`),
   create: (body: Partial<Goal>) =>
     apiFetch<Goal>('/api/goals', {
       method: 'POST',

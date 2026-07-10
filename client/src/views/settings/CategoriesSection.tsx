@@ -1,43 +1,13 @@
-import React, { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query';
-import { useSearchParams } from 'react-router-dom';
-import {
-  Eye,
-  EyeOff,
-  Plus,
-  Trash2,
-  Edit2,
-  X,
-  Check,
-  AlertTriangle,
-  Download,
-  Link2,
-  Unlink,
-  RefreshCw,
-  Info,
-  Wallet,
-  Tag,
-  Database,
-  CheckCircle,
-  Sparkles,
-  type LucideIcon,
-} from 'lucide-react';
-import {
-  settingsApi,
-  coinbaseApi,
-  categoriesApi,
-  rulesApi,
-  syncApi,
-  flattenCategories,
-} from '../../lib/api';
-import { formatRelativeTime } from '../../lib/formatters';
+import { Plus, Trash2, Edit2, X, Check } from 'lucide-react';
+import { categoriesApi } from '../../lib/api';
 import { useAppStore } from '../../store';
 import { invalidateFinancialData } from '../../lib/queryInvalidation';
 import { Modal } from '../../components/Modal';
-import { ConfirmRemoveModal } from '../../components/ConfirmRemoveModal';
-import { SyncActivityPanel } from '../../components/SyncActivityPanel';
 import { PageLoader } from '../../components/LoadingSpinner';
-import type { Category, MerchantRule, MerchantRuleSuggestion, SyncRun } from '@shared/types';
+import { InkButton, SectionLabel, TextButton } from '../../components/balance';
+import type { Category } from '@shared/types';
 
 const CATEGORY_PRESET_COLORS = [
   '#c9963a', '#7c8b99', '#b5654a', '#ce8642', '#9b8dee',
@@ -48,6 +18,15 @@ const CATEGORY_PRESET_COLORS = [
 export function invalidateCategoryData(queryClient: ReturnType<typeof useQueryClient>): void {
   void queryClient.invalidateQueries({ queryKey: ['categories'] });
   invalidateFinancialData(queryClient);
+}
+
+function Badge({ tone, children }: { tone: 'sage' | 'clay' | 'muted'; children: string }) {
+  const color = tone === 'sage' ? 'text-sage-deep' : tone === 'clay' ? 'text-clay' : 'text-muted';
+  return (
+    <span className={`flex-shrink-0 rounded border border-pill-border bg-pill-bg px-1.5 py-0.5 text-[11px] ${color}`}>
+      {children}
+    </span>
+  );
 }
 
 // ─── Category Row ────────────────────────────────────────────────────────────
@@ -76,20 +55,23 @@ export function CategoryRow({
     setEditing(false);
   };
 
+  const smallField =
+    'rounded-md border border-line-3 bg-card px-2 py-1 text-xs text-ink placeholder:text-muted-2 focus:outline-none focus:border-sage';
+
   return (
     <div>
       <div
-        className="flex items-center gap-2 py-1.5 hover:bg-black/5 group rounded px-2"
+        className="group flex items-center gap-2 rounded-lg px-2 py-1.5 transition-colors hover:bg-rail"
         style={{ paddingLeft: `${8 + depth * 20}px` }}
       >
-        <span className="w-3 h-3 rounded-full flex-shrink-0" style={{ backgroundColor: category.color || '#7a6c5d' }} />
+        <span className="h-3 w-3 flex-shrink-0 rounded-full" style={{ backgroundColor: category.color || '#7a6c5d' }} />
         {category.icon && !editing && <span className="text-sm">{category.icon}</span>}
         {editing ? (
-          <div className="flex flex-col gap-2 flex-1 py-1">
-            <div className="flex items-center gap-1">
+          <div className="flex flex-1 flex-col gap-2 py-1">
+            <div className="flex items-center gap-1.5">
               <input
                 autoFocus
-                className="bg-background border border-border rounded px-2 py-0.5 text-xs text-text flex-1 focus:outline-none focus:ring-1 focus:ring-positive-5"
+                className={`flex-1 ${smallField}`}
                 value={editName}
                 onChange={(e) => setEditName(e.target.value)}
                 onKeyDown={(e) => {
@@ -98,18 +80,18 @@ export function CategoryRow({
                 }}
               />
               <input
-                className="w-8 bg-background border border-border rounded px-1 py-0.5 text-xs text-center text-text focus:outline-none focus:ring-1 focus:ring-positive-5"
+                className={`w-9 text-center ${smallField}`}
                 value={editIcon}
                 onChange={(e) => setEditIcon(e.target.value)}
                 maxLength={2}
                 placeholder="🏠"
                 title="Category icon (emoji)"
               />
-              <button onClick={handleSave}>
-                <Check size={12} className="text-positive" />
+              <button type="button" onClick={handleSave}>
+                <Check size={13} className="text-sage-deep" />
               </button>
-              <button onClick={() => setEditing(false)}>
-                <X size={12} className="text-muted" />
+              <button type="button" onClick={() => setEditing(false)}>
+                <X size={13} className="text-muted" />
               </button>
             </div>
             <div className="flex items-center justify-between">
@@ -117,11 +99,12 @@ export function CategoryRow({
                 {CATEGORY_PRESET_COLORS.map((color) => (
                   <button
                     key={color}
+                    type="button"
                     onClick={() => setEditColor(color)}
-                    className="w-4 h-4 rounded-full transition-transform hover:scale-110"
+                    className="h-4 w-4 rounded-full transition-transform hover:scale-110"
                     style={{
                       backgroundColor: color,
-                      outline: editColor === color ? `2px solid white` : '2px solid transparent',
+                      outline: editColor === color ? '2px solid var(--mz-ink)' : '2px solid transparent',
                       outlineOffset: '1px',
                     }}
                     title={color}
@@ -129,10 +112,10 @@ export function CategoryRow({
                 ))}
               </div>
               {Boolean(category.is_income) && (
-                <label className="flex items-center gap-1.5 text-[11px] text-muted cursor-pointer">
+                <label className="flex cursor-pointer items-center gap-1.5 text-[11px] text-muted">
                   <input
                     type="checkbox"
-                    className="accent-positive"
+                    className="accent-sage"
                     checked={editTaxable}
                     onChange={(e) => setEditTaxable(e.target.checked)}
                   />
@@ -143,17 +126,18 @@ export function CategoryRow({
           </div>
         ) : (
           <>
-            <span className="text-sm text-text flex-1">{category.name}</span>
-            {Boolean(category.is_income) && <span className="text-xs text-positive bg-positive-10 px-1.5 py-0.5 rounded flex-shrink-0">income</span>}
-            {Boolean(category.taxable) && <span className="text-xs text-negative bg-negative/10 px-1.5 py-0.5 rounded flex-shrink-0">taxable</span>}
-            {Boolean(category.is_system) && <span className="text-xs text-muted bg-border/50 px-1.5 py-0.5 rounded flex-shrink-0">system</span>}
+            <span className="flex-1 text-sm text-ink">{category.name}</span>
+            {Boolean(category.is_income) && <Badge tone="sage">income</Badge>}
+            {Boolean(category.taxable) && <Badge tone="clay">taxable</Badge>}
+            {Boolean(category.is_system) && <Badge tone="muted">system</Badge>}
           </>
         )}
         {!editing && (
-          <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+          <div className="flex gap-1 opacity-0 transition-opacity group-hover:opacity-100">
             {depth === 0 && (
               <button
-                className="p-1 text-muted hover:text-positive"
+                type="button"
+                className="p-1 text-muted transition-colors hover:text-sage-deep"
                 title="Add subcategory"
                 onClick={() => onAddChild(category.id)}
               >
@@ -163,7 +147,8 @@ export function CategoryRow({
             {!category.is_system && (
               <>
                 <button
-                  className="p-1 text-muted hover:text-text"
+                  type="button"
+                  className="p-1 text-muted transition-colors hover:text-ink"
                   onClick={() => {
                     setEditName(category.name);
                     setEditColor(category.color || CATEGORY_PRESET_COLORS[0]);
@@ -173,7 +158,11 @@ export function CategoryRow({
                 >
                   <Edit2 size={12} />
                 </button>
-                <button className="p-1 text-muted hover:text-negative" onClick={() => onDelete(category.id)}>
+                <button
+                  type="button"
+                  className="p-1 text-muted transition-colors hover:text-clay"
+                  onClick={() => onDelete(category.id)}
+                >
                   <Trash2 size={12} />
                 </button>
               </>
@@ -249,51 +238,54 @@ export function CategoriesSection() {
   if (isLoading) return <PageLoader />;
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-3">
       <div className="flex items-center justify-between">
-        <h3 className="text-sm font-medium text-text">Categories</h3>
-        <button
-          className="flex items-center gap-1 text-xs text-positive hover:opacity-80"
-          onClick={() => { setAddParentId(null); setShowAddModal(true); }}
+        <SectionLabel>Categories</SectionLabel>
+        <TextButton
+          onClick={() => {
+            setAddParentId(null);
+            setShowAddModal(true);
+          }}
         >
-          <Plus size={13} /> Add Category
-        </button>
+          + Add category
+        </TextButton>
       </div>
-      <div className="bg-background border border-border rounded py-2">
+      <div>
         {rootCategories.map((cat) => (
           <CategoryRow
             key={cat.id}
             category={cat}
             onEdit={(id, name, color, icon, taxable) => editMutation.mutate({ id, name, color, icon, taxable })}
             onDelete={(id) => deleteMutation.mutate(id)}
-            onAddChild={(parentId) => { setAddParentId(parentId); setShowAddModal(true); }}
+            onAddChild={(parentId) => {
+              setAddParentId(parentId);
+              setShowAddModal(true);
+            }}
             depth={0}
           />
         ))}
-        {categories.length === 0 && (
-          <p className="text-xs text-muted text-center py-6">No categories yet</p>
-        )}
+        {categories.length === 0 && <p className="py-4 text-xs text-muted-2">No categories yet.</p>}
       </div>
 
       <Modal
         open={showAddModal}
         onClose={() => setShowAddModal(false)}
-        title={addParentId ? 'Add Subcategory' : 'Add Category'}
+        title={addParentId ? 'Add subcategory' : 'Add category'}
       >
         <div className="space-y-4">
           <div>
-            <label className="block text-xs text-muted mb-1">Name</label>
+            <label className="mz-label">Name</label>
             <div className="flex gap-2">
               <input
                 autoFocus
-                className="flex-1 bg-background border border-border rounded px-3 py-2 text-sm text-text focus:outline-none focus:ring-1 focus:ring-positive-5"
+                className="mz-field flex-1"
                 value={addName}
                 onChange={(e) => setAddName(e.target.value)}
                 onKeyDown={(e) => e.key === 'Enter' && addMutation.mutate()}
                 placeholder="Category name"
               />
               <input
-                className="w-10 bg-background border border-border rounded px-2 py-2 text-sm text-center text-text focus:outline-none focus:ring-1 focus:ring-positive-5"
+                className="mz-field !w-12 text-center"
                 value={addIcon}
                 onChange={(e) => setAddIcon(e.target.value)}
                 maxLength={2}
@@ -303,16 +295,17 @@ export function CategoriesSection() {
             </div>
           </div>
           <div>
-            <label className="block text-xs text-muted mb-2">Color</label>
+            <label className="mz-label">Color</label>
             <div className="flex flex-wrap gap-2">
               {CATEGORY_PRESET_COLORS.map((color) => (
                 <button
                   key={color}
+                  type="button"
                   onClick={() => setAddColor(color)}
-                  className="w-5 h-5 rounded-full transition-transform hover:scale-110"
+                  className="h-5 w-5 rounded-full transition-transform hover:scale-110"
                   style={{
                     backgroundColor: color,
-                    outline: addColor === color ? '2px solid white' : '2px solid transparent',
+                    outline: addColor === color ? '2px solid var(--mz-ink)' : '2px solid transparent',
                     outlineOffset: '1px',
                   }}
                   title={color}
@@ -320,25 +313,14 @@ export function CategoriesSection() {
               ))}
             </div>
           </div>
-          <div className="flex gap-3">
-            <button
-              className="flex-1 py-2 text-sm bg-text text-surface font-medium rounded hover:opacity-90"
-              onClick={() => addMutation.mutate()}
-              disabled={addMutation.isPending || !addName}
-            >
-              {addMutation.isPending ? 'Creating...' : 'Create'}
-            </button>
-            <button
-              className="px-4 py-2 text-sm border border-border rounded text-muted hover:text-text"
-              onClick={() => setShowAddModal(false)}
-            >
-              Cancel
-            </button>
+          <div className="flex items-center gap-5 pt-1">
+            <InkButton onClick={() => addMutation.mutate()} disabled={addMutation.isPending || !addName}>
+              {addMutation.isPending ? 'Creating…' : 'Create'}
+            </InkButton>
+            <TextButton onClick={() => setShowAddModal(false)}>Cancel</TextButton>
           </div>
         </div>
       </Modal>
     </div>
   );
 }
-
-// ─── Rules Section ────────────────────────────────────────────────────────────

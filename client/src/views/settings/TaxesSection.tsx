@@ -1,7 +1,8 @@
-import React, { useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useQuery, useMutation } from '@tanstack/react-query';
 import { settingsApi } from '../../lib/api';
 import { useAppStore } from '../../store';
+import { InkButton } from '../../components/balance';
 
 export function TaxesSection() {
   const { addToast } = useAppStore();
@@ -31,33 +32,32 @@ export function TaxesSection() {
     saveMutation.mutate(num);
   };
 
-  if (isLoading) return <div className="text-xs text-muted">Loading...</div>;
+  if (isLoading) return <div className="text-xs text-muted">Loading…</div>;
 
   return (
-    <div className="space-y-4">
-      <div>
-        <h3 className="text-sm font-medium text-text mb-1">Estimated Tax Rate</h3>
-        <p className="text-xs text-muted leading-relaxed mb-3">
-          For freelancers and business owners. Mizān will proactively draft transfers for this percentage of income in categories marked "taxable" to shield it from your "Safe to Spend" metric.
-        </p>
-        <div className="flex items-center gap-2">
-          <input
-            type="number"
-            min="0"
-            max="100"
-            step="1"
-            className="bg-background border border-border rounded px-3 py-2 text-sm text-text focus:outline-none focus:ring-1 focus:ring-positive-5 w-24"
-            value={rate}
-            onChange={(e) => setRate(e.target.value)}
-          />
-          <span className="text-muted text-sm">%</span>
-          <button
-            onClick={handleSave}
-            disabled={saveMutation.isPending}
-            className="ml-2 px-3 py-2 text-sm bg-text text-surface font-medium rounded hover:opacity-90"
-          >
-            {saveMutation.isPending ? 'Saving...' : 'Save'}
-          </button>
+    <div className="space-y-3">
+      <p className="text-[13px] leading-relaxed text-muted">
+        For freelancers and business owners. Mizān drafts transfers for this share of income in categories marked
+        taxable, keeping it out of safe-to-spend.
+      </p>
+      <div className="flex items-center gap-3">
+        <div>
+          <label className="mz-label">Estimated tax rate</label>
+          <div className="flex items-center gap-2">
+            <input
+              type="number"
+              min="0"
+              max="100"
+              step="1"
+              className="mz-field !w-24 tabular-nums"
+              value={rate}
+              onChange={(e) => setRate(e.target.value)}
+            />
+            <span className="text-sm text-muted">%</span>
+            <InkButton onClick={handleSave} disabled={saveMutation.isPending} className="ml-2">
+              {saveMutation.isPending ? 'Saving…' : 'Save'}
+            </InkButton>
+          </div>
         </div>
       </div>
     </div>

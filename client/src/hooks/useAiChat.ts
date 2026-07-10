@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback } from 'react';
+import { useState, useRef, useCallback, useEffect } from 'react';
 import { aiApi } from '../lib/api';
 import type { AdvisorAnalysis, ChatMessage } from '@shared/types';
 
@@ -10,14 +10,43 @@ export interface DisplayMessage extends ChatMessage {
   thinkingActive?: boolean;
 }
 
+// Conversation survives navigating away and back within the tab, but not a new session.
+const STORAGE_KEY = 'mizan.advisor.chat';
+
+function loadStoredMessages(): DisplayMessage[] {
+  try {
+    const raw = sessionStorage.getItem(STORAGE_KEY);
+    if (!raw) return [];
+    const parsed: unknown = JSON.parse(raw);
+    return Array.isArray(parsed) ? (parsed as DisplayMessage[]) : [];
+  } catch (err) {
+    console.warn('Failed to restore advisor chat', err);
+    return [];
+  }
+}
+
 function errorMessage(err: unknown, fallback: string) {
   return err instanceof Error && err.message ? err.message : fallback;
 }
 
 export function useAiChat() {
-  const [messages, setMessages] = useState<DisplayMessage[]>([]);
+  const [messages, setMessages] = useState<DisplayMessage[]>(loadStoredMessages);
   const [isStreaming, setIsStreaming] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
+
+  useEffect(() => {
+    if (isStreaming) return;
+    try {
+      if (messages.length === 0) {
+        sessionStorage.removeItem(STORAGE_KEY);
+      } else {
+        const settled = messages.map((m) => ({ ...m, streaming: false, thinkingActive: false }));
+        sessionStorage.setItem(STORAGE_KEY, JSON.stringify(settled));
+      }
+    } catch (err) {
+      console.warn('Failed to persist advisor chat', err);
+    }
+  }, [messages, isStreaming]);
 
   const sendMessage = useCallback(async (userText: string) => {
     if (isStreaming || !userText.trim()) return;

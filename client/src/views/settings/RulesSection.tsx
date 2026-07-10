@@ -1,49 +1,12 @@
-import React, { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query';
-import { useSearchParams } from 'react-router-dom';
-import {
-  Eye,
-  EyeOff,
-  Plus,
-  Trash2,
-  Edit2,
-  X,
-  Check,
-  AlertTriangle,
-  Download,
-  Link2,
-  Unlink,
-  RefreshCw,
-  Info,
-  Wallet,
-  Tag,
-  Database,
-  CheckCircle,
-  Sparkles,
-  type LucideIcon,
-} from 'lucide-react';
-import {
-  settingsApi,
-  coinbaseApi,
-  categoriesApi,
-  rulesApi,
-  syncApi,
-  flattenCategories,
-} from '../../lib/api';
-import { formatCurrency, formatDate, formatRelativeTime } from '../../lib/formatters';
+import { categoriesApi, rulesApi, flattenCategories } from '../../lib/api';
+import { formatCurrency, formatDate } from '../../lib/formatters';
 import { useAppStore } from '../../store';
 import { invalidateFinancialData } from '../../lib/queryInvalidation';
-import { Modal } from '../../components/Modal';
-import { ConfirmRemoveModal } from '../../components/ConfirmRemoveModal';
-import { SyncActivityPanel } from '../../components/SyncActivityPanel';
 import { PageLoader } from '../../components/LoadingSpinner';
-import type { Category, MerchantRule, MerchantRuleSuggestion, SyncRun } from '@shared/types';
-
-const CATEGORY_PRESET_COLORS = [
-  '#c9963a', '#7c8b99', '#b5654a', '#ce8642', '#9b8dee',
-  '#ee8d5b', '#70c4e0', '#e070b8', '#70e07a', '#a0a0b8',
-  '#c4a86e', '#6e8ec4',
-];
+import { InkButton, SectionLabel, TextButton } from '../../components/balance';
+import type { MerchantRule, MerchantRuleSuggestion } from '@shared/types';
 
 export function RulesSection() {
   const qc = useQueryClient();
@@ -146,135 +109,108 @@ export function RulesSection() {
 
   return (
     <div className="space-y-5">
-      <div className="grid grid-cols-1 sm:grid-cols-[1fr_180px_auto] gap-2">
+      <SectionLabel>Rules</SectionLabel>
+
+      <div className="grid grid-cols-1 gap-2 sm:grid-cols-[1fr_180px_auto]">
         <input
-          className="bg-background border border-border rounded px-3 py-2 text-sm text-text focus:outline-none focus:ring-1 focus:ring-positive-5"
+          className="mz-field"
           value={pattern}
           onChange={(e) => setPattern(e.target.value)}
           onKeyDown={(e) => e.key === 'Enter' && saveRule()}
-          placeholder="Merchant contains..."
+          placeholder="Merchant contains…"
         />
-        <select
-          className="bg-background border border-border rounded px-3 py-2 text-sm text-text focus:outline-none focus:ring-1 focus:ring-positive-5"
-          value={categoryId}
-          onChange={(e) => setCategoryId(e.target.value)}
-        >
+        <select className="mz-field" value={categoryId} onChange={(e) => setCategoryId(e.target.value)}>
           <option value="">Category</option>
           {categories.map((category) => (
             <option key={category.id} value={category.id}>{category.name}</option>
           ))}
         </select>
-        <button
-          className="flex items-center gap-1.5 px-3 py-2 text-xs bg-text text-surface font-medium rounded hover:opacity-90 disabled:opacity-40"
-          onClick={saveRule}
-          disabled={createMutation.isPending}
-        >
-          <Plus size={13} />
-          Add
-        </button>
+        <InkButton onClick={saveRule} disabled={createMutation.isPending}>
+          {createMutation.isPending ? 'Adding…' : 'Add'}
+        </InkButton>
       </div>
 
       {selectedCategory && (
         <p className="text-xs text-muted">
-          New matches will be categorized as <span className="text-text">{selectedCategory.name}</span>.
+          New matches will be categorized as <span className="text-ink">{selectedCategory.name}</span>.
         </p>
       )}
 
       {suggestions.length > 0 && (
-        <div className="border border-warning/30 bg-warning/10 rounded">
-          <div className="flex items-center gap-2 px-3 py-2 border-b border-warning/20">
-            <Sparkles size={13} className="text-warning" />
-            <p className="text-xs font-medium text-text">Suggested rules</p>
-          </div>
-          <div className="divide-y divide-warning/15">
-            {suggestions.map((suggestion) => (
-              <div key={`${suggestion.pattern}:${suggestion.category_id}`} className="flex items-center gap-3 px-3 py-3">
-                <div
-                  className="w-2.5 h-2.5 rounded-full flex-shrink-0"
-                  style={{ backgroundColor: suggestion.category_color ?? '#7a6c5d' }}
-                />
-                <div className="min-w-0 flex-1">
-                  <p className="text-sm text-text truncate">{suggestion.pattern}</p>
-                  <p className="text-xs text-muted">
-                    {suggestion.categorized_count} categorized as {suggestion.category_name}
-                    {' '}
-                    - {suggestion.uncategorized_count} uncategorized
-                    {' '}
-                    - {Math.round(suggestion.confidence * 100)}% confidence
-                  </p>
-                  <p className="text-xs text-muted mt-1">{suggestion.reason}</p>
-                  {suggestion.preview_transactions.length > 0 && (
-                    <div className="mt-2 flex flex-wrap gap-1.5">
-                      {suggestion.preview_transactions.slice(0, 4).map((transaction) => (
-                        <span
-                          key={transaction.id}
-                          className="text-[11px] text-muted border border-warning/20 rounded px-1.5 py-0.5 bg-background/45"
-                        >
-                          {transaction.will_apply ? 'Will update' : transaction.category_name ?? 'Evidence'}
-                          {' '}
-                          {formatDate(transaction.date)}
-                          {' '}
-                          {formatCurrency(transaction.amount)}
-                        </span>
-                      ))}
-                    </div>
-                  )}
-                </div>
-                <button
-                  className="flex items-center gap-1.5 text-xs text-[#332b26] bg-warning rounded px-2.5 py-1.5 hover:opacity-90 disabled:opacity-40"
-                  onClick={() => suggestionMutation.mutate(suggestion)}
-                  disabled={suggestionMutation.isPending}
-                >
-                  <Check size={12} />
-                  Accept
-                </button>
+        <div className="rounded-xl border border-sage-tint-border bg-sage-tint">
+          <div className="border-b border-sage-tint-border px-4 py-2.5 text-xs font-medium text-ink">Suggested rules</div>
+          {suggestions.map((suggestion, i) => (
+            <div
+              key={`${suggestion.pattern}:${suggestion.category_id}`}
+              className={`flex items-center gap-3 px-4 py-3 ${i < suggestions.length - 1 ? 'border-b border-sage-tint-border' : ''}`}
+            >
+              <div
+                className="h-2.5 w-2.5 flex-shrink-0 rounded-full"
+                style={{ backgroundColor: suggestion.category_color ?? '#7a6c5d' }}
+              />
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-sm text-ink">{suggestion.pattern}</p>
+                <p className="text-xs text-muted">
+                  {suggestion.categorized_count} categorized as {suggestion.category_name} · {suggestion.uncategorized_count}{' '}
+                  uncategorized · {Math.round(suggestion.confidence * 100)}% confidence
+                </p>
+                <p className="mt-1 text-xs text-muted-2">{suggestion.reason}</p>
+                {suggestion.preview_transactions.length > 0 && (
+                  <div className="mt-2 flex flex-wrap gap-1.5">
+                    {suggestion.preview_transactions.slice(0, 4).map((transaction) => (
+                      <span
+                        key={transaction.id}
+                        className="rounded border border-line-2 bg-card px-1.5 py-0.5 text-[11px] text-muted"
+                      >
+                        {transaction.will_apply ? 'Will update' : transaction.category_name ?? 'Evidence'}{' '}
+                        {formatDate(transaction.date)} {formatCurrency(transaction.amount)}
+                      </span>
+                    ))}
+                  </div>
+                )}
               </div>
-            ))}
-          </div>
+              <TextButton
+                variant="primary"
+                onClick={() => suggestionMutation.mutate(suggestion)}
+                disabled={suggestionMutation.isPending}
+              >
+                Accept
+              </TextButton>
+            </div>
+          ))}
         </div>
       )}
 
       <div className="flex items-center justify-between">
-        <p className="text-xs text-muted">{rules.length} rules</p>
-        <button
-          className="flex items-center gap-1.5 text-xs text-muted border border-border rounded px-3 py-1.5 hover:text-text disabled:opacity-40"
-          onClick={() => applyMutation.mutate()}
-          disabled={applyMutation.isPending || rules.length === 0}
-        >
-          <Check size={13} />
-          Apply Rules
-        </button>
+        <p className="text-xs text-muted">
+          {rules.length} rule{rules.length === 1 ? '' : 's'}
+        </p>
+        <TextButton onClick={() => applyMutation.mutate()} disabled={applyMutation.isPending || rules.length === 0}>
+          {applyMutation.isPending ? 'Applying…' : 'Apply to uncategorized'}
+        </TextButton>
       </div>
 
-      <div className="bg-background border border-border rounded divide-y divide-border">
-        {rules.map((rule: MerchantRule) => (
-          <div key={rule.id} className="flex items-center gap-3 px-3 py-3">
+      <div>
+        {rules.map((rule: MerchantRule, i) => (
+          <div key={rule.id} className={`flex items-center gap-3 px-1 py-3 ${i < rules.length - 1 ? 'border-b border-line' : ''}`}>
             <div
-              className="w-2.5 h-2.5 rounded-full flex-shrink-0"
+              className="h-2.5 w-2.5 flex-shrink-0 rounded-full"
               style={{ backgroundColor: rule.category_color ?? '#7a6c5d' }}
             />
             <div className="min-w-0 flex-1">
-              <p className="text-sm text-text truncate">{rule.pattern}</p>
+              <p className="truncate text-sm text-ink">{rule.pattern}</p>
               <p className="text-xs text-muted">
                 {rule.category_name ?? 'Unknown category'}
                 {rule.match_count !== undefined && ` · ${rule.match_count} matches`}
               </p>
             </div>
-            <button
-              className="p-1 text-muted hover:text-negative"
-              onClick={() => deleteMutation.mutate(rule.id)}
-              title="Delete rule"
-            >
-              <Trash2 size={13} />
-            </button>
+            <TextButton onClick={() => deleteMutation.mutate(rule.id)} className="hover:!text-clay">
+              Delete
+            </TextButton>
           </div>
         ))}
-        {rules.length === 0 && (
-          <p className="text-xs text-muted text-center py-6">No rules yet</p>
-        )}
+        {rules.length === 0 && <p className="py-4 text-xs text-muted-2">No rules yet.</p>}
       </div>
     </div>
   );
 }
-
-// ─── Data Section ─────────────────────────────────────────────────────────────

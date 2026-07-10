@@ -161,13 +161,26 @@ function GoalModal({ open, onClose, editing }: { open: boolean; onClose: () => v
 }
 
 export function Goals() {
+  const qc = useQueryClient();
+  const { addToast } = useAppStore();
   const [showModal, setShowModal] = useState(false);
   const [editing, setEditing] = useState<Goal | null>(null);
+  const [showArchived, setShowArchived] = useState(false);
 
-  const { data: goals } = useQuery({ queryKey: ['goals'], queryFn: () => goalsApi.list() });
+  const { data: goals } = useQuery({ queryKey: ['goals', 'all'], queryFn: () => goalsApi.list({ includeArchived: true }) });
   const { data: forecast } = useQuery({ queryKey: ['recurring', 'forecast', 30], queryFn: () => recurringApi.forecast(30) });
 
+  const restore = useMutation({
+    mutationFn: (goal: Goal) => goalsApi.update(goal.id, { is_archived: false }),
+    onSuccess: () => {
+      invalidateFinancialData(qc);
+      addToast({ type: 'success', message: 'Goal restored' });
+    },
+    onError: (err: Error) => addToast({ type: 'error', message: err.message }),
+  });
+
   const active = useMemo(() => (goals ?? []).filter((g) => !g.is_archived), [goals]);
+  const archived = useMemo(() => (goals ?? []).filter((g) => g.is_archived), [goals]);
   const totalSaved = active.reduce((s, g) => s + g.progress_amount, 0);
   const totalTarget = active.reduce((s, g) => s + g.target_amount, 0);
 
@@ -252,6 +265,41 @@ export function Goals() {
           </div>
         )}
       </div>
+
+      {archived.length > 0 && (
+        <div className="mt-10 flex-shrink-0 pb-2">
+          <button
+            type="button"
+            onClick={() => setShowArchived((v) => !v)}
+            className="text-[12.5px] text-muted-2 transition-colors hover:text-muted"
+          >
+            {showArchived ? 'Hide archived' : `Archived · ${archived.length}`}
+          </button>
+          {showArchived && (
+            <div className="mz-rise-fast mt-3">
+              {archived.map((g, i) => (
+                <div
+                  key={g.id}
+                  className={`flex items-baseline justify-between gap-4 py-2.5 ${i < archived.length - 1 ? 'border-b border-line' : ''}`}
+                >
+                  <span className="min-w-0 truncate text-[14px] text-muted">{g.name}</span>
+                  <span className="ml-auto flex-shrink-0 text-[13px] tabular-nums text-muted-2">
+                    {formatWholeCurrency(g.progress_amount)} of {formatWholeCurrency(g.target_amount)}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => restore.mutate(g)}
+                    disabled={restore.isPending}
+                    className="flex-shrink-0 text-[13px] text-ink transition-opacity hover:opacity-75 disabled:opacity-40"
+                  >
+                    Restore
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
 
       <GoalModal open={showModal} onClose={() => setShowModal(false)} editing={editing} />
     </Screen>

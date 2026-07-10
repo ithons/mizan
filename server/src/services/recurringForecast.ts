@@ -70,7 +70,9 @@ function buildOccurrence(
   endDate: string,
   adjustment?: RecurringOccurrenceAdjustment
 ): RecurringForecastOccurrence | null {
-  if (adjustment?.action === 'skip') return null;
+  // Skipped occurrences stay in the payload (dimmed + undoable in the UI) but
+  // are excluded from every total and review count by the aggregation below.
+  const skipped = adjustment?.action === 'skip';
 
   const expectedDate = adjustment?.action === 'snooze' && adjustment.adjusted_date
     ? adjustment.adjusted_date
@@ -82,9 +84,11 @@ function buildOccurrence(
     : baseAmount;
   const effectiveDate = parseISO(expectedDate);
   const status: RecurringForecastOccurrence['status'] = expectedDate < today ? 'overdue' : 'upcoming';
-  const needsReview = status === 'overdue'
-    ? true
-    : !pattern.is_confirmed && confidenceLabelValue !== 'likely';
+  const needsReview = skipped
+    ? false
+    : status === 'overdue'
+      ? true
+      : !pattern.is_confirmed && confidenceLabelValue !== 'likely';
 
   return {
     id: `${pattern.id}:${originalDate}`,
@@ -203,9 +207,10 @@ export function buildRecurringForecast(
 
   occurrences.sort((a, b) => a.expected_date.localeCompare(b.expected_date));
 
-  const income = occurrences.reduce((sum, occurrence) =>
+  const counted = occurrences.filter((occurrence) => occurrence.adjustment_action !== 'skip');
+  const income = counted.reduce((sum, occurrence) =>
     occurrence.amount > 0 ? sum + occurrence.amount : sum, 0);
-  const bills = occurrences.reduce((sum, occurrence) =>
+  const bills = counted.reduce((sum, occurrence) =>
     occurrence.amount < 0 ? sum + Math.abs(occurrence.amount) : sum, 0);
   const bucketedTotals = {
     confirmed_income: 0,
@@ -216,7 +221,7 @@ export function buildRecurringForecast(
     uncertain_bills: 0,
   };
 
-  for (const occurrence of occurrences) {
+  for (const occurrence of counted) {
     const bucket = forecastBucket(occurrence);
     const side = occurrence.amount > 0 ? 'income' : 'bills';
     const key = `${bucket}_${side}` as keyof typeof bucketedTotals;
@@ -229,8 +234,8 @@ export function buildRecurringForecast(
     bills,
     net: income - bills,
     ...bucketedTotals,
-    overdue_count: occurrences.filter((occurrence) => occurrence.status === 'overdue').length,
-    review_count: occurrences.filter((occurrence) => occurrence.needs_review).length,
+    overdue_count: counted.filter((occurrence) => occurrence.status === 'overdue').length,
+    review_count: counted.filter((occurrence) => occurrence.needs_review).length,
     occurrences,
   };
 }

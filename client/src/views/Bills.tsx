@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { format, parseISO } from 'date-fns';
@@ -35,13 +35,16 @@ export function Bills() {
   const qc = useQueryClient();
   const { addToast } = useAppStore();
 
+  const [showIncome, setShowIncome] = useState(false);
+
   const { data: forecast } = useQuery({ queryKey: ['recurring', 'forecast', 30], queryFn: () => recurringApi.forecast(30) });
   const { data: patterns } = useQuery({ queryKey: ['recurring'], queryFn: () => recurringApi.list() });
 
   const bills = useMemo(() => (patterns ?? []).filter(isBillPattern), [patterns]);
   const monthlyTotal = bills.reduce((s, p) => s + monthlyAmount(p), 0);
 
-  const upcoming = (forecast?.occurrences ?? []).filter((o) => !o.is_income && o.adjustment_action !== 'skip');
+  // Skipped occurrences stay visible (dimmed, with Undo) so a mis-click is recoverable.
+  const upcoming = (forecast?.occurrences ?? []).filter((o) => showIncome || !o.is_income);
 
   const breakdown = useMemo(() => {
     const byCategory = new Map<string, number>();
@@ -65,6 +68,15 @@ export function Bills() {
     onError: (err: Error) => addToast({ type: 'error', message: err.message }),
   });
 
+  const undoSkip = useMutation({
+    mutationFn: (o: RecurringForecastOccurrence) => recurringApi.deleteAdjustment(o.pattern_id, o.adjustment_id!),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['recurring'] });
+      addToast({ type: 'success', message: 'Skip undone' });
+    },
+    onError: (err: Error) => addToast({ type: 'error', message: err.message }),
+  });
+
   return (
     <Screen>
       <ScreenHeader
@@ -84,33 +96,56 @@ export function Bills() {
       <div className="flex min-h-0 flex-1 flex-col gap-10 lg:flex-row lg:gap-12">
         {/* Upcoming list */}
         <div className="min-w-0 lg:flex-[1.5]">
-          <SectionLabel className="mb-2.5">Upcoming · next 30 days</SectionLabel>
+          <div className="mb-2.5 flex items-baseline justify-between">
+            <SectionLabel>Upcoming · next 30 days</SectionLabel>
+            <button
+              type="button"
+              onClick={() => setShowIncome((v) => !v)}
+              className={`text-[12.5px] transition-colors ${showIncome ? 'text-sage-deep' : 'text-muted-2 hover:text-muted'}`}
+            >
+              {showIncome ? 'Income shown' : 'Show income'}
+            </button>
+          </div>
           {upcoming.map((o) => {
             const d = parseISO(o.adjusted_date ?? o.expected_date);
+            const skipped = o.adjustment_action === 'skip';
             return (
               <div
                 key={o.id}
-                className="group flex items-center gap-5 rounded-lg border-b border-line px-3 py-3 transition-colors hover:bg-rail"
+                className={`group flex items-center gap-5 rounded-lg border-b border-line px-3 py-3 transition-colors hover:bg-rail ${
+                  skipped ? 'opacity-50' : ''
+                }`}
               >
                 <div className="w-[38px] flex-shrink-0 text-center">
                   <div className="text-[10.5px] uppercase tracking-[0.1em] text-muted-2">{format(d, 'MMM')}</div>
                   <div className="font-serif text-[19px] leading-none text-ink">{format(d, 'd')}</div>
                 </div>
                 <div className="min-w-0 flex-1">
-                  <div className="truncate text-[15px] text-ink">{o.merchant_name}</div>
-                  <div className="mt-0.5 text-xs text-muted-2">{occurrenceMeta(o)}</div>
+                  <div className={`truncate text-[15px] text-ink ${skipped ? 'line-through' : ''}`}>{o.merchant_name}</div>
+                  <div className="mt-0.5 text-xs text-muted-2">{skipped ? 'Skipped this occurrence' : occurrenceMeta(o)}</div>
                 </div>
-                <span className="font-serif text-[18px] tabular-nums text-ink">
-                  {formatCurrency(Math.abs(o.adjusted_amount ?? o.amount))}
+                <span className={`font-serif text-[18px] tabular-nums ${o.is_income ? 'text-sage-deep' : 'text-ink'}`}>
+                  {formatCurrency(Math.abs(o.adjusted_amount ?? o.amount), { showSign: o.is_income })}
                 </span>
-                <button
-                  type="button"
-                  onClick={() => skipOccurrence.mutate(o)}
-                  disabled={skipOccurrence.isPending}
-                  className="rounded-md border border-pill-border bg-pill-bg px-2.5 py-1 text-[12px] text-muted opacity-0 transition-opacity hover:text-ink group-hover:opacity-100"
-                >
-                  Skip
-                </button>
+                {skipped ? (
+                  <button
+                    type="button"
+                    onClick={() => undoSkip.mutate(o)}
+                    disabled={undoSkip.isPending || !o.adjustment_id}
+                    className="rounded-md border border-pill-border bg-pill-bg px-2.5 py-1 text-[12px] text-muted transition-colors hover:text-ink disabled:opacity-50"
+                  >
+                    Undo
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => skipOccurrence.mutate(o)}
+                    disabled={skipOccurrence.isPending}
+                    className="rounded-md border border-pill-border bg-pill-bg px-2.5 py-1 text-[12px] text-muted opacity-0 transition-opacity hover:text-ink group-hover:opacity-100"
+                  >
+                    Skip
+                  </button>
+                )}
               </div>
             );
           })}

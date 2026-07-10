@@ -32,6 +32,19 @@ function AssistantMessage({ message, onConfirmDraft, confirming }: {
         style={{ background: 'radial-gradient(circle at 38% 34%, var(--mz-sage-soft), var(--mz-sage))' }}
       />
       <div className="min-w-0 flex-1">
+        {message.thinkingActive && (
+          <div className="mb-1.5 animate-pulse text-[13px] italic text-muted">Thinking…</div>
+        )}
+        {message.thinking && !message.thinkingActive && (
+          <details className="mb-1.5">
+            <summary className="cursor-pointer list-none text-[12.5px] text-muted-2 transition-colors hover:text-muted">
+              Thought for a moment ›
+            </summary>
+            <div className="mt-1.5 whitespace-pre-wrap border-l border-line-2 pl-3 text-[13px] leading-relaxed text-muted">
+              {message.thinking}
+            </div>
+          </details>
+        )}
         <div className="whitespace-pre-wrap text-[15.5px] leading-[1.65] text-ink">
           {message.content}
           {message.streaming && (
@@ -173,7 +186,7 @@ export function Advisor() {
             {messages.length === 0 && (
               <div className="mb-4 flex flex-wrap gap-x-5 gap-y-2 text-[13px] text-muted">
                 {suggestions.map((p) => (
-                  <button key={p} type="button" onClick={() => setInput(p)} className="transition-colors hover:text-ink">
+                  <button key={p} type="button" onClick={() => send(p)} className="transition-colors hover:text-ink">
                     {p}
                   </button>
                 ))}

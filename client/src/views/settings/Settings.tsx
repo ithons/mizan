@@ -111,7 +111,7 @@ export function Settings() {
   const coinbaseAccounts = (accounts ?? []).filter((a) => a.connection_type === 'coinbase').length;
   const categoryCount = flattenCategories(categories ?? []).length;
   const ruleCount = (rules ?? []).length;
-  const autoApply = autoApplyPref?.value ?? false;
+  const autoApply = autoApplyPref?.value ?? true;
 
   const toggle = (panel: PanelId) => setOpenPanel((prev) => (prev === panel ? null : panel));
   const statusText = (connected: boolean) =>

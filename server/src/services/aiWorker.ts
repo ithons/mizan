@@ -9,10 +9,12 @@ import { getPreference } from './preferences';
 import { confirmAdvisorDraft } from './advisorDrafts';
 
 // categorize_transaction / create_merchant_rule drafts at or above this confidence
-// auto-apply without a manual review step (per product decision); anything lower
-// stays in the normal 'open' review queue.
+// auto-apply without a manual review step; anything lower stays in the normal
+// 'open' review queue. Gated by the Settings toggle (preference below); defaults
+// on because that was the behavior before the toggle existed.
 const AUTO_APPLY_CONFIDENCE_THRESHOLD = 0.9;
 const AUTO_APPLIABLE_KINDS = new Set(['categorize_transaction', 'create_merchant_rule']);
+export const AUTO_APPLY_PREFERENCE_KEY = 'advisor_auto_apply_high_confidence';
 
 function getClient(): Anthropic | null {
   const apiKey = process.env.ANTHROPIC_API_KEY;
@@ -194,6 +196,9 @@ Example JSON format for each kind you're likely to use:
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
 
+    const autoApplyPref = getPreference(db, AUTO_APPLY_PREFERENCE_KEY);
+    const autoApplyEnabled = autoApplyPref ? autoApplyPref.value === true : true;
+
     db.transaction(() => {
       // Clear out any stale 'open' drafts that the AI is effectively replacing
       db.prepare(`DELETE FROM advisor_drafts WHERE status = 'open'`).run();
@@ -207,6 +212,7 @@ Example JSON format for each kind you're likely to use:
         let status: 'open' | 'confirmed' = 'open';
 
         const canAutoApply =
+          autoApplyEnabled &&
           AUTO_APPLIABLE_KINDS.has(draft.kind) &&
           draft.payload.kind === draft.kind &&
           typeof draft.confidence === 'number' &&

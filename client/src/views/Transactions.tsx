@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { format, isToday, isYesterday, parseISO, startOfMonth, endOfMonth, subMonths, startOfYear } from 'date-fns';
 import type {
   AdvisorDraftAction,
@@ -77,8 +77,10 @@ interface QueueItem {
   sub: string;
   primaryLabel: string;
   onPrimary: () => void;
-  /** Set for uncategorized transactions: Confirm needs a category picked inline. */
+  /** Set for items whose Confirm takes an inline category pick (categorize, rule edit). */
   needsCategory?: boolean;
+  /** Pre-selected category for the inline pick (e.g. the suggested rule category). */
+  defaultCategory?: string;
   onPickCategory?: (categoryId: string) => void;
   secondaryLabel?: string;
   onSecondary?: () => void;
@@ -106,7 +108,8 @@ function ReviewPanel({
   const rest = items.slice(1, 4);
   const leaving = focus != null && leavingKey === focus.key;
 
-  useEffect(() => setPickedCategory(''), [focus?.key]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => setPickedCategory(focus?.defaultCategory ?? ''), [focus?.key]);
 
   return (
     <div className="w-full flex-shrink-0 self-start border-t border-line-2 pt-6 lg:sticky lg:top-6 lg:w-[300px] lg:border-t-0 lg:pt-0">
@@ -407,11 +410,18 @@ export function Transactions() {
   const [editing, setEditing] = useState<Transaction | null>(null);
   const [hiddenKeys, setHiddenKeys] = useState<Set<string>>(new Set());
   const [leavingKey, setLeavingKey] = useState<string | null>(null);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [bulkCategory, setBulkCategory] = useState('');
 
   useEffect(() => {
     const t = setTimeout(() => setDebouncedSearch(search.trim()), 250);
     return () => clearTimeout(t);
   }, [search]);
+
+  // Selection doesn't survive a filter change; the visible set is different.
+  useEffect(() => {
+    setSelectedIds(new Set());
+  }, [range, debouncedSearch, accountFilter, categoryFilter, reviewOnly]);
 
   // Command palette "Add transaction" action
   useEffect(() => {
@@ -428,14 +438,22 @@ export function Transactions() {
       categoryId: categoryFilter ? [categoryFilter] : undefined,
       uncategorized: reviewOnly || undefined,
       reviewStatus: reviewOnly ? ('open' as const) : undefined,
-      limit: 200,
+      limit: 100,
     }),
     [range, debouncedSearch, accountFilter, categoryFilter, reviewOnly]
   );
 
-  const { data: page, isLoading } = useQuery({
+  const {
+    data: pages,
+    isLoading,
+    hasNextPage,
+    isFetchingNextPage,
+    fetchNextPage,
+  } = useInfiniteQuery({
     queryKey: ['transactions', filters],
-    queryFn: () => transactionsApi.list(filters),
+    queryFn: ({ pageParam }) => transactionsApi.list({ ...filters, page: pageParam }),
+    initialPageParam: 1,
+    getNextPageParam: (last) => (last.page * last.limit < last.total ? last.page + 1 : undefined),
   });
   const { data: reviewSummary } = useQuery({ queryKey: ['transactions', 'review'], queryFn: () => transactionsApi.review() });
   const { data: uncategorizedPage } = useQuery({
@@ -445,8 +463,8 @@ export function Transactions() {
   const { data: accounts } = useQuery({ queryKey: ['accounts'], queryFn: () => accountsApi.list() });
   const { data: categories } = useQuery({ queryKey: ['categories'], queryFn: () => categoriesApi.list() });
 
-  const transactions = page?.data ?? [];
-  const totalCount = page?.total ?? 0;
+  const transactions = useMemo(() => pages?.pages.flatMap((p) => p.data) ?? [], [pages]);
+  const totalCount = pages?.pages[0]?.total ?? 0;
   const reviewCount = reviewSummary?.total_open ?? 0;
 
   const dayGroups = useMemo(() => {
@@ -492,8 +510,24 @@ export function Transactions() {
     onError,
   });
   const createRule = useMutation({
-    mutationFn: (s: MerchantRuleSuggestion) => rulesApi.create({ pattern: s.pattern, category_id: s.category_id, apply_existing: true }),
+    mutationFn: ({ suggestion, categoryId }: { suggestion: MerchantRuleSuggestion; categoryId: string }) =>
+      rulesApi.create({ pattern: suggestion.pattern, category_id: categoryId, apply_existing: true }),
     onSuccess: () => invalidateFinancialData(qc),
+    onError,
+  });
+  const dismissTransaction = useMutation({
+    mutationFn: (id: string) => transactionsApi.markReview(id, 'dismissed'),
+    onSuccess: invalidateReview,
+    onError,
+  });
+  const bulkCategorize = useMutation({
+    mutationFn: ({ ids, categoryId }: { ids: string[]; categoryId: string }) => transactionsApi.bulkCategory(ids, categoryId),
+    onSuccess: (_, { ids }) => {
+      invalidateFinancialData(qc);
+      addToast({ type: 'success', message: `Categorized ${ids.length} transaction${ids.length === 1 ? '' : 's'}` });
+      setSelectedIds(new Set());
+      setBulkCategory('');
+    },
     onError,
   });
   const confirmRecurring = useMutation({ mutationFn: (p: RecurringPattern) => recurringApi.confirm(p.id), onSuccess: invalidateReview, onError });
@@ -542,7 +576,7 @@ export function Transactions() {
         needsCategory: true,
         onPickCategory: (categoryId) => resolve(key, (restore) => categorize.mutate({ id: t.id, categoryId }, { onError: restore })),
         secondaryLabel: 'Skip',
-        onSecondary: () => resolve(key),
+        onSecondary: () => resolve(key, (restore) => dismissTransaction.mutate(t.id, { onError: restore })),
       });
     }
     for (const s of reviewSummary?.rule_suggestions ?? []) {
@@ -550,10 +584,13 @@ export function Transactions() {
       items.push({
         key,
         kind: 'New rule',
-        title: `${s.pattern} → ${s.category_name}`,
-        sub: `applies to ${s.affected_transaction_ids.length} transaction${s.affected_transaction_ids.length === 1 ? '' : 's'}`,
+        title: `${s.pattern} → always categorize as…`,
+        sub: `applies to ${s.affected_transaction_ids.length} transaction${s.affected_transaction_ids.length === 1 ? '' : 's'} · suggested: ${s.category_name}`,
         primaryLabel: 'Confirm',
-        onPrimary: () => resolve(key, (restore) => createRule.mutate(s, { onError: restore })),
+        onPrimary: () => {},
+        needsCategory: true,
+        defaultCategory: s.category_id,
+        onPickCategory: (categoryId) => resolve(key, (restore) => createRule.mutate({ suggestion: s, categoryId }, { onError: restore })),
         secondaryLabel: 'Skip',
         onSecondary: () => resolve(key),
       });
@@ -601,6 +638,14 @@ export function Transactions() {
     return items;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [reviewSummary, uncategorizedPage]);
+
+  const toggleSelected = (id: string) =>
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
 
   const queueItems = useMemo(() => allQueueItems.filter((i) => !hiddenKeys.has(i.key)), [allQueueItems, hiddenKeys]);
   // Optimistically decrement the count by items hidden this session that the server still reports.
@@ -688,12 +733,42 @@ export function Transactions() {
       {/* Two-pane: ledger + review */}
       <div className="flex min-h-0 flex-1 flex-col gap-10 lg:flex-row lg:gap-12">
         <div className="min-w-0 flex-1">
-          {/* Column header */}
-          <div className="flex items-center px-3 pb-2 text-[11px] uppercase tracking-[0.1em] text-muted-2">
-            <span className="flex-1">Merchant</span>
-            <span className="w-[130px]">Account</span>
-            <span className="w-[110px] text-right">Amount</span>
-          </div>
+          {/* Column header, swapped for a bulk action bar while rows are selected */}
+          {selectedIds.size > 0 ? (
+            <div className="mz-rise-fast flex flex-wrap items-center gap-4 rounded-lg bg-rail px-3 py-2">
+              <span className="text-[13px] text-ink">
+                {selectedIds.size} selected
+              </span>
+              <Select
+                value={bulkCategory}
+                onChange={setBulkCategory}
+                placeholder="Set category…"
+                clearable={false}
+                options={flattenCategories(categories ?? []).map((c) => ({
+                  value: c.id,
+                  label: c.parent_id ? `· ${c.name}` : c.name,
+                }))}
+              />
+              <button
+                type="button"
+                disabled={!bulkCategory || bulkCategorize.isPending}
+                onClick={() => bulkCategorize.mutate({ ids: [...selectedIds], categoryId: bulkCategory })}
+                className="border-b border-ink pb-0.5 text-[13.5px] text-ink transition-opacity disabled:opacity-40"
+              >
+                {bulkCategorize.isPending ? 'Applying…' : 'Apply'}
+              </button>
+              <TextButton onClick={() => setSelectedIds(new Set())} className="ml-auto">
+                Clear
+              </TextButton>
+            </div>
+          ) : (
+            <div className="flex items-center px-3 pb-2 text-[11px] uppercase tracking-[0.1em] text-muted-2">
+              <span className="w-[26px]" />
+              <span className="flex-1">Merchant</span>
+              <span className="w-[130px]">Account</span>
+              <span className="w-[110px] text-right">Amount</span>
+            </div>
+          )}
 
           {isLoading && <SkeletonRows rows={6} />}
 
@@ -712,8 +787,22 @@ export function Transactions() {
                 <div
                   key={t.id}
                   onClick={() => setEditing(t)}
-                  className="flex cursor-pointer items-center rounded-lg border-b border-line px-3 py-3 transition-colors hover:bg-rail"
+                  className="group flex cursor-pointer items-center rounded-lg border-b border-line px-3 py-3 transition-colors hover:bg-rail"
                 >
+                  <button
+                    type="button"
+                    aria-label={selectedIds.has(t.id) ? 'Deselect transaction' : 'Select transaction'}
+                    aria-pressed={selectedIds.has(t.id)}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      toggleSelected(t.id);
+                    }}
+                    className={`mr-3 h-[14px] w-[14px] flex-shrink-0 rounded-full border transition-all ${
+                      selectedIds.has(t.id)
+                        ? 'border-sage bg-sage'
+                        : `border-line-3 ${selectedIds.size > 0 ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`
+                    }`}
+                  />
                   <div className="min-w-0 flex-1 pr-3">
                     <div className="truncate text-[15px] text-ink">{merchantLabel(t)}</div>
                     <div className="mt-1">
@@ -728,6 +817,14 @@ export function Transactions() {
               ))}
             </div>
           ))}
+
+          {hasNextPage && (
+            <div className="flex justify-center py-6">
+              <TextButton onClick={() => fetchNextPage()} disabled={isFetchingNextPage}>
+                {isFetchingNextPage ? 'Loading…' : `Load more · ${(totalCount - transactions.length).toLocaleString()} remaining`}
+              </TextButton>
+            </div>
+          )}
         </div>
 
         <ReviewPanel

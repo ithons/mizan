@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { simplefinApi } from '../../lib/api';
 import { formatRelativeTime } from '../../lib/formatters';
 import { useAppStore } from '../../store';
+import { InkButton, TextButton } from '../../components/balance';
 
 export function SimplefinSection() {
   const [setupToken, setSetupToken] = useState('');
@@ -80,62 +81,44 @@ export function SimplefinSection() {
   };
 
   return (
-    <div className="bg-surface rounded-lg p-6 space-y-4">
-      <div className="flex items-start justify-between">
-        <div>
-          <h3 className="text-lg font-medium text-foreground">SimpleFIN</h3>
-          <p className="text-sm text-muted">Primary connection powered by MX.</p>
-        </div>
-      </div>
+    <div className="space-y-4">
+      <p className="text-[13px] text-muted">Primary bank connection, powered by MX. Read-only.</p>
 
-      {error && <div className="text-red-500 text-sm">{error}</div>}
+      {error && <div className="text-sm text-clay">{error}</div>}
 
       {status ? (
-        <div className="flex items-center justify-between bg-background p-4 rounded border border-border">
+        <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="text-sm">
-            <span className="text-positive font-medium mr-2">● Connected</span>
+            <span className="mr-2 text-sage-deep">● Connected</span>
             <span className="text-muted">
-              SimpleFIN active
-              {status.last_synced_at && ` · Last synced ${formatRelativeTime(status.last_synced_at)}`}
+              {status.last_synced_at ? `Last synced ${formatRelativeTime(status.last_synced_at)}` : 'SimpleFIN active'}
             </span>
           </div>
-          <div className="flex gap-2">
-            <button
-              onClick={handleResync}
-              disabled={loading || resyncing}
-              className="px-4 py-2 text-sm bg-surface hover:bg-surface-hover border border-border rounded"
-            >
-              {resyncing ? 'Resyncing...' : 'Resync full history'}
-            </button>
-            <button
-              onClick={handleDisconnect}
-              disabled={loading || resyncing}
-              className="px-4 py-2 text-sm bg-surface hover:bg-surface-hover border border-border rounded"
-            >
+          <div className="flex items-center gap-5">
+            <TextButton onClick={handleResync} disabled={loading || resyncing}>
+              {resyncing ? 'Resyncing…' : 'Resync full history'}
+            </TextButton>
+            <TextButton onClick={handleDisconnect} disabled={loading || resyncing} className="hover:!text-clay">
               Disconnect
-            </button>
+            </TextButton>
           </div>
         </div>
       ) : (
         <form onSubmit={handleConnect} className="space-y-4">
           <div>
-            <label className="block text-sm font-medium text-muted mb-1">Setup Token</label>
+            <label className="mz-label">Setup token</label>
             <input
               type="text"
               value={setupToken}
               onChange={(e) => setSetupToken(e.target.value)}
-              placeholder="Paste your base64 setup token here..."
-              className="w-full bg-background border border-border rounded px-3 py-2 text-sm focus:outline-none focus:border-foreground"
+              placeholder="Paste your base64 setup token"
+              className="mz-field"
               required
             />
           </div>
-          <button
-            type="submit"
-            disabled={loading || !setupToken}
-            className="px-4 py-2 text-sm bg-foreground text-background font-medium rounded hover:opacity-90 disabled:opacity-50"
-          >
-            {loading ? 'Connecting...' : 'Connect SimpleFIN'}
-          </button>
+          <InkButton type="submit" disabled={loading || !setupToken}>
+            {loading ? 'Connecting…' : 'Connect SimpleFIN'}
+          </InkButton>
         </form>
       )}
     </div>

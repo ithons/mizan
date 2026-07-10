@@ -1,11 +1,14 @@
-import { useMemo, useRef, useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { format, parseISO, subMonths } from 'date-fns';
 import type { Holding } from '@shared/types';
 import { accountsApi, investmentsApi, reportsApi } from '../lib/api';
 import { formatWholeCurrency, formatPercent } from '../lib/formatters';
-import { getAllocationSlices, getCostBasisStats } from '../lib/investmentAnalytics';
-import { Screen, SectionLabel } from '../components/balance';
+import { parseDecimalInput } from '../lib/numberInput';
+import { ALLOCATION_LENSES, getAllocationSlices, getCostBasisStats, type AllocationLens } from '../lib/investmentAnalytics';
+import { useAppStore } from '../store';
+import { Modal } from '../components/Modal';
+import { Screen, SectionLabel, InkButton, TextButton } from '../components/balance';
 
 const RANGES = [
   { id: '1M', months: 1 },
@@ -38,6 +41,109 @@ function trendGeometry(history: Array<{ date: string; value: number }>): { point
   const ys = values.map((v) => 128 - ((v - min) / span) * 116);
   const points = ys.map((y, i) => `${(i * step).toFixed(1)},${y.toFixed(1)}`).join(' ');
   return { points, ys };
+}
+
+function HoldingModal({ holding, accountName, onClose }: { holding: Holding | null; accountName?: string; onClose: () => void }) {
+  const qc = useQueryClient();
+  const { addToast } = useAppStore();
+  const [costBasis, setCostBasis] = useState('');
+  const [note, setNote] = useState('');
+  const [sector, setSector] = useState('');
+
+  useEffect(() => {
+    if (holding) {
+      setCostBasis(holding.manual_cost_basis != null ? String(holding.manual_cost_basis) : '');
+      setNote(holding.manual_cost_basis_note ?? '');
+      setSector(holding.sector ?? '');
+    }
+  }, [holding]);
+
+  const onDone = (message: string) => {
+    qc.invalidateQueries({ queryKey: ['holdings'] });
+    qc.invalidateQueries({ queryKey: ['reports-investments'] });
+    addToast({ type: 'success', message });
+  };
+  const onError = (err: Error) => addToast({ type: 'error', message: err.message });
+
+  const save = useMutation({
+    mutationFn: async () => {
+      const parsed = costBasis.trim() ? parseDecimalInput(costBasis) : null;
+      if (costBasis.trim() && (parsed === null || parsed < 0)) throw new Error('Enter a valid cost basis');
+      const basisChanged =
+        parsed !== (holding!.manual_cost_basis ?? null) || (note || null) !== (holding!.manual_cost_basis_note ?? null);
+      const sectorChanged = (sector.trim() || null) !== (holding!.sector ?? null);
+      if (basisChanged) {
+        await investmentsApi.updateHoldingCostBasis(holding!.id, {
+          manual_cost_basis: parsed,
+          manual_cost_basis_note: note.trim() || null,
+        });
+      }
+      if (sectorChanged) {
+        await investmentsApi.updateSecurityMetadata(holding!.security_id, {
+          sector: sector.trim() || null,
+          sector_source: sector.trim() ? 'manual' : null,
+        });
+      }
+    },
+    onSuccess: () => {
+      onDone('Holding updated');
+      onClose();
+    },
+    onError,
+  });
+
+  if (!holding) return null;
+  const gain = holdingGain(holding);
+
+  return (
+    <Modal open onClose={onClose} title={holdingName(holding)}>
+      <div className="space-y-4">
+        <div className="flex items-baseline justify-between">
+          <span className="text-[13px] text-muted">
+            {accountName ?? 'Investment account'} · {holding.quantity.toLocaleString('en-US', { maximumFractionDigits: 4 })} share
+            {holding.quantity === 1 ? '' : 's'} @ {formatWholeCurrency(holding.institution_price)}
+          </span>
+          <span className="font-serif text-[22px] tabular-nums text-ink">{formatWholeCurrency(holding.institution_value)}</span>
+        </div>
+        {gain && (
+          <div className={`text-[13px] tabular-nums ${gain.gain >= 0 ? 'text-sage-deep' : 'text-clay'}`}>
+            {formatWholeCurrency(gain.gain, { showSign: gain.gain > 0 })} · {formatPercent(Math.abs(gain.pct))} against{' '}
+            {holding.cost_basis_quality === 'manual' ? 'your manual basis' : 'provider basis'}
+          </div>
+        )}
+        <div className="flex gap-4">
+          <div className="flex-1">
+            <label className="mz-label">Manual cost basis</label>
+            <input
+              type="number"
+              className="mz-field tabular-nums"
+              placeholder={holding.provider_cost_basis != null ? `Provider: ${holding.provider_cost_basis.toFixed(2)}` : 'Total paid'}
+              value={costBasis}
+              onChange={(e) => setCostBasis(e.target.value)}
+            />
+          </div>
+          <div className="flex-1">
+            <label className="mz-label">Sector</label>
+            <input className="mz-field" placeholder="Technology" value={sector} onChange={(e) => setSector(e.target.value)} />
+          </div>
+        </div>
+        <div>
+          <label className="mz-label">Basis note</label>
+          <input className="mz-field" placeholder="e.g. average of two lots" value={note} onChange={(e) => setNote(e.target.value)} />
+        </div>
+        <div className="text-xs leading-relaxed text-muted-2">
+          Manual basis overrides the provider's number everywhere gains are shown. Clear the field to fall back
+          {holding.provider_cost_basis != null ? ' to the provider basis.' : '.'}
+        </div>
+        <div className="flex items-center gap-5 pt-1">
+          <InkButton onClick={() => save.mutate()} disabled={save.isPending}>
+            {save.isPending ? 'Saving…' : 'Save'}
+          </InkButton>
+          <TextButton onClick={onClose}>Cancel</TextButton>
+        </div>
+      </div>
+    </Modal>
+  );
 }
 
 export function Investments() {
@@ -74,10 +180,13 @@ export function Investments() {
   const hoverXPct = hoverIdx != null && history.length > 1 ? (hoverIdx / (history.length - 1)) * 100 : 0;
   const hoverYPct = hoverIdx != null && ys[hoverIdx] != null ? (ys[hoverIdx] / 140) * 100 : 0;
 
+  const [lens, setLens] = useState<AllocationLens>('asset_type');
+  const [selectedHolding, setSelectedHolding] = useState<Holding | null>(null);
+
   const slices = useMemo(() => {
     const accountById = new Map((accounts ?? []).map((a) => [a.id, a]));
-    return getAllocationSlices(allHoldings, 'asset_type', accountById);
-  }, [allHoldings, accounts]);
+    return getAllocationSlices(allHoldings, lens, accountById);
+  }, [allHoldings, accounts, lens]);
 
   const accountNameById = useMemo(() => new Map((accounts ?? []).map((a) => [a.id, a.account_name])), [accounts]);
 
@@ -167,7 +276,11 @@ export function Investments() {
             .map((h) => {
               const gain = holdingGain(h);
               return (
-                <div key={h.id} className="flex items-center rounded-lg border-b border-line px-1 py-3 transition-colors hover:bg-rail">
+                <div
+                  key={h.id}
+                  onClick={() => setSelectedHolding(h)}
+                  className="flex cursor-pointer items-center rounded-lg border-b border-line px-1 py-3 transition-colors hover:bg-rail"
+                >
                   <div className="min-w-0 flex-1 pr-3">
                     <div className="truncate text-[15px] text-ink">{holdingName(h)}</div>
                     <div className="mt-0.5 text-xs text-muted-2">
@@ -193,7 +306,23 @@ export function Investments() {
 
         {/* Allocation */}
         <div className="w-full flex-shrink-0 self-start border-t border-line-2 pt-6 lg:sticky lg:top-6 lg:w-[260px] lg:border-t-0 lg:pt-0">
-          <SectionLabel className="mb-4">Allocation</SectionLabel>
+          <div className="mb-4 flex flex-wrap items-baseline justify-between gap-y-1">
+            <SectionLabel>Allocation</SectionLabel>
+            <div className="flex flex-wrap gap-0.5">
+              {ALLOCATION_LENSES.map((l) => (
+                <button
+                  key={l.id}
+                  type="button"
+                  onClick={() => setLens(l.id)}
+                  className={`px-1.5 py-0.5 text-[11px] transition-colors ${
+                    l.id === lens ? 'text-ink' : 'text-muted-2 hover:text-muted'
+                  }`}
+                >
+                  {l.label}
+                </button>
+              ))}
+            </div>
+          </div>
           {slices.length > 0 ? (
             <>
               <div className="mb-5 flex h-[10px] overflow-hidden rounded-[5px]">
@@ -219,6 +348,12 @@ export function Investments() {
           )}
         </div>
       </div>
+
+      <HoldingModal
+        holding={selectedHolding}
+        accountName={selectedHolding ? accountNameById.get(selectedHolding.account_id) : undefined}
+        onClose={() => setSelectedHolding(null)}
+      />
     </Screen>
   );
 }

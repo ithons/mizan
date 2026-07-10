@@ -246,7 +246,10 @@ test('recurring forecast applies skip, snooze, and amount adjustments', (t) => {
   const paycheck = forecast.occurrences.find((occurrence) => occurrence.pattern_id === 'paycheck');
   const streaming = forecast.occurrences.find((occurrence) => occurrence.pattern_id === 'streaming');
 
-  assert.equal(rent, undefined);
+  // Skipped occurrences stay in the payload (so the UI can offer undo) but are
+  // excluded from every total below.
+  assert.equal(rent?.adjustment_action, 'skip');
+  assert.equal(rent?.needs_review, false);
   assert.equal(paycheck?.expected_date, tomorrow);
   assert.equal(paycheck?.original_expected_date, today);
   assert.equal(paycheck?.adjustment_action, 'snooze');

@@ -107,7 +107,7 @@ export function buildSubscriptionInsights(
   const nextOccurrenceByPattern = new Map<string, RecurringForecastOccurrence>();
 
   for (const occurrence of forecast.occurrences) {
-    if (occurrence.amount >= 0) continue;
+    if (occurrence.amount >= 0 || occurrence.adjustment_action === 'skip') continue;
     nextAmountByPattern.set(
       occurrence.pattern_id,
       (nextAmountByPattern.get(occurrence.pattern_id) ?? 0) + Math.abs(occurrence.amount)
