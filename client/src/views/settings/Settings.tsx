@@ -76,7 +76,10 @@ export function Settings() {
   const [openPanel, setOpenPanel] = useState<PanelId>(null);
 
   useEffect(() => {
-    if (searchParams.get('section') === 'connections') setOpenPanel('simplefin');
+    const section = searchParams.get('section');
+    if (section === 'connections' || section === 'simplefin') setOpenPanel('simplefin');
+    else if (section === 'coinbase') setOpenPanel('coinbase');
+    else if (section === 'data' || section === 'import') setOpenPanel('import');
   }, [searchParams]);
 
   const { data: credentials } = useQuery({ queryKey: ['credential-status'], queryFn: () => settingsApi.getCredentials() });

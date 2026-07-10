@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { format, parseISO, subMonths } from 'date-fns';
+import { format, subMonths } from 'date-fns';
 import type { Holding } from '@shared/types';
 import { accountsApi, investmentsApi, reportsApi } from '../lib/api';
 import { formatWholeCurrency, formatPercent } from '../lib/formatters';
@@ -8,7 +8,7 @@ import { parseDecimalInput } from '../lib/numberInput';
 import { ALLOCATION_LENSES, getAllocationSlices, getCostBasisStats, type AllocationLens } from '../lib/investmentAnalytics';
 import { useAppStore } from '../store';
 import { Modal } from '../components/Modal';
-import { Screen, SectionLabel, InkButton, TextButton } from '../components/balance';
+import { Screen, SectionLabel, InkButton, TextButton, TrendChart } from '../components/balance';
 
 const RANGES = [
   { id: '1M', months: 1 },
@@ -28,19 +28,6 @@ function holdingGain(h: Holding): { gain: number; pct: number } | null {
   if (basis == null || basis <= 0) return null;
   const gain = h.institution_value - basis;
   return { gain, pct: (gain / basis) * 100 };
-}
-
-/** Map a value series into polyline points inside a 1000x140 viewBox. */
-function trendGeometry(history: Array<{ date: string; value: number }>): { points: string; ys: number[] } {
-  if (history.length < 2) return { points: '', ys: [] };
-  const values = history.map((p) => p.value);
-  const min = Math.min(...values);
-  const max = Math.max(...values);
-  const span = max - min || 1;
-  const step = 1000 / (history.length - 1);
-  const ys = values.map((v) => 128 - ((v - min) / span) * 116);
-  const points = ys.map((y, i) => `${(i * step).toFixed(1)},${y.toFixed(1)}`).join(' ');
-  return { points, ys };
 }
 
 function HoldingModal({ holding, accountName, onClose }: { holding: Holding | null; accountName?: string; onClose: () => void }) {
@@ -165,21 +152,6 @@ export function Investments() {
   const history = report?.history ?? [];
   const dayChange = history.length >= 2 ? history[history.length - 1].value - history[history.length - 2].value : null;
 
-  const { points, ys } = useMemo(() => trendGeometry(history), [history]);
-  const area = points ? `${points} 1000,140 0,140` : '';
-
-  const chartRef = useRef<HTMLDivElement>(null);
-  const [hoverIdx, setHoverIdx] = useState<number | null>(null);
-  const onChartMove = (e: React.MouseEvent) => {
-    if (history.length < 2 || !chartRef.current) return;
-    const rect = chartRef.current.getBoundingClientRect();
-    const frac = (e.clientX - rect.left) / rect.width;
-    setHoverIdx(Math.min(history.length - 1, Math.max(0, Math.round(frac * (history.length - 1)))));
-  };
-  const hoverPoint = hoverIdx != null && history[hoverIdx] ? history[hoverIdx] : null;
-  const hoverXPct = hoverIdx != null && history.length > 1 ? (hoverIdx / (history.length - 1)) * 100 : 0;
-  const hoverYPct = hoverIdx != null && ys[hoverIdx] != null ? (ys[hoverIdx] / 140) * 100 : 0;
-
   const [lens, setLens] = useState<AllocationLens>('asset_type');
   const [selectedHolding, setSelectedHolding] = useState<Holding | null>(null);
 
@@ -234,31 +206,8 @@ export function Investments() {
             </button>
           ))}
         </div>
-        {points ? (
-          <div ref={chartRef} className="relative" onMouseMove={onChartMove} onMouseLeave={() => setHoverIdx(null)}>
-            <svg viewBox="0 0 1000 140" width="100%" height="120" preserveAspectRatio="none" className="overflow-visible">
-              <polyline points={area} fill="var(--mz-sage-soft)" opacity="0.07" stroke="none" />
-              <polyline points={points} pathLength={1} className="mz-draw" fill="none" stroke="var(--mz-sage)" strokeWidth="2.5" />
-            </svg>
-            {hoverPoint && (
-              <>
-                <div className="pointer-events-none absolute bottom-0 top-0 w-px bg-line-3" style={{ left: `${hoverXPct}%` }} />
-                <div
-                  className="pointer-events-none absolute h-2 w-2 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-sage bg-card"
-                  style={{ left: `${hoverXPct}%`, top: `${(hoverYPct * 120) / 140}%` }}
-                />
-                <div
-                  className={`pointer-events-none absolute -top-2 whitespace-nowrap rounded-lg border border-line-2 bg-card px-3 py-1.5 text-xs ${
-                    hoverXPct > 55 ? '-translate-x-full' : ''
-                  }`}
-                  style={{ left: `${hoverXPct}%` }}
-                >
-                  <span className="font-serif text-[13px] tabular-nums text-ink">{formatWholeCurrency(hoverPoint.value)}</span>
-                  <span className="ml-2 text-muted-2">{format(parseISO(hoverPoint.date), 'MMM d, yyyy')}</span>
-                </div>
-              </>
-            )}
-          </div>
+        {history.length >= 2 ? (
+          <TrendChart history={history} />
         ) : (
           <div className="flex h-[120px] items-center text-[13.5px] text-muted-2">
             Portfolio history builds up from daily net worth snapshots as syncs run.

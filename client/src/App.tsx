@@ -8,13 +8,11 @@ const Today = lazy(() => import('./views/Today').then((module) => ({ default: mo
 const Onboarding = lazy(() => import('./views/Onboarding').then((module) => ({ default: module.Onboarding })));
 const Accounts = lazy(() => import('./views/accounts/Accounts').then((module) => ({ default: module.Accounts })));
 const Transactions = lazy(() => import('./views/Transactions').then((module) => ({ default: module.Transactions })));
-const ReviewInbox = lazy(() => import('./views/ReviewInbox').then((module) => ({ default: module.ReviewInbox })));
 const CashFlow = lazy(() => import('./views/CashFlow').then((module) => ({ default: module.CashFlow })));
 const Bills = lazy(() => import('./views/Bills').then((module) => ({ default: module.Bills })));
 const Budget = lazy(() => import('./views/Budget').then((module) => ({ default: module.Budget })));
 const Goals = lazy(() => import('./views/Goals').then((module) => ({ default: module.Goals })));
 const Investments = lazy(() => import('./views/Investments').then((module) => ({ default: module.Investments })));
-const Reports = lazy(() => import('./views/Reports').then((module) => ({ default: module.Reports })));
 const Settings = lazy(() => import('./views/settings/Settings').then((module) => ({ default: module.Settings })));
 const Advisor = lazy(() => import('./views/Advisor').then((module) => ({ default: module.Advisor })));
 
@@ -45,7 +43,8 @@ function AppRoutes() {
           <Route path="/" element={lazyView(<Today />)} />
           <Route path="/onboarding" element={lazyView(<Onboarding />)} />
           <Route path="/accounts" element={lazyView(<Accounts />)} />
-          <Route path="/review" element={lazyView(<ReviewInbox />)} />
+          {/* Legacy routes retired in the Balance redesign; keep old bookmarks working. */}
+          <Route path="/review" element={<Navigate to="/transactions" replace />} />
           <Route path="/transactions" element={lazyView(<Transactions />)} />
           <Route path="/cash-flow" element={lazyView(<CashFlow />)} />
           <Route path="/cashflow" element={<Navigate to="/cash-flow" replace />} />
@@ -53,7 +52,7 @@ function AppRoutes() {
           <Route path="/budget" element={lazyView(<Budget />)} />
           <Route path="/goals" element={lazyView(<Goals />)} />
           <Route path="/investments" element={lazyView(<Investments />)} />
-          <Route path="/reports" element={lazyView(<Reports />)} />
+          <Route path="/reports" element={<Navigate to="/cash-flow" replace />} />
           <Route path="/advisor" element={lazyView(<Advisor />)} />
           <Route path="/settings" element={lazyView(<Settings />)} />
         </Route>

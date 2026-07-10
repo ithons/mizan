@@ -2,12 +2,12 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { Account } from '@shared/types';
-import { accountsApi, syncApi } from '../../lib/api';
+import { accountsApi, networthApi, syncApi } from '../../lib/api';
 import { formatCompactRelative, formatWholeCurrency } from '../../lib/formatters';
 import { ACCOUNT_TYPE_LABELS } from '../../lib/constants';
 import { invalidateFinancialData } from '../../lib/queryInvalidation';
 import { useAppStore } from '../../store';
-import { Screen, ScreenHeader, SectionLabel, Row, TextButton } from '../../components/balance';
+import { Screen, ScreenHeader, SectionLabel, Row, TextButton, TrendChart } from '../../components/balance';
 import { ConfirmRemoveModal } from '../../components/ConfirmRemoveModal';
 import { SkeletonRows } from '../../components/SkeletonLoader';
 import { AddManualAccountModal, EditAccountModal } from './Modals';
@@ -50,6 +50,15 @@ export function Accounts() {
   const [removing, setRemoving] = useState<Account | null>(null);
 
   const { data: accounts, isLoading } = useQuery({ queryKey: ['accounts'], queryFn: () => accountsApi.list() });
+  const { data: snapshots } = useQuery({
+    queryKey: ['networth', 'history', 12],
+    queryFn: () => networthApi.history(12),
+    retry: false,
+  });
+  const netWorthHistory = useMemo(
+    () => (snapshots ?? []).map((s) => ({ date: s.date, value: s.net_worth })),
+    [snapshots]
+  );
 
   // Handle onboarding deep links: ?connect=bank routes to connections, ?manual=1 opens the add modal.
   useEffect(() => {
@@ -172,6 +181,13 @@ export function Accounts() {
           </div>
         ))}
       </div>
+
+      {netWorthHistory.length >= 2 && (
+        <div className="mb-8 flex-shrink-0">
+          <SectionLabel className="mb-2">Net worth · last 12 months</SectionLabel>
+          <TrendChart history={netWorthHistory} height={90} />
+        </div>
+      )}
 
       <div className="flex min-h-0 flex-1 flex-col gap-10 lg:flex-row lg:gap-12">
         {/* Grouped account list */}

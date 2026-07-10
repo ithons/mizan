@@ -8,3 +8,4 @@ export { Row } from './Row';
 export { TextButton, InkButton } from './buttons';
 export { Select, type SelectOption } from './Select';
 export { Tooltip } from './Tooltip';
+export { TrendChart } from './TrendChart';

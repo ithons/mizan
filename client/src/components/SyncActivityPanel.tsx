@@ -45,8 +45,8 @@ function RunSummary({ run, selected, onSelect }: {
 
   return (
     <button
-      className={`w-full flex items-center gap-3 px-3 py-2.5 text-left hover:bg-black/5 transition-colors ${
-        selected ? 'bg-positive/5' : ''
+      className={`w-full flex items-center gap-3 px-3 py-2.5 text-left hover:bg-rail transition-colors ${
+        selected ? 'bg-rail' : ''
       }`}
       onClick={onSelect}
     >
@@ -58,7 +58,7 @@ function RunSummary({ run, selected, onSelect }: {
       </div>
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-2">
-          <p className="text-sm text-text truncate">{scopeLabel[run.scope]}</p>
+          <p className="text-sm text-ink truncate">{scopeLabel[run.scope]}</p>
           <span className="text-[11px] font-mono" style={{ color: tone.color }}>
             {tone.label}
           </span>
@@ -76,7 +76,7 @@ function RunSummary({ run, selected, onSelect }: {
 
 export function SyncActivityPanel({
   runs,
-  title = 'Sync Activity',
+  title = 'Sync activity',
   showDetail = false,
 }: {
   runs?: SyncRun[];
@@ -108,11 +108,11 @@ export function SyncActivityPanel({
   };
 
   return (
-    <div className="bg-surface border border-border rounded">
-      <div className="px-4 py-3 border-b border-border flex items-center justify-between">
+    <div className="rounded-xl border border-line-2 bg-card-alt">
+      <div className="px-4 py-3 border-b border-line-2 flex items-center justify-between">
         <div className="flex items-center gap-2">
-          <Clock3 size={14} className="text-info" />
-          <h2 className="text-sm font-medium text-text">{title}</h2>
+          <Clock3 size={14} className="text-muted" />
+          <h2 className="text-sm font-medium text-ink">{title}</h2>
         </div>
         <div className="flex items-center gap-2">
           {selectedRun && (
@@ -120,7 +120,7 @@ export function SyncActivityPanel({
               <button
                 type="button"
                 onClick={askAdvisorAboutSync}
-                className="text-xs border border-border rounded px-2.5 py-1 text-muted hover:text-positive flex items-center gap-1"
+                className="flex items-center gap-1 rounded-md border border-pill-border bg-pill-bg px-2.5 py-1 text-xs text-muted transition-colors hover:text-ink"
               >
                 <Sparkles size={12} />
                 Ask advisor
@@ -139,7 +139,7 @@ export function SyncActivityPanel({
         </div>
       ) : (
         <div className={showDetail ? 'grid grid-cols-[minmax(220px,280px)_1fr]' : ''}>
-          <div className="divide-y divide-border">
+          <div className="divide-y divide-line">
             {visibleRuns.map((run) => (
               <RunSummary
                 key={run.id}
@@ -151,44 +151,44 @@ export function SyncActivityPanel({
           </div>
 
           {showDetail && (
-            <div className="border-l border-border p-4 min-w-0">
+            <div className="border-l border-line-2 p-4 min-w-0">
               {detail ? (
                 <div className="space-y-4">
                   <div className="grid grid-cols-4 gap-3 text-xs">
                     <div>
                       <p className="text-muted mb-0.5">Accounts</p>
-                      <p className="font-mono text-text">{detail.accounts_seen}</p>
+                      <p className="font-mono text-ink">{detail.accounts_seen}</p>
                     </div>
                     <div>
                       <p className="text-muted mb-0.5">Added</p>
-                      <p className="font-mono text-positive">{detail.transactions_added}</p>
+                      <p className="font-mono text-sage-deep">{detail.transactions_added}</p>
                     </div>
                     <div>
                       <p className="text-muted mb-0.5">Updated</p>
-                      <p className="font-mono text-info">{detail.transactions_modified}</p>
+                      <p className="font-mono text-muted">{detail.transactions_modified}</p>
                     </div>
                     <div>
                       <p className="text-muted mb-0.5">Removed</p>
-                      <p className="font-mono text-negative">{detail.transactions_removed}</p>
+                      <p className="font-mono text-clay">{detail.transactions_removed}</p>
                     </div>
                   </div>
 
                   {(detail.duplicate_candidates > 0 || detail.transfer_candidates > 0) && (
                     <div className="grid grid-cols-2 gap-3 text-xs">
-                      <div className="bg-background border border-border rounded p-3">
+                      <div className="rounded-lg border border-line-2 bg-card p-3">
                         <p className="text-muted mb-1">Duplicate groups</p>
-                        <p className="font-mono text-warning">{detail.duplicate_candidates}</p>
+                        <p className="font-mono text-gold">{detail.duplicate_candidates}</p>
                       </div>
-                      <div className="bg-background border border-border rounded p-3">
+                      <div className="rounded-lg border border-line-2 bg-card p-3">
                         <p className="text-muted mb-1">Transfer pairs</p>
-                        <p className="font-mono text-info">{detail.transfer_candidates}</p>
+                        <p className="font-mono text-muted">{detail.transfer_candidates}</p>
                       </div>
                     </div>
                   )}
 
                   {detail.error_message && (
-                    <div className="bg-negative/10 border border-negative/30 rounded p-3">
-                      <p className="text-xs text-negative font-medium mb-1">Issue</p>
+                    <div className="rounded-lg border border-pill-border bg-rail p-3">
+                      <p className="text-xs text-clay font-medium mb-1">Issue</p>
                       <p className="text-xs text-muted leading-relaxed">{detail.error_message}</p>
                       {detail.recovery_action && (
                         <p className="text-xs text-muted leading-relaxed mt-1">{detail.recovery_action}</p>
@@ -197,7 +197,7 @@ export function SyncActivityPanel({
                   )}
 
                   <div className="space-y-2">
-                    <p className="text-xs font-medium text-text">Providers</p>
+                    <p className="text-xs font-medium text-ink">Providers</p>
                     {detail.items.map((item) => {
                       const tone = item.status === 'succeeded'
                         ? '#c9963a'
@@ -207,9 +207,9 @@ export function SyncActivityPanel({
                             ? '#b5654a'
                             : '#7c8b99';
                       return (
-                        <div key={item.id} className="bg-background border border-border rounded p-3">
+                        <div key={item.id} className="rounded-lg border border-line-2 bg-card p-3">
                           <div className="flex items-center justify-between gap-3">
-                            <p className="text-sm text-text truncate">{item.institution_name}</p>
+                            <p className="text-sm text-ink truncate">{item.institution_name}</p>
                             <span className="text-xs font-mono flex-shrink-0" style={{ color: tone }}>
                               {item.status.replace(/_/g, ' ')}
                             </span>
@@ -237,10 +237,10 @@ export function SyncActivityPanel({
 
                   {detail.changes.length > 0 && (
                     <div className="space-y-2">
-                      <p className="text-xs font-medium text-text">Detected changes</p>
+                      <p className="text-xs font-medium text-ink">Detected changes</p>
                       {detail.changes.map((change) => (
                         <div key={change.id} className="text-xs text-muted flex items-start gap-2">
-                          <span className="w-1.5 h-1.5 rounded-full bg-info mt-1.5 flex-shrink-0" />
+                          <span className="w-1.5 h-1.5 rounded-full bg-sage mt-1.5 flex-shrink-0" />
                           <span>{change.description}</span>
                         </div>
                       ))}
@@ -249,7 +249,7 @@ export function SyncActivityPanel({
                 </div>
               ) : (
                 <div className="h-32 flex items-center justify-center text-sm text-muted">
-                  Loading sync detail...
+                  Loading sync detail…
                 </div>
               )}
             </div>

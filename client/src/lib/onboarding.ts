@@ -107,11 +107,11 @@ export function getOnboardingPlan({
       id: 'review',
       label: 'First review',
       detail: reviewDone
-        ? 'The Review Inbox is clear.'
+        ? 'The review queue is clear.'
         : `${reviewCount} review item${reviewCount === 1 ? '' : 's'} need confirmation before the dashboard is trusted.`,
       status: stepStatus(reviewDone, firstOpenId === 'review'),
-      route: '/review',
-      actionLabel: 'Open Review Inbox',
+      route: '/transactions',
+      actionLabel: 'Review transactions',
     },
     {
       id: 'dashboard',
