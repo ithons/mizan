@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import type { Account } from '@shared/types';
+import type { Account, SyncHealthConnection } from '@shared/types';
 import { accountsApi, networthApi, syncApi } from '../../lib/api';
 import { formatCompactRelative, formatWholeCurrency } from '../../lib/formatters';
 import { ACCOUNT_TYPE_LABELS } from '../../lib/constants';
@@ -36,6 +36,22 @@ function accountMeta(a: Account): string {
   return `${CONNECTION_LABELS[a.connection_type] ?? 'Manual'} · ${verb} ${formatCompactRelative(a.updated_at)}`;
 }
 
+// The badge reflects the shared connection's health, so every account on a connection shows the same state.
+function SyncBadge({ conn }: { conn?: SyncHealthConnection }) {
+  if (!conn) return null;
+  const base = 'flex-shrink-0 rounded border border-pill-border bg-pill-bg px-1.5 py-px text-[10.5px]';
+  if (conn.freshness === 'attention') {
+    return <span className={`${base} text-clay`} title={conn.status_detail}>Reconnect</span>;
+  }
+  if (conn.freshness === 'never') {
+    return <span className={`${base} text-gold`} title={conn.status_detail}>Never synced</span>;
+  }
+  if (conn.freshness === 'stale') {
+    return <span className={`${base} text-gold`} title={conn.status_detail}>Stale</span>;
+  }
+  return null;
+}
+
 export function Accounts() {
   const navigate = useNavigate();
   const qc = useQueryClient();
@@ -60,6 +76,12 @@ export function Accounts() {
     () => (snapshots ?? []).map((s) => ({ date: s.date, value: s.net_worth })),
     [snapshots]
   );
+  const { data: syncHealth } = useQuery({ queryKey: ['sync', 'health'], queryFn: () => syncApi.health(), retry: false });
+  const healthByConnection = useMemo(() => {
+    const map = new Map<string, SyncHealthConnection>();
+    for (const c of syncHealth?.connections ?? []) map.set(c.id, c);
+    return map;
+  }, [syncHealth]);
 
   // Handle onboarding deep links: ?connect=bank routes to connections, ?manual=1 opens the add modal.
   useEffect(() => {
@@ -131,7 +153,10 @@ export function Accounts() {
         </span>
         <div className="min-w-0">
           <div className="truncate text-[15.5px] text-ink">{a.account_name}</div>
-          <div className="mt-0.5 text-xs text-muted-2">{accountMeta(a)}</div>
+          <div className="mt-0.5 flex items-center gap-1.5 text-xs text-muted-2">
+            <span className="truncate">{accountMeta(a)}</span>
+            {a.connection_id && <SyncBadge conn={healthByConnection.get(a.connection_id)} />}
+          </div>
         </div>
       </div>
       <span className={`font-serif text-[18px] tabular-nums ${signedBalance(a) < 0 ? 'text-clay' : 'text-ink'}`}>
