@@ -10,7 +10,7 @@ import { useAppStore } from '../../store';
 import { Screen, ScreenHeader, SectionLabel, Row, TextButton, TrendChart } from '../../components/balance';
 import { ConfirmRemoveModal } from '../../components/ConfirmRemoveModal';
 import { SkeletonRows } from '../../components/SkeletonLoader';
-import { AddManualAccountModal, EditAccountModal } from './Modals';
+import { AddManualAccountModal, EditAccountModal, MergeAccountModal } from './Modals';
 
 const GROUPS: Array<{ name: string; match: (a: Account) => boolean }> = [
   { name: 'Cash', match: (a) => !a.is_liability && ['checking', 'savings', 'cash'].includes(a.type) },
@@ -47,6 +47,7 @@ export function Accounts() {
   const [showHidden, setShowHidden] = useState(false);
   const [showAddModal, setShowAddModal] = useState(false);
   const [editing, setEditing] = useState<Account | null>(null);
+  const [merging, setMerging] = useState<Account | null>(null);
   const [removing, setRemoving] = useState<Account | null>(null);
 
   const { data: accounts, isLoading } = useQuery({ queryKey: ['accounts'], queryFn: () => accountsApi.list() });
@@ -261,6 +262,9 @@ export function Accounts() {
               <TextButton onClick={() => toggleHidden.mutate(selected)}>
                 {selected.is_hidden ? 'Unhide from lists' : 'Hide from lists'}
               </TextButton>
+              {(accounts?.length ?? 0) > 1 && (
+                <TextButton onClick={() => setMerging(selected)}>Merge into…</TextButton>
+              )}
               <TextButton onClick={() => setRemoving(selected)} className="hover:!text-clay">
                 Remove…
               </TextButton>
@@ -271,6 +275,13 @@ export function Accounts() {
 
       <AddManualAccountModal open={showAddModal} onClose={() => setShowAddModal(false)} />
       <EditAccountModal open={editing != null} account={editing} onClose={() => setEditing(null)} />
+      <MergeAccountModal
+        open={merging != null}
+        source={merging}
+        accounts={accounts ?? []}
+        onClose={() => setMerging(null)}
+        onMerged={() => setSelectedId(null)}
+      />
       <ConfirmRemoveModal
         open={removing != null}
         onClose={() => setRemoving(null)}

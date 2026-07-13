@@ -128,6 +128,80 @@ export function AddManualAccountModal({ open, onClose }: { open: boolean; onClos
   );
 }
 
+export function MergeAccountModal({ open, source, accounts, onClose, onMerged }: {
+  open: boolean;
+  source: Account | null;
+  accounts: Account[];
+  onClose: () => void;
+  onMerged: () => void;
+}) {
+  const qc = useQueryClient();
+  const { addToast } = useAppStore();
+  const [targetId, setTargetId] = useState('');
+
+  useEffect(() => {
+    setTargetId('');
+  }, [source, open]);
+
+  const candidates = accounts.filter((a) => a.id !== source?.id);
+  const target = candidates.find((a) => a.id === targetId) ?? null;
+  const currencyMismatch = Boolean(source && target && source.currency !== target.currency);
+
+  const mutation = useMutation({
+    mutationFn: () => {
+      if (!source) throw new Error('No account selected');
+      if (!targetId) throw new Error('Pick an account to merge into');
+      return accountsApi.merge({ sourceAccountId: source.id, targetAccountId: targetId });
+    },
+    onSuccess: () => {
+      invalidateFinancialData(qc);
+      addToast({ type: 'success', message: 'Accounts merged' });
+      onMerged();
+      onClose();
+    },
+    onError: (err: Error) => addToast({ type: 'error', message: err.message }),
+  });
+
+  if (!source) return null;
+
+  return (
+    <Modal open={open} onClose={onClose} title="Merge account">
+      <div className="space-y-4">
+        <div>
+          <label className="mz-label">Merge into</label>
+          <select className="mz-field" value={targetId} onChange={(e) => setTargetId(e.target.value)}>
+            <option value="">Pick an account…</option>
+            {candidates.map((a) => (
+              <option key={a.id} value={a.id}>
+                {a.account_name}
+                {a.institution_name ? ` · ${a.institution_name}` : ''}
+              </option>
+            ))}
+          </select>
+        </div>
+        {target && (
+          <p className="text-[13px] leading-relaxed text-muted">
+            <span className="text-ink">{source.account_name}</span> will be merged into{' '}
+            <span className="text-ink">{target.account_name}</span> and removed. Its transactions and connection move to{' '}
+            <span className="text-ink">{target.account_name}</span>.
+          </p>
+        )}
+        {currencyMismatch && (
+          <p className="text-[13px] leading-relaxed text-clay">
+            These accounts use different currencies ({source.currency} and {target?.currency}). Merging anyway may mix values.
+          </p>
+        )}
+        <div className="flex items-center gap-5 pt-1">
+          <InkButton onClick={() => mutation.mutate()} disabled={mutation.isPending || !targetId}>
+            {mutation.isPending ? 'Merging…' : 'Merge account'}
+          </InkButton>
+          <TextButton onClick={onClose}>Cancel</TextButton>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
 export function EditAccountModal({ open, account, onClose }: {
   open: boolean;
   account: Account | null;
