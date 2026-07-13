@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { addMonths, format, parseISO, subMonths } from 'date-fns';
-import type { Budget as BudgetType, Category } from '@shared/types';
+import type { Budget as BudgetType, BudgetGroup, Category } from '@shared/types';
 import { budgetsApi, categoriesApi, flattenCategories } from '../lib/api';
 import { formatWholeCurrency } from '../lib/formatters';
 import { availableBudgetAmount, budgetActualSpend } from '../lib/budgetMath';
@@ -115,10 +115,133 @@ function BudgetModal({
   );
 }
 
+function GroupModal({
+  open,
+  onClose,
+  categories,
+  groups,
+  editing,
+}: {
+  open: boolean;
+  onClose: () => void;
+  categories: Category[];
+  groups: BudgetGroup[];
+  editing: BudgetGroup | null;
+}) {
+  const qc = useQueryClient();
+  const { addToast } = useAppStore();
+  const [name, setName] = useState('');
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+
+  useEffect(() => {
+    setName(editing?.name ?? '');
+    setSelected(new Set(editing ? editing.members.map((m) => m.category_id) : []));
+  }, [editing, open]);
+
+  const spendable = flattenCategories(categories).filter((c) => !c.is_income);
+  // Which other group each category currently sits in (a category can belong to only one group).
+  const otherGroupOf = new Map<string, string>();
+  for (const g of groups) {
+    if (editing && g.id === editing.id) continue;
+    for (const m of g.members) otherGroupOf.set(m.category_id, g.name);
+  }
+
+  const toggle = (id: string) =>
+    setSelected((prev) => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+
+  const save = useMutation({
+    mutationFn: async () => {
+      const trimmed = name.trim();
+      if (!trimmed) throw new Error('Name the group');
+      const ids = [...selected];
+      if (editing) {
+        if (trimmed !== editing.name) await budgetsApi.updateGroup(editing.id, { name: trimmed });
+        await budgetsApi.setGroupMembers(editing.id, ids);
+      } else {
+        const created = await budgetsApi.createGroup({ name: trimmed });
+        if (ids.length > 0) await budgetsApi.setGroupMembers(created.id, ids);
+      }
+    },
+    onSuccess: () => {
+      invalidateFinancialData(qc);
+      addToast({ type: 'success', message: editing ? 'Group updated' : 'Group created' });
+      onClose();
+    },
+    onError: (err: Error) => addToast({ type: 'error', message: err.message }),
+  });
+
+  const remove = useMutation({
+    mutationFn: () => budgetsApi.deleteGroup(editing!.id),
+    onSuccess: () => {
+      invalidateFinancialData(qc);
+      addToast({ type: 'success', message: 'Group deleted' });
+      onClose();
+    },
+    onError: (err: Error) => addToast({ type: 'error', message: err.message }),
+  });
+
+  return (
+    <Modal open={open} onClose={onClose} title={editing ? `Edit ${editing.name}` : 'New budget group'}>
+      <div className="space-y-4">
+        <div>
+          <label className="mz-label">Group name</label>
+          <input className="mz-field" value={name} onChange={(e) => setName(e.target.value)} placeholder="Essentials" autoFocus />
+        </div>
+        <div>
+          <label className="mz-label">Categories</label>
+          <div className="max-h-[280px] overflow-y-auto rounded-lg border border-line-2">
+            {spendable.length === 0 && <div className="px-3 py-3 text-[13px] text-muted-2">No spending categories yet.</div>}
+            {spendable.map((c, i) => {
+              const other = otherGroupOf.get(c.id);
+              return (
+                <label
+                  key={c.id}
+                  className={`flex cursor-pointer items-center gap-2.5 px-3 py-2 transition-colors hover:bg-rail ${
+                    i < spendable.length - 1 ? 'border-b border-line' : ''
+                  }`}
+                >
+                  <input
+                    type="checkbox"
+                    checked={selected.has(c.id)}
+                    onChange={() => toggle(c.id)}
+                    className="rounded border-line-3 text-sage focus:ring-0"
+                  />
+                  <span className="flex-1 text-[14px] text-ink">
+                    {c.parent_id ? `· ${c.name}` : c.name}
+                  </span>
+                  {other && !selected.has(c.id) && <span className="text-[12px] text-muted-2">in {other}</span>}
+                </label>
+              );
+            })}
+          </div>
+          <p className="mt-1.5 text-[12px] text-muted-2">A category can belong to one group. Adding it here moves it out of its current group.</p>
+        </div>
+        <div className="flex items-center gap-5 pt-1">
+          <InkButton onClick={() => save.mutate()} disabled={save.isPending}>
+            {save.isPending ? 'Saving…' : editing ? 'Save changes' : 'Create group'}
+          </InkButton>
+          <TextButton onClick={onClose}>Cancel</TextButton>
+          {editing && (
+            <TextButton onClick={() => remove.mutate()} disabled={remove.isPending} className="ml-auto hover:!text-clay">
+              Delete group
+            </TextButton>
+          )}
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
 export function Budget() {
   const [month, setMonth] = useState(format(new Date(), 'yyyy-MM'));
   const [showModal, setShowModal] = useState(false);
   const [editing, setEditing] = useState<BudgetType | null>(null);
+  const [groupModalOpen, setGroupModalOpen] = useState(false);
+  const [editingGroup, setEditingGroup] = useState<BudgetGroup | null>(null);
 
   const { data: budgets } = useQuery({ queryKey: ['budgets', month], queryFn: () => budgetsApi.getMonth(month) });
   const { data: groups } = useQuery({ queryKey: ['budgets', 'groups', month], queryFn: () => budgetsApi.groups(month) });
@@ -137,17 +260,16 @@ export function Budget() {
   const grouped = useMemo(() => {
     const byId = new Map(allBudgets.map((b) => [b.category_id, b]));
     const used = new Set<string>();
-    const sections = (groups ?? [])
-      .map((g) => {
-        const rows = g.members
-          .map((m) => byId.get(m.category_id))
-          .filter((b): b is BudgetType => Boolean(b));
-        rows.forEach((b) => used.add(b.category_id));
-        return { name: g.name, rows };
-      })
-      .filter((s) => s.rows.length > 0);
+    // Real groups always render (even when empty this month) so they can be managed.
+    const sections: Array<{ group: BudgetGroup | null; name: string; rows: BudgetType[] }> = (groups ?? []).map((g) => {
+      const rows = g.members
+        .map((m) => byId.get(m.category_id))
+        .filter((b): b is BudgetType => Boolean(b));
+      rows.forEach((b) => used.add(b.category_id));
+      return { group: g, name: g.name, rows };
+    });
     const rest = allBudgets.filter((b) => !used.has(b.category_id));
-    if (rest.length > 0) sections.push({ name: sections.length > 0 ? 'Other' : 'Categories', rows: rest });
+    if (rest.length > 0) sections.push({ group: null, name: sections.length > 0 ? 'Other' : 'Categories', rows: rest });
     return sections;
   }, [allBudgets, groups]);
 
@@ -188,6 +310,16 @@ export function Budget() {
             <button
               type="button"
               onClick={() => {
+                setEditingGroup(null);
+                setGroupModalOpen(true);
+              }}
+              className="text-[13.5px] text-muted transition-colors hover:text-ink"
+            >
+              + New group
+            </button>
+            <button
+              type="button"
+              onClick={() => {
                 setEditing(null);
                 setShowModal(true);
               }}
@@ -202,10 +334,27 @@ export function Budget() {
 
       <div className="flex-1">
         {grouped.map((section) => (
-          <div key={section.name} className="mb-6">
+          <div key={section.group?.id ?? section.name} className="group mb-6">
             <SectionLabel summary={groupSummary(section.rows)} className="mb-3">
-              {section.name}
+              <span className="inline-flex items-baseline gap-2">
+                {section.name}
+                {section.group && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setEditingGroup(section.group);
+                      setGroupModalOpen(true);
+                    }}
+                    className="text-[10px] normal-case tracking-normal text-muted-2 opacity-0 transition-opacity hover:text-ink group-hover:opacity-100"
+                  >
+                    edit
+                  </button>
+                )}
+              </span>
             </SectionLabel>
+            {section.rows.length === 0 && (
+              <div className="px-1 py-2 text-[13px] text-muted-2">No budgeted categories in this group yet.</div>
+            )}
             {section.rows.map((b) => {
               const available = availableBudgetAmount(b);
               const spent = budgetActualSpend(b);
@@ -248,6 +397,13 @@ export function Budget() {
       </div>
 
       <BudgetModal open={showModal} onClose={() => setShowModal(false)} categories={categories ?? []} budgets={allBudgets} editing={editing} />
+      <GroupModal
+        open={groupModalOpen}
+        onClose={() => setGroupModalOpen(false)}
+        categories={categories ?? []}
+        groups={groups ?? []}
+        editing={editingGroup}
+      />
     </Screen>
   );
 }
