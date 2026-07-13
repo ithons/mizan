@@ -54,15 +54,36 @@ export function runMigrations(): void {
     .filter((f) => f.endsWith('.sql'))
     .sort();
 
-  for (const file of files) {
-    if (applied.has(file)) continue;
-    const sql = fs.readFileSync(path.join(MIGRATIONS_DIR, file), 'utf-8');
-    db.exec(sql);
-    db.prepare('INSERT INTO schema_migrations (name, applied_at) VALUES (?, ?)').run(
-      file,
-      new Date().toISOString()
-    );
-    console.log(`[db] Applied migration: ${file}`);
+  // Each migration is applied atomically: a mid-file failure must roll back the
+  // whole file rather than leave a half-migrated schema recorded as unapplied.
+  // The create-new-table/copy/drop/rename migrations (013, 014) need FK
+  // enforcement off during the rebuild. foreign_keys can only be toggled outside
+  // a transaction, so we disable it around the loop and rely on foreign_key_check
+  // to catch violations before each COMMIT. Any in-file `PRAGMA foreign_keys`
+  // statement is a harmless no-op inside the transaction.
+  db.pragma('foreign_keys = OFF');
+  try {
+    for (const file of files) {
+      if (applied.has(file)) continue;
+      const sql = fs.readFileSync(path.join(MIGRATIONS_DIR, file), 'utf-8');
+      const applyMigration = db.transaction(() => {
+        db.exec(sql);
+        const violations = db.pragma('foreign_key_check') as unknown[];
+        if (violations.length > 0) {
+          throw new Error(
+            `Migration ${file} left ${violations.length} foreign-key violation(s): ${JSON.stringify(violations)}`
+          );
+        }
+        db.prepare('INSERT INTO schema_migrations (name, applied_at) VALUES (?, ?)').run(
+          file,
+          new Date().toISOString()
+        );
+      });
+      applyMigration();
+      console.log(`[db] Applied migration: ${file}`);
+    }
+  } finally {
+    db.pragma('foreign_keys = ON');
   }
 }
 

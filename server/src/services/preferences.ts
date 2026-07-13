@@ -1,6 +1,8 @@
 import type Database from 'better-sqlite3';
 import type { AppPreference } from '../../../shared/types';
 
+const CORRUPT = Symbol('corrupt-preference');
+
 interface PreferenceRow {
   key: string;
   value: string;
@@ -8,10 +10,19 @@ interface PreferenceRow {
   updated_at: string;
 }
 
-function parsePreference(row: PreferenceRow): AppPreference {
+function parsePreference(row: PreferenceRow): AppPreference | typeof CORRUPT {
+  let value: unknown;
+  try {
+    value = JSON.parse(row.value);
+  } catch (err) {
+    // A corrupt preference is treated as unset so callers fall back to defaults
+    // rather than crashing or misreading a partial string.
+    console.warn(`[preferences] Invalid JSON for '${row.key}': ${(err as Error).message}`);
+    return CORRUPT;
+  }
   return {
     key: row.key,
-    value: JSON.parse(row.value) as unknown,
+    value,
     created_at: row.created_at,
     updated_at: row.updated_at,
   };
@@ -23,7 +34,9 @@ export function getPreference(db: Database.Database, key: string): AppPreference
     FROM app_preferences
     WHERE key = ?
   `).get(key) as PreferenceRow | undefined;
-  return row ? parsePreference(row) : null;
+  if (!row) return null;
+  const parsed = parsePreference(row);
+  return parsed === CORRUPT ? null : parsed;
 }
 
 export function setPreference(

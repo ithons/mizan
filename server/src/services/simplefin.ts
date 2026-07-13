@@ -87,6 +87,17 @@ export interface SimplefinSyncResult {
   errors: string[];
 }
 
+// A malformed balance/amount must never be persisted: parseFloat would yield NaN
+// (stored as NULL in a REAL column) and silently corrupt net worth. Callers catch
+// this and either skip the account (preserving its prior balance) or the transaction.
+function parseFinancialAmount(raw: unknown, label: string): number {
+  const n = parseFloat(String(raw));
+  if (!Number.isFinite(n)) {
+    throw new Error(`SimpleFIN returned a non-numeric ${label}: ${JSON.stringify(raw)}`);
+  }
+  return n;
+}
+
 export async function syncSimplefin(): Promise<SimplefinSyncResult> {
   const creds = getCredentials();
   if (!creds.simplefin?.accessUrl) {
@@ -125,6 +136,17 @@ export async function syncSimplefin(): Promise<SimplefinSyncResult> {
     const currency = acct.currency || 'USD';
     const institutionName = acct.org?.name || 'SimpleFIN';
 
+    let balanceMagnitude: number;
+    try {
+      balanceMagnitude = parseFinancialAmount(acct.balance, `account "${acct.name}" balance`);
+    } catch (err) {
+      // Preserve the account's last-known balance rather than overwrite it with a
+      // corrupt value; surface the problem through the sync result.
+      errors.push((err as Error).message);
+      console.warn(`[simplefin] Skipping account ${acct.id}: ${(err as Error).message}`);
+      continue;
+    }
+
     const existingAcct = db.prepare(`
       SELECT id, account_name, current_balance, is_liability, currency
       FROM accounts
@@ -138,7 +160,7 @@ export async function syncSimplefin(): Promise<SimplefinSyncResult> {
     if (existingAcct) {
       accountId = existingAcct.id;
       isLiability = Boolean(existingAcct.is_liability);
-      currentBalance = isLiability ? -parseFloat(acct.balance) : parseFloat(acct.balance);
+      currentBalance = isLiability ? -balanceMagnitude : balanceMagnitude;
 
       if (balancesDiffer(existingAcct.current_balance, currentBalance)) {
         balanceChanges.push({
@@ -173,7 +195,7 @@ export async function syncSimplefin(): Promise<SimplefinSyncResult> {
       accountId = uuidv4();
       const guessed = guessAccountTypeAndLiability(acct.name, institutionName);
       isLiability = guessed.isLiability;
-      currentBalance = isLiability ? -parseFloat(acct.balance) : parseFloat(acct.balance);
+      currentBalance = isLiability ? -balanceMagnitude : balanceMagnitude;
 
       db.prepare(`
         INSERT INTO accounts
@@ -204,7 +226,15 @@ export async function syncSimplefin(): Promise<SimplefinSyncResult> {
       // the user's timezone. For a local-first desktop app, this is correct. If deployed 
       // to a remote VPS, this may cause late-night transactions to land on the wrong day.
       const date = format(new Date(txn.posted * 1000), 'yyyy-MM-dd');
-      const amount = parseFloat(txn.amount); // already negative for expenses
+      let amount: number; // already negative for expenses
+      try {
+        amount = parseFinancialAmount(txn.amount, `transaction ${txn.id} amount`);
+      } catch (err) {
+        errors.push((err as Error).message);
+        console.warn(`[simplefin] Skipping transaction ${txn.id}: ${(err as Error).message}`);
+        skipped++;
+        continue;
+      }
       const merchantName = txn.payee || null;
       const originalName = txn.description || '';
       // Not every institution reports this via SimpleFIN Bridge - defaults to posted (0)

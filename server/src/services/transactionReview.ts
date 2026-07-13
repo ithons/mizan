@@ -5,6 +5,7 @@ import type {
   TransactionReviewSummary,
 } from '../../../shared/types';
 import { suggestMerchantRules } from './rules';
+import { safeJsonParse } from './jsonSafe';
 import {
   getDuplicateCandidateGroups,
   getTransferCandidatePairs,
@@ -55,13 +56,17 @@ export function getTransactionReviewSummary(db: Database.Database): TransactionR
     SELECT * FROM advisor_drafts WHERE status = 'open' ORDER BY created_at DESC
   `).all() as Array<any>;
   
-  const aiDrafts = aiDraftsRaw.map(row => ({
-    ...row,
-    payload: JSON.parse(row.payload),
-    changes: JSON.parse(row.changes),
-    citations: JSON.parse(row.citations),
-    confirmation_required: true,
-  }));
+  const aiDrafts = aiDraftsRaw
+    .map(row => {
+      const payload = safeJsonParse<unknown>(row.payload, null, `advisor_draft ${row.id} payload`);
+      const changes = safeJsonParse<unknown>(row.changes, null, `advisor_draft ${row.id} changes`);
+      const citations = safeJsonParse<unknown>(row.citations, null, `advisor_draft ${row.id} citations`);
+      // A draft with an unreadable payload cannot be applied — drop it rather
+      // than surface a broken card.
+      if (payload === null) return null;
+      return { ...row, payload, changes: changes ?? [], citations: citations ?? [], confirmation_required: true };
+    })
+    .filter((d): d is NonNullable<typeof d> => d !== null);
 
   const queues: TransactionReviewQueueSummary[] = [
     {
