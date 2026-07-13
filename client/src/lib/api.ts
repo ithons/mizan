@@ -335,6 +335,13 @@ export const budgetsApi = {
 
 export const recurringApi = {
   list: () => apiFetch<RecurringPattern[]>('/api/recurring'),
+  create: (body: {
+    merchant_name: string;
+    frequency: RecurringPattern['frequency'];
+    average_amount: number;
+    next_expected: string;
+    category_id?: string | null;
+  }) => apiFetch<RecurringPattern>('/api/recurring', { method: 'POST', body: JSON.stringify(body) }),
   upcoming: (days?: number) =>
     apiFetch<RecurringPattern[]>(`/api/recurring/upcoming${days ? `?days=${days}` : ''}`),
   forecast: (days?: number) =>

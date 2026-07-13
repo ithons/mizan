@@ -2,11 +2,114 @@ import { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { format, parseISO } from 'date-fns';
-import type { RecurringForecastOccurrence, RecurringPattern } from '@shared/types';
-import { recurringApi } from '../lib/api';
+import type { Category, RecurringForecastOccurrence, RecurringPattern } from '@shared/types';
+import { categoriesApi, flattenCategories, recurringApi } from '../lib/api';
 import { formatCurrency, formatWholeCurrency } from '../lib/formatters';
+import { parseDecimalInput } from '../lib/numberInput';
 import { useAppStore } from '../store';
-import { Screen, ScreenHeader, SectionLabel, TextButton } from '../components/balance';
+import { Modal } from '../components/Modal';
+import { Screen, ScreenHeader, SectionLabel, InkButton, TextButton } from '../components/balance';
+
+const FREQUENCY_OPTIONS: Array<RecurringPattern['frequency']> = ['weekly', 'biweekly', 'monthly', 'quarterly', 'annual'];
+
+function BillModal({ open, onClose, categories }: { open: boolean; onClose: () => void; categories: Category[] }) {
+  const qc = useQueryClient();
+  const { addToast } = useAppStore();
+  const [name, setName] = useState('');
+  const [amount, setAmount] = useState('');
+  const [frequency, setFrequency] = useState<RecurringPattern['frequency']>('monthly');
+  const [nextDate, setNextDate] = useState(format(new Date(), 'yyyy-MM-dd'));
+  const [categoryId, setCategoryId] = useState('');
+
+  const flat = flattenCategories(categories);
+  const selectedCategory = flat.find((c) => c.id === categoryId);
+  const isIncome = Boolean(selectedCategory?.is_income);
+
+  const reset = () => {
+    setName('');
+    setAmount('');
+    setFrequency('monthly');
+    setNextDate(format(new Date(), 'yyyy-MM-dd'));
+    setCategoryId('');
+  };
+
+  const save = useMutation({
+    mutationFn: () => {
+      const parsed = parseDecimalInput(amount);
+      if (!name.trim()) throw new Error('Name the item');
+      if (parsed === null || parsed <= 0) throw new Error('Enter a valid amount');
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(nextDate)) throw new Error('Pick the next date');
+      return recurringApi.create({
+        merchant_name: name.trim(),
+        frequency,
+        average_amount: parsed,
+        next_expected: nextDate,
+        category_id: categoryId || null,
+      });
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['recurring'] });
+      addToast({ type: 'success', message: `${isIncome ? 'Income' : 'Bill'} added` });
+      reset();
+      onClose();
+    },
+    onError: (err: Error) => addToast({ type: 'error', message: err.message }),
+  });
+
+  return (
+    <Modal open={open} onClose={onClose} title="Add recurring item">
+      <div className="space-y-4">
+        <div>
+          <label className="mz-label">Name</label>
+          <input className="mz-field" value={name} onChange={(e) => setName(e.target.value)} placeholder="Rent, Netflix, Paycheck…" autoFocus />
+        </div>
+        <div className="flex gap-4">
+          <div className="flex-1">
+            <label className="mz-label">Amount</label>
+            <input type="number" className="mz-field tabular-nums" placeholder="0.00" value={amount} onChange={(e) => setAmount(e.target.value)} />
+          </div>
+          <div className="flex-1">
+            <label className="mz-label">Frequency</label>
+            <select className="mz-field" value={frequency} onChange={(e) => setFrequency(e.target.value as RecurringPattern['frequency'])}>
+              {FREQUENCY_OPTIONS.map((f) => (
+                <option key={f} value={f}>
+                  {f.charAt(0).toUpperCase() + f.slice(1)}
+                </option>
+              ))}
+            </select>
+          </div>
+        </div>
+        <div className="flex gap-4">
+          <div className="flex-1">
+            <label className="mz-label">Next date</label>
+            <input type="date" className="mz-field tabular-nums" value={nextDate} onChange={(e) => setNextDate(e.target.value)} />
+          </div>
+          <div className="flex-1">
+            <label className="mz-label">Category</label>
+            <select className="mz-field" value={categoryId} onChange={(e) => setCategoryId(e.target.value)}>
+              <option value="">Uncategorized (bill)</option>
+              {flat.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.parent_id ? `· ${c.name}` : c.name}
+                  {c.is_income ? ' (income)' : ''}
+                </option>
+              ))}
+            </select>
+          </div>
+        </div>
+        <p className="text-[12px] text-muted-2">
+          {isIncome ? 'Tracked as income' : 'Tracked as a bill'} · category determines whether this counts as income or an expense.
+        </p>
+        <div className="flex items-center gap-5 pt-1">
+          <InkButton onClick={() => save.mutate()} disabled={save.isPending}>
+            {save.isPending ? 'Adding…' : 'Add item'}
+          </InkButton>
+          <TextButton onClick={onClose}>Cancel</TextButton>
+        </div>
+      </div>
+    </Modal>
+  );
+}
 
 const FREQUENCY_PER_MONTH: Record<RecurringPattern['frequency'], number> = {
   weekly: 52 / 12,
@@ -36,9 +139,11 @@ export function Bills() {
   const { addToast } = useAppStore();
 
   const [showIncome, setShowIncome] = useState(false);
+  const [showAdd, setShowAdd] = useState(false);
 
   const { data: forecast } = useQuery({ queryKey: ['recurring', 'forecast', 30], queryFn: () => recurringApi.forecast(30) });
   const { data: patterns } = useQuery({ queryKey: ['recurring'], queryFn: () => recurringApi.list() });
+  const { data: categories } = useQuery({ queryKey: ['categories'], queryFn: () => categoriesApi.list() });
 
   const bills = useMemo(() => (patterns ?? []).filter(isBillPattern), [patterns]);
   const monthlyTotal = bills.reduce((s, p) => s + monthlyAmount(p), 0);
@@ -90,6 +195,7 @@ export function Bills() {
             'Recurring charges are detected automatically from your transactions'
           )
         }
+        actions={<InkButton onClick={() => setShowAdd(true)}>+ Add bill</InkButton>}
         className="mb-6"
       />
 
@@ -187,6 +293,8 @@ export function Bills() {
           )}
         </div>
       </div>
+
+      <BillModal open={showAdd} onClose={() => setShowAdd(false)} categories={categories ?? []} />
     </Screen>
   );
 }

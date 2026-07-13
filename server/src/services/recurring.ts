@@ -1,4 +1,5 @@
 import { v4 as uuidv4 } from 'uuid';
+import type Database from 'better-sqlite3';
 import {
   differenceInDays,
   addDays,
@@ -8,6 +9,61 @@ import {
 } from 'date-fns';
 import { getDb } from '../db/index';
 import { compareTwoStrings } from "string-similarity";
+
+export type RecurringFrequency = 'weekly' | 'biweekly' | 'monthly' | 'quarterly' | 'annual';
+
+export interface CreateRecurringPatternInput {
+  merchant_name: string;
+  frequency: RecurringFrequency;
+  average_amount: number;
+  next_expected: string;
+  category_id?: string | null;
+}
+
+function httpError(message: string, status: number): Error & { status: number } {
+  const err = new Error(message) as Error & { status: number };
+  err.status = status;
+  return err;
+}
+
+/**
+ * Create a user-defined recurring pattern. Manual patterns are stored confirmed
+ * (transaction_count 0) so they surface in the forecast immediately. Income vs. bill
+ * is derived downstream from the assigned category's is_income flag.
+ */
+export function createRecurringPattern(db: Database.Database, input: CreateRecurringPatternInput): string {
+  const name = input.merchant_name.trim();
+  if (!name) throw httpError('Name is required', 400);
+
+  const existing = db.prepare('SELECT id FROM recurring_patterns WHERE merchant_name = ?').get(name);
+  if (existing) throw httpError('A recurring item with that name already exists', 409);
+
+  if (input.category_id) {
+    const category = db.prepare('SELECT id FROM categories WHERE id = ?').get(input.category_id);
+    if (!category) throw httpError('Category not found', 400);
+  }
+
+  const id = uuidv4();
+  const now = new Date().toISOString();
+  db.prepare(`
+    INSERT INTO recurring_patterns
+      (id, merchant_name, category_id, frequency, average_amount, last_seen, next_expected,
+       is_active, is_confirmed, transaction_count, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, 1, 1, 0, ?, ?)
+  `).run(
+    id,
+    name,
+    input.category_id ?? null,
+    input.frequency,
+    Math.abs(input.average_amount),
+    input.next_expected,
+    input.next_expected,
+    now,
+    now,
+  );
+
+  return id;
+}
 
 
 const US_STATES = new Set([

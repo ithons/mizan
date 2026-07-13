@@ -1,7 +1,8 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import { getDb } from '../db/index';
 import { validate } from '../middleware/validate';
-import { UpdateRecurringSchema, UpsertRecurringAdjustmentSchema } from '../../../shared/schemas';
+import { CreateRecurringSchema, UpdateRecurringSchema, UpsertRecurringAdjustmentSchema } from '../../../shared/schemas';
+import { createRecurringPattern } from '../services/recurring';
 import { buildRecurringForecast } from '../services/recurringForecast';
 import { buildSubscriptionInsights } from '../services/subscriptionInsights';
 import {
@@ -35,7 +36,8 @@ router.get('/', (_req: Request, res: Response, next: NextFunction): void => {
       SELECT
         rp.*,
         c.name AS category_name,
-        c.color AS category_color
+        c.color AS category_color,
+        CASE WHEN c.is_income = 1 THEN rp.average_amount ELSE -rp.average_amount END AS average_signed_amount
       FROM recurring_patterns rp
       LEFT JOIN categories c ON c.id = rp.category_id
       WHERE rp.is_active = 1
@@ -43,6 +45,27 @@ router.get('/', (_req: Request, res: Response, next: NextFunction): void => {
     `).all();
 
     res.json({ data: patterns });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// POST / - create a user-defined recurring pattern
+router.post('/', validate(CreateRecurringSchema), (req: Request, res: Response, next: NextFunction): void => {
+  try {
+    const db = getDb();
+    const id = createRecurringPattern(db, req.body);
+    const pattern = db.prepare(`
+      SELECT
+        rp.*,
+        c.name AS category_name,
+        c.color AS category_color,
+        CASE WHEN c.is_income = 1 THEN rp.average_amount ELSE -rp.average_amount END AS average_signed_amount
+      FROM recurring_patterns rp
+      LEFT JOIN categories c ON c.id = rp.category_id
+      WHERE rp.id = ?
+    `).get(id);
+    res.status(201).json({ data: pattern });
   } catch (err) {
     next(err);
   }

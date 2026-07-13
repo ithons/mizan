@@ -102,6 +102,14 @@ export const UpdateRecurringSchema = z.object({
   category_id: z.string().nullable().optional(),
 });
 
+export const CreateRecurringSchema = z.object({
+  merchant_name: z.string().min(1),
+  frequency: z.enum(['weekly', 'biweekly', 'monthly', 'quarterly', 'annual']),
+  average_amount: z.number().positive(),
+  next_expected: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  category_id: z.string().nullable().optional(),
+});
+
 export const UpsertRecurringAdjustmentSchema = z.object({
   original_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
   action: z.enum(['skip', 'snooze', 'adjust']),
