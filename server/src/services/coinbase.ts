@@ -17,6 +17,30 @@ interface CoinbaseConnectionRow {
   id: string;
 }
 
+// coinbase_user_id for the synthetic connection created when Coinbase is configured
+// via .env (COINBASE_KEY_NAME/COINBASE_PRIVATE_KEY) rather than the connect route.
+// The env path has no real Coinbase user id; this stable sentinel lets us anchor a
+// single connection so crypto accounts are linked and surface in sync health.
+const ENV_COINBASE_USER_ID = 'env';
+
+// Guarantees exactly one active coinbase_connections row exists and returns its id.
+// Preserves a real connect-route connection if one is already active; otherwise
+// creates (or reactivates) the synthetic env connection.
+function ensureCoinbaseConnection(db: Database.Database, now: string): string {
+  const active = db.prepare(
+    "SELECT id FROM coinbase_connections WHERE status = 'active'"
+  ).get() as CoinbaseConnectionRow | undefined;
+  if (active) return active.id;
+
+  const row = db.prepare(`
+    INSERT INTO coinbase_connections (id, coinbase_user_id, display_name, last_synced_at, status, created_at)
+    VALUES (?, ?, 'Coinbase', NULL, 'active', ?)
+    ON CONFLICT(coinbase_user_id) DO UPDATE SET status = 'active'
+    RETURNING id
+  `).get(uuidv4(), ENV_COINBASE_USER_ID, now) as CoinbaseConnectionRow;
+  return row.id;
+}
+
 interface CoinbaseAccountRow {
   id: string;
   coinbase_account_id: string;
@@ -214,10 +238,13 @@ export async function syncCoinbase(): Promise<CoinbaseSyncResult> {
   let syncedCount = 0;
   const balanceChanges: AccountBalanceChange[] = [];
   const seenAccountIds = new Set<string>();
-  const activeConnection = db.prepare(
+  // A real connect-route connection that pre-exists this sync keeps its historical
+  // behavior of importing trade history; a synthetic env connection stays
+  // balances-only (crypto trade history is not pulled into the ledger by default).
+  const preExistingConnection = db.prepare(
     "SELECT id FROM coinbase_connections WHERE status = 'active'"
   ).get() as CoinbaseConnectionRow | undefined;
-  const activeConnectionId = activeConnection?.id ?? null;
+  const activeConnectionId = ensureCoinbaseConnection(db, now);
 
   while (hasNext) {
     const params = new URLSearchParams({ limit: '250' });
@@ -334,8 +361,8 @@ export async function syncCoinbase(): Promise<CoinbaseSyncResult> {
     staleAccountCount++;
   }
 
-  const transactionCount = activeConnection
-    ? await syncTradeHistory(activeConnection.id)
+  const transactionCount = preExistingConnection
+    ? await syncTradeHistory(preExistingConnection.id)
     : 0;
 
   db.prepare(
