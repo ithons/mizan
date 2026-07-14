@@ -7,9 +7,31 @@ import {
   listHoldingsWithMetadata,
   setManualCostBasis,
   setSecurityMetadata,
+  type HoldingHistoryPoint,
 } from '../services/investmentMetadata';
+import { dollarizeFields } from '../services/money';
+import type { Holding } from '../../../shared/types';
 
 const router = Router();
+
+// The service returns money in integer cents; dollarize at the route boundary.
+// institution_price (per-unit) and quantity (share count) are NOT money.
+const HOLDING_MONEY_FIELDS = [
+  'institution_value',
+  'provider_cost_basis',
+  'cost_basis',
+  'effective_cost_basis',
+  'manual_cost_basis',
+] as const;
+const HISTORY_MONEY_FIELDS = ['institution_value', 'cost_basis'] as const;
+
+function holdingToDollars(holding: Holding): Holding {
+  return dollarizeFields(holding as unknown as Record<string, unknown>, HOLDING_MONEY_FIELDS) as unknown as Holding;
+}
+
+function historyPointToDollars(point: HoldingHistoryPoint): HoldingHistoryPoint {
+  return dollarizeFields(point as unknown as Record<string, unknown>, HISTORY_MONEY_FIELDS) as unknown as HoldingHistoryPoint;
+}
 
 function routeParam(value: string | string[] | undefined): string | null {
   return typeof value === 'string' && value.length > 0 ? value : null;
@@ -19,7 +41,7 @@ function routeParam(value: string | string[] | undefined): string | null {
 router.get('/holdings', (_req: Request, res: Response, next: NextFunction): void => {
   try {
     const db = getDb();
-    res.json({ data: listHoldingsWithMetadata(db) });
+    res.json({ data: listHoldingsWithMetadata(db).map(holdingToDollars) });
   } catch (err) {
     next(err);
   }
@@ -37,7 +59,7 @@ router.put(
         return;
       }
 
-      res.json({ data: setManualCostBasis(db, id, req.body) });
+      res.json({ data: holdingToDollars(setManualCostBasis(db, id, req.body)) });
     } catch (err) {
       next(err);
     }
@@ -74,7 +96,7 @@ router.get('/holdings/:id/history', (req: Request, res: Response, next: NextFunc
     }
 
     const days = req.query.days ? parseInt(req.query.days as string, 10) : undefined;
-    res.json({ data: getHoldingHistory(db, id, days) });
+    res.json({ data: getHoldingHistory(db, id, days).map(historyPointToDollars) });
   } catch (err) {
     next(err);
   }
@@ -90,7 +112,7 @@ router.get('/holdings/:accountId', (req: Request, res: Response, next: NextFunct
       return;
     }
 
-    res.json({ data: listHoldingsWithMetadata(db, accountId) });
+    res.json({ data: listHoldingsWithMetadata(db, accountId).map(holdingToDollars) });
   } catch (err) {
     next(err);
   }
@@ -129,9 +151,10 @@ router.get('/transactions', (req: Request, res: Response, next: NextFunction): v
       LEFT JOIN securities s ON s.id = it.security_id
       ${where}
       ORDER BY it.date DESC, it.created_at DESC
-    `).all(...params);
+    `).all(...params) as Record<string, unknown>[];
 
-    res.json({ data: txns });
+    // amount/fees are integer cents; price is per-unit (REAL) and quantity is a share count.
+    res.json({ data: txns.map((t) => dollarizeFields(t, ['amount', 'fees'])) });
   } catch (err) {
     next(err);
   }
@@ -150,9 +173,9 @@ router.get('/transactions/:accountId', (req: Request, res: Response, next: NextF
       LEFT JOIN securities s ON s.id = it.security_id
       WHERE it.account_id = ?
       ORDER BY it.date DESC, it.created_at DESC
-    `).all(req.params.accountId);
+    `).all(req.params.accountId) as Record<string, unknown>[];
 
-    res.json({ data: txns });
+    res.json({ data: txns.map((t) => dollarizeFields(t, ['amount', 'fees'])) });
   } catch (err) {
     next(err);
   }

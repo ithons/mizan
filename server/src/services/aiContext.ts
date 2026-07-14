@@ -8,6 +8,7 @@ import type {
   TransactionReviewSummary,
 } from '../../../shared/types';
 import { getDb } from '../db/index';
+import { toDollars, toDollarsOrNull } from './money';
 import { calculateGoalProgress } from './goalProgress';
 import { buildRecurringForecast } from './recurringForecast';
 import { getCashflowReport, getReportSummary } from './reporting';
@@ -25,6 +26,9 @@ For cash flow: use the recurring forecast and goal progress when available. If d
 
 Keep responses concise unless depth is clearly warranted. Use dollar amounts and percentages from their data. Never fabricate numbers.`;
 
+// fmt() takes dollars. EVERY money value in this file is integer cents — both inline-SQL
+// reads AND values returned from service functions (reporting, forecast, goal progress) —
+// so every argument to fmt() must be wrapped in toDollars() at its call site.
 function fmt(n: number | null | undefined, prefix = '$'): string {
   if (n == null) return 'N/A';
   const abs = Math.abs(n);
@@ -127,7 +131,7 @@ export function buildAdvisorActions({
       'Explain spending change',
       '/reports',
       'What drove the increase in my spending this period, and which categories should I inspect first?',
-      `Spending is up ${fmt(reportSummary.expenses.delta)} versus the prior comparable period.`,
+      `Spending is up ${fmt(toDollars(reportSummary.expenses.delta))} versus the prior comparable period.`,
       reportSummary.expenses.delta_percent !== null && reportSummary.expenses.delta_percent > 20 ? 'warning' : 'info'
     ));
   }
@@ -232,7 +236,9 @@ export function buildFinancialContext(): string {
   const acctLines: string[] = [];
 
   for (const a of accounts) {
-    const bal = a.current_balance;
+    // current_balance is integer cents; dollarize once here so all downstream sums, the
+    // net-worth math, and the forecast (already dollars) combine in the same unit.
+    const bal = toDollars(a.current_balance);
     if (a.is_liability) {
       liabilities += Math.abs(bal);
       acctLines.push(`  ${a.account_name} (${a.institution_name || a.type}): ${fmt(bal)} owed`);
@@ -260,7 +266,8 @@ export function buildFinancialContext(): string {
     WHERE date < ? ORDER BY date DESC LIMIT 1
   `).get(thisMonthStart) as { net_worth: number } | undefined;
 
-  const nwDelta = lastMonthSnapshot ? netWorth - lastMonthSnapshot.net_worth : null;
+  // netWorth is dollars (from dollarized balances); the snapshot column is cents.
+  const nwDelta = lastMonthSnapshot ? netWorth - toDollars(lastMonthSnapshot.net_worth) : null;
 
   lines.push('');
   lines.push(`### Net Worth: ${fmt(netWorth)}${nwDelta != null ? ` (${nwDelta >= 0 ? '+' : ''}${fmt(nwDelta)} vs last month)` : ''}`);
@@ -292,9 +299,9 @@ export function buildFinancialContext(): string {
 
   lines.push('');
   lines.push('### Cash Flow - 3-month average');
-  lines.push(`  Income:   ${fmt(avgIncome)}/mo`);
-  lines.push(`  Expenses: ${fmt(avgExpenses)}/mo`);
-  lines.push(`  Net:      ${fmt(avgNet)}/mo`);
+  lines.push(`  Income:   ${fmt(toDollars(avgIncome))}/mo`);
+  lines.push(`  Expenses: ${fmt(toDollars(avgExpenses))}/mo`);
+  lines.push(`  Net:      ${fmt(toDollars(avgNet))}/mo`);
 
   const reportSummary = getReportSummary(db, {
     startDate: thisMonthStart,
@@ -302,14 +309,14 @@ export function buildFinancialContext(): string {
   });
   lines.push('');
   lines.push(`### Report Summary - ${format(today, 'MMMM')}`);
-  lines.push(`  Income: ${fmt(reportSummary.income.current)} (${fmt(reportSummary.income.delta)} vs prior period)`);
-  lines.push(`  Spending: ${fmt(reportSummary.expenses.current)} (${fmt(reportSummary.expenses.delta)} vs prior period)`);
-  lines.push(`  Net cash flow: ${fmt(reportSummary.net.current)} (${fmt(reportSummary.net.delta)} vs prior period)`);
+  lines.push(`  Income: ${fmt(toDollars(reportSummary.income.current))} (${fmt(toDollars(reportSummary.income.delta))} vs prior period)`);
+  lines.push(`  Spending: ${fmt(toDollars(reportSummary.expenses.current))} (${fmt(toDollars(reportSummary.expenses.delta))} vs prior period)`);
+  lines.push(`  Net cash flow: ${fmt(toDollars(reportSummary.net.current))} (${fmt(toDollars(reportSummary.net.delta))} vs prior period)`);
   lines.push(`  Savings rate: ${reportSummary.savings_rate.current.toFixed(1)}% (${reportSummary.savings_rate.delta >= 0 ? '+' : ''}${reportSummary.savings_rate.delta.toFixed(1)} pp)`);
   if (reportSummary.excluded_flows.length > 0) {
     lines.push('  Excluded from income and spending reports:');
     for (const flow of reportSummary.excluded_flows) {
-      lines.push(`    ${flow.flow_type}: ${flow.count} transactions, net ${fmt(flow.net)}`);
+      lines.push(`    ${flow.flow_type}: ${flow.count} transactions, net ${fmt(toDollars(flow.net))}`);
     }
   }
 
@@ -318,10 +325,11 @@ export function buildFinancialContext(): string {
   if (forecast.occurrences.length > 0) {
     lines.push('');
     lines.push(`### Forward Cash Flow - next ${forecastDays} days`);
-    lines.push(`  Scheduled income: ${fmt(forecast.income)}`);
-    lines.push(`  Scheduled bills:  ${fmt(forecast.bills)}`);
-    lines.push(`  Scheduled net:    ${fmt(forecast.net)}`);
-    lines.push(`  Liquid after scheduled net: ${fmt(liquid + forecast.net)}`);
+    lines.push(`  Scheduled income: ${fmt(toDollars(forecast.income))}`);
+    lines.push(`  Scheduled bills:  ${fmt(toDollars(forecast.bills))}`);
+    lines.push(`  Scheduled net:    ${fmt(toDollars(forecast.net))}`);
+    // `liquid` is dollars (from dollarized balances); forecast.net is cents.
+    lines.push(`  Liquid after scheduled net: ${fmt(liquid + toDollars(forecast.net))}`);
     lines.push('  Next scheduled items:');
     for (const occurrence of forecast.occurrences.slice(0, 10)) {
       const sign = occurrence.amount >= 0 ? '+' : '-';
@@ -331,7 +339,7 @@ export function buildFinancialContext(): string {
         ? `, ${occurrence.adjustment_action} adjustment from ${occurrence.original_expected_date ?? occurrence.expected_date}`
         : '';
       lines.push(
-        `    ${occurrence.expected_date}: ${occurrence.merchant_name} ${sign}${fmt(Math.abs(occurrence.amount))} (${category}, ${occurrence.frequency}, ${status}${adjustment})`
+        `    ${occurrence.expected_date}: ${occurrence.merchant_name} ${sign}${fmt(toDollars(Math.abs(occurrence.amount)))} (${category}, ${occurrence.frequency}, ${status}${adjustment})`
       );
     }
   }
@@ -363,15 +371,17 @@ export function buildFinancialContext(): string {
     LEFT JOIN categories pc ON pc.id = c.parent_id
     WHERE b.period = 'monthly'
   `).all() as Array<{ amount: number; category_name: string; parent_category: string }>;
-  const budgetMap = new Map(budgets.map((b) => [b.parent_category || b.category_name, b.amount]));
+  // budgets.amount and thisMonthSpending.total are inline-SQL cents; dollarize for display.
+  const budgetMap = new Map(budgets.map((b) => [b.parent_category || b.category_name, toDollars(b.amount)]));
 
   if (thisMonthSpending.length > 0) {
     lines.push('');
     lines.push(`### Top Spending - ${format(today, 'MMMM')}`);
     for (const row of thisMonthSpending) {
+      const total = toDollars(row.total);
       const budget = budgetMap.get(row.category);
-      const budgetStr = budget ? ` | budget: ${fmt(row.total)}/${fmt(budget)} (${Math.round((row.total / budget) * 100)}%)` : '';
-      lines.push(`  ${row.category}: ${fmt(row.total)}${budgetStr}`);
+      const budgetStr = budget ? ` | budget: ${fmt(total)}/${fmt(budget)} (${Math.round((total / budget) * 100)}%)` : '';
+      lines.push(`  ${row.category}: ${fmt(total)}${budgetStr}`);
     }
   }
 
@@ -404,8 +414,9 @@ export function buildFinancialContext(): string {
         ? ` | linked to ${goal.account_name}${goal.institution_name ? ` at ${goal.institution_name}` : ''}`
         : '';
       const targetDate = goal.target_date ? ` | target: ${goal.target_date}` : '';
+      // progress.* (calculateGoalProgress) and goal.target_amount are both cents.
       lines.push(
-        `  ${goal.name}: ${fmt(progress.progress_amount)} ${verb} of ${fmt(goal.target_amount)} (${Math.round(progress.progress_percent)}%), ${fmt(progress.remaining_amount)} remaining${targetDate}${linked}`
+        `  ${goal.name}: ${fmt(toDollars(progress.progress_amount))} ${verb} of ${fmt(toDollars(goal.target_amount))} (${Math.round(progress.progress_percent)}%), ${fmt(toDollars(progress.remaining_amount))} remaining${targetDate}${linked}`
       );
     }
   }
@@ -443,7 +454,9 @@ export function buildFinancialContext(): string {
   // section's separate "Crypto" bucket (from accounts.current_balance), so including their
   // holdings here too would present the same crypto value under two different totals in
   // the same context blob.
-  const holdings = db.prepare(`
+  // institution_value and cost_basis are inline-SQL integer cents; dollarize at read so the
+  // portfolio totals, asset-mix values, and per-holding lines below are all in dollars.
+  const holdings = (db.prepare(`
     SELECT
       s.ticker, s.name AS sec_name, s.type AS sec_type,
       h.quantity, h.institution_value, h.cost_basis
@@ -456,7 +469,11 @@ export function buildFinancialContext(): string {
   `).all() as Array<{
     ticker: string | null; sec_name: string; sec_type: string;
     quantity: number; institution_value: number; cost_basis: number | null;
-  }>;
+  }>).map((h) => ({
+    ...h,
+    institution_value: toDollars(h.institution_value),
+    cost_basis: toDollarsOrNull(h.cost_basis),
+  }));
 
   if (holdings.length > 0) {
     const totalPortfolio = holdings.reduce((s, h) => s + h.institution_value, 0);
@@ -500,7 +517,7 @@ export function buildFinancialContext(): string {
     lines.push('');
     lines.push('### Net Worth Trend (last 6 months)');
     for (const snap of nwHistory) {
-      lines.push(`  ${snap.date}: ${fmt(snap.net_worth)}`);
+      lines.push(`  ${snap.date}: ${fmt(toDollars(snap.net_worth))}`);
     }
   }
 
@@ -519,7 +536,7 @@ export function buildFinancialContext(): string {
     lines.push('### Recent Transactions');
     for (const tx of recent) {
       const sign = tx.amount >= 0 ? '+' : '-';
-      lines.push(`  ${tx.date}: ${tx.merchant_name ?? 'Unknown'} - ${sign}${fmt(Math.abs(tx.amount))} (${tx.category ?? 'Uncategorized'})`);
+      lines.push(`  ${tx.date}: ${tx.merchant_name ?? 'Unknown'} - ${sign}${fmt(toDollars(Math.abs(tx.amount)))} (${tx.category ?? 'Uncategorized'})`);
     }
   }
 

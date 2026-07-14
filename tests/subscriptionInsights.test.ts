@@ -79,7 +79,7 @@ function setupDb(): Database.Database {
     id: 'paycheck',
     merchant_name: 'MIT Payroll',
     category_id: 'income',
-    average_amount: 2500,
+    average_amount: 250000,
     frequency: 'monthly',
     last_seen: today,
     next_expected: today,
@@ -91,7 +91,7 @@ function setupDb(): Database.Database {
     id: 'rent',
     merchant_name: 'Rent',
     category_id: 'bills',
-    average_amount: 1000,
+    average_amount: 100000,
     frequency: 'monthly',
     last_seen: today,
     next_expected: today,
@@ -103,7 +103,7 @@ function setupDb(): Database.Database {
     id: 'streaming',
     merchant_name: 'Streaming',
     category_id: 'bills',
-    average_amount: 15,
+    average_amount: 1500,
     frequency: 'monthly',
     last_seen: today,
     next_expected: today,
@@ -115,7 +115,7 @@ function setupDb(): Database.Database {
     id: 'cloud',
     merchant_name: 'Cloud Storage',
     category_id: 'bills',
-    average_amount: 120,
+    average_amount: 12000,
     frequency: 'annual',
     last_seen: today,
     next_expected: inTwentyDays,
@@ -127,7 +127,7 @@ function setupDb(): Database.Database {
     id: 'coffee',
     merchant_name: 'Coffee Club',
     category_id: 'bills',
-    average_amount: 10,
+    average_amount: 1000,
     frequency: 'weekly',
     last_seen: today,
     next_expected: today,
@@ -139,7 +139,7 @@ function setupDb(): Database.Database {
     id: 'trial',
     merchant_name: 'App Trial',
     category_id: 'bills',
-    average_amount: 8,
+    average_amount: 800,
     frequency: 'monthly',
     last_seen: today,
     next_expected: today,
@@ -151,7 +151,7 @@ function setupDb(): Database.Database {
     id: 'weak',
     merchant_name: 'Weak Pattern',
     category_id: 'bills',
-    average_amount: 40,
+    average_amount: 4000,
     frequency: 'monthly',
     last_seen: today,
     next_expected: today,
@@ -164,9 +164,9 @@ function setupDb(): Database.Database {
     INSERT INTO transactions (id, recurring_id, date, amount, pending)
     VALUES (?, ?, ?, ?, 0)
   `);
-  insertTransaction.run('streaming_1', 'streaming', format(subDays(new Date(), 90), 'yyyy-MM-dd'), -15);
-  insertTransaction.run('streaming_2', 'streaming', format(subDays(new Date(), 60), 'yyyy-MM-dd'), -15);
-  insertTransaction.run('streaming_3', 'streaming', format(subDays(new Date(), 30), 'yyyy-MM-dd'), -19);
+  insertTransaction.run('streaming_1', 'streaming', format(subDays(new Date(), 90), 'yyyy-MM-dd'), -1500);
+  insertTransaction.run('streaming_2', 'streaming', format(subDays(new Date(), 60), 'yyyy-MM-dd'), -1500);
+  insertTransaction.run('streaming_3', 'streaming', format(subDays(new Date(), 30), 'yyyy-MM-dd'), -1900);
 
   return db;
 }
@@ -214,13 +214,13 @@ test('subscription insights summarize recurring bills without income or weak pat
   assert.equal(insights.unconfirmed_count, 1);
   assert.equal(insights.increase_count, 1);
   assert.equal(insights.increases[0].merchant_name, 'Streaming');
-  closeTo(insights.increases[0].increase_amount ?? 0, 4);
+  closeTo(insights.increases[0].increase_amount ?? 0, 400);
   closeTo(insights.increases[0].increase_percent ?? 0, 4 / 15);
   assert.equal(insights.subscriptions.some((item) => item.merchant_name === 'MIT Payroll'), false);
   assert.equal(insights.subscriptions.some((item) => item.merchant_name === 'Weak Pattern'), false);
   assert.equal(insights.unconfirmed[0].merchant_name, 'App Trial');
   assert.ok(insights.upcoming.some((item) => item.merchant_name === 'Cloud Storage'));
-  closeTo(insights.total_monthly_amount, 1000 + (49 / 3) + 10 + (10 * 52 / 12) + 8);
+  closeTo(insights.total_monthly_amount, 100000 + (4900 / 3) + 1000 + (1000 * 52 / 12) + 800);
   assert.ok(insights.total_upcoming_amount > insights.total_monthly_amount);
 });
 

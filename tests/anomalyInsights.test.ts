@@ -53,10 +53,10 @@ test('anomaly insights flag category spending spikes and income gaps', (t) => {
   const db = setupDb();
   t.after(() => db.close());
 
-  insertTransaction(db, 'food_previous', '2026-05-20', -100, 'cat_food');
-  insertTransaction(db, 'food_current', '2026-06-20', -650, 'cat_food');
-  insertTransaction(db, 'paycheck_previous', '2026-05-25', 3000, 'cat_income_paycheck');
-  insertTransaction(db, 'paycheck_current', '2026-06-25', 1000, 'cat_income_paycheck');
+  insertTransaction(db, 'food_previous', '2026-05-20', -10000, 'cat_food');
+  insertTransaction(db, 'food_current', '2026-06-20', -65000, 'cat_food');
+  insertTransaction(db, 'paycheck_previous', '2026-05-25', 300000, 'cat_income_paycheck');
+  insertTransaction(db, 'paycheck_current', '2026-06-25', 100000, 'cat_income_paycheck');
 
   const insights = getAnomalyInsights(db, new Date('2026-06-30T12:00:00.000Z'));
 

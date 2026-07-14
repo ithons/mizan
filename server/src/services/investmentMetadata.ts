@@ -1,5 +1,6 @@
 import type Database from 'better-sqlite3';
 import type { Holding, Security } from '../../../shared/types';
+import { toCents } from './money';
 
 interface HoldingRow {
   id: string;
@@ -81,6 +82,9 @@ const holdingSelect = `
 `;
 
 function holdingFromRow(row: HoldingRow): Holding {
+  // Position values and cost-basis figures stay in integer cents; the route boundary
+  // (routes/investments.ts) dollarizes them. institution_price is a per-unit price and
+  // quantity is a share count, so neither is money-in-cents and both pass through untouched.
   return {
     id: row.id,
     account_id: row.account_id,
@@ -158,13 +162,16 @@ export function setManualCostBasis(
     : input.manual_cost_basis_note?.trim() || null;
   const updatedAt = input.manual_cost_basis == null ? null : new Date().toISOString();
 
+  // Inbound override is dollars (Zod-validated user input); the column is integer cents.
+  const manualCostBasisCents = input.manual_cost_basis == null ? null : toCents(input.manual_cost_basis);
+
   db.prepare(`
     UPDATE holdings
     SET manual_cost_basis = ?,
         manual_cost_basis_note = ?,
         manual_cost_basis_updated_at = ?
     WHERE id = ?
-  `).run(input.manual_cost_basis, note, updatedAt, holdingId);
+  `).run(manualCostBasisCents, note, updatedAt, holdingId);
 
   const holding = getHoldingWithMetadata(db, holdingId);
   if (!holding) throw httpError('Holding not found', 404);
@@ -189,6 +196,8 @@ export function getHoldingHistory(
     | undefined;
   if (!holding) throw httpError('Holding not found', 404);
 
+  // institution_value and cost_basis stay in integer cents (dollarized at the route);
+  // institution_price (per-unit) and quantity (share count) are not money.
   return db.prepare(`
     SELECT date, quantity, institution_price, institution_value, cost_basis
     FROM holdings_history

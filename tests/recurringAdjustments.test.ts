@@ -72,7 +72,7 @@ test('recurring adjustments upsert and delete by original occurrence date', (t) 
 
   assert.equal(adjusted.id, snooze.id);
   assert.equal(adjusted.action, 'adjust');
-  assert.equal(adjusted.adjusted_amount, -900);
+  assert.equal(adjusted.adjusted_amount, -90000);
   assert.equal(adjusted.adjusted_date, null);
   assert.equal(listRecurringAdjustments(db, 'rent').length, 1);
   assert.equal(deleteRecurringAdjustment(db, 'rent', adjusted.id), true);

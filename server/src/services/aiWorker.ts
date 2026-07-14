@@ -7,6 +7,7 @@ import type { AdvisorDraftAction, AdvisorDraftPayload, AdvisorCitation, AdvisorD
 import { buildRecurringForecast } from './recurringForecast';
 import { getPreference } from './preferences';
 import { confirmAdvisorDraft } from './advisorDrafts';
+import { toDollars } from './money';
 
 // categorize_transaction / create_merchant_rule drafts at or above this confidence
 // auto-apply without a manual review step; anything lower stays in the normal
@@ -105,7 +106,7 @@ Valid categories (use the "id" value for any category_id field, never the name):
 ${categories.map(c => `- id: "${c.id}", name: "${c.name}"`).join('\n')}
 
 Uncategorized transactions (use the "id" value for any transaction_id field):
-${uncategorizedTransactions.map(t => `- id: "${t.id}", date: ${t.date}, amount: ${t.amount}, merchant: "${t.merchant_name || t.original_name}"`).join('\n')}
+${uncategorizedTransactions.map(t => `- id: "${t.id}", date: ${t.date}, amount: ${toDollars(t.amount)}, merchant: "${t.merchant_name || t.original_name}"`).join('\n')}
 
 Review Summary:
 ${uncategorizedCount} total uncategorized transactions (${uncategorizedTransactions.length} shown above).

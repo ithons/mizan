@@ -9,6 +9,7 @@ import {
 } from 'date-fns';
 import { getDb } from '../db/index';
 import { compareTwoStrings } from "string-similarity";
+import { toCents } from './money';
 
 export type RecurringFrequency = 'weekly' | 'biweekly' | 'monthly' | 'quarterly' | 'annual';
 
@@ -55,7 +56,7 @@ export function createRecurringPattern(db: Database.Database, input: CreateRecur
     name,
     input.category_id ?? null,
     input.frequency,
-    Math.abs(input.average_amount),
+    toCents(Math.abs(input.average_amount)),
     input.next_expected,
     input.next_expected,
     now,

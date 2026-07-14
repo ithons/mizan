@@ -8,8 +8,18 @@ import {
   MergeAccountSchema,
 } from '../../../shared/schemas';
 import { takeSnapshot } from '../services/snapshot';
+import { toCents, dollarizeFields } from '../services/money';
 
 const router = Router();
+
+// current_balance/available_balance/credit_limit are stored as integer cents; the
+// API contract is dollars, so account rows are dollarized on the way out.
+// native_balance (crypto quantity) is NOT money and is left untouched.
+const ACCOUNT_MONEY_FIELDS = ['current_balance', 'available_balance', 'credit_limit'] as const;
+
+function accountToDollars<T extends Record<string, unknown>>(row: T): T {
+  return dollarizeFields(row, ACCOUNT_MONEY_FIELDS);
+}
 
 type AccountRow = Record<string, unknown> & {
   is_manual: number;
@@ -25,7 +35,7 @@ router.get('/', (_req: Request, res: Response, next: NextFunction): void => {
       SELECT a.*
       FROM accounts a
       ORDER BY a.sort_order ASC, a.created_at ASC
-    `).all() as AccountRow[]).map((a) => ({
+    `).all() as AccountRow[]).map((a) => accountToDollars({
       ...a,
       is_manual: Boolean(a.is_manual),
       is_hidden: Boolean(a.is_hidden),
@@ -78,7 +88,7 @@ router.post(
         body.institution_name,
         body.account_name,
         body.type,
-        body.current_balance,
+        toCents(body.current_balance),
         body.currency,
         isLiability ? 1 : 0,
         body.color || null,
@@ -87,12 +97,12 @@ router.post(
         now
       );
 
-      const account = db.prepare('SELECT * FROM accounts WHERE id = ?').get(id);
+      const account = db.prepare('SELECT * FROM accounts WHERE id = ?').get(id) as Record<string, unknown>;
 
       // Take a fresh snapshot so net worth reflects the new account immediately
       takeSnapshot();
 
-      res.status(201).json({ data: account });
+      res.status(201).json({ data: accountToDollars(account) });
     } catch (err) {
       next(err);
     }
@@ -182,11 +192,11 @@ router.patch(
       }
       if (body.current_balance !== undefined) {
         updates.push('current_balance = ?');
-        values.push(body.current_balance);
+        values.push(toCents(body.current_balance));
       }
 
       if (updates.length === 0) {
-        res.json({ data: existing });
+        res.json({ data: accountToDollars(existing as Record<string, unknown>) });
         return;
       }
 
@@ -201,8 +211,8 @@ router.patch(
         takeSnapshot();
       }
 
-      const updated = db.prepare('SELECT * FROM accounts WHERE id = ?').get(id);
-      res.json({ data: updated });
+      const updated = db.prepare('SELECT * FROM accounts WHERE id = ?').get(id) as Record<string, unknown>;
+      res.json({ data: accountToDollars(updated) });
     } catch (err) {
       next(err);
     }

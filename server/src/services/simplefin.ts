@@ -6,6 +6,7 @@ import { getCredentials } from './credentials';
 import { getDb } from '../db/index';
 import { balancesDiffer, type AccountBalanceChange } from './balanceChanges';
 import { guessAccountTypeAndLiability } from './accountClassification';
+import { toCents, toCentsOrNull, toDollars } from './money';
 
 interface SimplefinHolding {
   symbol?: string | null;
@@ -66,7 +67,8 @@ export function upsertHoldingsFromSimplefin(db: Database.Database, accountId: st
       insertSecurity.run(securityId, ticker, name, currency);
     }
 
-    upsertHolding.run(uuidv4(), accountId, securityId, shares, price, marketValue, costBasis, currency, now);
+    // quantity + per-unit price stay REAL dollars; value + cost basis are totals -> cents.
+    upsertHolding.run(uuidv4(), accountId, securityId, shares, price, toCents(marketValue), toCentsOrNull(costBasis), currency, now);
   }
 }
 
@@ -160,15 +162,17 @@ export async function syncSimplefin(): Promise<SimplefinSyncResult> {
     if (existingAcct) {
       accountId = existingAcct.id;
       isLiability = Boolean(existingAcct.is_liability);
-      currentBalance = isLiability ? -balanceMagnitude : balanceMagnitude;
+      currentBalance = toCents(isLiability ? -balanceMagnitude : balanceMagnitude);
 
+      // existingAcct.current_balance and currentBalance are both cents here; the
+      // display-facing change struct is kept in dollars.
       if (balancesDiffer(existingAcct.current_balance, currentBalance)) {
         balanceChanges.push({
           accountId: existingAcct.id,
           accountName: existingAcct.account_name,
           provider: 'simplefin',
-          previousBalance: existingAcct.current_balance,
-          newBalance: currentBalance,
+          previousBalance: toDollars(existingAcct.current_balance),
+          newBalance: toDollars(currentBalance),
           isLiability,
           currency: existingAcct.currency ?? currency,
         });
@@ -195,7 +199,7 @@ export async function syncSimplefin(): Promise<SimplefinSyncResult> {
       accountId = uuidv4();
       const guessed = guessAccountTypeAndLiability(acct.name, institutionName);
       isLiability = guessed.isLiability;
-      currentBalance = isLiability ? -balanceMagnitude : balanceMagnitude;
+      currentBalance = toCents(isLiability ? -balanceMagnitude : balanceMagnitude);
 
       db.prepare(`
         INSERT INTO accounts
@@ -226,9 +230,9 @@ export async function syncSimplefin(): Promise<SimplefinSyncResult> {
       // the user's timezone. For a local-first desktop app, this is correct. If deployed 
       // to a remote VPS, this may cause late-night transactions to land on the wrong day.
       const date = format(new Date(txn.posted * 1000), 'yyyy-MM-dd');
-      let amount: number; // already negative for expenses
+      let amount: number; // cents, already negative for expenses
       try {
-        amount = parseFinancialAmount(txn.amount, `transaction ${txn.id} amount`);
+        amount = toCents(parseFinancialAmount(txn.amount, `transaction ${txn.id} amount`));
       } catch (err) {
         errors.push((err as Error).message);
         console.warn(`[simplefin] Skipping transaction ${txn.id}: ${(err as Error).message}`);
@@ -291,7 +295,7 @@ export async function syncSimplefin(): Promise<SimplefinSyncResult> {
         accountId: account.id,
         accountName: account.account_name,
         provider: 'simplefin',
-        previousBalance: account.current_balance,
+        previousBalance: toDollars(account.current_balance),
         newBalance: 0,
         isLiability: Boolean(account.is_liability),
         currency: account.currency ?? 'USD',

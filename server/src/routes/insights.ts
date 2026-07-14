@@ -6,6 +6,7 @@ import { getDataQualitySummary } from '../services/dataQuality';
 import { buildRecurringForecast } from '../services/recurringForecast';
 import { suggestMerchantRules } from '../services/rules';
 import { getAnomalyInsights } from '../services/anomalyInsights';
+import { toDollars } from '../services/money';
 import type { Insight, InsightSeverity } from '../../../shared/types';
 
 const router = Router();
@@ -292,7 +293,7 @@ router.get('/', (_req: Request, res: Response, next: NextFunction): void => {
           rank: 25,
           title: 'Budget is over plan',
           message: `${tightestBudget.category_name} is at ${percent(used)} of its monthly budget.`,
-          metric: `${money(tightestBudget.spent)} / ${money(tightestBudget.amount)}`,
+          metric: `${money(toDollars(tightestBudget.spent))} / ${money(toDollars(tightestBudget.amount))}`,
           action_label: 'Open budget',
           action_route: '/budget',
         });
@@ -303,33 +304,37 @@ router.get('/', (_req: Request, res: Response, next: NextFunction): void => {
           rank: 45,
           title: 'Budget is getting tight',
           message: `${tightestBudget.category_name} has used ${percent(used)} of its monthly budget.`,
-          metric: `${money(tightestBudget.amount - tightestBudget.spent)} left`,
+          metric: `${money(toDollars(tightestBudget.amount - tightestBudget.spent))} left`,
           action_label: 'Open budget',
           action_route: '/budget',
         });
       }
     }
 
+    // liquid_assets (inline-SQL SUM) and buildRecurringForecast both return integer cents;
+    // dollarize each before combining and feeding the money() string formatter.
     const forecast = buildRecurringForecast(db, 30);
-    if (forecast.occurrences.length > 0 && accountSummary.liquid_assets + forecast.net < 0) {
+    const liquidAssets = toDollars(accountSummary.liquid_assets);
+    const forecastNet = toDollars(forecast.net);
+    if (forecast.occurrences.length > 0 && liquidAssets + forecastNet < 0) {
       addInsight(insights, {
         id: 'cash-projection-negative',
         severity: 'critical',
         rank: 5,
         title: 'Projected cash shortfall',
         message: `Scheduled recurring activity would take liquid cash below zero over the next 30 days.`,
-        metric: money(accountSummary.liquid_assets + forecast.net),
+        metric: money(liquidAssets + forecastNet),
         action_label: 'Open bills',
         action_route: '/bills',
       });
-    } else if (forecast.occurrences.length > 0 && forecast.net < 0) {
+    } else if (forecast.occurrences.length > 0 && forecastNet < 0) {
       addInsight(insights, {
         id: 'cash-projection-down',
         severity: 'info',
         rank: 50,
         title: 'Cash is scheduled to move down',
-        message: `Known recurring bills exceed recurring income by ${money(Math.abs(forecast.net))} over the next 30 days.`,
-        metric: money(forecast.net),
+        message: `Known recurring bills exceed recurring income by ${money(Math.abs(forecastNet))} over the next 30 days.`,
+        metric: money(forecastNet),
         action_label: 'Open bills',
         action_route: '/bills',
       });
@@ -353,12 +358,14 @@ router.get('/', (_req: Request, res: Response, next: NextFunction): void => {
     `).all() as GoalInsightRow[];
     const soonestOpenGoal = goals
       .map((goal) => {
-        const progressAmount = calculateGoalProgress(goal).progress_amount;
+        // calculateGoalProgress and target_amount are both integer cents; dollarize both.
+        const progressAmount = toDollars(calculateGoalProgress(goal).progress_amount);
+        const target = toDollars(goal.target_amount);
         return {
           goal,
           progressAmount,
-          remaining: Math.max(goal.target_amount - progressAmount, 0),
-          percentComplete: goal.target_amount > 0 ? (progressAmount / goal.target_amount) * 100 : 0,
+          remaining: Math.max(target - progressAmount, 0),
+          percentComplete: target > 0 ? (progressAmount / target) * 100 : 0,
         };
       })
       .find((goal) => goal.remaining > 0 && goal.goal.target_date !== null);
@@ -380,11 +387,12 @@ router.get('/', (_req: Request, res: Response, next: NextFunction): void => {
     } else {
       const almostDone = goals
         .map((goal) => {
-          const progressAmount = calculateGoalProgress(goal).progress_amount;
+          const progressAmount = toDollars(calculateGoalProgress(goal).progress_amount);
+          const target = toDollars(goal.target_amount);
           return {
             goal,
-            remaining: Math.max(goal.target_amount - progressAmount, 0),
-            percentComplete: goal.target_amount > 0 ? (progressAmount / goal.target_amount) * 100 : 0,
+            remaining: Math.max(target - progressAmount, 0),
+            percentComplete: target > 0 ? (progressAmount / target) * 100 : 0,
           };
         })
         .find((goal) => goal.percentComplete >= 90 && goal.remaining > 0);

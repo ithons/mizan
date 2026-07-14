@@ -10,9 +10,179 @@ import {
   getSpendingReport,
   getSpendingTrendsReport,
 } from '../services/reporting';
-import type { ReportComparisonMode, ReportEvidenceKind, ReportExcludedFlowSummary } from '../../../shared/types';
+import type {
+  CashflowReport,
+  NetWorthSnapshot,
+  ReportCategoryChange,
+  ReportComparisonMode,
+  ReportDrilldown,
+  ReportEvidenceDrilldown,
+  ReportEvidenceKind,
+  ReportExcludedFlowSummary,
+  ReportMetricSummary,
+  ReportNetWorthEvidence,
+  ReportSummary,
+  SpendingReport,
+  Transaction,
+} from '../../../shared/types';
+import type { TrendReport } from '../services/reporting';
+import { dollarizeFields, toDollars, toDollarsOrNull } from '../services/money';
 
 const router = Router();
+
+const SNAPSHOT_MONEY_FIELDS = [
+  'total_assets',
+  'total_liabilities',
+  'net_worth',
+  'liquid_assets',
+  'investment_assets',
+  'crypto_assets',
+] as const;
+
+// net_worth_snapshots stores totals and the per-account `breakdown` JSON in cents;
+// convert numeric columns and restringify breakdown values to the dollar contract.
+function dollarizeBreakdownString(value: string): string {
+  try {
+    const parsed: unknown = JSON.parse(value);
+    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return value;
+    const out: Record<string, unknown> = {};
+    for (const [id, v] of Object.entries(parsed)) {
+      out[id] = typeof v === 'number' ? toDollars(v) : v;
+    }
+    return JSON.stringify(out);
+  } catch {
+    return value;
+  }
+}
+
+function dollarizeSnapshotRow(row: unknown): unknown {
+  if (row == null || typeof row !== 'object') return row;
+  const converted = dollarizeFields(row as Record<string, unknown>, SNAPSHOT_MONEY_FIELDS);
+  if (typeof converted.breakdown === 'string') {
+    converted.breakdown = dollarizeBreakdownString(converted.breakdown);
+  }
+  return converted;
+}
+
+// The reporting service returns every money total in integer cents. These helpers
+// dollarize the money fields of each report at this route boundary. Percentages
+// (percentage, delta_percent, savings_rate), counts, and dates pass through.
+type SpendingCategory = SpendingReport['categories'][number];
+
+function spendingCategoryToDollars(node: SpendingCategory): SpendingCategory {
+  return {
+    ...node,
+    amount: toDollars(node.amount),
+    ...(node.children ? { children: node.children.map(spendingCategoryToDollars) } : {}),
+  };
+}
+
+function spendingReportToDollars(report: SpendingReport): SpendingReport {
+  return {
+    categories: report.categories.map(spendingCategoryToDollars),
+    total: toDollars(report.total),
+  };
+}
+
+function cashflowToDollars(report: CashflowReport): CashflowReport {
+  return {
+    months: report.months.map((month) => ({
+      month: month.month,
+      income: toDollars(month.income),
+      expenses: toDollars(month.expenses),
+      net: toDollars(month.net),
+    })),
+  };
+}
+
+function metricToDollars(metric: ReportMetricSummary): ReportMetricSummary {
+  return {
+    current: toDollars(metric.current),
+    previous: toDollars(metric.previous),
+    delta: toDollars(metric.delta),
+    delta_percent: metric.delta_percent,
+  };
+}
+
+function categoryChangeToDollars(change: ReportCategoryChange): ReportCategoryChange {
+  return {
+    ...change,
+    current: toDollars(change.current),
+    previous: toDollars(change.previous),
+    delta: toDollars(change.delta),
+  };
+}
+
+function summaryToDollars(summary: ReportSummary): ReportSummary {
+  return {
+    ...summary,
+    income: metricToDollars(summary.income),
+    expenses: metricToDollars(summary.expenses),
+    net: metricToDollars(summary.net),
+    // savings_rate is a percentage metric, not money — pass through.
+    top_spending: summary.top_spending.map(categoryChangeToDollars),
+    top_income: summary.top_income.map(categoryChangeToDollars),
+    spending_movers: summary.spending_movers.map(categoryChangeToDollars),
+    excluded_flows: summary.excluded_flows.map((flow) => ({
+      ...flow,
+      inflows: toDollars(flow.inflows),
+      outflows: toDollars(flow.outflows),
+      net: toDollars(flow.net),
+    })),
+  };
+}
+
+function transactionsToDollars(rows: Transaction[]): Transaction[] {
+  return rows.map(
+    (row) => dollarizeFields(row as unknown as Record<string, unknown>, ['amount']) as unknown as Transaction
+  );
+}
+
+function trendsToDollars(report: TrendReport): TrendReport {
+  return {
+    months: report.months,
+    series: report.series.map((series) => ({
+      ...series,
+      values: series.values.map(toDollars),
+    })),
+  };
+}
+
+function drilldownToDollars(drilldown: ReportDrilldown): ReportDrilldown {
+  return {
+    ...drilldown,
+    total: toDollars(drilldown.total),
+    transactions: transactionsToDollars(drilldown.transactions),
+  };
+}
+
+function evidenceToDollars(evidence: ReportEvidenceDrilldown): ReportEvidenceDrilldown {
+  return {
+    ...evidence,
+    income: toDollars(evidence.income),
+    expenses: toDollars(evidence.expenses),
+    net: toDollars(evidence.net),
+    total: toDollars(evidence.total),
+    transactions: transactionsToDollars(evidence.transactions),
+  };
+}
+
+function networthEvidenceToDollars(evidence: ReportNetWorthEvidence): ReportNetWorthEvidence {
+  return {
+    ...evidence,
+    snapshot: dollarizeSnapshotRow(evidence.snapshot) as NetWorthSnapshot,
+    previous_snapshot: evidence.previous_snapshot
+      ? (dollarizeSnapshotRow(evidence.previous_snapshot) as NetWorthSnapshot)
+      : null,
+    delta: toDollarsOrNull(evidence.delta),
+    asset_delta: toDollarsOrNull(evidence.asset_delta),
+    liability_delta: toDollarsOrNull(evidence.liability_delta),
+    accounts: evidence.accounts.map((account) => ({
+      ...account,
+      balance: toDollars(account.balance),
+    })),
+  };
+}
 
 function firstQueryValue(value: unknown): string | undefined {
   if (typeof value === 'string') return value;
@@ -69,7 +239,7 @@ router.get('/cashflow', (req: Request, res: Response, next: NextFunction): void 
     const db = getDb();
     const startDate = firstQueryValue(req.query.startDate);
     const endDate = firstQueryValue(req.query.endDate);
-    res.json({ data: getCashflowReport(db, { startDate, endDate }) });
+    res.json({ data: cashflowToDollars(getCashflowReport(db, { startDate, endDate })) });
   } catch (err) {
     next(err);
   }
@@ -82,7 +252,7 @@ router.get('/summary', (req: Request, res: Response, next: NextFunction): void =
     const startDate = firstQueryValue(req.query.startDate);
     const endDate = firstQueryValue(req.query.endDate);
     const comparison = reportComparison(req.query.comparison);
-    res.json({ data: getReportSummary(db, { startDate, endDate, comparison }) });
+    res.json({ data: summaryToDollars(getReportSummary(db, { startDate, endDate, comparison })) });
   } catch (err) {
     next(err);
   }
@@ -96,11 +266,11 @@ router.get('/spending', (req: Request, res: Response, next: NextFunction): void 
     const endDate = firstQueryValue(req.query.endDate);
     const parentOnly = firstQueryValue(req.query.parentOnly);
     res.json({
-      data: getSpendingReport(db, {
+      data: spendingReportToDollars(getSpendingReport(db, {
         startDate,
         endDate,
         parentOnly: parentOnly === 'true',
-      }),
+      })),
     });
   } catch (err) {
     next(err);
@@ -113,7 +283,7 @@ router.get('/income', (req: Request, res: Response, next: NextFunction): void =>
     const db = getDb();
     const startDate = firstQueryValue(req.query.startDate);
     const endDate = firstQueryValue(req.query.endDate);
-    res.json({ data: getIncomeReport(db, { startDate, endDate }) });
+    res.json({ data: spendingReportToDollars(getIncomeReport(db, { startDate, endDate })) });
   } catch (err) {
     next(err);
   }
@@ -127,11 +297,11 @@ router.get('/trends', (req: Request, res: Response, next: NextFunction): void =>
     const endDate = firstQueryValue(req.query.endDate);
     const parsedCategoryIds = splitQueryValues(req.query.categoryIds);
     res.json({
-      data: getSpendingTrendsReport(db, {
+      data: trendsToDollars(getSpendingTrendsReport(db, {
         startDate,
         endDate,
         categoryIds: parsedCategoryIds,
-      }),
+      })),
     });
   } catch (err) {
     next(err);
@@ -157,12 +327,12 @@ router.get('/drilldown', (req: Request, res: Response, next: NextFunction): void
     }
 
     res.json({
-      data: getReportDrilldown(db, {
+      data: drilldownToDollars(getReportDrilldown(db, {
         kind,
         categoryId,
         startDate,
         endDate,
-      }),
+      })),
     });
   } catch (err) {
     next(err);
@@ -193,13 +363,13 @@ router.get('/evidence', (req: Request, res: Response, next: NextFunction): void 
     }
 
     res.json({
-      data: getReportEvidenceDrilldown(db, {
+      data: evidenceToDollars(getReportEvidenceDrilldown(db, {
         kind,
         month,
         flowType,
         startDate,
         endDate,
-      }),
+      })),
     });
   } catch (err) {
     next(err);
@@ -223,7 +393,7 @@ router.get('/networth/evidence', (req: Request, res: Response, next: NextFunctio
       return;
     }
 
-    res.json({ data: evidence });
+    res.json({ data: networthEvidenceToDollars(evidence) });
   } catch (err) {
     next(err);
   }
@@ -253,7 +423,7 @@ router.get('/networth', (req: Request, res: Response, next: NextFunction): void 
       SELECT * FROM net_worth_snapshots
       ${where}
       ORDER BY date ASC
-    `).all(...params);
+    `).all(...params).map(dollarizeSnapshotRow);
 
     res.json({ data: { snapshots } });
   } catch (err) {
@@ -268,7 +438,7 @@ router.get('/investments', (req: Request, res: Response, next: NextFunction): vo
     const { startDate, endDate } = req.query as Record<string, string>;
 
     // Current allocation by security type
-    const allocation = db.prepare(`
+    const allocation = (db.prepare(`
       SELECT
         s.type AS security_type,
         SUM(h.institution_value) AS total_value
@@ -276,10 +446,13 @@ router.get('/investments', (req: Request, res: Response, next: NextFunction): vo
       JOIN securities s ON s.id = h.security_id
       GROUP BY s.type
       ORDER BY total_value DESC
-    `).all();
+    `).all() as Array<Record<string, unknown>>).map((row) =>
+      dollarizeFields(row, ['total_value'])
+    );
 
-    // P&L table: holdings with cost_basis
-    const holdings = db.prepare(`
+    // P&L table: holdings with cost_basis. institution_price/quantity are per-unit and
+    // stay as-is; the value/basis/gain columns are cents and convert to dollars.
+    const holdings = (db.prepare(`
       SELECT
         h.*,
         s.ticker,
@@ -289,7 +462,9 @@ router.get('/investments', (req: Request, res: Response, next: NextFunction): vo
       FROM holdings h
       JOIN securities s ON s.id = h.security_id
       ORDER BY h.institution_value DESC
-    `).all();
+    `).all() as Array<Record<string, unknown>>).map((row) =>
+      dollarizeFields(row, ['institution_value', 'cost_basis', 'manual_cost_basis', 'unrealized_gain'])
+    );
 
     // Portfolio value over time from net worth snapshots. Investment transaction
     // volume is not portfolio value and should not drive a value-history chart.
@@ -323,12 +498,12 @@ router.get('/investments', (req: Request, res: Response, next: NextFunction): vo
 
     const history = (snapshots as Array<{ date: string; value: number }>).map((snapshot) => ({
       date: snapshot.date,
-      value: snapshot.value,
+      value: toDollars(snapshot.value),
     }));
 
     res.json({
       data: {
-        total_value: totalValue.total || 0,
+        total_value: toDollars(totalValue.total || 0),
         allocation,
         holdings,
         history,

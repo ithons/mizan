@@ -49,8 +49,8 @@ test('upsertHoldingsFromSimplefin creates securities and holdings from a SimpleF
     quantity: number; institution_price: number; institution_value: number; cost_basis: number | null;
   }>;
   assert.deepEqual(holdings, [
-    { quantity: 100, institution_price: 1, institution_value: 100, cost_basis: null },
-    { quantity: 10, institution_price: 250, institution_value: 2500, cost_basis: 2000 },
+    { quantity: 100, institution_price: 1, institution_value: 10000, cost_basis: null },
+    { quantity: 10, institution_price: 250, institution_value: 250000, cost_basis: 200000 },
   ]);
 });
 
@@ -70,9 +70,9 @@ test('upsertHoldingsFromSimplefin falls back to shares*purchase_price when cost_
 
   const holdings = db.prepare('SELECT quantity, cost_basis FROM holdings ORDER BY quantity').all();
   assert.deepEqual(holdings, [
-    { quantity: 1.477, cost_basis: 1.477 * 204.98 },
+    { quantity: 1.477, cost_basis: Math.round(1.477 * 204.98 * 100) },
     { quantity: 4.61, cost_basis: 0 },
-    { quantity: 10, cost_basis: 2000 },
+    { quantity: 10, cost_basis: 200000 },
   ]);
 });
 
@@ -93,6 +93,6 @@ test('upsertHoldingsFromSimplefin updates an existing holding for the same accou
 
   assert.equal(securities.n, 1);
   assert.deepEqual(holdings, [
-    { quantity: 12, institution_value: 3000, cost_basis: 2400, updated_at: '2026-07-03T00:00:00.000Z' },
+    { quantity: 12, institution_value: 300000, cost_basis: 240000, updated_at: '2026-07-03T00:00:00.000Z' },
   ]);
 });

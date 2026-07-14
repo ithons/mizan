@@ -5,6 +5,7 @@ import { getDb } from '../db/index';
 import { validate } from '../middleware/validate';
 import { CreateGoalSchema, UpdateGoalSchema } from '../../../shared/schemas';
 import { calculateGoalProgress } from '../services/goalProgress';
+import { toCents, toCentsOrNull, toDollars, toDollarsOrNull } from '../services/money';
 import type { Goal, GoalType } from '../../../shared/types';
 
 const router = Router();
@@ -58,13 +59,15 @@ function getParamId(value: string | string[] | undefined): string | null {
 function toGoal(row: GoalRow): Goal {
   const progress = calculateGoalProgress(row);
 
+  // Row and progress money fields are cents; dollarize at this response boundary.
+  // progress_percent is a ratio, not money.
   return {
     id: row.id,
     name: row.name,
     type: row.type,
-    target_amount: row.target_amount,
-    current_amount: progress.current_amount,
-    starting_amount: row.starting_amount,
+    target_amount: toDollars(row.target_amount),
+    current_amount: toDollars(progress.current_amount),
+    starting_amount: toDollarsOrNull(row.starting_amount),
     account_id: row.account_id,
     target_date: row.target_date,
     color: row.color,
@@ -72,12 +75,12 @@ function toGoal(row: GoalRow): Goal {
     is_tax_envelope: Boolean(row.is_tax_envelope),
     created_at: row.created_at,
     updated_at: row.updated_at,
-    progress_amount: progress.progress_amount,
-    remaining_amount: progress.remaining_amount,
+    progress_amount: toDollars(progress.progress_amount),
+    remaining_amount: toDollars(progress.remaining_amount),
     progress_percent: progress.progress_percent,
     account_name: row.account_name,
     institution_name: row.institution_name,
-    account_balance: row.account_balance,
+    account_balance: toDollarsOrNull(row.account_balance),
     account_is_liability: row.account_is_liability === null
       ? null
       : Boolean(row.account_is_liability),
@@ -132,7 +135,9 @@ router.post(
 
       const now = new Date().toISOString();
       const id = uuidv4();
-      let startingAmount = body.starting_amount ?? null;
+      // User-supplied starting_amount is dollars -> cents; the account-seeded value
+      // reads current_balance which is already cents.
+      let startingAmount = toCentsOrNull(body.starting_amount ?? null);
 
       if (body.type === 'debt' && accountId && startingAmount === null) {
         const account = db.prepare(
@@ -150,8 +155,8 @@ router.post(
         id,
         body.name,
         body.type,
-        body.target_amount,
-        body.current_amount ?? 0,
+        toCents(body.target_amount),
+        toCents(body.current_amount ?? 0),
         startingAmount,
         accountId,
         body.target_date ?? null,
@@ -209,9 +214,9 @@ router.patch(
 
       if (body.name !== undefined) addUpdate('name', body.name);
       if (body.type !== undefined) addUpdate('type', body.type);
-      if (body.target_amount !== undefined) addUpdate('target_amount', body.target_amount);
-      if (body.current_amount !== undefined) addUpdate('current_amount', body.current_amount);
-      if (body.starting_amount !== undefined) addUpdate('starting_amount', body.starting_amount);
+      if (body.target_amount !== undefined) addUpdate('target_amount', toCents(body.target_amount));
+      if (body.current_amount !== undefined) addUpdate('current_amount', toCents(body.current_amount));
+      if (body.starting_amount !== undefined) addUpdate('starting_amount', toCentsOrNull(body.starting_amount));
       if (body.account_id !== undefined) {
         const accountId = normalizeAccountId(body.account_id);
         if (accountId && !accountExists(db, accountId)) {

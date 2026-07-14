@@ -10,6 +10,7 @@ import {
   getDuplicateCandidateGroups,
   getTransferCandidatePairs,
 } from './transactionIntegrity';
+import { toDollars } from './money';
 
 interface ReviewCounts {
   uncategorized_count: number;
@@ -48,10 +49,24 @@ function getRecurringCandidates(db: Database.Database): RecurringPattern[] {
 export function getTransactionReviewSummary(db: Database.Database): TransactionReviewSummary {
   const counts = getCounts(db);
   const ruleSuggestions = suggestMerchantRules(db);
-  const recurringCandidates = getRecurringCandidates(db);
-  const duplicateCandidates = getDuplicateCandidateGroups(db);
-  const transferCandidates = getTransferCandidatePairs(db);
-  
+  // average_amount is integer cents from recurring_patterns; dollarize for the client.
+  const recurringCandidates = getRecurringCandidates(db).map((rp) => ({
+    ...rp,
+    average_amount: toDollars(rp.average_amount),
+  }));
+  // transactionIntegrity returns candidate amounts in integer cents. This summary is served
+  // straight through to the client (routes/transactions.ts) and its other consumers
+  // (aiContext/advisorTools/dataQuality/aiWorker) read only counts, never these amounts —
+  // so dollarizing the candidate `amount` here is the single, safe conversion point.
+  const duplicateCandidates = getDuplicateCandidateGroups(db).map((group) => ({
+    ...group,
+    amount: toDollars(group.amount),
+  }));
+  const transferCandidates = getTransferCandidatePairs(db).map((pair) => ({
+    ...pair,
+    amount: toDollars(pair.amount),
+  }));
+
   const aiDraftsRaw = db.prepare(`
     SELECT * FROM advisor_drafts WHERE status = 'open' ORDER BY created_at DESC
   `).all() as Array<any>;

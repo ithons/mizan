@@ -10,9 +10,82 @@ import {
   listRecurringAdjustments,
   upsertRecurringAdjustment,
 } from '../services/recurringAdjustments';
+import { dollarizeFields, toDollars, toDollarsOrNull } from '../services/money';
+import type {
+  RecurringForecast,
+  RecurringForecastOccurrence,
+  RecurringOccurrenceAdjustment,
+  SubscriptionInsightItem,
+  SubscriptionInsights,
+} from '../../../shared/types';
 import { format, addDays } from 'date-fns';
 
 const router = Router();
+
+// recurring_patterns.average_amount (and the computed average_signed_amount), forecast
+// totals/occurrence amounts, subscription amounts, and adjusted_amount are all stored/
+// computed in integer cents; dollarize each money field at this route boundary.
+// Confidence, percentages, counts, days, dates, and ids are not money.
+const PATTERN_MONEY_FIELDS = ['average_amount', 'average_signed_amount'] as const;
+
+function patternToDollars(row: Record<string, unknown>): Record<string, unknown> {
+  return dollarizeFields(row, PATTERN_MONEY_FIELDS);
+}
+
+function occurrenceToDollars(occurrence: RecurringForecastOccurrence): RecurringForecastOccurrence {
+  return {
+    ...occurrence,
+    amount: toDollars(occurrence.amount),
+    adjusted_amount: toDollarsOrNull(occurrence.adjusted_amount),
+  };
+}
+
+function forecastToDollars(forecast: RecurringForecast): RecurringForecast {
+  return {
+    ...forecast,
+    income: toDollars(forecast.income),
+    bills: toDollars(forecast.bills),
+    net: toDollars(forecast.net),
+    confirmed_income: toDollars(forecast.confirmed_income),
+    confirmed_bills: toDollars(forecast.confirmed_bills),
+    likely_income: toDollars(forecast.likely_income),
+    likely_bills: toDollars(forecast.likely_bills),
+    uncertain_income: toDollars(forecast.uncertain_income),
+    uncertain_bills: toDollars(forecast.uncertain_bills),
+    occurrences: forecast.occurrences.map(occurrenceToDollars),
+  };
+}
+
+function subscriptionItemToDollars(item: SubscriptionInsightItem): SubscriptionInsightItem {
+  return {
+    ...item,
+    average_amount: toDollars(item.average_amount),
+    monthly_amount: toDollars(item.monthly_amount),
+    upcoming_amount: toDollars(item.upcoming_amount),
+    latest_amount: toDollarsOrNull(item.latest_amount),
+    previous_amount: toDollarsOrNull(item.previous_amount),
+    increase_amount: toDollarsOrNull(item.increase_amount),
+    // increase_percent is a ratio, not money.
+  };
+}
+
+function subscriptionInsightsToDollars(insights: SubscriptionInsights): SubscriptionInsights {
+  return {
+    ...insights,
+    total_monthly_amount: toDollars(insights.total_monthly_amount),
+    total_upcoming_amount: toDollars(insights.total_upcoming_amount),
+    confirmed_monthly_amount: toDollars(insights.confirmed_monthly_amount),
+    unconfirmed_monthly_amount: toDollars(insights.unconfirmed_monthly_amount),
+    subscriptions: insights.subscriptions.map(subscriptionItemToDollars),
+    increases: insights.increases.map(subscriptionItemToDollars),
+    unconfirmed: insights.unconfirmed.map(subscriptionItemToDollars),
+    upcoming: insights.upcoming.map(subscriptionItemToDollars),
+  };
+}
+
+function adjustmentToDollars(adjustment: RecurringOccurrenceAdjustment): RecurringOccurrenceAdjustment {
+  return { ...adjustment, adjusted_amount: toDollarsOrNull(adjustment.adjusted_amount) };
+}
 
 function parseDays(value: unknown): number | null {
   if (value === undefined) return 30;
@@ -42,9 +115,9 @@ router.get('/', (_req: Request, res: Response, next: NextFunction): void => {
       LEFT JOIN categories c ON c.id = rp.category_id
       WHERE rp.is_active = 1
       ORDER BY rp.merchant_name ASC
-    `).all();
+    `).all() as Record<string, unknown>[];
 
-    res.json({ data: patterns });
+    res.json({ data: patterns.map(patternToDollars) });
   } catch (err) {
     next(err);
   }
@@ -64,8 +137,8 @@ router.post('/', validate(CreateRecurringSchema), (req: Request, res: Response, 
       FROM recurring_patterns rp
       LEFT JOIN categories c ON c.id = rp.category_id
       WHERE rp.id = ?
-    `).get(id);
-    res.status(201).json({ data: pattern });
+    `).get(id) as Record<string, unknown>;
+    res.status(201).json({ data: patternToDollars(pattern) });
   } catch (err) {
     next(err);
   }
@@ -94,9 +167,9 @@ router.get('/upcoming', (req: Request, res: Response, next: NextFunction): void 
         AND rp.next_expected <= ?
         AND (rp.is_confirmed = 1 OR rp.transaction_count >= 3)
       ORDER BY rp.next_expected ASC
-    `).all(endDate);
+    `).all(endDate) as Record<string, unknown>[];
 
-    res.json({ data: patterns });
+    res.json({ data: patterns.map(patternToDollars) });
   } catch (err) {
     next(err);
   }
@@ -112,7 +185,7 @@ router.get('/forecast', (req: Request, res: Response, next: NextFunction): void 
       return;
     }
 
-    res.json({ data: buildRecurringForecast(db, days) });
+    res.json({ data: forecastToDollars(buildRecurringForecast(db, days)) });
   } catch (err) {
     next(err);
   }
@@ -127,7 +200,7 @@ router.get('/subscriptions', (req: Request, res: Response, next: NextFunction): 
       return;
     }
 
-    res.json({ data: buildSubscriptionInsights(db, days) });
+    res.json({ data: subscriptionInsightsToDollars(buildSubscriptionInsights(db, days)) });
   } catch (err) {
     next(err);
   }
@@ -142,7 +215,7 @@ router.get('/:id/adjustments', (req: Request, res: Response, next: NextFunction)
       return;
     }
 
-    res.json({ data: listRecurringAdjustments(db, id) });
+    res.json({ data: listRecurringAdjustments(db, id).map(adjustmentToDollars) });
   } catch (err) {
     next(err);
   }
@@ -160,7 +233,7 @@ router.put(
         return;
       }
 
-      res.json({ data: upsertRecurringAdjustment(db, id, req.body) });
+      res.json({ data: adjustmentToDollars(upsertRecurringAdjustment(db, id, req.body)) });
     } catch (err) {
       next(err);
     }
@@ -205,8 +278,8 @@ router.post('/:id/confirm', (req: Request, res: Response, next: NextFunction): v
       'UPDATE recurring_patterns SET is_confirmed = 1, updated_at = ? WHERE id = ?'
     ).run(new Date().toISOString(), id);
 
-    const updated = db.prepare('SELECT * FROM recurring_patterns WHERE id = ?').get(id);
-    res.json({ data: updated });
+    const updated = db.prepare('SELECT * FROM recurring_patterns WHERE id = ?').get(id) as Record<string, unknown>;
+    res.json({ data: patternToDollars(updated) });
   } catch (err) {
     next(err);
   }
@@ -272,8 +345,8 @@ router.patch(
         'UPDATE recurring_patterns SET category_id = ?, updated_at = ? WHERE id = ?'
       ).run(categoryId, new Date().toISOString(), id);
 
-      const updated = db.prepare('SELECT * FROM recurring_patterns WHERE id = ?').get(id);
-      res.json({ data: updated });
+      const updated = db.prepare('SELECT * FROM recurring_patterns WHERE id = ?').get(id) as Record<string, unknown>;
+      res.json({ data: patternToDollars(updated) });
     } catch (err) {
       next(err);
     }

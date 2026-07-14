@@ -4,6 +4,7 @@ import type {
   RecurringAdjustmentAction,
   RecurringOccurrenceAdjustment,
 } from '../../../shared/types';
+import { toCents } from './money';
 
 export interface UpsertRecurringAdjustmentInput {
   original_date: string;
@@ -39,6 +40,8 @@ function assertDate(value: string, label: string): void {
   }
 }
 
+// adjusted_amount stays in cents; the recurring route/forecast dollarize at their
+// own response/display boundary.
 function adjustmentFromRow(row: AdjustmentRow): RecurringOccurrenceAdjustment {
   return {
     id: row.id,
@@ -99,7 +102,7 @@ function normalizeAdjustmentInput(input: UpsertRecurringAdjustmentInput): Requir
     original_date: input.original_date,
     action: 'adjust',
     adjusted_date: null,
-    adjusted_amount: input.adjusted_amount,
+    adjusted_amount: toCents(input.adjusted_amount),
     note,
   };
 }

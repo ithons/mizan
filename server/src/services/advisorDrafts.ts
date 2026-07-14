@@ -15,6 +15,7 @@ import {
 import { refreshTransactionIntegrity } from './transactionIntegrity';
 import { upsertRecurringAdjustment } from './recurringAdjustments';
 import { setManualCostBasis, setSecurityMetadata } from './investmentMetadata';
+import { toCents, toCentsOrNull, toDollars, toDollarsOrNull } from './money';
 
 interface CategoryRow {
   id: string;
@@ -118,13 +119,6 @@ function categories(db: Database.Database): CategoryRow[] {
     FROM categories
     ORDER BY length(name) DESC
   `).all() as CategoryRow[];
-}
-
-function categoryName(db: Database.Database, categoryId: string): string {
-  const row = db.prepare('SELECT name FROM categories WHERE id = ?').get(categoryId) as
-    | { name: string }
-    | undefined;
-  return row?.name ?? categoryId;
 }
 
 function assertCategory(db: Database.Database, categoryId: string): CategoryRow {
@@ -289,7 +283,7 @@ function draftCategorizeTransaction(db: Database.Database, question: string): Ad
         detail: transaction.date,
         route: `/transactions?search=${encodeURIComponent(merchant)}`,
         record_id: transaction.id,
-        amount: transaction.amount,
+        amount: toDollars(transaction.amount),
         date: transaction.date,
       }),
     ],
@@ -312,7 +306,9 @@ function draftUpdateBudget(db: Database.Database, question: string): AdvisorDraf
     LIMIT 1
   `).get(category.id) as BudgetRow | undefined;
 
-  const before = existing?.amount ?? null;
+  // existing.amount is integer cents; `before` is display-only (changes + citation), so
+  // dollarize it here. The payload keeps `amount` in dollars and is converted at the write.
+  const before = existing?.amount != null ? toDollars(existing.amount) : null;
   const payload: AdvisorDraftPayload = {
     kind: 'update_budget',
     category_id: category.id,
@@ -378,17 +374,17 @@ function draftUpdateGoal(db: Database.Database, question: string): AdvisorDraftA
     route: '/goals',
     payload,
     changes: [
-      { field: 'target amount', before: goal.target_amount, after: amount },
+      { field: 'target amount', before: toDollars(goal.target_amount), after: amount },
     ],
     citations: [
       citation({
         id: `goal:${goal.id}`,
         kind: 'goal',
         label: goal.name,
-        detail: `Current target $${goal.target_amount.toFixed(2)}`,
+        detail: `Current target $${toDollars(goal.target_amount).toFixed(2)}`,
         route: '/goals',
         record_id: goal.id,
-        amount: goal.target_amount,
+        amount: toDollars(goal.target_amount),
       }),
     ],
   });
@@ -472,14 +468,14 @@ function draftConfirmRecurring(db: Database.Database, question: string): Advisor
         detail: `${recurring.frequency}, ${recurring.transaction_count} transactions`,
         route: '/bills',
         record_id: recurring.id,
-        amount: recurring.average_amount,
+        amount: toDollars(recurring.average_amount),
         date: recurring.next_expected,
       }),
     ],
   });
 }
 
-function draftCreateBudgetGroup(db: Database.Database, question: string): AdvisorDraftAction | null {
+function draftCreateBudgetGroup(question: string): AdvisorDraftAction | null {
   const text = normalize(question);
   if (!/\b(create|add|new)\b/.test(text) || !text.includes('budget group')) return null;
 
@@ -643,7 +639,7 @@ function draftRecurringAdjustment(db: Database.Database, question: string): Advi
         detail: `${recurring.frequency}, next expected ${recurring.next_expected}`,
         route: '/bills',
         record_id: recurring.id,
-        amount: recurring.average_amount,
+        amount: toDollars(recurring.average_amount),
         date: originalDate,
       }),
     ],
@@ -677,17 +673,17 @@ function draftManualCostBasis(db: Database.Database, question: string): AdvisorD
     route: '/investments',
     payload,
     changes: [
-      { field: 'manual cost basis', before: holding.manual_cost_basis, after: amount },
+      { field: 'manual cost basis', before: toDollarsOrNull(holding.manual_cost_basis), after: amount },
     ],
     citations: [
       citation({
         id: `holding:${holding.id}:cost-basis`,
         kind: 'investment',
         label: holdingName(holding),
-        detail: holding.effective_cost_basis == null ? 'Missing effective cost basis' : `Effective $${holding.effective_cost_basis.toFixed(2)}`,
+        detail: holding.effective_cost_basis == null ? 'Missing effective cost basis' : `Effective $${toDollars(holding.effective_cost_basis).toFixed(2)}`,
         route: '/investments',
         record_id: holding.id,
-        amount: holding.institution_value,
+        amount: toDollars(holding.institution_value),
       }),
     ],
   });
@@ -746,7 +742,7 @@ export function buildAdvisorDrafts(
     draftUpdateBudget(db, question),
     draftUpdateGoal(db, question),
     draftConfirmRecurring(db, question),
-    draftCreateBudgetGroup(db, question),
+    draftCreateBudgetGroup(question),
     draftRenameBudgetGroup(db, question),
     draftAssignCategoryToBudgetGroup(db, question),
     draftRecurringAdjustment(db, question),
@@ -816,6 +812,8 @@ function confirmBudget(db: Database.Database, payload: Extract<AdvisorDraftPaylo
 } {
   assertCategory(db, payload.category_id);
   const now = new Date().toISOString();
+  // payload.amount is dollars; budgets.amount is integer cents.
+  const amountCents = toCents(payload.amount);
   const existing = db.prepare('SELECT id FROM budgets WHERE category_id = ?').get(payload.category_id) as
     | { id: string }
     | undefined;
@@ -825,7 +823,7 @@ function confirmBudget(db: Database.Database, payload: Extract<AdvisorDraftPaylo
       UPDATE budgets
       SET amount = ?, period = ?, rollover = ?, updated_at = ?
       WHERE id = ?
-    `).run(payload.amount, payload.period, payload.rollover ? 1 : 0, now, existing.id);
+    `).run(amountCents, payload.period, payload.rollover ? 1 : 0, now, existing.id);
 
     return { changed: result.changes, result: { budget_id: existing.id } };
   }
@@ -834,7 +832,7 @@ function confirmBudget(db: Database.Database, payload: Extract<AdvisorDraftPaylo
   db.prepare(`
     INSERT INTO budgets (id, category_id, amount, period, rollover, rollover_balance, created_at, updated_at)
     VALUES (?, ?, ?, ?, ?, 0, ?, ?)
-  `).run(id, payload.category_id, payload.amount, payload.period, payload.rollover ? 1 : 0, now, now);
+  `).run(id, payload.category_id, amountCents, payload.period, payload.rollover ? 1 : 0, now, now);
 
   return { changed: 1, result: { budget_id: id } };
 }
@@ -846,12 +844,13 @@ function confirmGoalTarget(db: Database.Database, payload: Extract<AdvisorDraftP
   const existing = db.prepare('SELECT id FROM goals WHERE id = ?').get(payload.goal_id);
   if (!existing) throw new Error('Goal not found');
 
+  // payload.target_amount is dollars; goals.target_amount is integer cents.
   const result = db.prepare(`
     UPDATE goals
     SET target_amount = ?,
         updated_at = ?
     WHERE id = ?
-  `).run(payload.target_amount, new Date().toISOString(), payload.goal_id);
+  `).run(toCents(payload.target_amount), new Date().toISOString(), payload.goal_id);
 
   return { changed: result.changes, result: { goal_id: payload.goal_id } };
 }
@@ -863,7 +862,8 @@ function confirmAllocateGoalFunds(db: Database.Database, payload: Extract<Adviso
   const existing = db.prepare('SELECT id, current_amount FROM goals WHERE id = ?').get(payload.goal_id) as { id: string; current_amount: number } | undefined;
   if (!existing) throw new Error('Goal not found');
 
-  const newAmount = existing.current_amount + payload.amount_to_add;
+  // existing.current_amount is integer cents; the AI-draft payload amount_to_add is dollars.
+  const newAmount = existing.current_amount + toCents(payload.amount_to_add);
 
   const result = db.prepare(`
     UPDATE goals
@@ -884,7 +884,7 @@ function confirmCreateGoal(db: Database.Database, payload: Extract<AdvisorDraftP
   db.prepare(`
     INSERT INTO goals (id, name, type, target_amount, current_amount, account_id, is_tax_envelope, created_at, updated_at)
     VALUES (?, ?, ?, ?, 0, ?, ?, ?, ?)
-  `).run(id, payload.name, payload.type, payload.target_amount, payload.account_id ?? null, payload.is_tax_envelope ? 1 : 0, now, now);
+  `).run(id, payload.name, payload.type, toCents(payload.target_amount), payload.account_id ?? null, payload.is_tax_envelope ? 1 : 0, now, now);
 
   return { changed: 1, result: { goal_id: id } };
 }
@@ -986,11 +986,14 @@ function confirmRecurringAdjustment(
   changed: number;
   result: unknown;
 } {
+  // payload.adjusted_amount is dollars. recurring_occurrence_adjustments.adjusted_amount
+  // substitutes for recurring_patterns.average_amount (integer cents) in the forecast, so it
+  // must be stored in cents to stay consistent with that arithmetic.
   const adjustment = upsertRecurringAdjustment(db, payload.recurring_id, {
     original_date: payload.original_date,
     action: payload.action,
     adjusted_date: payload.adjusted_date ?? null,
-    adjusted_amount: payload.adjusted_amount ?? null,
+    adjusted_amount: toCentsOrNull(payload.adjusted_amount),
     note: payload.note ?? null,
   });
 

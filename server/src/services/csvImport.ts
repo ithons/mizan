@@ -5,7 +5,7 @@ import type { z } from 'zod';
 import type { CsvImportPreview, CsvImportPreviewIssue, CsvImportPreviewRow } from '../../../shared/types';
 import type { CsvImportMappingSchema } from '../../../shared/schemas';
 import { adjustManualAccountBalance } from './manualAccountBalance';
-import { amountCents } from './transactionIntegrity';
+import { toCents } from './money';
 
 export type CsvImportMapping = z.infer<typeof CsvImportMappingSchema>;
 
@@ -110,7 +110,7 @@ function duplicateCandidateCount(
     FROM transactions
     WHERE account_id = ?
       AND date = ?
-      AND CAST(ROUND(amount * 100) AS INTEGER) = ?
+      AND amount = ?
       AND (
         merchant_name = ?
         OR original_name = ?
@@ -118,7 +118,7 @@ function duplicateCandidateCount(
   `).get(
     row.account_id,
     row.date,
-    amountCents(row.amount),
+    toCents(row.amount),
     row.merchant_name,
     row.original_name
   ) as { count: number } | undefined;
@@ -137,11 +137,11 @@ function transferCandidateCount(
     FROM transactions
     WHERE account_id <> ?
       AND date = ?
-      AND CAST(ROUND(amount * 100) AS INTEGER) = ?
+      AND amount = ?
   `).get(
     row.account_id,
     row.date,
-    -amountCents(row.amount)
+    -toCents(row.amount)
   ) as { count: number } | undefined;
 
   return transfer?.count ?? 0;
@@ -262,7 +262,7 @@ export function commitCsvImport(
     try {
       const accountId = row.account_id;
       const date = row.date;
-      const amount = row.amount;
+      const amountCents = toCents(row.amount);
       const originalName = row.original_name;
       const importRow = db.transaction(() => {
         db.prepare(`
@@ -274,7 +274,7 @@ export function commitCsvImport(
           uuidv4(),
           accountId,
           date,
-          amount,
+          amountCents,
           row.merchant_name,
           originalName,
           row.category_id,
@@ -283,7 +283,7 @@ export function commitCsvImport(
           now
         );
 
-        return adjustManualAccountBalance(db, accountId, amount, now);
+        return adjustManualAccountBalance(db, accountId, amountCents, now);
       });
 
       if (importRow()) {

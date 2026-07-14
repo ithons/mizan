@@ -44,10 +44,6 @@ function shortHash(input: string): string {
   return crypto.createHash('sha256').update(input).digest('hex').slice(0, 16);
 }
 
-export function amountCents(amount: number): number {
-  return Math.round(amount * 100);
-}
-
 function normalizeMerchant(merchant: string): string {
   return merchant.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
 }
@@ -91,8 +87,8 @@ export function refreshDuplicateCandidates(db: Database.Database): DuplicateDete
     const merchant = normalizeMerchant(row.merchant_name || row.original_name);
     if (!merchant) continue;
 
-    const cents = amountCents(row.amount);
-    
+    const cents = row.amount; // already integer cents
+
     // Exact strict match key (original logic)
     const key = [
       row.account_id,
@@ -210,7 +206,7 @@ export function refreshTransferCandidates(db: Database.Database): TransferDetect
   const byAbsAmount = new Map<number, { inflows: TransferRow[]; outflows: TransferRow[] }>();
 
   for (const row of rows) {
-    const cents = Math.abs(amountCents(row.amount));
+    const cents = Math.abs(row.amount); // already integer cents
     const bucket = byAbsAmount.get(cents) ?? { inflows: [], outflows: [] };
     if (row.amount > 0) {
       bucket.inflows.push(row);

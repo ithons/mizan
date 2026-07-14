@@ -231,6 +231,8 @@ function recurringOccurrencesForMonth(
   return occurrences;
 }
 
+// Money totals stay in cents here; every consumer (routes, AI context) dollarizes
+// at its own response/display boundary.
 export function getMonthlyBudgetsWithProjection(
   db: Database.Database,
   year: number,

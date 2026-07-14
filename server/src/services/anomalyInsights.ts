@@ -1,5 +1,6 @@
 import type Database from 'better-sqlite3';
 import { format, subDays } from 'date-fns';
+import { toDollars } from './money';
 import type { Insight } from '../../../shared/types';
 
 export interface RankedInsight extends Insight {
@@ -69,8 +70,8 @@ export function getAnomalyInsights(db: Database.Database, now = new Date()): Ran
       SUM(previous_amount) AS previous_spend
     FROM expense_rows
     GROUP BY category_name
-    HAVING current_spend >= 300
-       AND current_spend - previous_spend >= 200
+    HAVING current_spend >= 30000
+       AND current_spend - previous_spend >= 20000
        AND (previous_spend = 0 OR current_spend >= previous_spend * 1.75)
     ORDER BY current_spend - previous_spend DESC
     LIMIT 1
@@ -128,23 +129,23 @@ export function getAnomalyInsights(db: Database.Database, now = new Date()): Ran
       rank: 28,
       title: 'Spending spike detected',
       message: increase === null
-        ? `${topCategorySpike.category_name} spending is ${money(topCategorySpike.current_spend)} in the last 30 days after no comparable spending in the prior 30 days.`
+        ? `${topCategorySpike.category_name} spending is ${money(toDollars(topCategorySpike.current_spend))} in the last 30 days after no comparable spending in the prior 30 days.`
         : `${topCategorySpike.category_name} spending is up ${percent(increase)} versus the prior 30 days.`,
-      metric: money(delta),
+      metric: money(toDollars(delta)),
       action_label: 'Open reports',
       action_route: '/reports',
     });
   }
 
-  if (income.previous_income >= 500 && income.current_income < income.previous_income * 0.6) {
+  if (income.previous_income >= 50000 && income.current_income < income.previous_income * 0.6) {
     const gap = income.previous_income - income.current_income;
     insights.push({
       id: 'income-gap',
       severity: 'warning',
       rank: 29,
       title: 'Income gap detected',
-      message: `Income in the last 30 days is ${money(income.current_income)}, down from ${money(income.previous_income)} in the prior 30 days.`,
-      metric: money(gap),
+      message: `Income in the last 30 days is ${money(toDollars(income.current_income))}, down from ${money(toDollars(income.previous_income))} in the prior 30 days.`,
+      metric: money(toDollars(gap)),
       action_label: 'Open reports',
       action_route: '/reports',
     });

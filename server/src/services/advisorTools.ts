@@ -13,6 +13,7 @@ import type {
   SubscriptionInsightItem,
 } from '../../../shared/types';
 import { buildAdvisorDrafts } from './advisorDrafts';
+import { toDollars } from './money';
 import { calculateGoalProgress } from './goalProgress';
 import {
   getBudgetRolloverLedger,
@@ -57,6 +58,10 @@ interface InvestmentTransactionQualityRow {
   sale_count: number;
 }
 
+// fmt() takes dollars, but EVERY money value the analyzer reads is integer cents — both
+// the inline sectorRows SQL AND every value returned from service functions (reporting,
+// forecast, budgets, goals, subscriptions, holdings). So every argument to fmt() and every
+// citation `amount:` must be wrapped in toDollars() exactly once at its call site.
 function fmt(amount: number | null | undefined): string {
   if (amount == null) return 'N/A';
   const abs = Math.abs(amount);
@@ -66,12 +71,18 @@ function fmt(amount: number | null | undefined): string {
   return `${sign}$${abs.toFixed(2)}`;
 }
 
+// Dollarize an optional cents field, preserving undefined so fmt() and optional citation
+// `amount` fields keep their number | undefined contract.
+function toDollarsOpt(cents: number | null | undefined): number | undefined {
+  return cents == null ? undefined : toDollars(cents);
+}
+
 function availableBudgetAmount(budget: { amount: number; rollover: boolean; rollover_balance: number }): number {
   return budget.amount + (budget.rollover ? budget.rollover_balance : 0);
 }
 
 function budgetGroupLine(group: BudgetGroup): string {
-  return `${group.name}: ${fmt(group.totals.projected_spend)} projected against ${fmt(group.totals.budgeted)}, ${fmt(group.totals.projected_remaining)} remaining across ${group.totals.budget_count} budgets.`;
+  return `${group.name}: ${fmt(toDollars(group.totals.projected_spend))} projected against ${fmt(toDollars(group.totals.budgeted))}, ${fmt(toDollars(group.totals.projected_remaining))} remaining across ${group.totals.budget_count} budgets.`;
 }
 
 function count(db: Database.Database, sql: string, ...params: unknown[]): number {
@@ -278,7 +289,7 @@ function analyzeBudget(
     watched
       .map((budget) => {
         const availableAmount = availableBudgetAmount(budget);
-        return `${budget.category_name ?? 'Uncategorized'}: projected ${fmt(budget.projected_spend)} of ${fmt(availableAmount)}, ${fmt(budget.projected_remaining)} remaining.`;
+        return `${budget.category_name ?? 'Uncategorized'}: projected ${fmt(toDollarsOpt(budget.projected_spend))} of ${fmt(toDollars(availableAmount))}, ${fmt(toDollarsOpt(budget.projected_remaining))} remaining.`;
       })
       .join('\n'),
   ];
@@ -287,7 +298,7 @@ function analyzeBudget(
   }
   if (rolloverRows.length > 0) {
     lines.push(`Recent rollover ledger:\n${rolloverRows.map((row) =>
-      `${row.category_name ?? row.category_id} ${row.month}: start ${fmt(row.starting_rollover)}, budget ${fmt(row.budget_amount)}, spent ${fmt(row.actual_spend)}, ending ${fmt(row.ending_rollover)}.`
+      `${row.category_name ?? row.category_id} ${row.month}: start ${fmt(toDollars(row.starting_rollover))}, budget ${fmt(toDollars(row.budget_amount))}, spent ${fmt(toDollars(row.actual_spend))}, ending ${fmt(toDollars(row.ending_rollover))}.`
     ).join('\n')}`);
   }
 
@@ -302,7 +313,7 @@ function analyzeBudget(
           detail: `${Math.round(budget.projected_percent ?? 0)}% projected`,
           route: '/budget',
           record_id: budget.id,
-          amount: budget.projected_spend,
+          amount: toDollarsOpt(budget.projected_spend),
         })
       ),
       ...groups.slice(0, 4).map((group) =>
@@ -310,10 +321,10 @@ function analyzeBudget(
           id: `budget-group:${group.id}`,
           kind: 'budget' as const,
           label: group.name,
-          detail: `${group.totals.budget_count} budgets, ${fmt(group.totals.projected_remaining)} projected remaining`,
+          detail: `${group.totals.budget_count} budgets, ${fmt(toDollars(group.totals.projected_remaining))} projected remaining`,
           route: '/budget',
           record_id: group.id,
-          amount: group.totals.projected_spend,
+          amount: toDollars(group.totals.projected_spend),
         })
       ),
       ...rolloverRows.map((row) =>
@@ -321,10 +332,10 @@ function analyzeBudget(
           id: `rollover-ledger:${row.id}`,
           kind: 'budget' as const,
           label: `${row.category_name ?? 'Budget'} ${row.month}`,
-          detail: `Ending rollover ${fmt(row.ending_rollover)}`,
+          detail: `Ending rollover ${fmt(toDollars(row.ending_rollover))}`,
           route: '/budget',
           record_id: row.id,
-          amount: row.ending_rollover,
+          amount: toDollars(row.ending_rollover),
           date: `${row.month}-01`,
         })
       ),
@@ -341,14 +352,14 @@ function analyzeRecurring(db: Database.Database): Pick<AdvisorAnalysis, 'answer'
   const adjustmentLabel = (action: string | null | undefined): string =>
     action === 'adjust' ? 'amount adjustment' : `${action} adjustment`;
   const lines = [
-    `Over the next 60 days, Mizān projects ${fmt(forecast.income)} income, ${fmt(forecast.bills)} bills, and ${fmt(forecast.net)} net scheduled cash flow.`,
+    `Over the next 60 days, Mizān projects ${fmt(toDollars(forecast.income))} income, ${fmt(toDollars(forecast.bills))} bills, and ${fmt(toDollars(forecast.net))} net scheduled cash flow.`,
   ];
   if (forecast.review_count > 0) {
     lines.push(`${forecast.review_count} recurring item${forecast.review_count === 1 ? '' : 's'} need review, including ${forecast.overdue_count} overdue.`);
   }
   if (nextItems.length > 0) {
     lines.push(nextItems.map((item) =>
-      `${item.expected_date}: ${item.merchant_name} ${item.amount >= 0 ? '+' : '-'}${fmt(Math.abs(item.amount))}`
+      `${item.expected_date}: ${item.merchant_name} ${item.amount >= 0 ? '+' : '-'}${fmt(toDollars(Math.abs(item.amount)))}`
     ).join('\n'));
   }
   if (adjustedItems.length > 0) {
@@ -372,7 +383,7 @@ function analyzeRecurring(db: Database.Database): Pick<AdvisorAnalysis, 'answer'
           : `${item.frequency}, ${item.confidence_label}`,
         route: '/bills',
         record_id: item.pattern_id,
-        amount: item.amount,
+        amount: toDollars(item.amount),
         date: item.expected_date,
       })
     ),
@@ -382,9 +393,9 @@ function analyzeRecurring(db: Database.Database): Pick<AdvisorAnalysis, 'answer'
 function subscriptionLine(item: SubscriptionInsightItem): string {
   const category = item.category_name ? ` in ${item.category_name}` : '';
   const increase = item.increase_amount && item.increase_amount > 0
-    ? `, up ${fmt(item.increase_amount)} from the recent baseline`
+    ? `, up ${fmt(toDollars(item.increase_amount))} from the recent baseline`
     : '';
-  return `${item.merchant_name}: ${fmt(item.monthly_amount)}/mo equivalent, next expected ${item.next_expected}${category}${increase}.`;
+  return `${item.merchant_name}: ${fmt(toDollars(item.monthly_amount))}/mo equivalent, next expected ${item.next_expected}${category}${increase}.`;
 }
 
 function analyzeSubscriptions(db: Database.Database): Pick<AdvisorAnalysis, 'answer' | 'citations'> {
@@ -405,8 +416,8 @@ function analyzeSubscriptions(db: Database.Database): Pick<AdvisorAnalysis, 'ans
   }
 
   const lines = [
-    `${insights.subscription_count} subscription-like recurring bill${insights.subscription_count === 1 ? '' : 's'} total ${fmt(insights.total_monthly_amount)}/mo equivalent.`,
-    `${fmt(insights.total_upcoming_amount)} is scheduled over the next ${insights.days} days.`,
+    `${insights.subscription_count} subscription-like recurring bill${insights.subscription_count === 1 ? '' : 's'} total ${fmt(toDollars(insights.total_monthly_amount))}/mo equivalent.`,
+    `${fmt(toDollars(insights.total_upcoming_amount))} is scheduled over the next ${insights.days} days.`,
   ];
 
   if (insights.increase_count > 0) {
@@ -439,7 +450,7 @@ function analyzeSubscriptions(db: Database.Database): Pick<AdvisorAnalysis, 'ans
         label: 'Subscription summary',
         detail: `${insights.subscription_count} detected`,
         route: '/bills',
-        amount: insights.total_monthly_amount,
+        amount: toDollars(insights.total_monthly_amount),
       }),
       ...Array.from(citedSubscriptions.values()).map((item) =>
         citation({
@@ -449,7 +460,7 @@ function analyzeSubscriptions(db: Database.Database): Pick<AdvisorAnalysis, 'ans
           detail: `${item.frequency}, ${item.confidence_label}`,
           route: '/bills',
           record_id: item.pattern_id,
-          amount: item.monthly_amount,
+          amount: toDollars(item.monthly_amount),
           date: item.next_expected,
         })
       ),
@@ -493,7 +504,7 @@ function analyzeGoals(db: Database.Database): Pick<AdvisorAnalysis, 'answer' | '
   const lines = [
     `There ${goals.length === 1 ? 'is' : 'are'} ${goals.length} active goal${goals.length === 1 ? '' : 's'}.`,
     goals.slice(0, 5).map((goal) =>
-      `${goal.name}: ${Math.round(goal.progress.progress_percent)}% complete, ${fmt(goal.progress.remaining_amount)} remaining${goal.target_date ? ` by ${goal.target_date}` : ''}.`
+      `${goal.name}: ${Math.round(goal.progress.progress_percent)}% complete, ${fmt(toDollars(goal.progress.remaining_amount))} remaining${goal.target_date ? ` by ${goal.target_date}` : ''}.`
     ).join('\n'),
   ];
 
@@ -507,7 +518,7 @@ function analyzeGoals(db: Database.Database): Pick<AdvisorAnalysis, 'answer' | '
         detail: `${Math.round(goal.progress.progress_percent)}% complete`,
         route: '/goals',
         record_id: goal.id,
-        amount: goal.progress.remaining_amount,
+        amount: toDollars(goal.progress.remaining_amount),
         date: goal.target_date,
       })
     ),
@@ -645,16 +656,16 @@ function analyzeInvestments(db: Database.Database): Pick<AdvisorAnalysis, 'answe
   const missingSector = holdings.filter((holding) => !holding.sector?.trim());
   const sectors = sectorRows(db);
   const sectorSummary = sectors.slice(0, 5).map((row) =>
-    `${row.sector ?? 'Sector unavailable'}: ${fmt(row.value)} across ${row.count} holding${row.count === 1 ? '' : 's'}`
+    `${row.sector ?? 'Sector unavailable'}: ${fmt(toDollars(row.value))} across ${row.count} holding${row.count === 1 ? '' : 's'}`
   ).join('\n');
 
   const lines = [
-    `Mizān sees ${holdings.length} current investment holding${holdings.length === 1 ? '' : 's'} worth ${fmt(totalValue)}.`,
+    `Mizān sees ${holdings.length} current investment holding${holdings.length === 1 ? '' : 's'} worth ${fmt(toDollars(totalValue))}.`,
     `Cost basis is available for ${knownBasis.length}/${holdings.length} holdings; ${manualBasisCount} holding${manualBasisCount === 1 ? '' : 's'} use manual corrections.`,
   ];
 
   if (unrealized != null) {
-    lines.push(`Known-basis unrealized gain or loss is ${fmt(unrealized)} on ${fmt(knownBasisValue)} cost basis.`);
+    lines.push(`Known-basis unrealized gain or loss is ${fmt(toDollars(unrealized))} on ${fmt(toDollars(knownBasisValue))} cost basis.`);
   } else {
     lines.push('Unrealized gain cannot be calculated because cost basis is missing for all holdings.');
   }
@@ -680,7 +691,7 @@ function analyzeInvestments(db: Database.Database): Pick<AdvisorAnalysis, 'answe
         label: 'Investment quality summary',
         detail: `${knownBasis.length}/${holdings.length} cost basis coverage`,
         route: '/investments',
-        amount: totalValue,
+        amount: toDollars(totalValue),
       }),
       ...missingBasis.slice(0, 4).map((holding) =>
         citation({
@@ -690,7 +701,7 @@ function analyzeInvestments(db: Database.Database): Pick<AdvisorAnalysis, 'answe
           detail: 'Missing cost basis',
           route: '/investments',
           record_id: holding.id,
-          amount: holding.institution_value,
+          amount: toDollars(holding.institution_value),
         })
       ),
       ...missingSector.slice(0, 4).map((holding) =>
@@ -701,9 +712,11 @@ function analyzeInvestments(db: Database.Database): Pick<AdvisorAnalysis, 'answe
           detail: 'Missing sector metadata',
           route: '/investments',
           record_id: holding.id,
-          amount: holding.institution_value,
+          amount: toDollars(holding.institution_value),
         })
       ),
+      // Every holdings.institution_value here is integer cents (listHoldingsWithMetadata
+      // and the inline sectorRows SQL alike), so each is dollarized at the citation.
       ...sectors.slice(0, 4).map((row) =>
         citation({
           id: `sector:${row.sector ?? 'unavailable'}`,
@@ -711,7 +724,7 @@ function analyzeInvestments(db: Database.Database): Pick<AdvisorAnalysis, 'answe
           label: row.sector ?? 'Sector unavailable',
           detail: `${row.count} holding${row.count === 1 ? '' : 's'}`,
           route: '/investments',
-          amount: row.value,
+          amount: toDollars(row.value),
         })
       ),
     ],
@@ -766,13 +779,13 @@ function analyzeReports(
   const { startDate, endDate } = monthRange(now);
   const report = getReportSummary(db, { startDate, endDate });
   const lines = [
-    `For ${format(now, 'MMMM yyyy')}, Mizān sees ${fmt(report.income.current)} income, ${fmt(report.expenses.current)} spending, and ${fmt(report.net.current)} net cash flow.`,
-    `Savings rate is ${report.savings_rate.current.toFixed(1)}%. Spending changed by ${fmt(report.expenses.delta)} versus the prior comparable period.`,
+    `For ${format(now, 'MMMM yyyy')}, Mizān sees ${fmt(toDollars(report.income.current))} income, ${fmt(toDollars(report.expenses.current))} spending, and ${fmt(toDollars(report.net.current))} net cash flow.`,
+    `Savings rate is ${report.savings_rate.current.toFixed(1)}%. Spending changed by ${fmt(toDollars(report.expenses.delta))} versus the prior comparable period.`,
   ];
 
   if (report.top_spending.length > 0) {
     lines.push(`Top spending categories:\n${report.top_spending.slice(0, 3).map((category) =>
-      `${category.category_name}: ${fmt(category.current)}`
+      `${category.category_name}: ${fmt(toDollars(category.current))}`
     ).join('\n')}`);
   }
 
@@ -783,7 +796,7 @@ function analyzeReports(
       label: 'Current month report summary',
       detail: `${startDate} to ${endDate}`,
       route: '/reports',
-      amount: report.net.current,
+      amount: toDollars(report.net.current),
     }),
     ...report.top_spending.slice(0, 5).map((category) =>
       citation({
@@ -793,7 +806,7 @@ function analyzeReports(
         detail: 'Top spending category',
         route: '/reports',
         record_id: category.category_id,
-        amount: category.current,
+        amount: toDollars(category.current),
       })
     ),
   ];

@@ -39,8 +39,8 @@ function setupCsvImportDb(): Database.Database {
 
     INSERT INTO accounts (id, account_name, institution_name, current_balance, is_manual)
     VALUES
-      ('acct_cash', 'Cash', 'Manual', 100, 1),
-      ('acct_savings', 'Savings', 'Manual', 250, 1);
+      ('acct_cash', 'Cash', 'Manual', 10000, 1),
+      ('acct_savings', 'Savings', 'Manual', 25000, 1);
 
     INSERT INTO categories (id, name)
     VALUES ('cat_food', 'Food');
@@ -49,11 +49,11 @@ function setupCsvImportDb(): Database.Database {
       id, account_id, date, amount, merchant_name, original_name, category_id, created_at, updated_at
     )
     VALUES (
-      'txn_existing', 'acct_cash', '2026-06-30', -4.5, 'Coffee', 'Coffee', 'cat_food',
+      'txn_existing', 'acct_cash', '2026-06-30', -450, 'Coffee', 'Coffee', 'cat_food',
       '2026-06-30T00:00:00.000Z', '2026-06-30T00:00:00.000Z'
     ),
     (
-      'txn_transfer_pair', 'acct_savings', '2026-06-29', 12, 'Transfer', 'Transfer', NULL,
+      'txn_transfer_pair', 'acct_savings', '2026-06-29', 1200, 'Transfer', 'Transfer', NULL,
       '2026-06-29T00:00:00.000Z', '2026-06-29T00:00:00.000Z'
     );
   `);
@@ -117,7 +117,7 @@ test('csv import preview validates rows and surfaces duplicate warnings without 
   assert.match(preview.rows[2]?.issues.at(-1)?.message ?? '', /may be a transfer/);
 
   const account = db.prepare('SELECT current_balance FROM accounts WHERE id = ?').get('acct_cash') as { current_balance: number };
-  assert.equal(account.current_balance, 100);
+  assert.equal(account.current_balance, 10000);
 });
 
 test('csv import commit imports valid rows and reports invalid row errors', (t) => {
@@ -134,7 +134,7 @@ test('csv import commit imports valid rows and reports invalid row errors', (t) 
   assert.equal(transactionCount.count, 4);
 
   const account = db.prepare('SELECT current_balance FROM accounts WHERE id = ?').get('acct_cash') as { current_balance: number };
-  assert.equal(account.current_balance, 83.5);
+  assert.equal(account.current_balance, 8350);
 });
 
 test('csv import duplicate detection compares exact cents, not a float epsilon', (t) => {
@@ -145,7 +145,7 @@ test('csv import duplicate detection compares exact cents, not a float epsilon',
   db.prepare(`
     INSERT INTO transactions (id, account_id, date, amount, merchant_name, original_name, created_at, updated_at)
     VALUES ('txn_float_noise', 'acct_cash', '2026-06-28', ?, 'Noisy', 'Noisy', '2026-06-28T00:00:00.000Z', '2026-06-28T00:00:00.000Z')
-  `).run(-(0.1 + 0.2 + 19.5));
+  `).run(Math.round(-(0.1 + 0.2 + 19.5) * 100));
 
   const noisyRows = [
     { date: '2026-06-28', amount: '-19.80', merchant: 'Noisy', category: 'Food', account: 'Cash', notes: '' },

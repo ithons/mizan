@@ -87,7 +87,8 @@ function priceIncreaseForPattern(db: Database.Database, patternId: string): Incr
 
   const increaseAmount = latest - previous;
   const increasePercent = increaseAmount / previous;
-  if (increaseAmount < 1 || increasePercent < 0.05) return null;
+  // Amounts are cents: 100 cents preserves the prior $1 minimum increase threshold.
+  if (increaseAmount < 100 || increasePercent < 0.05) return null;
 
   return {
     latest_amount: latest,
@@ -184,6 +185,7 @@ export function buildSubscriptionInsights(
     .filter((subscription) => subscription.upcoming_amount > 0 && subscription.next_expected <= endDate)
     .sort((a, b) => a.next_expected.localeCompare(b.next_expected));
 
+  // All amounts stay in cents; the recurring route dollarizes at its response boundary.
   return {
     days,
     subscription_count: subscriptions.length,

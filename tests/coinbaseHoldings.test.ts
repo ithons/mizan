@@ -45,7 +45,7 @@ test('upsertCoinbaseHolding creates a crypto security and holding row', (t) => {
     quantity: number; institution_price: number; institution_value: number; cost_basis: number | null;
   }>;
   assert.deepEqual(holdings, [
-    { quantity: 0.5, institution_price: 60000, institution_value: 30000, cost_basis: null },
+    { quantity: 0.5, institution_price: 60000, institution_value: 3000000, cost_basis: null },
   ]);
 });
 
@@ -61,7 +61,7 @@ test('upsertCoinbaseHolding updates an existing holding for the same account+cur
 
   assert.equal(securities.n, 1);
   assert.deepEqual(holdings, [
-    { quantity: 3, institution_value: 9600, updated_at: '2026-07-03T00:00:00.000Z' },
+    { quantity: 3, institution_value: 960000, updated_at: '2026-07-03T00:00:00.000Z' },
   ]);
 });
 
@@ -77,7 +77,7 @@ test('upsertCoinbaseHolding reuses a security across different accounts holding 
 
   assert.equal(securities.n, 1);
   assert.deepEqual(holdings, [
-    { account_id: 'acct_1', institution_value: 6000 },
-    { account_id: 'acct_2', institution_value: 12000 },
+    { account_id: 'acct_1', institution_value: 600000 },
+    { account_id: 'acct_2', institution_value: 1200000 },
   ]);
 });

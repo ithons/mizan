@@ -5,6 +5,7 @@ import type Database from 'better-sqlite3';
 import { getCredentials } from './credentials';
 import { getDb } from '../db/index';
 import { balancesDiffer, type AccountBalanceChange } from './balanceChanges';
+import { toCents, toDollars } from './money';
 
 export interface CoinbaseSyncResult {
   accountCount: number;
@@ -82,6 +83,7 @@ export function upsertCoinbaseHolding(
     `).run(securityId, currency, currency);
   }
 
+  // quantity + per-unit price stay REAL dollars; institution_value is a total -> cents.
   db.prepare(`
     INSERT INTO holdings (id, account_id, security_id, quantity, institution_price, institution_value, cost_basis, currency, updated_at)
     VALUES (?, ?, ?, ?, ?, ?, NULL, 'USD', ?)
@@ -90,7 +92,7 @@ export function upsertCoinbaseHolding(
       institution_price = excluded.institution_price,
       institution_value = excluded.institution_value,
       updated_at = excluded.updated_at
-  `).run(uuidv4(), accountId, securityId, quantity, price, value, now);
+  `).run(uuidv4(), accountId, securityId, quantity, price, toCents(value), now);
 }
 
 function parseCoinbaseNumber(value: string | undefined, label: string): number {
@@ -278,16 +280,20 @@ export async function syncCoinbase(): Promise<CoinbaseSyncResult> {
       if (balanceValue <= 0 && !existing) continue;
 
       const spotPrice = balanceValue === 0 ? 0 : await getUsdSpotPrice(currency);
-      const currentBalance = balanceValue * spotPrice;
+      const currentBalance = balanceValue * spotPrice; // dollars
+      const currentBalanceCents = toCents(currentBalance);
       const accountId = existing?.id ?? uuidv4();
 
       if (existing) {
-        if (balancesDiffer(existing.current_balance, currentBalance)) {
+        // existing.current_balance and currentBalanceCents are both cents; the
+        // display-facing change struct is kept in dollars. native_balance is a coin
+        // quantity, not money, and stays as-is.
+        if (balancesDiffer(existing.current_balance, currentBalanceCents)) {
           balanceChanges.push({
             accountId: existing.id,
             accountName: existing.account_name,
             provider: 'coinbase',
-            previousBalance: existing.current_balance,
+            previousBalance: toDollars(existing.current_balance),
             newBalance: currentBalance,
             isLiability: Boolean(existing.is_liability),
             currency: existing.currency ?? 'USD',
@@ -300,7 +306,7 @@ export async function syncCoinbase(): Promise<CoinbaseSyncResult> {
               native_currency = ?, native_balance = ?, current_balance = ?,
               updated_at = ?
           WHERE id = ?
-        `).run(activeConnectionId, currency, balanceValue, currentBalance, now, existing.id);
+        `).run(activeConnectionId, currency, balanceValue, currentBalanceCents, now, existing.id);
       } else {
         db.prepare(`
           INSERT INTO accounts
@@ -313,7 +319,7 @@ export async function syncCoinbase(): Promise<CoinbaseSyncResult> {
           account.uuid,
           activeConnectionId,
           account.name || currency,
-          currentBalance,
+          currentBalanceCents,
           currency,
           balanceValue,
           now,
@@ -346,7 +352,7 @@ export async function syncCoinbase(): Promise<CoinbaseSyncResult> {
         accountId: account.id,
         accountName: account.account_name ?? 'Coinbase account',
         provider: 'coinbase',
-        previousBalance: account.current_balance ?? 0,
+        previousBalance: toDollars(account.current_balance ?? 0),
         newBalance: 0,
         isLiability: Boolean(account.is_liability),
         currency: account.currency ?? 'USD',
@@ -465,7 +471,7 @@ export async function syncTradeHistory(connectionId: string): Promise<number> {
         order.order_id,
         acct.id,
         date,
-        signedAmount,
+        toCents(signedAmount),
         `${side === 'BUY' ? 'Buy' : 'Sell'} ${currency}`,
         categoryId,
         now,

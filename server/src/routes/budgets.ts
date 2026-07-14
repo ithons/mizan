@@ -13,8 +13,52 @@ import {
   getMonthlyBudgetsWithProjection,
 } from '../services/budgetProjection';
 import { getBudgetGroupsWithTotals } from '../services/budgetGroups';
+import { toCents, dollarizeFields } from '../services/money';
+import type { Budget, BudgetGroup, BudgetRolloverLedgerEntry } from '../../../shared/types';
 
 const router = Router();
+
+// Money totals are stored and computed in cents; the API contract is dollars, so
+// every money field is dollarized here at the response boundary. Not money:
+// projected_percent, pacing_velocity, budget_count, sort_order, rollover flag.
+const BUDGET_MONEY_FIELDS = ['amount', 'rollover_balance'] as const;
+const PROJECTION_MONEY_FIELDS = [
+  'amount',
+  'rollover_balance',
+  'spent',
+  'expected_recurring',
+  'projected_spend',
+  'projected_remaining',
+] as const;
+const GROUP_TOTALS_MONEY_FIELDS = [
+  'budgeted',
+  'spent',
+  'rollover_balance',
+  'expected_recurring',
+  'projected_spend',
+  'projected_remaining',
+] as const;
+const LEDGER_MONEY_FIELDS = [
+  'starting_rollover',
+  'budget_amount',
+  'actual_spend',
+  'ending_rollover',
+] as const;
+
+function projectionToDollars(budget: Budget): Budget {
+  return dollarizeFields(budget as unknown as Record<string, unknown>, PROJECTION_MONEY_FIELDS) as unknown as Budget;
+}
+
+function ledgerEntryToDollars(entry: BudgetRolloverLedgerEntry): BudgetRolloverLedgerEntry {
+  return dollarizeFields(entry as unknown as Record<string, unknown>, LEDGER_MONEY_FIELDS) as unknown as BudgetRolloverLedgerEntry;
+}
+
+function groupToDollars(group: BudgetGroup): BudgetGroup {
+  return {
+    ...group,
+    totals: dollarizeFields(group.totals as unknown as Record<string, unknown>, GROUP_TOTALS_MONEY_FIELDS) as unknown as BudgetGroup['totals'],
+  };
+}
 
 function parsePositiveInteger(value: unknown): number | null {
   if (typeof value !== 'string' || !/^\d+$/.test(value)) return null;
@@ -54,7 +98,7 @@ function categoryIdsExist(db: ReturnType<typeof getDb>, ids: string[]): boolean 
 router.get('/', (_req: Request, res: Response, next: NextFunction): void => {
   try {
     const db = getDb();
-    const budgets = db.prepare(`
+    const budgets = (db.prepare(`
       SELECT
         b.*,
         c.name AS category_name,
@@ -63,7 +107,7 @@ router.get('/', (_req: Request, res: Response, next: NextFunction): void => {
       FROM budgets b
       JOIN categories c ON c.id = b.category_id
       ORDER BY c.name ASC
-    `).all();
+    `).all() as Record<string, unknown>[]).map((budget) => dollarizeFields(budget, BUDGET_MONEY_FIELDS));
 
     res.json({ data: budgets });
   } catch (err) {
@@ -85,7 +129,7 @@ router.get('/groups', (req: Request, res: Response, next: NextFunction): void =>
     }
 
     res.json({
-      data: getBudgetGroupsWithTotals(db, parsedMonth.year, parsedMonth.month),
+      data: getBudgetGroupsWithTotals(db, parsedMonth.year, parsedMonth.month).map(groupToDollars),
     });
   } catch (err) {
     next(err);
@@ -112,7 +156,7 @@ router.post(
 
       const current = currentMonthParts();
       const group = getBudgetGroupsWithTotals(db, current.year, current.month).find((item) => item.id === id);
-      res.status(201).json({ data: group });
+      res.status(201).json({ data: group ? groupToDollars(group) : group });
     } catch (err) {
       next(err);
     }
@@ -157,7 +201,7 @@ router.patch(
 
       const current = currentMonthParts();
       const group = getBudgetGroupsWithTotals(db, current.year, current.month).find((item) => item.id === id);
-      res.json({ data: group });
+      res.json({ data: group ? groupToDollars(group) : group });
     } catch (err) {
       next(err);
     }
@@ -203,7 +247,7 @@ router.put(
 
       const current = currentMonthParts();
       const group = getBudgetGroupsWithTotals(db, current.year, current.month).find((item) => item.id === id);
-      res.json({ data: group });
+      res.json({ data: group ? groupToDollars(group) : group });
     } catch (err) {
       next(err);
     }
@@ -248,7 +292,7 @@ router.get('/rollover-ledger', (req: Request, res: Response, next: NextFunction)
         budgetId: typeof req.query.budgetId === 'string' ? req.query.budgetId : undefined,
         month: typeof req.query.month === 'string' ? req.query.month : undefined,
         months: months ?? undefined,
-      }),
+      }).map(ledgerEntryToDollars),
     });
   } catch (err) {
     next(err);
@@ -267,7 +311,7 @@ router.get('/month/:year/:month', (req: Request, res: Response, next: NextFuncti
       return;
     }
 
-    res.json({ data: getMonthlyBudgetsWithProjection(db, year, month) });
+    res.json({ data: getMonthlyBudgetsWithProjection(db, year, month).map(projectionToDollars) });
   } catch (err) {
     next(err);
   }
@@ -304,19 +348,19 @@ router.put(
           UPDATE budgets
           SET amount = ?, period = ?, rollover = ?, updated_at = ?
           WHERE id = ?
-        `).run(body.amount, body.period, body.rollover ? 1 : 0, now, existing.id);
+        `).run(toCents(body.amount), body.period, body.rollover ? 1 : 0, now, existing.id);
 
-        const updated = db.prepare('SELECT * FROM budgets WHERE id = ?').get(existing.id);
-        res.json({ data: updated });
+        const updated = db.prepare('SELECT * FROM budgets WHERE id = ?').get(existing.id) as Record<string, unknown>;
+        res.json({ data: dollarizeFields(updated, BUDGET_MONEY_FIELDS) });
       } else {
         const id = uuidv4();
         db.prepare(`
           INSERT INTO budgets (id, category_id, amount, period, rollover, rollover_balance, created_at, updated_at)
           VALUES (?, ?, ?, ?, ?, 0, ?, ?)
-        `).run(id, categoryId, body.amount, body.period, body.rollover ? 1 : 0, now, now);
+        `).run(id, categoryId, toCents(body.amount), body.period, body.rollover ? 1 : 0, now, now);
 
-        const created = db.prepare('SELECT * FROM budgets WHERE id = ?').get(id);
-        res.status(201).json({ data: created });
+        const created = db.prepare('SELECT * FROM budgets WHERE id = ?').get(id) as Record<string, unknown>;
+        res.status(201).json({ data: dollarizeFields(created, BUDGET_MONEY_FIELDS) });
       }
     } catch (err) {
       next(err);

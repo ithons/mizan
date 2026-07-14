@@ -1,4 +1,5 @@
 import type Database from 'better-sqlite3';
+import { toDollars } from './money';
 
 export type TransactionCsvFormat = 'mizan' | 'monarch';
 
@@ -60,14 +61,14 @@ function getRow(row: TransactionCsvRow, format: TransactionCsvFormat): string[] 
       csvCell(row.merchant_name ?? row.original_name),
       csvCell(row.category_name),
       csvCell(row.account_name),
-      csvCell(row.amount),
+      csvCell(toDollars(row.amount)),
       csvCell(row.notes),
     ];
   }
 
   return [
     csvCell(row.date),
-    csvCell(row.amount),
+    csvCell(toDollars(row.amount)),
     csvCell(row.merchant_name),
     csvCell(row.original_name),
     csvCell(row.category_name),

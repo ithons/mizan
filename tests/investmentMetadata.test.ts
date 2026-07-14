@@ -91,9 +91,9 @@ test('holdings expose effective cost basis while preserving provider basis', (t)
   });
 
   assert.equal(updated.provider_cost_basis, 1000);
-  assert.equal(updated.cost_basis, 1100);
-  assert.equal(updated.effective_cost_basis, 1100);
-  assert.equal(updated.manual_cost_basis, 1100);
+  assert.equal(updated.cost_basis, 110000);
+  assert.equal(updated.effective_cost_basis, 110000);
+  assert.equal(updated.manual_cost_basis, 110000);
   assert.equal(updated.cost_basis_quality, 'manual');
 
   const cleared = setManualCostBasis(db, 'hold_vti', {

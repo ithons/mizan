@@ -116,6 +116,8 @@ function buildOccurrence(
   };
 }
 
+// Amounts stay in cents; every consumer (recurring route, subscription insights,
+// AI context) dollarizes at its own response/display boundary.
 export function buildRecurringForecast(
   db: Database.Database,
   days: number

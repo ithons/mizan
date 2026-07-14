@@ -25,6 +25,10 @@ import type {
   NetWorthSnapshot,
 } from '../../../shared/types';
 
+// Every report object this module returns keeps money TOTALS in integer cents.
+// Dollarization happens exclusively at the route boundary (routes/reports.ts) or,
+// for AI text, at the fmt() call site. Percentages, counts, and ratios pass through.
+
 interface ReportDateRange {
   startDate?: string;
   endDate?: string;
@@ -877,6 +881,10 @@ export function getReportNetWorthEvidence(
     LIMIT 1
   `).get(snapshot.date) as NetWorthSnapshot | undefined;
 
+  // Snapshots, deltas, and account balances all stay in cents; routes/reports.ts
+  // dollarizes the snapshot money columns, the breakdown JSON, and these deltas.
+  const accounts = getSnapshotAccounts(db, snapshot);
+
   return {
     kind: 'networth_snapshot',
     label: `Net worth on ${snapshot.date}`,
@@ -885,7 +893,7 @@ export function getReportNetWorthEvidence(
     delta: previousSnapshot ? snapshot.net_worth - previousSnapshot.net_worth : null,
     asset_delta: previousSnapshot ? snapshot.total_assets - previousSnapshot.total_assets : null,
     liability_delta: previousSnapshot ? snapshot.total_liabilities - previousSnapshot.total_liabilities : null,
-    accounts: getSnapshotAccounts(db, snapshot),
+    accounts,
   };
 }
 
@@ -950,7 +958,6 @@ export function getReportSummary(
   const currentSpending = getSpendingReport(db, { ...range, parentOnly: true });
   const previousSpending = getSpendingReport(db, { ...previous, parentOnly: true });
   const currentIncome = getIncomeReport(db, range);
-  const previousIncome = getIncomeReport(db, previous);
 
   return {
     start_date: range.startDate,

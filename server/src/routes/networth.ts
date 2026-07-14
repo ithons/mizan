@@ -1,8 +1,44 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import { getDb } from '../db/index';
 import { takeSnapshot } from '../services/snapshot';
+import { dollarizeFields, toDollars } from '../services/money';
 
 const router = Router();
+
+const SNAPSHOT_MONEY_FIELDS = [
+  'total_assets',
+  'total_liabilities',
+  'net_worth',
+  'liquid_assets',
+  'investment_assets',
+  'crypto_assets',
+] as const;
+
+// net_worth_snapshots stores totals and the per-account `breakdown` JSON in cents.
+// The API contract is dollars, so convert the numeric columns and restringify the
+// breakdown values on the way out.
+function dollarizeBreakdownString(value: string): string {
+  try {
+    const parsed: unknown = JSON.parse(value);
+    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return value;
+    const out: Record<string, unknown> = {};
+    for (const [id, v] of Object.entries(parsed)) {
+      out[id] = typeof v === 'number' ? toDollars(v) : v;
+    }
+    return JSON.stringify(out);
+  } catch {
+    return value;
+  }
+}
+
+function dollarizeSnapshotRow(row: unknown): unknown {
+  if (row == null || typeof row !== 'object') return row;
+  const converted = dollarizeFields(row as Record<string, unknown>, SNAPSHOT_MONEY_FIELDS);
+  if (typeof converted.breakdown === 'string') {
+    converted.breakdown = dollarizeBreakdownString(converted.breakdown);
+  }
+  return converted;
+}
 
 function parsePositiveIntegerQuery(value: unknown): number | null | undefined {
   if (value === undefined) return undefined;
@@ -20,7 +56,7 @@ router.get('/snapshot', (_req: Request, res: Response, next: NextFunction): void
       'SELECT * FROM net_worth_snapshots ORDER BY date DESC LIMIT 1'
     ).get();
 
-    res.json({ data: snapshot ?? null });
+    res.json({ data: snapshot ? dollarizeSnapshotRow(snapshot) : null });
   } catch (err) {
     next(err);
   }
@@ -37,7 +73,7 @@ router.post('/snapshot', (_req: Request, res: Response, next: NextFunction): voi
       'SELECT * FROM net_worth_snapshots WHERE date = ?'
     ).get(today);
 
-    res.json({ data: snapshot });
+    res.json({ data: snapshot ? dollarizeSnapshotRow(snapshot) : null });
   } catch (err) {
     next(err);
   }
@@ -82,7 +118,7 @@ router.get('/history', (req: Request, res: Response, next: NextFunction): void =
       ORDER BY date ASC
     `).all(...params);
 
-    res.json({ data: snapshots });
+    res.json({ data: snapshots.map(dollarizeSnapshotRow) });
   } catch (err) {
     next(err);
   }

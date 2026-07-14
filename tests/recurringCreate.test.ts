@@ -62,7 +62,7 @@ test('createRecurringPattern inserts a confirmed pattern with an unsigned amount
 
   const row = db.prepare('SELECT * FROM recurring_patterns WHERE id = ?').get(id) as any;
   assert.equal(row.merchant_name, 'Rent');
-  assert.equal(row.average_amount, 1800);
+  assert.equal(row.average_amount, 180000);
   assert.equal(row.is_confirmed, 1);
   assert.equal(row.is_active, 1);
   assert.equal(row.transaction_count, 0);

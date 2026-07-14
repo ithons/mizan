@@ -33,6 +33,8 @@ export function calculateGoalProgress(row: GoalProgressInput): GoalProgressResul
     ? Math.min((progressAmount / row.target_amount) * 100, 100)
     : 0;
 
+  // All amounts stay in cents (percent is a ratio); consumers dollarize at their
+  // own response/display boundary.
   return {
     current_amount: currentAmount,
     progress_amount: progressAmount,

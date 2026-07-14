@@ -327,21 +327,21 @@ function setupAdvisorDb(): Database.Database {
   insertTransaction(db, {
     id: 'paycheck',
     date: '2026-06-03',
-    amount: 1000,
+    amount: 100000,
     merchant: 'Employer',
     categoryId: 'cat_income_paycheck',
   });
   insertTransaction(db, {
     id: 'restaurant',
     date: '2026-06-07',
-    amount: -100,
+    amount: -10000,
     merchant: 'Restaurant',
     categoryId: 'cat_food_restaurants',
   });
   insertTransaction(db, {
     id: 'uncategorized',
     date: '2026-06-08',
-    amount: -25,
+    amount: -2500,
     merchant: 'Mystery',
     categoryId: null,
     reviewStatus: 'open',
@@ -349,7 +349,7 @@ function setupAdvisorDb(): Database.Database {
 
   db.prepare(`
     INSERT INTO budgets (id, category_id, amount, period, rollover, rollover_balance, created_at, updated_at)
-    VALUES ('budget_food', 'cat_food', 120, 'monthly', 0, 0, ?, ?)
+    VALUES ('budget_food', 'cat_food', 12000, 'monthly', 0, 0, ?, ?)
   `).run(TEST_NOW, TEST_NOW);
 
   db.prepare(`
@@ -460,7 +460,7 @@ test('advisor budget analysis uses rollover-adjusted available amount', (t) => {
   insertTransaction(db, {
     id: 'may_food',
     date: '2026-05-12',
-    amount: -20,
+    amount: -2000,
     merchant: 'May Restaurant',
     categoryId: 'cat_food_restaurants',
   });
@@ -538,7 +538,7 @@ test('advisor subscription analysis cites recurring subscription evidence', (t) 
       id, merchant_name, category_id, average_amount, frequency, last_seen, next_expected,
       is_active, is_confirmed, transaction_count, created_at, updated_at
     )
-    VALUES ('rec_streaming', 'Streaming', 'cat_food', 15, 'monthly', ?, ?, 1, 1, 4, ?, ?)
+    VALUES ('rec_streaming', 'Streaming', 'cat_food', 1500, 'monthly', ?, ?, 1, 1, 4, ?, ?)
   `).run(
     format(subDays(new Date(), 30), 'yyyy-MM-dd'),
     format(new Date(), 'yyyy-MM-dd'),
@@ -548,7 +548,7 @@ test('advisor subscription analysis cites recurring subscription evidence', (t) 
   insertTransaction(db, {
     id: 'streaming_1',
     date: format(subDays(new Date(), 90), 'yyyy-MM-dd'),
-    amount: -15,
+    amount: -1500,
     merchant: 'Streaming',
     categoryId: 'cat_food',
     recurringId: 'rec_streaming',
@@ -556,7 +556,7 @@ test('advisor subscription analysis cites recurring subscription evidence', (t) 
   insertTransaction(db, {
     id: 'streaming_2',
     date: format(subDays(new Date(), 60), 'yyyy-MM-dd'),
-    amount: -15,
+    amount: -1500,
     merchant: 'Streaming',
     categoryId: 'cat_food',
     recurringId: 'rec_streaming',
@@ -564,7 +564,7 @@ test('advisor subscription analysis cites recurring subscription evidence', (t) 
   insertTransaction(db, {
     id: 'streaming_3',
     date: format(subDays(new Date(), 30), 'yyyy-MM-dd'),
-    amount: -19,
+    amount: -1900,
     merchant: 'Streaming',
     categoryId: 'cat_food',
     recurringId: 'rec_streaming',
@@ -621,7 +621,7 @@ test('advisor anomaly analysis cites unusual report signals', (t) => {
   insertTransaction(db, {
     id: 'previous_paycheck',
     date: '2026-05-25',
-    amount: 3000,
+    amount: 300000,
     merchant: 'Employer',
     categoryId: 'cat_income_paycheck',
   });
@@ -673,7 +673,7 @@ test('advisor drafts and confirms budget and goal updates', (t) => {
   confirmAdvisorDraft(db, budgetDraft, true);
 
   const budget = db.prepare('SELECT amount FROM budgets WHERE id = ?').get('budget_food') as { amount: number };
-  assert.equal(budget.amount, 200);
+  assert.equal(budget.amount, 20000);
 
   const goalAnalysis = analyzeAdvisorQuestion(
     db,
@@ -687,7 +687,7 @@ test('advisor drafts and confirms budget and goal updates', (t) => {
   const goal = db.prepare('SELECT target_amount FROM goals WHERE id = ?').get('goal_emergency') as {
     target_amount: number;
   };
-  assert.equal(goal.target_amount, 6000);
+  assert.equal(goal.target_amount, 600000);
 });
 
 test('advisor draft confirmation requires explicit confirmation', (t) => {
@@ -856,7 +856,7 @@ test('advisor drafts and confirms investment metadata changes', (t) => {
   const holding = db.prepare('SELECT manual_cost_basis FROM holdings WHERE id = ?').get('holding_cash') as {
     manual_cost_basis: number;
   };
-  assert.equal(holding.manual_cost_basis, 500);
+  assert.equal(holding.manual_cost_basis, 50000);
 
   const sectorAnalysis = analyzeAdvisorQuestion(
     db,

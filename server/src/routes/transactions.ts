@@ -20,8 +20,15 @@ import {
   BulkCategorySchema,
   TransactionReviewStatusSchema,
 } from '../../../shared/schemas';
+import { toCents, dollarizeFields } from '../services/money';
 
 const router = Router();
+
+// transactions.amount is stored as integer cents; the API contract is dollars, so
+// transaction rows are dollarized on the way out. No other numeric column here is money.
+function transactionToDollars<T extends Record<string, unknown>>(row: T): T {
+  return dollarizeFields(row, ['amount']);
+}
 
 function accountExists(db: Database.Database, accountId: string): boolean {
   return Boolean(db.prepare('SELECT id FROM accounts WHERE id = ?').get(accountId));
@@ -205,7 +212,7 @@ router.get('/', (req: Request, res: Response, next: NextFunction): void => {
         return;
       }
       conditions.push('t.amount >= ?');
-      params.push(minAmount);
+      params.push(toCents(minAmount));
     }
     if (query.maxAmount !== undefined) {
       const maxAmount = parseQueryNumber(query.maxAmount);
@@ -214,7 +221,7 @@ router.get('/', (req: Request, res: Response, next: NextFunction): void => {
         return;
       }
       conditions.push('t.amount <= ?');
-      params.push(maxAmount);
+      params.push(toCents(maxAmount));
     }
     if (query.pending !== undefined) {
       const pending = parseBooleanQuery(query.pending);
@@ -284,9 +291,16 @@ router.get('/', (req: Request, res: Response, next: NextFunction): void => {
       ${where}
       ORDER BY ${transactionOrderBy(sortBy, sortDir)}
       LIMIT ? OFFSET ?
-    `).all(...params, limit, offset);
+    `).all(...params, limit, offset) as Record<string, unknown>[];
 
-    res.json({ data: { data, total: countRow.total, page, limit } });
+    res.json({
+      data: {
+        data: data.map(transactionToDollars),
+        total: countRow.total,
+        page,
+        limit,
+      },
+    });
   } catch (err) {
     next(err);
   }
@@ -318,14 +332,14 @@ router.get('/:id', (req: Request, res: Response, next: NextFunction): void => {
       LEFT JOIN categories c ON c.id = t.category_id
       LEFT JOIN accounts a ON a.id = t.account_id
       WHERE t.id = ?
-    `).get(req.params.id);
+    `).get(req.params.id) as Record<string, unknown> | undefined;
 
     if (!txn) {
       res.status(404).json({ error: 'Transaction not found' });
       return;
     }
 
-    res.json({ data: txn });
+    res.json({ data: transactionToDollars(txn) });
   } catch (err) {
     next(err);
   }
@@ -352,6 +366,7 @@ router.post(
       const now = new Date().toISOString();
       let balanceChanged = false;
       const categoryId = body.category_id || null;
+      const amountCents = toCents(body.amount);
 
       if (!accountExists(db, body.account_id)) {
         res.status(404).json({ error: 'Account not found' });
@@ -373,7 +388,7 @@ router.post(
           id,
           body.account_id,
           body.date,
-          body.amount,
+          amountCents,
           body.merchant_name || null,
           body.original_name,
           categoryId,
@@ -382,7 +397,7 @@ router.post(
           now
         );
 
-        balanceChanged = adjustManualAccountBalance(db, body.account_id, body.amount, now);
+        balanceChanged = adjustManualAccountBalance(db, body.account_id, amountCents, now);
       });
 
       insertTransaction();
@@ -393,8 +408,8 @@ router.post(
       detectRecurring();
       refreshTransactionIntegrity(db);
 
-      const txn = db.prepare('SELECT * FROM transactions WHERE id = ?').get(id);
-      res.status(201).json({ data: txn });
+      const txn = db.prepare('SELECT * FROM transactions WHERE id = ?').get(id) as Record<string, unknown>;
+      res.status(201).json({ data: transactionToDollars(txn) });
     } catch (err) {
       next(err);
     }
@@ -439,6 +454,10 @@ router.patch(
         return;
       }
 
+      // body.amount arrives in dollars; convert once and reuse for the column write and
+      // the manual-account rebalance (existing.amount is already cents).
+      const amountCents = body.amount !== undefined ? toCents(body.amount) : undefined;
+
       const updates: string[] = [];
       const values: unknown[] = [];
 
@@ -459,7 +478,7 @@ router.patch(
       }
       if (body.amount !== undefined) {
         updates.push('amount = ?');
-        values.push(body.amount);
+        values.push(amountCents);
       }
       if (body.merchant_name !== undefined) {
         updates.push('merchant_name = ?');
@@ -476,11 +495,11 @@ router.patch(
         const updateTransaction = db.transaction(() => {
           db.prepare(`UPDATE transactions SET ${updates.join(', ')} WHERE id = ?`).run(...values);
 
-          if (body.amount !== undefined && existing.is_manual) {
+          if (amountCents !== undefined && existing.is_manual) {
             balanceChanged = adjustManualAccountBalance(
               db,
               existing.account_id,
-              body.amount - existing.amount,
+              amountCents - existing.amount,
               now
             );
           }
@@ -513,8 +532,8 @@ router.patch(
       detectRecurring();
       refreshTransactionIntegrity(db);
 
-      const updated = db.prepare('SELECT * FROM transactions WHERE id = ?').get(id);
-      res.json({ data: { transaction: updated, categorization } });
+      const updated = db.prepare('SELECT * FROM transactions WHERE id = ?').get(id) as Record<string, unknown>;
+      res.json({ data: { transaction: transactionToDollars(updated), categorization } });
     } catch (err) {
       next(err);
     }
@@ -584,7 +603,8 @@ router.patch(
         return;
       }
 
-      res.json({ data: db.prepare('SELECT * FROM transactions WHERE id = ?').get(id) });
+      const reviewed = db.prepare('SELECT * FROM transactions WHERE id = ?').get(id) as Record<string, unknown>;
+      res.json({ data: transactionToDollars(reviewed) });
     } catch (err) {
       next(err);
     }

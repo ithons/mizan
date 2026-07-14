@@ -1,5 +1,7 @@
 import type Database from 'better-sqlite3';
 
+// `delta` is in integer cents (current_balance is stored as cents). Callers convert
+// dollar inputs with toCents before calling; no scaling happens here.
 export function adjustManualAccountBalance(
   db: Database.Database,
   accountId: string,
