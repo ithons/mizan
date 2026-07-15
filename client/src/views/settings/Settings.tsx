@@ -13,7 +13,7 @@ import { DataSection } from './DataSection';
 
 const AUTO_APPLY_PREFERENCE_KEY = 'advisor_auto_apply_high_confidence';
 
-type PanelId = 'simplefin' | 'coinbase' | 'import' | 'categories' | 'ai_disclosure' | 'advisor_profile' | null;
+type PanelId = 'simplefin' | 'coinbase' | 'import' | 'categories' | 'ai_disclosure' | 'advisor_profile' | 'ai_actions' | null;
 
 function SettingsRow({
   title,
@@ -66,6 +66,48 @@ function Toggle({ on, onChange, disabled }: { on: boolean; onChange: (next: bool
 
 function ExpandedPanel({ children }: { children: ReactNode }) {
   return <div className="mb-2 mt-1 rounded-xl border border-line-2 bg-card p-5">{children}</div>;
+}
+
+function AiActionsPanel({ open, onToggle }: { open: boolean; onToggle: () => void }) {
+  const { data: actions } = useQuery({
+    queryKey: ['ai-actions'],
+    queryFn: () => aiApi.listActions(),
+    enabled: open,
+  });
+  return (
+    <>
+      <SettingsRow
+        title="What the AI has done"
+        sub="Every action the AI applied to your data — auto-applied or confirmed by you"
+        trailing={<span className="text-muted">{open ? 'Hide' : 'Review →'}</span>}
+        onClick={onToggle}
+      />
+      {open && (
+        <ExpandedPanel>
+          {(!actions || actions.length === 0) ? (
+            <p className="text-[13.5px] text-muted-2">No AI actions yet.</p>
+          ) : (
+            <div className="space-y-2.5">
+              {actions.map((a) => (
+                <div key={a.id} className="flex items-start justify-between gap-3 border-b border-line pb-2.5 last:border-0">
+                  <div className="min-w-0">
+                    <div className="text-[14px] text-ink">{a.label}</div>
+                    <div className="mt-0.5 text-xs text-muted-2">{a.summary}</div>
+                  </div>
+                  <div className="flex-shrink-0 text-right text-[11px] text-muted-2">
+                    <div className={a.source === 'worker_auto' ? 'text-warning' : 'text-sage-deep'}>
+                      {a.source === 'worker_auto' ? 'auto-applied' : 'you confirmed'}
+                    </div>
+                    <div>{formatCompactRelative(a.created_at)}</div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </ExpandedPanel>
+      )}
+    </>
+  );
 }
 
 function AdvisorContextEditor({ open, onToggle }: { open: boolean; onToggle: () => void }) {
@@ -266,9 +308,19 @@ export function Settings() {
                       no key is configured.
                     </p>
                     <p>
+                      In Advisor, the model can also call read-only tools to look up your transactions, spending by
+                      category, and monthly cash flow — so specific rows may be sent in response to what you ask.
+                    </p>
+                    <p>
+                      The background worker sends a bit more than the snapshot below: your category list and up to 15 of
+                      your uncategorized transactions (merchant and amount), so it can propose categorizations.
+                      Confirming an auto-categorization also creates a merchant rule so similar transactions are handled
+                      the same way in future.
+                    </p>
+                    <p>
                       Each sync also fetches crypto spot prices from Coinbase. That request carries no personal data.
                     </p>
-                    <p className="text-ink">This is the exact snapshot, regenerated live:</p>
+                    <p className="text-ink">This is the base snapshot, regenerated live:</p>
                     <pre className="max-h-80 overflow-auto whitespace-pre-wrap rounded-lg border border-line-2 bg-rail p-3 font-mono text-[12px] text-ink">
                       {aiContext.context || 'No context available yet — run a sync first.'}
                     </pre>
@@ -276,6 +328,9 @@ export function Settings() {
                 </ExpandedPanel>
               )}
             </>
+          )}
+          {aiContext?.configured && (
+            <AiActionsPanel open={openPanel === 'ai_actions'} onToggle={() => toggle('ai_actions')} />
           )}
           <AdvisorContextEditor
             open={openPanel === 'advisor_profile'}

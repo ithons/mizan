@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import Database from 'better-sqlite3';
 import { AiWorkerDraftSchema, AdvisorDraftPayloadSchema } from '../shared/schemas';
-import { confirmAdvisorDraft } from '../server/src/services/advisorDrafts';
+import { confirmAdvisorDraft, listAdvisorActions } from '../server/src/services/advisorDrafts';
 import type { AdvisorDraftAction } from '../shared/types';
 
 // The aiWorker parses raw JSON from the model and validates each draft against
@@ -130,6 +130,42 @@ test('confirmAdvisorDraft rejects a string money amount before any DB write', ()
       () => confirmAdvisorDraft(db, malformedGoalAction('300000'), true),
       /Invalid draft payload/
     );
+  } finally {
+    db.close();
+  }
+});
+
+test('confirmAdvisorDraft records an audit action with its source', () => {
+  const db = new Database(':memory:');
+  try {
+    db.exec(`
+      CREATE TABLE goals (id TEXT PRIMARY KEY, target_amount INTEGER, updated_at TEXT);
+      CREATE TABLE advisor_drafts (id TEXT PRIMARY KEY, status TEXT, updated_at TEXT);
+      CREATE TABLE advisor_actions (id TEXT PRIMARY KEY, kind TEXT, label TEXT, summary TEXT, source TEXT, payload TEXT, created_at TEXT);
+    `);
+    db.prepare("INSERT INTO goals (id, target_amount) VALUES ('goal_1', 100000)").run();
+    const action = {
+      id: 'draft_x',
+      kind: 'update_goal_target',
+      label: 'Raise emergency fund target',
+      summary: 'Bump the target to $5,000.',
+      route: '/goals',
+      payload: { kind: 'update_goal_target', goal_id: 'goal_1', target_amount: 5000 },
+      changes: [],
+      citations: [],
+      confirmation_required: true,
+    } as unknown as AdvisorDraftAction;
+
+    confirmAdvisorDraft(db, action, true, 'worker_auto');
+
+    const actions = listAdvisorActions(db);
+    assert.equal(actions.length, 1);
+    assert.equal(actions[0].source, 'worker_auto');
+    assert.equal(actions[0].kind, 'update_goal_target');
+
+    // $5,000 -> 500000 integer cents, applied atomically with the log.
+    const goal = db.prepare("SELECT target_amount FROM goals WHERE id = 'goal_1'").get() as { target_amount: number };
+    assert.equal(goal.target_amount, 500000);
   } finally {
     db.close();
   }

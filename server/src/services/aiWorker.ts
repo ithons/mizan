@@ -254,7 +254,7 @@ Example JSON format for each kind you're likely to use:
             confirmation_required: true,
           };
           try {
-            confirmAdvisorDraft(db, action, true);
+            confirmAdvisorDraft(db, action, true, 'worker_auto');
             status = 'confirmed';
             autoApplied++;
           } catch (err) {

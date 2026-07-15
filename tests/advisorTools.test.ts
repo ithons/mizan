@@ -95,6 +95,16 @@ function setupAdvisorDb(): Database.Database {
       updated_at TEXT NOT NULL
     );
 
+    CREATE TABLE advisor_actions (
+      id TEXT PRIMARY KEY,
+      kind TEXT NOT NULL,
+      label TEXT NOT NULL,
+      summary TEXT NOT NULL,
+      source TEXT NOT NULL,
+      payload TEXT NOT NULL,
+      created_at TEXT NOT NULL
+    );
+
     CREATE TABLE simplefin_connections (
       id TEXT PRIMARY KEY,
       access_url TEXT UNIQUE NOT NULL,

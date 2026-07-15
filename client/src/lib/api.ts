@@ -584,6 +584,17 @@ export const settingsApi = {
 
 export const aiApi = {
   getContext: () => apiFetch<AdvisorContextResponse>('/api/ai/context'),
+  listActions: () =>
+    apiFetch<
+      Array<{
+        id: string;
+        kind: string;
+        label: string;
+        summary: string;
+        source: 'worker_auto' | 'user_confirm';
+        created_at: string;
+      }>
+    >('/api/ai/actions'),
   getProfile: () => apiFetch<{ profile: string }>('/api/ai/profile'),
   saveProfile: (profile: string) =>
     apiFetch<{ profile: string }>('/api/ai/profile', {

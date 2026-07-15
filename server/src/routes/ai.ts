@@ -11,7 +11,7 @@ import {
   deleteConversation,
   type ConversationMessage,
 } from '../services/conversations';
-import { confirmAdvisorDraft, dismissAdvisorDraft } from '../services/advisorDrafts';
+import { confirmAdvisorDraft, dismissAdvisorDraft, listAdvisorActions } from '../services/advisorDrafts';
 import { analyzeAdvisorQuestion } from '../services/advisorTools';
 import { ADVISOR_TOOLS, runAdvisorTool } from '../services/advisorChatTools';
 import type { AdvisorConfirmRequest, ChatMessage } from '../../../shared/types';
@@ -111,6 +111,15 @@ router.delete('/conversations/:id', (req: Request, res: Response, next: NextFunc
       return;
     }
     res.json({ data: { success: true } });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// GET /api/ai/actions - audit trail of AI actions that mutated the database
+router.get('/actions', (_req: Request, res: Response, next: NextFunction): void => {
+  try {
+    res.json({ data: listAdvisorActions(getDb()) });
   } catch (err) {
     next(err);
   }

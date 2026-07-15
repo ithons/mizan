@@ -1008,10 +1008,29 @@ export function dismissAdvisorDraft(db: Database.Database, id: string): { change
   return { changed: result.changes };
 }
 
+export interface AdvisorActionLog {
+  id: string;
+  kind: string;
+  label: string;
+  summary: string;
+  source: 'worker_auto' | 'user_confirm';
+  created_at: string;
+}
+
+export function listAdvisorActions(db: Database.Database, limit = 50): AdvisorActionLog[] {
+  return db.prepare(`
+    SELECT id, kind, label, summary, source, created_at
+    FROM advisor_actions
+    ORDER BY created_at DESC, rowid DESC
+    LIMIT ?
+  `).all(limit) as AdvisorActionLog[];
+}
+
 export function confirmAdvisorDraft(
   db: Database.Database,
   draftAction: AdvisorDraftAction,
-  confirm: boolean
+  confirm: boolean,
+  source: 'worker_auto' | 'user_confirm' = 'user_confirm'
 ): AdvisorConfirmResponse {
   if (!confirm) throw new Error('Explicit confirmation is required');
   if (draftAction.confirmation_required !== true) throw new Error('Invalid draft action');
@@ -1065,6 +1084,20 @@ export function confirmAdvisorDraft(
     db.prepare(`
       UPDATE advisor_drafts SET status = 'confirmed', updated_at = ? WHERE id = ? AND status = 'open'
     `).run(new Date().toISOString(), draftAction.id);
+
+    // Record the applied action in the visible audit trail, atomically with the mutation.
+    db.prepare(`
+      INSERT INTO advisor_actions (id, kind, label, summary, source, payload, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      uuidv4(),
+      draftAction.kind,
+      draftAction.label,
+      draftAction.summary,
+      source,
+      JSON.stringify(draftAction.payload),
+      new Date().toISOString()
+    );
 
     return result;
   });
