@@ -289,12 +289,23 @@ router.delete(
     try {
       const db = getDb();
 
-      // Delete all user data tables (in dependency order)
+      // Full factory reset: clear every user-data table (children before parents), the
+      // AI history/audit tables, and app_preferences (the AI profile + settings). Only
+      // schema_migrations is preserved.
       db.exec(`
+        DELETE FROM messages;
+        DELETE FROM conversations;
+        DELETE FROM advisor_actions;
+        DELETE FROM advisor_drafts;
+        DELETE FROM holdings_history;
         DELETE FROM investment_transactions;
         DELETE FROM holdings;
         DELETE FROM securities;
+        DELETE FROM budget_rollover_ledger;
+        DELETE FROM budget_group_members;
+        DELETE FROM budget_groups;
         DELETE FROM merchant_rules;
+        DELETE FROM recurring_occurrence_adjustments;
         DELETE FROM recurring_patterns;
         DELETE FROM goals;
         DELETE FROM transactions;
@@ -307,6 +318,7 @@ router.delete(
         DELETE FROM sync_run_items;
         DELETE FROM sync_runs;
         DELETE FROM data_import_runs;
+        DELETE FROM app_preferences;
       `);
 
       res.json({ data: { success: true } });
