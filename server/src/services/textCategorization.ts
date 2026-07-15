@@ -13,9 +13,12 @@ const RULES: CategoryRule[] = [
   { categoryId: 'cat_income_dividends', keywords: ['dividend'] },
   { categoryId: 'cat_income_interest', keywords: ['interest payment', 'interest earned', 'interest paid'] },
 
-  // Multi-word food-delivery brands before the generic rideshare rule below
+  // Food-delivery brands first — before restaurants and before the generic "uber"
+  // rideshare rule below (so "uber eats" is delivery, not a ride).
+  { categoryId: 'cat_food_delivery', keywords: [
+    'uber eats', 'ubereats', 'doordash', 'grubhub', 'postmates', 'seamless', 'caviar', 'gopuff',
+  ] },
   { categoryId: 'cat_food_restaurants', keywords: [
-    'uber eats', 'ubereats', 'doordash', 'grubhub', 'postmates', 'seamless',
     'chipotle', "mcdonald", 'chick-fil-a', 'chickfila', 'starbucks reserve',
     'pizza', 'sushi', 'restaurant', 'bistro', 'taqueria', 'burger', 'diner',
   ] },
@@ -41,6 +44,11 @@ const RULES: CategoryRule[] = [
   { categoryId: 'cat_transport_parking', keywords: ['parking', 'parkmobile', 'spothero', 'parkwhiz'] },
   { categoryId: 'cat_transport_transit', keywords: ['mta', 'metro card', 'metrocard', 'bart', 'septa', 'caltrain', 'transit auth'] },
   { categoryId: 'cat_transport_auto', keywords: ['auto loan', 'car payment', 'auto finance'] },
+
+  // Newer top-level categories
+  { categoryId: 'cat_pets', keywords: ['chewy', 'petco', 'petsmart', 'trupanion', 'veterinary', ' vet ', 'pet supplies'] },
+  { categoryId: 'cat_fees', keywords: ['overdraft', 'atm fee', 'service charge', 'wire fee', 'foreign transaction fee', 'bank fee', 'late fee'] },
+  { categoryId: 'cat_gifts', keywords: ['gofundme', 'donation', 'red cross', 'charity', 'patreon'] },
 
   // Home
   { categoryId: 'cat_home_rent', keywords: ['rent payment', 'property mgmt', 'apartments', 'realpage'] },

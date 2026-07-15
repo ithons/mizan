@@ -8,8 +8,10 @@ test('matches common merchants to their category', () => {
   assert.equal(guessCategoryFromText('Whole Foods Market', 'WFM 10245'), 'cat_food_groceries');
   assert.equal(guessCategoryFromText('AMAZON.COM*A1B2C3', 'AMAZON.COM*A1B2C3'), 'cat_shop_amazon');
   assert.equal(guessCategoryFromText('Netflix.com', 'NETFLIX.COM'), 'cat_ent_streaming');
-  assert.equal(guessCategoryFromText('Uber Eats', 'UBER   *EATS'), 'cat_food_restaurants');
+  assert.equal(guessCategoryFromText('Uber Eats', 'UBER   *EATS'), 'cat_food_delivery');
+  assert.equal(guessCategoryFromText('DoorDash', 'DOORDASH*ORDER'), 'cat_food_delivery');
   assert.equal(guessCategoryFromText('Uber', 'UBER *TRIP HELP.UBER.COM'), 'cat_transport_ride');
+  assert.equal(guessCategoryFromText('Chewy', 'CHEWY.COM'), 'cat_pets');
 });
 
 test('returns null for unrecognized or empty text', () => {
