@@ -18,6 +18,27 @@ const AUTO_APPLY_CONFIDENCE_THRESHOLD = 0.9;
 const AUTO_APPLIABLE_KINDS = new Set(['categorize_transaction', 'create_merchant_rule']);
 export const AUTO_APPLY_PREFERENCE_KEY = 'advisor_auto_apply_high_confidence';
 
+// Stable identity for the entity a draft acts on. Two drafts with the same key are
+// two suggestions about the same thing, so a fresh pass supersedes the old one; a
+// draft whose key the fresh pass does not regenerate is left in place (still pending
+// the user's review) rather than blanket-deleted.
+function draftTargetKey(payload: AdvisorDraftPayload): string {
+  switch (payload.kind) {
+    case 'create_merchant_rule': return `create_merchant_rule:${payload.pattern}`;
+    case 'categorize_transaction': return `categorize_transaction:${payload.transaction_id}`;
+    case 'update_budget': return `update_budget:${payload.category_id}`;
+    case 'update_goal_target': return `update_goal_target:${payload.goal_id}`;
+    case 'confirm_recurring': return `confirm_recurring:${payload.recurring_id}`;
+    case 'create_budget_group': return `create_budget_group:${payload.name}`;
+    case 'rename_budget_group': return `rename_budget_group:${payload.group_id}`;
+    case 'assign_category_to_budget_group': return `assign_category_to_budget_group:${payload.group_id}:${payload.category_id}`;
+    case 'create_recurring_adjustment': return `create_recurring_adjustment:${payload.recurring_id}:${payload.original_date}`;
+    case 'set_manual_cost_basis': return `set_manual_cost_basis:${payload.holding_id}`;
+    case 'set_sector_metadata': return `set_sector_metadata:${payload.security_id}`;
+    default: return (payload as { kind: string }).kind;
+  }
+}
+
 function getClient(): Anthropic | null {
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) return null;
@@ -139,7 +160,15 @@ Example JSON format for each kind you're likely to use:
       temperature: 0.1,
     });
 
-    const rawText = response.content[0].type === 'text' ? response.content[0].text : '';
+    if (response.stop_reason === 'max_tokens') {
+      console.warn('[ai-worker] Model response hit max_tokens; draft JSON is likely truncated and may fail to parse.');
+    }
+    const firstBlock = response.content[0];
+    const rawText = firstBlock && firstBlock.type === 'text' ? firstBlock.text : '';
+    if (!rawText) {
+      console.warn('[ai-worker] Model returned no usable text content (empty or non-text); skipping this pass.');
+      return;
+    }
     // The model is instructed to return raw JSON, but strip a ```/```json fence
     // defensively in case it wraps the response anyway.
     const text = rawText.trim().replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/, '').trim();
@@ -170,21 +199,36 @@ Example JSON format for each kind you're likely to use:
     const autoApplyEnabled = autoApplyPref ? autoApplyPref.value === true : true;
 
     db.transaction(() => {
-      // Clear out any stale 'open' drafts that the AI is effectively replacing
-      db.prepare(`DELETE FROM advisor_drafts WHERE status = 'open'`).run();
-
+      // Trust boundary: drafts came straight from the model as raw JSON. Validate
+      // each against the strict schema up front, so we also know which entities this
+      // pass covers before deciding what to supersede.
+      const validated: Array<ReturnType<typeof AiWorkerDraftSchema.parse>> = [];
       for (const rawDraft of drafts) {
-        // Trust boundary: the draft came straight from the model as raw JSON. Reject
-        // anything that doesn't validate against the strict schema rather than storing
-        // or applying a malformed/hallucinated payload.
         const parsed = AiWorkerDraftSchema.safeParse(rawDraft);
         if (!parsed.success) {
           rejected++;
           console.warn('[ai-worker] Rejected malformed draft:', parsed.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join('; '));
           continue;
         }
-        const draft = parsed.data;
+        validated.push(parsed.data);
+      }
 
+      // Supersede only the open drafts this pass regenerates (same target entity).
+      // Open drafts for entities the fresh pass no longer surfaces are left in place
+      // so the user's un-acted-on review queue isn't silently wiped every sync.
+      const freshKeys = new Set(validated.map((d) => draftTargetKey(d.payload as AdvisorDraftPayload)));
+      const openRows = db.prepare(`SELECT id, payload FROM advisor_drafts WHERE status = 'open'`).all() as Array<{ id: string; payload: string }>;
+      const deleteDraft = db.prepare(`DELETE FROM advisor_drafts WHERE id = ?`);
+      for (const row of openRows) {
+        try {
+          const payload = JSON.parse(row.payload) as AdvisorDraftPayload;
+          if (freshKeys.has(draftTargetKey(payload))) deleteDraft.run(row.id);
+        } catch {
+          // Leave rows with unparseable payloads untouched.
+        }
+      }
+
+      for (const draft of validated) {
         const id = uuidv4();
         const changes: AdvisorDraftChange[] = draft.changes;
         const citations: AdvisorCitation[] = draft.citations as AdvisorCitation[];

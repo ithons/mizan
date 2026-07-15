@@ -279,7 +279,17 @@ export async function syncCoinbase(): Promise<CoinbaseSyncResult> {
 
       if (balanceValue <= 0 && !existing) continue;
 
-      const spotPrice = balanceValue === 0 ? 0 : await getUsdSpotPrice(currency);
+      // Price each holding independently: a single unpriceable/delisted coin must not
+      // abort the whole sync run. Skip it (it stays in seenAccountIds so it isn't
+      // pruned as stale) and continue with the rest.
+      let spotPrice: number;
+      try {
+        spotPrice = balanceValue === 0 ? 0 : await getUsdSpotPrice(currency);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : 'unknown pricing error';
+        console.warn(`[coinbase] Skipping ${currency} account ${account.uuid}: ${message}`);
+        continue;
+      }
       const currentBalance = balanceValue * spotPrice; // dollars
       const currentBalanceCents = toCents(currentBalance);
       const accountId = existing?.id ?? uuidv4();
