@@ -10,6 +10,7 @@ const navItems = [
   { to: '/transactions', label: 'Transactions', shortcut: '3' },
   { to: '/review', label: 'Review', shortcut: 'r' },
   { to: '/cash-flow', label: 'Cash flow', shortcut: '4' },
+  { to: '/reports', label: 'Reports', shortcut: 'p' },
   { to: '/budget', label: 'Budget', shortcut: '5' },
   { to: '/bills', label: 'Bills', shortcut: '6' },
   { to: '/goals', label: 'Goals', shortcut: '7' },
