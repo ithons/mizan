@@ -39,7 +39,7 @@ export function CategoryRow({
   depth,
 }: {
   category: Category;
-  onEdit: (id: string, name: string, color: string, icon: string, taxable: boolean) => void;
+  onEdit: (id: string, name: string, color: string, icon: string) => void;
   onDelete: (id: string) => void;
   onAddChild: (parentId: string) => void;
   depth: number;
@@ -48,10 +48,9 @@ export function CategoryRow({
   const [editName, setEditName] = useState(category.name);
   const [editColor, setEditColor] = useState(category.color || CATEGORY_PRESET_COLORS[0]);
   const [editIcon, setEditIcon] = useState(category.icon || '');
-  const [editTaxable, setEditTaxable] = useState(category.taxable || false);
 
   const handleSave = () => {
-    onEdit(category.id, editName, editColor, editIcon, editTaxable);
+    onEdit(category.id, editName, editColor, editIcon);
     setEditing(false);
   };
 
@@ -94,41 +93,27 @@ export function CategoryRow({
                 <X size={13} className="text-muted" />
               </button>
             </div>
-            <div className="flex items-center justify-between">
-              <div className="flex flex-wrap gap-1">
-                {CATEGORY_PRESET_COLORS.map((color) => (
-                  <button
-                    key={color}
-                    type="button"
-                    onClick={() => setEditColor(color)}
-                    className="h-4 w-4 rounded-full transition-transform hover:scale-110"
-                    style={{
-                      backgroundColor: color,
-                      outline: editColor === color ? '2px solid var(--mz-ink)' : '2px solid transparent',
-                      outlineOffset: '1px',
-                    }}
-                    title={color}
-                  />
-                ))}
-              </div>
-              {Boolean(category.is_income) && (
-                <label className="flex cursor-pointer items-center gap-1.5 text-[11px] text-muted">
-                  <input
-                    type="checkbox"
-                    className="accent-sage"
-                    checked={editTaxable}
-                    onChange={(e) => setEditTaxable(e.target.checked)}
-                  />
-                  Subject to estimated tax
-                </label>
-              )}
+            <div className="flex flex-wrap gap-1">
+              {CATEGORY_PRESET_COLORS.map((color) => (
+                <button
+                  key={color}
+                  type="button"
+                  onClick={() => setEditColor(color)}
+                  className="h-4 w-4 rounded-full transition-transform hover:scale-110"
+                  style={{
+                    backgroundColor: color,
+                    outline: editColor === color ? '2px solid var(--mz-ink)' : '2px solid transparent',
+                    outlineOffset: '1px',
+                  }}
+                  title={color}
+                />
+              ))}
             </div>
           </div>
         ) : (
           <>
             <span className="flex-1 text-sm text-ink">{category.name}</span>
             {Boolean(category.is_income) && <Badge tone="sage">income</Badge>}
-            {Boolean(category.taxable) && <Badge tone="clay">taxable</Badge>}
             {Boolean(category.is_system) && <Badge tone="muted">system</Badge>}
           </>
         )}
@@ -199,8 +184,8 @@ export function CategoriesSection() {
   });
 
   const editMutation = useMutation({
-    mutationFn: ({ id, name, color, icon, taxable }: { id: string; name: string; color: string; icon: string; taxable: boolean }) =>
-      categoriesApi.update(id, { name, color, icon, taxable }),
+    mutationFn: ({ id, name, color, icon }: { id: string; name: string; color: string; icon: string }) =>
+      categoriesApi.update(id, { name, color, icon }),
     onSuccess: () => invalidateCategoryData(qc),
   });
 
@@ -255,7 +240,7 @@ export function CategoriesSection() {
           <CategoryRow
             key={cat.id}
             category={cat}
-            onEdit={(id, name, color, icon, taxable) => editMutation.mutate({ id, name, color, icon, taxable })}
+            onEdit={(id, name, color, icon) => editMutation.mutate({ id, name, color, icon })}
             onDelete={(id) => deleteMutation.mutate(id)}
             onAddChild={(parentId) => {
               setAddParentId(parentId);

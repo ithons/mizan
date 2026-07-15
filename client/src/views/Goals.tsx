@@ -20,8 +20,6 @@ function goalNote(goal: Goal, projectedMonthly: number): string {
     parts.push('complete');
   } else if (goal.target_date) {
     parts.push(`full by ${format(parseISO(goal.target_date), 'MMM yyyy')}`);
-  } else if (goal.is_tax_envelope) {
-    parts.push('tax envelope');
   } else if (goal.progress_amount <= 0) {
     parts.push('just started');
   }
@@ -38,7 +36,6 @@ function GoalModal({ open, onClose, editing }: { open: boolean; onClose: () => v
     current_amount: '',
     target_date: '',
     account_id: '',
-    is_tax_envelope: false,
   });
 
   useEffect(() => {
@@ -48,7 +45,6 @@ function GoalModal({ open, onClose, editing }: { open: boolean; onClose: () => v
       current_amount: editing ? String(editing.current_amount) : '',
       target_date: editing?.target_date ?? '',
       account_id: editing?.account_id ?? '',
-      is_tax_envelope: editing?.is_tax_envelope ?? false,
     });
   }, [editing, open]);
 
@@ -65,7 +61,6 @@ function GoalModal({ open, onClose, editing }: { open: boolean; onClose: () => v
         current_amount: current ?? 0,
         target_date: form.target_date || null,
         account_id: form.account_id || null,
-        is_tax_envelope: form.is_tax_envelope,
       };
       return editing ? goalsApi.update(editing.id, body) : goalsApi.create(body);
     },
@@ -135,15 +130,6 @@ function GoalModal({ open, onClose, editing }: { open: boolean; onClose: () => v
             </select>
           </div>
         </div>
-        <label className="flex cursor-pointer items-center gap-2">
-          <input
-            type="checkbox"
-            checked={form.is_tax_envelope}
-            onChange={(e) => setForm({ ...form, is_tax_envelope: e.target.checked })}
-            className="rounded border-line-3 text-sage focus:ring-0"
-          />
-          <span className="text-sm text-ink">Tax envelope (kept out of safe-to-spend)</span>
-        </label>
         <div className="flex items-center gap-5 pt-1">
           <InkButton onClick={() => save.mutate()} disabled={save.isPending}>
             {save.isPending ? 'Saving…' : editing ? 'Save changes' : 'Create goal'}
@@ -241,7 +227,7 @@ export function Goals() {
                 </div>
                 <span className="text-[13px] text-sage">{pct}%</span>
               </div>
-              <ProgressBar fraction={fraction} tone={g.is_tax_envelope ? 'gold' : 'sage'} height={8} className="mb-3" />
+              <ProgressBar fraction={fraction} tone="sage" height={8} className="mb-3" />
               <div className="flex items-baseline justify-between">
                 <span className="font-serif text-[21px] tabular-nums text-ink">{formatWholeCurrency(g.progress_amount)}</span>
                 <span className="text-[13px] tabular-nums text-muted">of {formatWholeCurrency(g.target_amount)}</span>

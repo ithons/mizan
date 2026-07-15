@@ -169,7 +169,6 @@ export interface Category {
   is_income: boolean;
   is_system: boolean;
   is_investment: boolean;
-  taxable: boolean;
   sort_order: number;
   children?: Category[];
 }
@@ -430,7 +429,6 @@ export interface Goal {
   target_date?: string | null;
   color?: string | null;
   is_archived: boolean;
-  is_tax_envelope: boolean;
   created_at: string;
   updated_at: string;
   progress_amount: number;
@@ -735,19 +733,6 @@ export type AdvisorDraftPayload =
       kind: 'update_goal_target';
       goal_id: string;
       target_amount: number;
-    }
-  | {
-      kind: 'allocate_goal_funds';
-      goal_id: string;
-      amount_to_add: number;
-    }
-  | {
-      kind: 'create_goal';
-      name: string;
-      type: GoalType;
-      target_amount: number;
-      account_id?: string | null;
-      is_tax_envelope?: boolean;
     }
   | {
       kind: 'confirm_recurring';

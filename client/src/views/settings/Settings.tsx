@@ -10,11 +10,10 @@ import { CoinbaseSection } from './CoinbaseSection';
 import { CategoriesSection } from './CategoriesSection';
 import { RulesSection } from './RulesSection';
 import { DataSection } from './DataSection';
-import { TaxesSection } from './TaxesSection';
 
 const AUTO_APPLY_PREFERENCE_KEY = 'advisor_auto_apply_high_confidence';
 
-type PanelId = 'simplefin' | 'coinbase' | 'import' | 'categories' | 'taxes' | null;
+type PanelId = 'simplefin' | 'coinbase' | 'import' | 'categories' | null;
 
 function SettingsRow({
   title,
@@ -217,17 +216,6 @@ export function Settings() {
                 <CategoriesSection />
                 <RulesSection />
               </div>
-            </ExpandedPanel>
-          )}
-          <SettingsRow
-            title="Tax withholding"
-            sub="Set aside a share of taxable income automatically"
-            trailing={<span className="text-muted">Configure →</span>}
-            onClick={() => toggle('taxes')}
-          />
-          {openPanel === 'taxes' && (
-            <ExpandedPanel>
-              <TaxesSection />
             </ExpandedPanel>
           )}
           <SettingsRow title="Appearance" trailing={<span className="text-muted">Light</span>} last />

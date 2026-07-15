@@ -21,7 +21,6 @@ interface GoalRow {
   target_date: string | null;
   color: string | null;
   is_archived: number;
-  is_tax_envelope: number;
   created_at: string;
   updated_at: string;
   account_name: string | null;
@@ -72,7 +71,6 @@ function toGoal(row: GoalRow): Goal {
     target_date: row.target_date,
     color: row.color,
     is_archived: Boolean(row.is_archived),
-    is_tax_envelope: Boolean(row.is_tax_envelope),
     created_at: row.created_at,
     updated_at: row.updated_at,
     progress_amount: toDollars(progress.progress_amount),
@@ -124,7 +122,6 @@ router.post(
         account_id?: string | null;
         target_date?: string | null;
         color?: string | null;
-        is_tax_envelope?: boolean;
       };
       const accountId = normalizeAccountId(body.account_id);
 
@@ -149,8 +146,8 @@ router.post(
       db.prepare(`
         INSERT INTO goals
           (id, name, type, target_amount, current_amount, starting_amount,
-           account_id, target_date, color, is_archived, is_tax_envelope, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)
+           account_id, target_date, color, is_archived, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)
       `).run(
         id,
         body.name,
@@ -161,7 +158,6 @@ router.post(
         accountId,
         body.target_date ?? null,
         body.color ?? null,
-        body.is_tax_envelope ? 1 : 0,
         now,
         now
       );
@@ -202,7 +198,6 @@ router.patch(
         target_date?: string | null;
         color?: string | null;
         is_archived?: boolean;
-        is_tax_envelope?: boolean;
       };
 
       const updates: string[] = [];
@@ -228,7 +223,6 @@ router.patch(
       if (body.target_date !== undefined) addUpdate('target_date', body.target_date);
       if (body.color !== undefined) addUpdate('color', body.color);
       if (body.is_archived !== undefined) addUpdate('is_archived', body.is_archived ? 1 : 0);
-      if (body.is_tax_envelope !== undefined) addUpdate('is_tax_envelope', body.is_tax_envelope ? 1 : 0);
 
       if (updates.length > 0) {
         addUpdate('updated_at', new Date().toISOString());

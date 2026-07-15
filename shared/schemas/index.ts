@@ -56,7 +56,6 @@ export const CreateCategorySchema = z.object({
   parent_id: z.string().nullable().optional(),
   is_income: z.boolean().default(false),
   is_investment: z.boolean().default(false),
-  taxable: z.boolean().default(false),
   sort_order: z.number().int().default(0),
 });
 
@@ -64,7 +63,6 @@ export const UpdateCategorySchema = z.object({
   name: z.string().min(1).optional(),
   icon: z.string().nullable().optional(),
   color: z.string().nullable().optional(),
-  taxable: z.boolean().optional(),
   sort_order: z.number().int().optional(),
 });
 
@@ -127,7 +125,6 @@ export const CreateGoalSchema = z.object({
   account_id: z.string().nullable().optional(),
   target_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(),
   color: z.string().nullable().optional(),
-  is_tax_envelope: z.boolean().default(false),
 });
 
 export const UpdateGoalSchema = CreateGoalSchema.partial().extend({

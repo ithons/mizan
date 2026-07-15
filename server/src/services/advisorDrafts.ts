@@ -855,40 +855,6 @@ function confirmGoalTarget(db: Database.Database, payload: Extract<AdvisorDraftP
   return { changed: result.changes, result: { goal_id: payload.goal_id } };
 }
 
-function confirmAllocateGoalFunds(db: Database.Database, payload: Extract<AdvisorDraftPayload, { kind: 'allocate_goal_funds' }>): {
-  changed: number;
-  result: unknown;
-} {
-  const existing = db.prepare('SELECT id, current_amount FROM goals WHERE id = ?').get(payload.goal_id) as { id: string; current_amount: number } | undefined;
-  if (!existing) throw new Error('Goal not found');
-
-  // existing.current_amount is integer cents; the AI-draft payload amount_to_add is dollars.
-  const newAmount = existing.current_amount + toCents(payload.amount_to_add);
-
-  const result = db.prepare(`
-    UPDATE goals
-    SET current_amount = ?,
-        updated_at = ?
-    WHERE id = ?
-  `).run(newAmount, new Date().toISOString(), payload.goal_id);
-
-  return { changed: result.changes, result: { goal_id: payload.goal_id, new_amount: newAmount } };
-}
-
-function confirmCreateGoal(db: Database.Database, payload: Extract<AdvisorDraftPayload, { kind: 'create_goal' }>): {
-  changed: number;
-  result: unknown;
-} {
-  const now = new Date().toISOString();
-  const id = uuidv4();
-  db.prepare(`
-    INSERT INTO goals (id, name, type, target_amount, current_amount, account_id, is_tax_envelope, created_at, updated_at)
-    VALUES (?, ?, ?, ?, 0, ?, ?, ?, ?)
-  `).run(id, payload.name, payload.type, toCents(payload.target_amount), payload.account_id ?? null, payload.is_tax_envelope ? 1 : 0, now, now);
-
-  return { changed: 1, result: { goal_id: id } };
-}
-
 function confirmRecurring(db: Database.Database, payload: Extract<AdvisorDraftPayload, { kind: 'confirm_recurring' }>): {
   changed: number;
   result: unknown;
@@ -1061,10 +1027,6 @@ export function confirmAdvisorDraft(
         result = confirmBudget(db, draftAction.payload); break;
       case 'update_goal_target':
         result = confirmGoalTarget(db, draftAction.payload); break;
-      case 'allocate_goal_funds':
-        result = confirmAllocateGoalFunds(db, draftAction.payload); break;
-      case 'create_goal':
-        result = confirmCreateGoal(db, draftAction.payload); break;
       case 'confirm_recurring':
         result = confirmRecurring(db, draftAction.payload); break;
       case 'create_budget_group':
