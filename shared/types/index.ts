@@ -600,9 +600,10 @@ export interface ChatMessage {
 }
 
 export interface AiStreamEvent {
-  type: 'chunk' | 'thinking_start' | 'thinking' | 'thinking_end' | 'done' | 'error';
+  type: 'chunk' | 'thinking_start' | 'thinking' | 'thinking_end' | 'tool_use' | 'done' | 'error';
   text?: string;
   message?: string;
+  name?: string;
 }
 
 export type InsightSeverity = 'critical' | 'warning' | 'positive' | 'info';

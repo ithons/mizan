@@ -648,7 +648,8 @@ export const aiApi = {
     signal?: AbortSignal,
     onThinkingStart?: () => void,
     onThinkingChunk?: (text: string) => void,
-    onThinkingEnd?: () => void
+    onThinkingEnd?: () => void,
+    onToolUse?: (name: string) => void
   ): Promise<void> => {
     const res = await fetch('/api/ai/chat', {
       method: 'POST',
@@ -689,6 +690,7 @@ export const aiApi = {
           else if (ev.type === 'thinking_start') onThinkingStart?.();
           else if (ev.type === 'thinking' && ev.text) onThinkingChunk?.(ev.text);
           else if (ev.type === 'thinking_end') onThinkingEnd?.();
+          else if (ev.type === 'tool_use' && ev.name) onToolUse?.(ev.name);
           else if (ev.type === 'done') onDone();
           else if (ev.type === 'error') onError(ev.message ?? 'Unknown error');
         } catch (err) {

@@ -38,6 +38,9 @@ function AssistantMessage({ message, onConfirmDraft, confirming }: {
         {message.thinkingActive && (
           <div className="mb-1.5 animate-pulse text-[13px] italic text-muted">Thinking…</div>
         )}
+        {message.toolActivity && (
+          <div className="mb-1.5 animate-pulse text-[13px] italic text-muted">{message.toolActivity}</div>
+        )}
         {message.thinking && !message.thinkingActive && (
           <details className="mb-1.5">
             <summary className="cursor-pointer list-none text-[12.5px] text-muted-2 transition-colors hover:text-muted">

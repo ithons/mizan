@@ -8,7 +8,15 @@ export interface DisplayMessage extends ChatMessage {
   analysis?: AdvisorAnalysis;
   thinking?: string;
   thinkingActive?: boolean;
+  toolActivity?: string;
 }
+
+// Friendly labels for the read-only DB tools the advisor can call, shown while it queries.
+const TOOL_LABELS: Record<string, string> = {
+  list_transactions: 'Looking through your transactions…',
+  spending_by_category: 'Tallying spending by category…',
+  monthly_cashflow: 'Checking your monthly cash flow…',
+};
 
 // The active conversation id is remembered across reloads so the thread resumes; the
 // messages themselves live on the server (services/conversations.ts).
@@ -137,14 +145,19 @@ export function useAiChat() {
         history,
         (chunkText) => {
           assistantAccum += chunkText;
-          updateAssistant((m) => ({ ...m, content: m.content + chunkText }));
+          // Text is arriving, so any "querying your data" activity is done.
+          updateAssistant((m) => ({ ...m, content: m.content + chunkText, toolActivity: undefined }));
         },
         () => {},
         (errMsg) => { streamErrorMsg = errMsg; },
         controller.signal,
         () => updateAssistant((m) => ({ ...m, thinkingActive: true })),
         (thinkingText) => updateAssistant((m) => ({ ...m, thinking: (m.thinking ?? '') + thinkingText })),
-        () => updateAssistant((m) => ({ ...m, thinkingActive: false }))
+        () => updateAssistant((m) => ({ ...m, thinkingActive: false })),
+        (toolName) => updateAssistant((m) => ({
+          ...m,
+          toolActivity: TOOL_LABELS[toolName] ?? 'Looking things up…',
+        }))
       );
 
       const analysis = await analysisPromise;
