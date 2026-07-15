@@ -1,5 +1,4 @@
 import { Router, Request, Response, NextFunction } from 'express';
-import { v4 as uuidv4 } from 'uuid';
 import { getDb } from '../db/index';
 import { validate } from '../middleware/validate';
 import {
@@ -8,7 +7,14 @@ import {
   MergeAccountSchema,
 } from '../../../shared/schemas';
 import { takeSnapshot } from '../services/snapshot';
-import { toCents, dollarizeFields } from '../services/money';
+import { dollarizeFields } from '../services/money';
+import {
+  createManualAccount,
+  deleteAccount,
+  listAccounts,
+  mergeAccounts,
+  updateAccount,
+} from '../services/accounts';
 
 const router = Router();
 
@@ -21,28 +27,15 @@ function accountToDollars<T extends Record<string, unknown>>(row: T): T {
   return dollarizeFields(row, ACCOUNT_MONEY_FIELDS);
 }
 
-type AccountRow = Record<string, unknown> & {
-  is_manual: number;
-  is_hidden: number;
-  is_liability: number;
-};
+function routeId(value: string | string[] | undefined): string {
+  return Array.isArray(value) ? value[0] : value ?? '';
+}
 
 // GET / - all accounts with current_balance, sorted by sort_order
 router.get('/', (_req: Request, res: Response, next: NextFunction): void => {
   try {
     const db = getDb();
-    const accounts = (db.prepare(`
-      SELECT a.*
-      FROM accounts a
-      ORDER BY a.sort_order ASC, a.created_at ASC
-    `).all() as AccountRow[]).map((a) => accountToDollars({
-      ...a,
-      is_manual: Boolean(a.is_manual),
-      is_hidden: Boolean(a.is_hidden),
-      is_liability: Boolean(a.is_liability),
-    }));
-
-    res.json({ data: accounts });
+    res.json({ data: listAccounts(db).map(accountToDollars) });
   } catch (err) {
     next(err);
   }
@@ -55,51 +48,9 @@ router.post(
   (req: Request, res: Response, next: NextFunction): void => {
     try {
       const db = getDb();
-      const body = req.body as {
-        account_name: string;
-        type: string;
-        institution_name?: string;
-        current_balance: number;
-        currency: string;
-        is_liability?: boolean;
-        color?: string;
-      };
+      const account = createManualAccount(db, req.body);
 
-      const id = uuidv4();
-      const now = new Date().toISOString();
-
-      // Auto-derive liability from type if not explicitly provided
-      const isLiability = body.is_liability ?? (body.type === 'credit');
-
-      // Get next sort_order
-      const maxOrder = db.prepare(
-        'SELECT MAX(sort_order) as max_order FROM accounts'
-      ).get() as { max_order: number | null };
-      const sortOrder = (maxOrder.max_order ?? -1) + 1;
-
-      db.prepare(`
-        INSERT INTO accounts
-          (id, connection_type, institution_name, account_name, type,
-           current_balance, currency, is_manual, is_hidden, is_liability,
-           color, sort_order, created_at, updated_at)
-        VALUES (?, 'manual', ?, ?, ?, ?, ?, 1, 0, ?, ?, ?, ?, ?)
-      `).run(
-        id,
-        body.institution_name,
-        body.account_name,
-        body.type,
-        toCents(body.current_balance),
-        body.currency,
-        isLiability ? 1 : 0,
-        body.color || null,
-        sortOrder,
-        now,
-        now
-      );
-
-      const account = db.prepare('SELECT * FROM accounts WHERE id = ?').get(id) as Record<string, unknown>;
-
-      // Take a fresh snapshot so net worth reflects the new account immediately
+      // Take a fresh snapshot so net worth reflects the new account immediately.
       takeSnapshot();
 
       res.status(201).json({ data: accountToDollars(account) });
@@ -116,103 +67,23 @@ router.patch(
   (req: Request, res: Response, next: NextFunction): void => {
     try {
       const db = getDb();
-      const { id } = req.params;
-      const body = req.body as {
-        account_name?: string;
-        institution_name?: string | null;
-        type?: string;
-        currency?: string;
-        is_liability?: boolean;
-        color?: string | null;
-        is_hidden?: boolean;
-        sort_order?: number;
-        current_balance?: number;
-      };
+      const result = updateAccount(db, routeId(req.params.id), req.body);
 
-      const existing = db.prepare('SELECT * FROM accounts WHERE id = ?').get(id) as
-        | { is_manual: number }
-        | undefined;
-      if (!existing) {
-        res.status(404).json({ error: 'Account not found' });
+      if (!result.ok) {
+        if (result.reason === 'not_found') {
+          res.status(404).json({ error: 'Account not found' });
+        } else {
+          res.status(400).json({ error: 'Only manual accounts can be edited directly' });
+        }
         return;
       }
 
-      // institution_name/currency are provider-sourced and only editable on manual
-      // accounts. `type`/`is_liability` are editable on any account — a synced account's
-      // type is only ever a sync-time guess (see accountClassification.ts), and the user
-      // correcting it is exactly the intended escape hatch for a misclassified account.
-      const manualOnlyFields = [
-        body.institution_name,
-        body.currency,
-      ];
-      if (!existing.is_manual && manualOnlyFields.some((field) => field !== undefined)) {
-        res.status(400).json({ error: 'Only manual accounts can be edited directly' });
-        return;
-      }
-
-      const updates: string[] = [];
-      const values: unknown[] = [];
-
-      if (body.account_name !== undefined) {
-        updates.push('account_name = ?');
-        values.push(body.account_name);
-      }
-      if (body.institution_name !== undefined) {
-        updates.push('institution_name = ?');
-        values.push(body.institution_name);
-      }
-      if (body.type !== undefined) {
-        updates.push('type = ?');
-        values.push(body.type);
-        updates.push('type_source = ?');
-        values.push('manual');
-      }
-      if (body.currency !== undefined) {
-        updates.push('currency = ?');
-        values.push(body.currency);
-      }
-      if (body.is_liability !== undefined) {
-        updates.push('is_liability = ?');
-        values.push(body.is_liability ? 1 : 0);
-      } else if (body.type !== undefined) {
-        updates.push('is_liability = ?');
-        values.push(body.type === 'credit' ? 1 : 0);
-      }
-      if (body.color !== undefined) {
-        updates.push('color = ?');
-        values.push(body.color);
-      }
-      if (body.is_hidden !== undefined) {
-        updates.push('is_hidden = ?');
-        values.push(body.is_hidden ? 1 : 0);
-      }
-      if (body.sort_order !== undefined) {
-        updates.push('sort_order = ?');
-        values.push(body.sort_order);
-      }
-      if (body.current_balance !== undefined) {
-        updates.push('current_balance = ?');
-        values.push(toCents(body.current_balance));
-      }
-
-      if (updates.length === 0) {
-        res.json({ data: accountToDollars(existing as Record<string, unknown>) });
-        return;
-      }
-
-      updates.push('updated_at = ?');
-      values.push(new Date().toISOString());
-      values.push(id);
-
-      db.prepare(`UPDATE accounts SET ${updates.join(', ')} WHERE id = ?`).run(...values);
-
-      // If balance changed, refresh snapshot
-      if (body.current_balance !== undefined) {
+      // If balance changed, refresh the net worth snapshot.
+      if (result.balanceChanged) {
         takeSnapshot();
       }
 
-      const updated = db.prepare('SELECT * FROM accounts WHERE id = ?').get(id) as Record<string, unknown>;
-      res.json({ data: accountToDollars(updated) });
+      res.json({ data: accountToDollars(result.row) });
     } catch (err) {
       next(err);
     }
@@ -231,108 +102,37 @@ router.post(
         sourceAccountId: string;
       };
 
-      if (targetAccountId === sourceAccountId) {
-        res.status(400).json({ error: 'Cannot merge an account into itself' });
-        return;
-      }
-
-      const target = db.prepare('SELECT * FROM accounts WHERE id = ?').get(targetAccountId) as any;
-      const source = db.prepare('SELECT * FROM accounts WHERE id = ?').get(sourceAccountId) as any;
-
-      if (!target || !source) {
-        res.status(404).json({ error: 'One or both accounts not found' });
-        return;
-      }
-
-      const now = new Date().toISOString();
-
-      db.transaction(() => {
-        // Move provider IDs from source to target
-        const providerFields: string[] = [];
-        const providerValues: any[] = [];
-
-        if (source.simplefin_account_id) {
-          providerFields.push('simplefin_account_id = ?');
-          providerValues.push(source.simplefin_account_id);
+      const result = mergeAccounts(db, targetAccountId, sourceAccountId);
+      if (!result.ok) {
+        if (result.reason === 'same_account') {
+          res.status(400).json({ error: 'Cannot merge an account into itself' });
+        } else {
+          res.status(404).json({ error: 'One or both accounts not found' });
         }
-
-        // Update target account connection info to match source
-        db.prepare(`
-          UPDATE accounts
-          SET connection_type = ?,
-              connection_id = ?,
-              ${providerFields.length > 0 ? providerFields.join(', ') + ',' : ''}
-              current_balance = ?,
-              updated_at = ?
-          WHERE id = ?
-        `).run(
-          source.connection_type,
-          source.connection_id,
-          ...providerValues,
-          source.current_balance,
-          now,
-          targetAccountId
-        );
-
-        // Reassign all transactions
-        db.prepare(`
-          UPDATE transactions
-          SET account_id = ?, updated_at = ?
-          WHERE account_id = ?
-        `).run(targetAccountId, now, sourceAccountId);
-
-        // Reassign holdings and investment transactions
-        db.prepare(`
-          UPDATE holdings
-          SET account_id = ?, updated_at = ?
-          WHERE account_id = ?
-        `).run(targetAccountId, now, sourceAccountId);
-
-        db.prepare(`
-          UPDATE investment_transactions
-          SET account_id = ?
-          WHERE account_id = ?
-        `).run(targetAccountId, sourceAccountId);
-
-        // Remove the source account
-        db.prepare('DELETE FROM accounts WHERE id = ?').run(sourceAccountId);
-      })();
+        return;
+      }
 
       takeSnapshot();
-
       res.json({ data: { success: true } });
     } catch (err) {
       next(err);
     }
   }
 );
+
+// DELETE /:id - delete a manual account, or hide a synced one
 router.delete('/:id', (req: Request, res: Response, next: NextFunction): void => {
   try {
     const db = getDb();
-    const { id } = req.params;
+    const result = deleteAccount(db, routeId(req.params.id));
 
-    const account = db.prepare('SELECT * FROM accounts WHERE id = ?').get(id) as
-      | { is_manual: number }
-      | undefined;
-
-    if (!account) {
+    if (!result.ok) {
       res.status(404).json({ error: 'Account not found' });
       return;
     }
 
-    if (account.is_manual) {
-      // Clean up associated transactions before deleting the account
-      db.prepare('DELETE FROM transactions WHERE account_id = ?').run(id);
-      db.prepare('DELETE FROM accounts WHERE id = ?').run(id);
-    } else {
-      db.prepare(
-        'UPDATE accounts SET is_hidden = 1, updated_at = ? WHERE id = ?'
-      ).run(new Date().toISOString(), id);
-    }
-
-    // Refresh net worth snapshot after account removal
+    // Refresh net worth snapshot after account removal.
     takeSnapshot();
-
     res.json({ data: { success: true } });
   } catch (err) {
     next(err);

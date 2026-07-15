@@ -1,0 +1,471 @@
+import type Database from 'better-sqlite3';
+import { v4 as uuidv4 } from 'uuid';
+import { toCents } from './money';
+import { adjustManualAccountBalance } from './manualAccountBalance';
+import { applyMerchantRuleToMatchingTransactions, upsertMerchantRule } from './rules';
+
+// All money here is integer cents (the DB contract). Callers dollarize at the
+// response boundary. Query-string parsing and the resulting 400s stay in the route;
+// these functions take already-typed inputs and own the SQL + business logic.
+
+export type TransactionSortBy = 'date' | 'amount' | 'merchant';
+export type TransactionSortDir = 'asc' | 'desc';
+
+export interface TransactionListFilters {
+  page: number;
+  limit: number;
+  sortBy: TransactionSortBy;
+  sortDir: TransactionSortDir;
+  accountIds: string[];
+  categoryIds: string[];
+  startDate?: string;
+  endDate?: string;
+  search?: string;
+  minAmount?: number; // dollars, as supplied by the client
+  maxAmount?: number; // dollars
+  pending?: boolean;
+  recurring?: boolean;
+  uncategorized?: boolean;
+  reviewStatus?: string;
+  type?: 'income' | 'expense';
+}
+
+export interface TransactionListResult {
+  rows: Record<string, unknown>[];
+  total: number;
+}
+
+function accountExists(db: Database.Database, accountId: string): boolean {
+  return Boolean(db.prepare('SELECT id FROM accounts WHERE id = ?').get(accountId));
+}
+
+function categoryExists(db: Database.Database, categoryId: string): boolean {
+  return Boolean(db.prepare('SELECT id FROM categories WHERE id = ?').get(categoryId));
+}
+
+// Expand each selected category to itself plus all descendant categories, so a filter
+// on a parent category also matches transactions tagged to its children.
+export function expandCategoryIds(db: Database.Database, categoryIds: string[]): string[] {
+  const categories = db.prepare('SELECT id, parent_id FROM categories').all() as Array<{
+    id: string;
+    parent_id: string | null;
+  }>;
+  const childrenByParent = new Map<string, string[]>();
+
+  for (const category of categories) {
+    if (!category.parent_id) continue;
+    const children = childrenByParent.get(category.parent_id) ?? [];
+    children.push(category.id);
+    childrenByParent.set(category.parent_id, children);
+  }
+
+  const expanded = new Set<string>();
+  const addWithDescendants = (categoryId: string): void => {
+    if (expanded.has(categoryId)) return;
+    expanded.add(categoryId);
+
+    for (const childId of childrenByParent.get(categoryId) ?? []) {
+      addWithDescendants(childId);
+    }
+  };
+
+  for (const categoryId of categoryIds) {
+    addWithDescendants(categoryId);
+  }
+
+  return Array.from(expanded);
+}
+
+function transactionOrderBy(sortBy: TransactionSortBy, sortDir: TransactionSortDir): string {
+  const direction = sortDir.toUpperCase();
+
+  switch (sortBy) {
+    case 'amount':
+      return `t.amount ${direction}, t.date DESC, t.created_at DESC`;
+    case 'merchant':
+      return `lower(COALESCE(t.merchant_name, t.original_name, '')) ${direction}, t.date DESC, t.created_at DESC`;
+    case 'date':
+      return `t.date ${direction}, t.created_at ${direction}`;
+  }
+}
+
+export function listTransactions(db: Database.Database, filters: TransactionListFilters): TransactionListResult {
+  const conditions: string[] = [];
+  const params: unknown[] = [];
+
+  if (filters.accountIds.length > 0) {
+    conditions.push(`t.account_id IN (${filters.accountIds.map(() => '?').join(',')})`);
+    params.push(...filters.accountIds);
+  }
+
+  if (filters.categoryIds.length > 0) {
+    const expandedCategoryIds = expandCategoryIds(
+      db,
+      filters.categoryIds.map((id) => id.trim()).filter(Boolean)
+    );
+
+    if (expandedCategoryIds.length > 0) {
+      conditions.push(`t.category_id IN (${expandedCategoryIds.map(() => '?').join(',')})`);
+      params.push(...expandedCategoryIds);
+    }
+  }
+
+  if (filters.startDate) {
+    conditions.push('t.date >= ?');
+    params.push(filters.startDate);
+  }
+  if (filters.endDate) {
+    conditions.push('t.date <= ?');
+    params.push(filters.endDate);
+  }
+  if (filters.search) {
+    conditions.push('(t.merchant_name LIKE ? OR t.original_name LIKE ? OR t.notes LIKE ?)');
+    const like = `%${filters.search}%`;
+    params.push(like, like, like);
+  }
+  if (filters.minAmount !== undefined) {
+    conditions.push('t.amount >= ?');
+    params.push(toCents(filters.minAmount));
+  }
+  if (filters.maxAmount !== undefined) {
+    conditions.push('t.amount <= ?');
+    params.push(toCents(filters.maxAmount));
+  }
+  if (filters.pending !== undefined) {
+    conditions.push('t.pending = ?');
+    params.push(filters.pending ? 1 : 0);
+  }
+  if (filters.recurring !== undefined) {
+    conditions.push(filters.recurring ? 't.recurring_id IS NOT NULL' : 't.recurring_id IS NULL');
+  }
+  if (filters.uncategorized !== undefined) {
+    conditions.push(filters.uncategorized ? 't.category_id IS NULL' : 't.category_id IS NOT NULL');
+  }
+  if (filters.reviewStatus !== undefined) {
+    conditions.push('t.review_status = ?');
+    params.push(filters.reviewStatus);
+  }
+  if (filters.type === 'income') {
+    conditions.push('t.amount > 0');
+  } else if (filters.type === 'expense') {
+    conditions.push('t.amount < 0');
+  }
+
+  const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+  const offset = (filters.page - 1) * filters.limit;
+
+  const countRow = db.prepare(`
+    SELECT COUNT(*) as total
+    FROM transactions t
+    ${where}
+  `).get(...params) as { total: number };
+
+  const rows = db.prepare(`
+    SELECT
+      t.*,
+      c.name AS category_name,
+      c.color AS category_color,
+      c.icon AS category_icon,
+      a.account_name,
+      a.institution_name
+    FROM transactions t
+    LEFT JOIN categories c ON c.id = t.category_id
+    LEFT JOIN accounts a ON a.id = t.account_id
+    ${where}
+    ORDER BY ${transactionOrderBy(filters.sortBy, filters.sortDir)}
+    LIMIT ? OFFSET ?
+  `).all(...params, filters.limit, offset) as Record<string, unknown>[];
+
+  return { rows, total: countRow.total };
+}
+
+export function getTransactionById(db: Database.Database, id: string): Record<string, unknown> | undefined {
+  return db.prepare(`
+    SELECT
+      t.*,
+      c.name AS category_name,
+      c.color AS category_color,
+      c.icon AS category_icon,
+      a.account_name,
+      a.institution_name
+    FROM transactions t
+    LEFT JOIN categories c ON c.id = t.category_id
+    LEFT JOIN accounts a ON a.id = t.account_id
+    WHERE t.id = ?
+  `).get(id) as Record<string, unknown> | undefined;
+}
+
+export interface CreateManualTransactionInput {
+  account_id: string;
+  date: string;
+  amount: number; // dollars
+  merchant_name?: string;
+  original_name: string;
+  category_id?: string;
+  notes?: string;
+}
+
+export type CreateManualTransactionResult =
+  | { ok: true; row: Record<string, unknown>; balanceChanged: boolean }
+  | { ok: false; reason: 'account_not_found' | 'category_not_found' };
+
+export function createManualTransaction(
+  db: Database.Database,
+  input: CreateManualTransactionInput
+): CreateManualTransactionResult {
+  const id = uuidv4();
+  const now = new Date().toISOString();
+  const categoryId = input.category_id || null;
+  const amountCents = toCents(input.amount);
+
+  if (!accountExists(db, input.account_id)) {
+    return { ok: false, reason: 'account_not_found' };
+  }
+  if (categoryId && !categoryExists(db, categoryId)) {
+    return { ok: false, reason: 'category_not_found' };
+  }
+
+  let balanceChanged = false;
+  const insertTransaction = db.transaction(() => {
+    db.prepare(`
+      INSERT INTO transactions
+        (id, account_id, date, amount, merchant_name, original_name,
+         category_id, pending, notes, is_manual, source_type, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, 1, 'manual', ?, ?)
+    `).run(
+      id,
+      input.account_id,
+      input.date,
+      amountCents,
+      input.merchant_name || null,
+      input.original_name,
+      categoryId,
+      input.notes || null,
+      now,
+      now
+    );
+
+    balanceChanged = adjustManualAccountBalance(db, input.account_id, amountCents, now);
+  });
+
+  insertTransaction();
+
+  const row = db.prepare('SELECT * FROM transactions WHERE id = ?').get(id) as Record<string, unknown>;
+  return { ok: true, row, balanceChanged };
+}
+
+export interface UpdateTransactionInput {
+  category_id?: string | null;
+  notes?: string | null;
+  date?: string;
+  amount?: number; // dollars
+  merchant_name?: string | null;
+}
+
+export interface TransactionCategorization {
+  rule_id: string | null;
+  pattern: string | null;
+  applied: number;
+}
+
+export type UpdateTransactionResult =
+  | { ok: true; row: Record<string, unknown>; balanceChanged: boolean; categorization: TransactionCategorization }
+  | { ok: false; reason: 'not_found' | 'category_not_found' };
+
+export function updateTransaction(
+  db: Database.Database,
+  id: string,
+  input: UpdateTransactionInput
+): UpdateTransactionResult {
+  const existing = db.prepare('SELECT * FROM transactions WHERE id = ?').get(id) as
+    | {
+        account_id: string;
+        amount: number;
+        category_id: string | null;
+        is_manual: number;
+        merchant_name: string | null;
+        original_name: string;
+      }
+    | undefined;
+
+  if (!existing) {
+    return { ok: false, reason: 'not_found' };
+  }
+
+  const categoryId = input.category_id || null;
+  if (input.category_id !== undefined && categoryId && !categoryExists(db, categoryId)) {
+    return { ok: false, reason: 'category_not_found' };
+  }
+
+  // input.amount arrives in dollars; convert once and reuse for the column write and
+  // the manual-account rebalance (existing.amount is already cents).
+  const amountCents = input.amount !== undefined ? toCents(input.amount) : undefined;
+
+  const updates: string[] = [];
+  const values: unknown[] = [];
+
+  if (input.category_id !== undefined) {
+    updates.push('category_id = ?');
+    values.push(categoryId);
+    if (categoryId) {
+      updates.push("review_status = 'reviewed'");
+    }
+  }
+  if (input.notes !== undefined) {
+    updates.push('notes = ?');
+    values.push(input.notes);
+  }
+  if (input.date !== undefined) {
+    updates.push('date = ?');
+    values.push(input.date);
+  }
+  if (input.amount !== undefined) {
+    updates.push('amount = ?');
+    values.push(amountCents);
+  }
+  if (input.merchant_name !== undefined) {
+    updates.push('merchant_name = ?');
+    values.push(input.merchant_name);
+  }
+
+  const now = new Date().toISOString();
+  updates.push('updated_at = ?');
+  values.push(now);
+  values.push(id);
+
+  let balanceChanged = false;
+  if (updates.length > 1) {
+    const updateTransactionTx = db.transaction(() => {
+      db.prepare(`UPDATE transactions SET ${updates.join(', ')} WHERE id = ?`).run(...values);
+
+      if (amountCents !== undefined && existing.is_manual) {
+        balanceChanged = adjustManualAccountBalance(
+          db,
+          existing.account_id,
+          amountCents - existing.amount,
+          now
+        );
+      }
+    });
+
+    updateTransactionTx();
+  }
+
+  // If the category changed, upsert a merchant rule and apply it to matching rows.
+  let categorization: TransactionCategorization = { rule_id: null, pattern: null, applied: 0 };
+  if (input.category_id !== undefined && categoryId) {
+    const merchantName = existing.merchant_name || existing.original_name;
+    const ruleId = upsertMerchantRule(db, merchantName, categoryId, now);
+    const result = applyMerchantRuleToMatchingTransactions(db, merchantName, categoryId, now);
+    categorization = { rule_id: ruleId, pattern: merchantName, applied: result.updated };
+  }
+
+  const row = db.prepare('SELECT * FROM transactions WHERE id = ?').get(id) as Record<string, unknown>;
+  return { ok: true, row, balanceChanged, categorization };
+}
+
+export type DeleteTransactionResult =
+  | { ok: true; balanceChanged: boolean }
+  | { ok: false; reason: 'not_found' | 'not_manual' };
+
+export function deleteTransaction(db: Database.Database, id: string): DeleteTransactionResult {
+  const txn = db.prepare('SELECT account_id, amount, is_manual FROM transactions WHERE id = ?').get(id) as
+    | { account_id: string; amount: number; is_manual: number }
+    | undefined;
+
+  if (!txn) {
+    return { ok: false, reason: 'not_found' };
+  }
+  if (!txn.is_manual) {
+    return { ok: false, reason: 'not_manual' };
+  }
+
+  let balanceChanged = false;
+  const deleteTransactionTx = db.transaction(() => {
+    db.prepare('DELETE FROM transactions WHERE id = ?').run(id);
+    balanceChanged = adjustManualAccountBalance(db, txn.account_id, -txn.amount, new Date().toISOString());
+  });
+
+  deleteTransactionTx();
+  return { ok: true, balanceChanged };
+}
+
+export function setTransactionReviewStatus(
+  db: Database.Database,
+  id: string,
+  status: 'open' | 'reviewed' | 'dismissed'
+): Record<string, unknown> | null {
+  const now = new Date().toISOString();
+  const result = db.prepare(`
+    UPDATE transactions
+    SET review_status = ?,
+        updated_at = ?
+    WHERE id = ?
+  `).run(status, now, id);
+
+  if (result.changes === 0) {
+    return null;
+  }
+
+  return db.prepare('SELECT * FROM transactions WHERE id = ?').get(id) as Record<string, unknown>;
+}
+
+export type BulkCategorizeResult =
+  | { ok: true; updated: number }
+  | { ok: false; reason: 'category_not_found' | 'missing_transactions' };
+
+export function bulkCategorizeTransactions(
+  db: Database.Database,
+  ids: string[],
+  categoryId: string
+): BulkCategorizeResult {
+  const transactionIds = Array.from(new Set(ids));
+
+  if (!categoryExists(db, categoryId)) {
+    return { ok: false, reason: 'category_not_found' };
+  }
+
+  const placeholders = transactionIds.map(() => '?').join(',');
+  const now = new Date().toISOString();
+
+  const updateCategories = db.transaction(() => {
+    const selectedTransactions = db.prepare(`
+      SELECT id, merchant_name, original_name
+      FROM transactions
+      WHERE id IN (${placeholders})
+    `).all(...transactionIds) as Array<{
+      id: string;
+      merchant_name: string | null;
+      original_name: string;
+    }>;
+
+    if (selectedTransactions.length !== transactionIds.length) {
+      throw new Error('MISSING_TRANSACTIONS');
+    }
+
+    db.prepare(
+      `UPDATE transactions SET category_id = ?, review_status = 'reviewed', updated_at = ? WHERE id IN (${placeholders})`
+    ).run(categoryId, now, ...transactionIds);
+
+    const patterns = new Set(
+      selectedTransactions
+        .map((transaction) => transaction.merchant_name || transaction.original_name)
+        .filter((pattern) => pattern.length > 0)
+    );
+
+    for (const pattern of patterns) {
+      upsertMerchantRule(db, pattern, categoryId, now);
+    }
+  });
+
+  try {
+    updateCategories();
+  } catch (err) {
+    if ((err as Error).message === 'MISSING_TRANSACTIONS') {
+      return { ok: false, reason: 'missing_transactions' };
+    }
+    throw err;
+  }
+
+  return { ok: true, updated: transactionIds.length };
+}
