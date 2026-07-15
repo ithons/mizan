@@ -9,6 +9,7 @@ import {
 } from '../../../shared/schemas';
 import {
   applyMerchantRulesToExistingTransactions,
+  applyMerchantRuleToMatchingTransactions,
   recategorizeAll,
   suggestMerchantRules,
   upsertMerchantRule,
@@ -89,6 +90,7 @@ router.post(
         pattern: string;
         category_id: string;
         apply_existing: boolean;
+        apply_existing_overwrite: boolean;
       };
 
       if (!categoryExists(db, body.category_id)) {
@@ -98,9 +100,16 @@ router.post(
 
       const now = new Date().toISOString();
       const id = upsertMerchantRule(db, body.pattern, body.category_id, now);
-      const applied = body.apply_existing
-        ? applyMerchantRulesToExistingTransactions(db, { onlyUncategorized: true }).updated
-        : 0;
+      let applied = 0;
+      if (body.apply_existing_overwrite) {
+        // Re-label every past transaction matching this rule (not just uncategorized),
+        // leaving hand-categorized rows alone.
+        applied = applyMerchantRuleToMatchingTransactions(db, body.pattern, body.category_id, now, {
+          overwrite: true,
+        }).updated;
+      } else if (body.apply_existing) {
+        applied = applyMerchantRulesToExistingTransactions(db, { onlyUncategorized: true }).updated;
+      }
 
       res.status(201).json({ data: { rule: id ? getRule(db, id) : null, applied } });
     } catch (err) {

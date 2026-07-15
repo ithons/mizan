@@ -253,12 +253,18 @@ export const categoriesApi = {
 export const rulesApi = {
   list: () => apiFetch<MerchantRule[]>('/api/rules'),
   suggestions: () => apiFetch<MerchantRuleSuggestion[]>('/api/rules/suggestions'),
-  create: (body: { pattern: string; category_id: string; apply_existing?: boolean }) =>
+  create: (body: {
+    pattern: string;
+    category_id: string;
+    apply_existing?: boolean;
+    apply_existing_overwrite?: boolean;
+  }) =>
     apiFetch<{ rule: MerchantRule | null; applied: number }>('/api/rules', {
       method: 'POST',
       body: JSON.stringify({
         ...body,
         apply_existing: body.apply_existing ?? true,
+        apply_existing_overwrite: body.apply_existing_overwrite ?? false,
       }),
     }),
   update: (id: string, body: Partial<MerchantRule>) =>

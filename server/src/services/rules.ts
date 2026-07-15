@@ -233,15 +233,21 @@ export function applyMerchantRuleToMatchingTransactions(
   db: Database.Database,
   pattern: string,
   categoryId: string,
-  now = new Date().toISOString()
+  now = new Date().toISOString(),
+  options: { overwrite?: boolean } = {}
 ): RuleApplicationResult {
   const normalizedPattern = pattern.trim();
   if (!normalizedPattern) return { updated: 0 };
 
+  // Default: fill only uncategorized rows. overwrite: also re-label rows already in a
+  // different category, but never ones the user categorized by hand.
+  const scanWhere = options.overwrite ? 'WHERE manually_categorized = 0' : 'WHERE category_id IS NULL';
+  const guard = options.overwrite ? 'AND manually_categorized = 0' : 'AND category_id IS NULL';
+
   const transactions = db.prepare(`
     SELECT id, merchant_name, original_name, category_id
     FROM transactions
-    WHERE category_id IS NULL
+    ${scanWhere}
   `).all() as TransactionRuleCandidate[];
 
   const update = db.prepare(`
@@ -250,12 +256,13 @@ export function applyMerchantRuleToMatchingTransactions(
         review_status = 'reviewed',
         updated_at = ?
     WHERE id = ?
-      AND category_id IS NULL
+      ${guard}
   `);
 
   let updated = 0;
   for (const transaction of transactions) {
     if (!merchantMatchesRulePattern(transactionMerchantName(transaction), normalizedPattern)) continue;
+    if (options.overwrite && transaction.category_id === categoryId) continue; // already correct
     const result = update.run(categoryId, now, transaction.id);
     updated += result.changes;
   }

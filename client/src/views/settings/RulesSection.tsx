@@ -13,6 +13,7 @@ export function RulesSection() {
   const { addToast } = useAppStore();
   const [pattern, setPattern] = useState('');
   const [categoryId, setCategoryId] = useState('');
+  const [applyToAll, setApplyToAll] = useState(false);
 
   const { data: rules = [], isLoading: rulesLoading } = useQuery({
     queryKey: ['rules'],
@@ -37,11 +38,13 @@ export function RulesSection() {
       pattern,
       category_id: categoryId,
       apply_existing: true,
+      apply_existing_overwrite: applyToAll,
     }),
     onSuccess: (result) => {
       invalidateFinancialData(qc);
       setPattern('');
       setCategoryId('');
+      setApplyToAll(false);
       addToast({
         type: 'success',
         message: result.applied > 0
@@ -143,6 +146,16 @@ export function RulesSection() {
           {createMutation.isPending ? 'Adding…' : 'Add'}
         </InkButton>
       </div>
+
+      <label className="flex cursor-pointer items-center gap-2 text-xs text-muted">
+        <input
+          type="checkbox"
+          checked={applyToAll}
+          onChange={(e) => setApplyToAll(e.target.checked)}
+          className="h-3.5 w-3.5 accent-sage"
+        />
+        Also re-label all past transactions matching this rule (keeps ones you categorized by hand)
+      </label>
 
       {selectedCategory && (
         <p className="text-xs text-muted">

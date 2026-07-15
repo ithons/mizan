@@ -135,6 +135,9 @@ export const CreateMerchantRuleSchema = z.object({
   pattern: z.string().min(1),
   category_id: z.string().min(1),
   apply_existing: z.boolean().default(true),
+  // When true, re-label ALL past transactions matching this rule (except ones categorized
+  // by hand), not just uncategorized ones.
+  apply_existing_overwrite: z.boolean().default(false),
 });
 
 export const UpdateMerchantRuleSchema = z.object({

@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import Database from 'better-sqlite3';
-import { recategorizeAll } from '../server/src/services/rules';
+import { recategorizeAll, applyMerchantRuleToMatchingTransactions } from '../server/src/services/rules';
 
 function setup(): Database.Database {
   const db = new Database(':memory:');
@@ -38,4 +38,28 @@ test('recategorizeAll never overwrites a manually categorized row', (t) => {
   recategorizeAll(db);
   const t2 = db.prepare("SELECT category_id FROM transactions WHERE id = 't2'").get() as { category_id: string };
   assert.equal(t2.category_id, 'cat_manual'); // preserved despite matching the rule
+});
+
+test('applyMerchantRuleToMatchingTransactions with overwrite re-labels past non-manual rows', (t) => {
+  const db = setup();
+  t.after(() => db.close());
+  const result = applyMerchantRuleToMatchingTransactions(db, 'STARBUCKS', 'cat_coffee', '2026-02-01', {
+    overwrite: true,
+  });
+  const cat = (id: string) =>
+    (db.prepare('SELECT category_id FROM transactions WHERE id = ?').get(id) as { category_id: string | null }).category_id;
+  assert.equal(cat('t1'), 'cat_coffee'); // was cat_wrong, relabeled
+  assert.equal(cat('t3'), 'cat_coffee'); // was null, filled
+  assert.equal(cat('t2'), 'cat_manual'); // manual, untouched
+  assert.equal(result.updated, 2); // t1 + t3 (t2 skipped, and none already correct)
+});
+
+test('applyMerchantRuleToMatchingTransactions without overwrite only fills uncategorized', (t) => {
+  const db = setup();
+  t.after(() => db.close());
+  applyMerchantRuleToMatchingTransactions(db, 'STARBUCKS', 'cat_coffee', '2026-02-01');
+  const cat = (id: string) =>
+    (db.prepare('SELECT category_id FROM transactions WHERE id = ?').get(id) as { category_id: string | null }).category_id;
+  assert.equal(cat('t1'), 'cat_wrong'); // already categorized -> left alone
+  assert.equal(cat('t3'), 'cat_coffee'); // null -> filled
 });
