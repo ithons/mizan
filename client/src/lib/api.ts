@@ -20,15 +20,8 @@ import type {
   SyncRun,
   SyncRunDetail,
   CashflowReport,
-  ReportDrilldown,
-  ReportEvidenceDrilldown,
-  ReportEvidenceKind,
-  ReportExcludedFlowSummary,
-  ReportNetWorthEvidence,
   ReportComparisonMode,
-  ReportSummary,
   SpendingReport,
-  NetWorthHistory,
   CredentialStatus,
   Holding,
   HoldingHistoryPoint,
@@ -415,13 +408,6 @@ export interface ReportParams {
 }
 
 export const reportsApi = {
-  summary: (params?: ReportParams) => {
-    const q = new URLSearchParams();
-    if (params?.startDate) q.set('startDate', params.startDate);
-    if (params?.endDate) q.set('endDate', params.endDate);
-    if (params?.comparison) q.set('comparison', params.comparison);
-    return apiFetch<ReportSummary>(`/api/reports/summary?${q.toString()}`);
-  },
   cashflow: (params?: ReportParams) => {
     const q = new URLSearchParams();
     if (params?.startDate) q.set('startDate', params.startDate);
@@ -435,48 +421,6 @@ export const reportsApi = {
     if (params?.month) q.set('month', params.month);
     return apiFetch<SpendingReport>(`/api/reports/spending?${q.toString()}`);
   },
-  income: (params?: ReportParams) => {
-    const q = new URLSearchParams();
-    if (params?.startDate) q.set('startDate', params.startDate);
-    if (params?.endDate) q.set('endDate', params.endDate);
-    if (params?.month) q.set('month', params.month);
-    return apiFetch<SpendingReport>(`/api/reports/income?${q.toString()}`);
-  },
-  trends: (params?: ReportParams & { categoryIds?: string[] }) => {
-    const q = new URLSearchParams();
-    if (params?.startDate) q.set('startDate', params.startDate);
-    if (params?.endDate) q.set('endDate', params.endDate);
-    if (params?.categoryIds?.length) q.set('categoryIds', params.categoryIds.join(','));
-    return apiFetch<{ months: string[]; series: Array<{ category_id: string; category_name: string; color?: string | null; values: number[] }> }>(`/api/reports/trends?${q.toString()}`);
-  },
-  drilldown: (params: ReportParams & { kind: 'spending' | 'income'; categoryId: string }) => {
-    const q = new URLSearchParams();
-    q.set('kind', params.kind);
-    q.set('categoryId', params.categoryId);
-    if (params.startDate) q.set('startDate', params.startDate);
-    if (params.endDate) q.set('endDate', params.endDate);
-    return apiFetch<ReportDrilldown>(`/api/reports/drilldown?${q.toString()}`);
-  },
-  evidence: (params: ReportParams & {
-    kind: ReportEvidenceKind;
-    month?: string;
-    flowType?: ReportExcludedFlowSummary['flow_type'];
-  }) => {
-    const q = new URLSearchParams();
-    q.set('kind', params.kind);
-    if (params.month) q.set('month', params.month);
-    if (params.flowType) q.set('flowType', params.flowType);
-    if (params.startDate) q.set('startDate', params.startDate);
-    if (params.endDate) q.set('endDate', params.endDate);
-    return apiFetch<ReportEvidenceDrilldown>(`/api/reports/evidence?${q.toString()}`);
-  },
-  netWorthEvidence: (snapshotId: string) => {
-    const q = new URLSearchParams();
-    q.set('snapshotId', snapshotId);
-    return apiFetch<ReportNetWorthEvidence>(`/api/reports/networth/evidence?${q.toString()}`);
-  },
-  networth: (params?: { months?: number }) =>
-    apiFetch<NetWorthHistory>(`/api/reports/networth${params?.months ? `?months=${params.months}` : ''}`),
   investments: (params?: ReportParams) => {
     const q = new URLSearchParams();
     if (params?.startDate) q.set('startDate', params.startDate);

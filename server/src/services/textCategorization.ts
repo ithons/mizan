@@ -1,5 +1,5 @@
 // Best-effort local categorizer for providers (SimpleFIN, Coinbase) that don't supply
-// a category themselves, unlike Plaid's personal_finance_category. Rules are checked in
+// a category themselves. Rules are checked in
 // order; the first match wins, so more specific multi-word patterns are listed before
 // generic single-word ones that would otherwise shadow them (e.g. "uber eats" before "uber").
 interface CategoryRule {

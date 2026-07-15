@@ -977,10 +977,6 @@ export interface ReportNetWorthEvidence {
   accounts: ReportNetWorthEvidenceAccount[];
 }
 
-export interface NetWorthHistory {
-  snapshots: NetWorthSnapshot[];
-}
-
 export interface CredentialStatus {
   coinbase: boolean;
   coinbaseFromEnv: boolean;

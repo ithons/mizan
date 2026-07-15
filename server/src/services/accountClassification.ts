@@ -2,7 +2,7 @@ import type Database from 'better-sqlite3';
 import type { AccountType } from '../../../shared/types';
 
 // Best-effort guess only, run at first insert for a new SimpleFIN account. Institutions
-// don't expose a structured type/subtype the way Plaid did, so this is a name/org
+// don't expose a structured type/subtype, so this is a name/org
 // substring heuristic — it is not the ground truth. A user can always override the
 // result via PATCH /api/accounts/:id, which marks the account 'manual' so neither this
 // function nor the reclassification backfill below will ever touch it again.
