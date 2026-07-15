@@ -273,6 +273,8 @@ export const rulesApi = {
         only_uncategorized: body.only_uncategorized ?? true,
       }),
     }),
+  recategorize: () =>
+    apiFetch<{ updated: number }>('/api/rules/recategorize', { method: 'POST' }),
   delete: (id: string) =>
     apiFetch<void>(`/api/rules/${id}`, { method: 'DELETE' }),
 };

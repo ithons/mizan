@@ -93,6 +93,20 @@ export function RulesSection() {
     onError: (err: Error) => addToast({ type: 'error', message: err.message }),
   });
 
+  const recategorizeMutation = useMutation({
+    mutationFn: () => rulesApi.recategorize(),
+    onSuccess: (result) => {
+      invalidateFinancialData(qc);
+      addToast({
+        type: 'success',
+        message: result.updated > 0
+          ? `Re-checked all transactions · ${result.updated} recategorized`
+          : 'Re-checked all transactions · nothing changed',
+      });
+    },
+    onError: (err: Error) => addToast({ type: 'error', message: err.message }),
+  });
+
   const saveRule = () => {
     if (!pattern.trim()) {
       addToast({ type: 'error', message: 'Pattern is required' });
@@ -185,9 +199,17 @@ export function RulesSection() {
         <p className="text-xs text-muted">
           {rules.length} rule{rules.length === 1 ? '' : 's'}
         </p>
-        <TextButton onClick={() => applyMutation.mutate()} disabled={applyMutation.isPending || rules.length === 0}>
-          {applyMutation.isPending ? 'Applying…' : 'Apply to uncategorized'}
-        </TextButton>
+        <div className="flex items-center gap-4">
+          <TextButton
+            onClick={() => recategorizeMutation.mutate()}
+            disabled={recategorizeMutation.isPending}
+          >
+            {recategorizeMutation.isPending ? 'Re-checking…' : 'Re-check all transactions'}
+          </TextButton>
+          <TextButton onClick={() => applyMutation.mutate()} disabled={applyMutation.isPending || rules.length === 0}>
+            {applyMutation.isPending ? 'Applying…' : 'Apply to uncategorized'}
+          </TextButton>
+        </div>
       </div>
 
       <div>

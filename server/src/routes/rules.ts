@@ -9,6 +9,7 @@ import {
 } from '../../../shared/schemas';
 import {
   applyMerchantRulesToExistingTransactions,
+  recategorizeAll,
   suggestMerchantRules,
   upsertMerchantRule,
 } from '../services/rules';
@@ -179,6 +180,16 @@ router.post(
     }
   }
 );
+
+// POST /recategorize - re-run rules + text heuristic over ALL transactions, preserving
+// rows the user categorized by hand
+router.post('/recategorize', (_req: Request, res: Response, next: NextFunction): void => {
+  try {
+    res.json({ data: recategorizeAll(getDb()) });
+  } catch (err) {
+    next(err);
+  }
+});
 
 // DELETE /:id - delete rule
 router.delete('/:id', (req: Request, res: Response, next: NextFunction): void => {

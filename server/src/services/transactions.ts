@@ -310,6 +310,10 @@ export function updateTransaction(
     if (categoryId) {
       updates.push("review_status = 'reviewed'");
     }
+    // Mark (or unmark) this as a deliberate manual choice so a full re-categorization
+    // pass never overwrites it.
+    updates.push('manually_categorized = ?');
+    values.push(categoryId ? 1 : 0);
   }
   if (input.notes !== undefined) {
     updates.push('notes = ?');
@@ -444,7 +448,7 @@ export function bulkCategorizeTransactions(
     }
 
     db.prepare(
-      `UPDATE transactions SET category_id = ?, review_status = 'reviewed', updated_at = ? WHERE id IN (${placeholders})`
+      `UPDATE transactions SET category_id = ?, review_status = 'reviewed', manually_categorized = 1, updated_at = ? WHERE id IN (${placeholders})`
     ).run(categoryId, now, ...transactionIds);
 
     const patterns = new Set(

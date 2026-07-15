@@ -125,7 +125,7 @@ export function applyMerchantRulesToTransaction(
 
 export function applyMerchantRulesToExistingTransactions(
   db: Database.Database,
-  options: { onlyUncategorized?: boolean } = {}
+  options: { onlyUncategorized?: boolean; skipManual?: boolean } = {}
 ): RuleApplicationResult {
   const onlyUncategorized = options.onlyUncategorized ?? true;
   const rules = db.prepare(
@@ -134,7 +134,10 @@ export function applyMerchantRulesToExistingTransactions(
 
   if (rules.length === 0) return { updated: 0 };
 
-  const conditions = onlyUncategorized ? 'WHERE category_id IS NULL' : '';
+  const clauses: string[] = [];
+  if (onlyUncategorized) clauses.push('category_id IS NULL');
+  if (options.skipManual) clauses.push('manually_categorized = 0');
+  const conditions = clauses.length > 0 ? `WHERE ${clauses.join(' AND ')}` : '';
   const transactions = db.prepare(`
     SELECT id, merchant_name, original_name, category_id
     FROM transactions
@@ -184,6 +187,36 @@ export function autoCategorizeTransactions(db: Database.Database): RuleApplicati
   const update = db.prepare(
     'UPDATE transactions SET category_id = ?, updated_at = ? WHERE id = ?'
   );
+
+  let heuristicUpdated = 0;
+  for (const transaction of remaining) {
+    const categoryId = guessCategoryFromText(transaction.merchant_name, transaction.original_name);
+    if (!categoryId) continue;
+    update.run(categoryId, now, transaction.id);
+    heuristicUpdated++;
+  }
+
+  return { updated: ruleResult.updated + heuristicUpdated };
+}
+
+// Full "re-check all transactions" pass: re-applies every merchant rule and then the
+// text heuristic across the whole ledger, but never touches rows the user categorized by
+// hand (manually_categorized = 1). Rule/heuristic categorizations can change; deliberate
+// manual choices are preserved.
+export function recategorizeAll(db: Database.Database): RuleApplicationResult {
+  const ruleResult = applyMerchantRulesToExistingTransactions(db, {
+    onlyUncategorized: false,
+    skipManual: true,
+  });
+
+  const remaining = db.prepare(`
+    SELECT id, merchant_name, original_name
+    FROM transactions
+    WHERE category_id IS NULL AND manually_categorized = 0
+  `).all() as Array<{ id: string; merchant_name: string | null; original_name: string }>;
+
+  const now = new Date().toISOString();
+  const update = db.prepare('UPDATE transactions SET category_id = ?, updated_at = ? WHERE id = ?');
 
   let heuristicUpdated = 0;
   for (const transaction of remaining) {
