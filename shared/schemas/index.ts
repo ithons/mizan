@@ -197,3 +197,56 @@ export const CsvImportMappingSchema = z.object({
   dateFormat: z.string().optional(),
   amountNegate: z.boolean().default(false),
 });
+
+// ─── Advisor drafts (trust boundary for LLM-authored actions) ────────────────
+// The background AI worker parses raw JSON straight out of the model. These
+// schemas are the boundary: every draft is validated against them before it is
+// stored or auto-applied, so a malformed or hallucinated payload is rejected
+// rather than best-effort written to the DB. Money fields (amount/target_amount/
+// manual_cost_basis) are DOLLARS here — confirm handlers convert to integer cents.
+const id = z.string().min(1);
+const money = z.number().finite();
+
+export const AdvisorDraftPayloadSchema = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('create_merchant_rule'), pattern: z.string().min(1), category_id: id, apply_existing: z.boolean() }),
+  z.object({ kind: z.literal('categorize_transaction'), transaction_id: id, category_id: id }),
+  z.object({ kind: z.literal('update_budget'), category_id: id, amount: money, period: z.literal('monthly'), rollover: z.boolean() }),
+  z.object({ kind: z.literal('update_goal_target'), goal_id: id, target_amount: money }),
+  z.object({ kind: z.literal('confirm_recurring'), recurring_id: id }),
+  z.object({ kind: z.literal('create_budget_group'), name: z.string().min(1), color: z.string().nullable().optional() }),
+  z.object({ kind: z.literal('rename_budget_group'), group_id: id, name: z.string().min(1) }),
+  z.object({ kind: z.literal('assign_category_to_budget_group'), group_id: id, category_id: id }),
+  z.object({
+    kind: z.literal('create_recurring_adjustment'),
+    recurring_id: id,
+    original_date: z.string().min(1),
+    action: z.enum(['skip', 'snooze', 'adjust']),
+    adjusted_date: z.string().nullable().optional(),
+    adjusted_amount: money.nullable().optional(),
+    note: z.string().nullable().optional(),
+  }),
+  z.object({ kind: z.literal('set_manual_cost_basis'), holding_id: id, manual_cost_basis: money.nullable(), note: z.string().nullable().optional() }),
+  z.object({ kind: z.literal('set_sector_metadata'), security_id: id, sector: z.string().nullable(), sector_source: z.string().nullable().optional() }),
+]);
+
+// Top-level draft object as emitted by the worker LLM. label/summary/route/changes/
+// citations are display-only, so they're validated loosely; the payload carries
+// everything that mutates the DB, so it's validated strictly. The refinement rejects
+// any draft whose top-level kind disagrees with its payload kind (confirmAdvisorDraft
+// also enforces this, but rejecting here keeps a mismatched draft out of the DB).
+export const AiWorkerDraftSchema = z
+  .object({
+    kind: z.string().min(1),
+    label: z.string().min(1),
+    summary: z.string().min(1),
+    route: z.string().optional(),
+    confidence: z.number().min(0).max(1).optional(),
+    payload: AdvisorDraftPayloadSchema,
+    changes: z.array(z.object({
+      field: z.string(),
+      before: z.union([z.string(), z.number(), z.boolean(), z.null()]),
+      after: z.union([z.string(), z.number(), z.boolean(), z.null()]),
+    })).optional().default([]),
+    citations: z.array(z.unknown()).optional().default([]),
+  })
+  .refine((d) => d.kind === d.payload.kind, { message: 'draft.kind must match payload.kind' });

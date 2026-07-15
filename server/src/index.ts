@@ -34,6 +34,11 @@ import aiRouter from './routes/ai';
 
 const PORT = parseInt(process.env.PORT || '3001', 10);
 const IS_PROD = process.env.NODE_ENV === 'production';
+// Single-user local app with no auth layer: bind to loopback so the API (and all the
+// financial data behind it) isn't reachable from the LAN by default. Set MIZAN_HOST to
+// 0.0.0.0 or a specific interface to deliberately expose it beyond this machine.
+const HOST = process.env.MIZAN_HOST || '127.0.0.1';
+const HOST_IS_LOOPBACK = HOST === '127.0.0.1' || HOST === 'localhost' || HOST === '::1';
 
 async function main() {
   // 1. Run DB migrations
@@ -123,8 +128,11 @@ async function main() {
   app.use(errorHandler);
 
   const announce = () => console.log(`\n  Mizān  →  http://localhost:${PORT}\n`);
+  if (IS_PROD && !HOST_IS_LOOPBACK) {
+    console.log(`[startup] MIZAN_HOST=${HOST} — binding beyond loopback. The app has no auth middleware, so anything that can reach this host/port can read/write your financial data.`);
+  }
   const server = IS_PROD
-    ? app.listen(PORT, '0.0.0.0', announce)
+    ? app.listen(PORT, HOST, announce)
     : ViteExpress.listen(app, PORT, announce);
 
   // Startup sync is opt-in because it calls external providers. Gated on staleness

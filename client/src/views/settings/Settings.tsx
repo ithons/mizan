@@ -13,7 +13,7 @@ import { DataSection } from './DataSection';
 
 const AUTO_APPLY_PREFERENCE_KEY = 'advisor_auto_apply_high_confidence';
 
-type PanelId = 'simplefin' | 'coinbase' | 'import' | 'categories' | null;
+type PanelId = 'simplefin' | 'coinbase' | 'import' | 'categories' | 'ai_disclosure' | null;
 
 function SettingsRow({
   title,
@@ -190,6 +190,35 @@ export function Settings() {
               aiContext?.configured ? <span className="text-sage-deep">Set</span> : <span className="text-muted-2">Not set</span>
             }
           />
+          {aiContext?.configured && (
+            <>
+              <SettingsRow
+                title="What Mizān sends to Anthropic"
+                sub="AI is enabled · review exactly what leaves your machine"
+                trailing={<span className="text-muted">{openPanel === 'ai_disclosure' ? 'Hide' : 'Review →'}</span>}
+                onClick={() => toggle('ai_disclosure')}
+              />
+              {openPanel === 'ai_disclosure' && (
+                <ExpandedPanel>
+                  <div className="space-y-3 text-[13.5px] leading-relaxed text-muted">
+                    <p>
+                      Because <span className="text-ink">ANTHROPIC_API_KEY</span> is set, Mizān sends the financial
+                      snapshot below to Anthropic's API in two cases: every time you send a message in Advisor, and
+                      automatically after every sync, when the background worker proposes drafts. Nothing is sent when
+                      no key is configured.
+                    </p>
+                    <p>
+                      Each sync also fetches crypto spot prices from Coinbase. That request carries no personal data.
+                    </p>
+                    <p className="text-ink">This is the exact snapshot, regenerated live:</p>
+                    <pre className="max-h-80 overflow-auto whitespace-pre-wrap rounded-lg border border-line-2 bg-rail p-3 font-mono text-[12px] text-ink">
+                      {aiContext.context || 'No context available yet — run a sync first.'}
+                    </pre>
+                  </div>
+                </ExpandedPanel>
+              )}
+            </>
+          )}
           <SettingsRow
             title="Auto-apply high-confidence drafts"
             sub="Categorization & rules over 90% confidence"

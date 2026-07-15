@@ -8,6 +8,7 @@ import { buildRecurringForecast } from './recurringForecast';
 import { getPreference } from './preferences';
 import { confirmAdvisorDraft } from './advisorDrafts';
 import { toDollars } from './money';
+import { AiWorkerDraftSchema } from '../../../shared/schemas';
 
 // categorize_transaction / create_merchant_rule drafts at or above this confidence
 // auto-apply without a manual review step; anything lower stays in the normal
@@ -158,6 +159,7 @@ Example JSON format for each kind you're likely to use:
     const now = new Date().toISOString();
     let inserted = 0;
     let autoApplied = 0;
+    let rejected = 0;
 
     const insertDraft = db.prepare(`
       INSERT INTO advisor_drafts (id, kind, label, summary, route, payload, changes, citations, status, created_at, updated_at)
@@ -171,28 +173,37 @@ Example JSON format for each kind you're likely to use:
       // Clear out any stale 'open' drafts that the AI is effectively replacing
       db.prepare(`DELETE FROM advisor_drafts WHERE status = 'open'`).run();
 
-      for (const draft of drafts) {
-        if (!draft.kind || !draft.label || !draft.summary || !draft.payload) continue;
+      for (const rawDraft of drafts) {
+        // Trust boundary: the draft came straight from the model as raw JSON. Reject
+        // anything that doesn't validate against the strict schema rather than storing
+        // or applying a malformed/hallucinated payload.
+        const parsed = AiWorkerDraftSchema.safeParse(rawDraft);
+        if (!parsed.success) {
+          rejected++;
+          console.warn('[ai-worker] Rejected malformed draft:', parsed.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join('; '));
+          continue;
+        }
+        const draft = parsed.data;
 
         const id = uuidv4();
-        const changes: AdvisorDraftChange[] = draft.changes || [];
-        const citations: AdvisorCitation[] = draft.citations || [];
+        const changes: AdvisorDraftChange[] = draft.changes;
+        const citations: AdvisorCitation[] = draft.citations as AdvisorCitation[];
+        const route = draft.route || '/review';
         let status: 'open' | 'confirmed' = 'open';
 
         const canAutoApply =
           autoApplyEnabled &&
           AUTO_APPLIABLE_KINDS.has(draft.kind) &&
-          draft.payload.kind === draft.kind &&
           typeof draft.confidence === 'number' &&
           draft.confidence >= AUTO_APPLY_CONFIDENCE_THRESHOLD;
 
         if (canAutoApply) {
           const action: AdvisorDraftAction = {
             id,
-            kind: draft.kind,
+            kind: draft.kind as AdvisorDraftAction['kind'],
             label: draft.label,
             summary: draft.summary,
-            route: draft.route || '/review',
+            route,
             payload: draft.payload as AdvisorDraftPayload,
             changes,
             citations,
@@ -212,7 +223,7 @@ Example JSON format for each kind you're likely to use:
           draft.kind,
           draft.label,
           draft.summary,
-          draft.route || '/review',
+          route,
           JSON.stringify(draft.payload),
           JSON.stringify(changes),
           JSON.stringify(citations),
@@ -224,7 +235,7 @@ Example JSON format for each kind you're likely to use:
       }
     })();
 
-    console.log(`[ai-worker] Generated and saved ${inserted} proactive drafts (${autoApplied} auto-applied).`);
+    console.log(`[ai-worker] Generated and saved ${inserted} proactive drafts (${autoApplied} auto-applied${rejected ? `, ${rejected} rejected as malformed` : ''}).`);
 
   } catch (err) {
     console.error('[ai-worker] Error running background AI review:', err);
