@@ -13,6 +13,7 @@ import { isSyncStale, runFullSync, startSyncScheduler, stopSyncScheduler } from 
 import { autoCategorizeTransactions } from './services/rules';
 import { reclassifyAutoAccountTypes } from './services/accountClassification';
 import { errorHandler } from './middleware/errorHandler';
+import { buildLocalGuardConfig, localOriginGuard } from './middleware/localGuard';
 
 import accountsRouter from './routes/accounts';
 import transactionsRouter from './routes/transactions';
@@ -96,6 +97,18 @@ async function main() {
   }
 
   app.use(express.json({ limit: '10mb' }));
+
+  // Reject requests with an unrecognized Host (DNS-rebinding defense) or a foreign
+  // Origin on writes (local CSRF). Honors deliberate exposure via CORS_ORIGIN /
+  // MIZAN_HOST / MIZAN_ALLOWED_HOSTS. Applied to the API surface only.
+  const localGuard = buildLocalGuardConfig({
+    port: PORT,
+    host: HOST,
+    hostIsLoopback: HOST_IS_LOOPBACK,
+    corsOrigin: process.env.CORS_ORIGIN,
+    extraHosts: process.env.MIZAN_ALLOWED_HOSTS,
+  });
+  app.use('/api', localOriginGuard(localGuard));
 
   // API routes
   app.use('/api/accounts', accountsRouter);
