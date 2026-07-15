@@ -45,12 +45,22 @@ function getClient(): Anthropic | null {
   return new Anthropic({ apiKey });
 }
 
+// Re-entrancy guard: the worker is fired via setTimeout after every sync, and it awaits a
+// slow LLM call, so two passes could otherwise overlap (rapid syncs) and double-apply or
+// race each other's draft supersession. Only one pass runs at a time.
+let workerRunning = false;
+
 export async function runBackgroundAiReview(): Promise<void> {
   const anthropic = getClient();
   if (!anthropic) {
     console.log('[ai-worker] Skipped: ANTHROPIC_API_KEY is not configured');
     return;
   }
+  if (workerRunning) {
+    console.log('[ai-worker] Skipped: a review pass is already running.');
+    return;
+  }
+  workerRunning = true;
 
   const db = getDb();
   console.log('[ai-worker] Starting background AI review pass...');
@@ -283,5 +293,7 @@ Example JSON format for each kind you're likely to use:
 
   } catch (err) {
     console.error('[ai-worker] Error running background AI review:', err);
+  } finally {
+    workerRunning = false;
   }
 }
