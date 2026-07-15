@@ -1,6 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import Database from 'better-sqlite3';
 import { AiWorkerDraftSchema, AdvisorDraftPayloadSchema } from '../shared/schemas';
+import { confirmAdvisorDraft } from '../server/src/services/advisorDrafts';
+import type { AdvisorDraftAction } from '../shared/types';
 
 // The aiWorker parses raw JSON from the model and validates each draft against
 // AiWorkerDraftSchema before storing or auto-applying it. These tests pin the
@@ -88,4 +91,46 @@ test('accepts set_manual_cost_basis with an explicit null cost basis', () => {
     manual_cost_basis: null,
   });
   assert.equal(r.success, true);
+});
+
+// The apply path (POST /api/ai/confirm -> confirmAdvisorDraft) can receive a fully
+// client-supplied draft. Validation must run there too, not only on worker ingestion,
+// or a non-finite/wrong-typed money field reaches toCents() and writes NaN. The gate
+// runs before the DB transaction opens, so an empty DB is enough to prove rejection.
+function malformedGoalAction(targetAmount: unknown): AdvisorDraftAction {
+  return {
+    id: 'draft_1',
+    kind: 'update_goal_target',
+    label: 'Raise emergency fund',
+    summary: 'Bump the goal target.',
+    route: '/goals',
+    payload: { kind: 'update_goal_target', goal_id: 'goal_1', target_amount: targetAmount },
+    changes: [],
+    citations: [],
+    confirmation_required: true,
+  } as unknown as AdvisorDraftAction;
+}
+
+test('confirmAdvisorDraft rejects a non-finite money amount before any DB write', () => {
+  const db = new Database(':memory:');
+  try {
+    assert.throws(
+      () => confirmAdvisorDraft(db, malformedGoalAction(Number.POSITIVE_INFINITY), true),
+      /Invalid draft payload/
+    );
+  } finally {
+    db.close();
+  }
+});
+
+test('confirmAdvisorDraft rejects a string money amount before any DB write', () => {
+  const db = new Database(':memory:');
+  try {
+    assert.throws(
+      () => confirmAdvisorDraft(db, malformedGoalAction('300000'), true),
+      /Invalid draft payload/
+    );
+  } finally {
+    db.close();
+  }
 });

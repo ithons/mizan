@@ -16,6 +16,7 @@ import { refreshTransactionIntegrity } from './transactionIntegrity';
 import { upsertRecurringAdjustment } from './recurringAdjustments';
 import { setManualCostBasis, setSecurityMetadata } from './investmentMetadata';
 import { toCents, toCentsOrNull, toDollars, toDollarsOrNull } from './money';
+import { AdvisorDraftPayloadSchema } from '../../../shared/schemas';
 
 interface CategoryRow {
   id: string;
@@ -1015,6 +1016,19 @@ export function confirmAdvisorDraft(
   if (!confirm) throw new Error('Explicit confirmation is required');
   if (draftAction.confirmation_required !== true) throw new Error('Invalid draft action');
   if (draftAction.kind !== draftAction.payload.kind) throw new Error('Draft kind does not match payload');
+
+  // Trust boundary: the payload can be fully client-supplied (POST /api/ai/confirm),
+  // so validate it strictly before any handler converts money to cents. Without this,
+  // a string/non-finite target_amount reaches toCents() -> Math.round(NaN) -> a NaN
+  // write into an integer-cents column. The background worker already validates on
+  // ingestion, but this is the single boundary both paths must pass.
+  const parsedPayload = AdvisorDraftPayloadSchema.safeParse(draftAction.payload);
+  if (!parsedPayload.success) {
+    const detail = parsedPayload.error.issues
+      .map((issue) => `${issue.path.join('.')}: ${issue.message}`)
+      .join('; ');
+    throw new Error(`Invalid draft payload: ${detail}`);
+  }
 
   const apply = db.transaction(() => {
     let result: { changed: number; result: unknown };
