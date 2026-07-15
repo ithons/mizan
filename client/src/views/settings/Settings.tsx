@@ -13,7 +13,7 @@ import { DataSection } from './DataSection';
 
 const AUTO_APPLY_PREFERENCE_KEY = 'advisor_auto_apply_high_confidence';
 
-type PanelId = 'simplefin' | 'coinbase' | 'import' | 'categories' | 'ai_disclosure' | null;
+type PanelId = 'simplefin' | 'coinbase' | 'import' | 'categories' | 'ai_disclosure' | 'advisor_profile' | null;
 
 function SettingsRow({
   title,
@@ -66,6 +66,64 @@ function Toggle({ on, onChange, disabled }: { on: boolean; onChange: (next: bool
 
 function ExpandedPanel({ children }: { children: ReactNode }) {
   return <div className="mb-2 mt-1 rounded-xl border border-line-2 bg-card p-5">{children}</div>;
+}
+
+function AdvisorContextEditor({ open, onToggle }: { open: boolean; onToggle: () => void }) {
+  const qc = useQueryClient();
+  const { addToast } = useAppStore();
+  const { data } = useQuery({ queryKey: ['ai-profile'], queryFn: () => aiApi.getProfile() });
+  const [draft, setDraft] = useState<string | null>(null);
+  const value = draft ?? data?.profile ?? '';
+  const dirty = draft !== null && draft !== (data?.profile ?? '');
+  const save = useMutation({
+    mutationFn: (text: string) => aiApi.saveProfile(text),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['ai-profile'] });
+      qc.invalidateQueries({ queryKey: ['ai-context'] });
+      setDraft(null);
+      addToast({ type: 'success', message: 'Advisor context saved' });
+    },
+    onError: (err: Error) => addToast({ type: 'error', message: err.message }),
+  });
+  return (
+    <>
+      <SettingsRow
+        title="Personal context"
+        sub="Facts about you the advisor should always assume"
+        trailing={<span className="text-muted">{open ? 'Hide' : 'Edit →'}</span>}
+        onClick={onToggle}
+      />
+      {open && (
+        <ExpandedPanel>
+          <div className="space-y-3">
+            <p className="text-[13.5px] leading-relaxed text-muted">
+              Injected into every AI prompt (chat and the background worker) so the advisor reasons from your
+              real situation instead of guessing.
+            </p>
+            <textarea
+              value={value}
+              onChange={(e) => setDraft(e.target.value)}
+              rows={8}
+              maxLength={4000}
+              placeholder="e.g. I autopay my cards in full each month; I'm a student with seasonal income; I prefer a taxable brokerage over a Roth IRA."
+              className="w-full resize-y rounded-lg border border-line-2 bg-rail p-3 font-mono text-[12.5px] leading-relaxed text-ink outline-none focus:border-sage"
+            />
+            <div className="flex items-center justify-between">
+              <span className="text-xs text-muted-2">{value.length}/4000</span>
+              <button
+                type="button"
+                disabled={!dirty || save.isPending}
+                onClick={() => save.mutate(value)}
+                className="rounded-lg bg-sage px-4 py-2 text-[13px] text-card transition-opacity disabled:opacity-50"
+              >
+                {save.isPending ? 'Saving…' : 'Save'}
+              </button>
+            </div>
+          </div>
+        </ExpandedPanel>
+      )}
+    </>
+  );
 }
 
 export function Settings() {
@@ -219,6 +277,10 @@ export function Settings() {
               )}
             </>
           )}
+          <AdvisorContextEditor
+            open={openPanel === 'advisor_profile'}
+            onToggle={() => toggle('advisor_profile')}
+          />
           <SettingsRow
             title="Auto-apply high-confidence drafts"
             sub="Categorization & rules over 90% confidence"

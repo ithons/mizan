@@ -15,6 +15,9 @@ import { getCashflowReport, getReportSummary } from './reporting';
 import { getTransactionReviewSummary } from './transactionReview';
 import { getSyncHealth } from './syncHealth';
 import { buildAdvisorReadTools } from './advisorTools';
+import { getPreference } from './preferences';
+
+export const ADVISOR_PROFILE_PREFERENCE_KEY = 'advisor_user_profile';
 
 export const ADVISOR_SYSTEM_PROMPT = `You are a sharp, honest personal financial advisor with access to the user's complete financial picture. Their real balances, transactions, portfolio, goals, recurring bills, and cash-flow forecast are provided below.
 
@@ -198,6 +201,16 @@ export function buildFinancialContext(): string {
   const sixMonthsAgo = format(startOfMonth(subMonths(today, 6)), 'yyyy-MM-dd');
 
   const lines: string[] = [`## Financial Snapshot - ${format(today, 'MMMM d, yyyy')}`];
+
+  // User-provided personal context. Injected here so it reaches the chat prompt, the
+  // background worker prompt, and the Settings disclosure panel from one place.
+  const profile = getPreference(db, ADVISOR_PROFILE_PREFERENCE_KEY);
+  const profileText = typeof profile?.value === 'string' ? profile.value.trim() : '';
+  if (profileText) {
+    lines.push('');
+    lines.push('### About You (personal context you provided)');
+    lines.push(profileText);
+  }
 
   const syncHealth = getSyncHealth(db);
 

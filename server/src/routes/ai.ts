@@ -1,7 +1,8 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import Anthropic from '@anthropic-ai/sdk';
 import { getDb } from '../db/index';
-import { buildAdvisorContextSnapshot, ADVISOR_SYSTEM_PROMPT } from '../services/aiContext';
+import { buildAdvisorContextSnapshot, ADVISOR_SYSTEM_PROMPT, ADVISOR_PROFILE_PREFERENCE_KEY } from '../services/aiContext';
+import { getPreference, setPreference } from '../services/preferences';
 import { confirmAdvisorDraft, dismissAdvisorDraft } from '../services/advisorDrafts';
 import { analyzeAdvisorQuestion } from '../services/advisorTools';
 import { ADVISOR_TOOLS, runAdvisorTool } from '../services/advisorChatTools';
@@ -25,6 +26,36 @@ router.get('/context', (_req: Request, res: Response, next: NextFunction): void 
         configured: Boolean(process.env.ANTHROPIC_API_KEY),
       },
     });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// GET /api/ai/profile - the user's editable personal context injected into every AI prompt
+router.get('/profile', (_req: Request, res: Response, next: NextFunction): void => {
+  try {
+    const pref = getPreference(getDb(), ADVISOR_PROFILE_PREFERENCE_KEY);
+    const profile = typeof pref?.value === 'string' ? pref.value : '';
+    res.json({ data: { profile } });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// PUT /api/ai/profile - replace the user's personal context (empty string clears it)
+router.put('/profile', (req: Request, res: Response, next: NextFunction): void => {
+  try {
+    const profile = typeof req.body?.profile === 'string' ? req.body.profile : null;
+    if (profile === null) {
+      res.status(400).json({ error: 'profile (string) is required' });
+      return;
+    }
+    if (profile.length > 4000) {
+      res.status(400).json({ error: 'profile must be 4000 characters or fewer' });
+      return;
+    }
+    setPreference(getDb(), ADVISOR_PROFILE_PREFERENCE_KEY, profile.trim());
+    res.json({ data: { profile: profile.trim() } });
   } catch (err) {
     next(err);
   }

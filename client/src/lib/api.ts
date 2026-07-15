@@ -584,6 +584,12 @@ export const settingsApi = {
 
 export const aiApi = {
   getContext: () => apiFetch<AdvisorContextResponse>('/api/ai/context'),
+  getProfile: () => apiFetch<{ profile: string }>('/api/ai/profile'),
+  saveProfile: (profile: string) =>
+    apiFetch<{ profile: string }>('/api/ai/profile', {
+      method: 'PUT',
+      body: JSON.stringify({ profile }),
+    }),
   analyze: (question: string, signal?: AbortSignal) =>
     apiFetch<AdvisorAnalysis>('/api/ai/analyze', {
       method: 'POST',
