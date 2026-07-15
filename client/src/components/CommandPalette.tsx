@@ -15,7 +15,7 @@ interface Command {
 }
 
 // Restrict Command Palette drafts to lower-stakes, easily reversible actions (transactions & budgets).
-// High-stakes actions (goals, tax envelopes, investments) should be handled via explicit UI or chat.
+// High-stakes actions (goals, investments) should be handled via explicit UI or chat.
 const ALLOWED_PALETTE_DRAFTS = new Set([
   'categorize_transaction',
   'create_merchant_rule',
