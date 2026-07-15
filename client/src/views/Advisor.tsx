@@ -2,6 +2,9 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { format } from 'date-fns';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
+import rehypeSanitize from 'rehype-sanitize';
 import type { AdvisorDraftAction } from '@shared/types';
 import { accountsApi, aiApi, budgetsApi, goalsApi, networthApi, recurringApi, reportsApi, transactionsApi } from '../lib/api';
 import { formatWholeCurrency } from '../lib/formatters';
@@ -45,8 +48,10 @@ function AssistantMessage({ message, onConfirmDraft, confirming }: {
             </div>
           </details>
         )}
-        <div className="whitespace-pre-wrap text-[15.5px] leading-[1.65] text-ink">
-          {message.content}
+        <div className="text-[15.5px] leading-[1.65] text-ink [&_a]:text-sage-deep [&_a]:underline [&_code]:rounded [&_code]:bg-rail [&_code]:px-1 [&_code]:py-0.5 [&_code]:font-mono [&_code]:text-[13px] [&_h1]:mt-4 [&_h1]:text-lg [&_h1]:font-semibold [&_h2]:mt-4 [&_h2]:text-base [&_h2]:font-semibold [&_h3]:mt-3 [&_h3]:font-semibold [&_hr]:my-3 [&_hr]:border-line [&_li]:mb-1 [&_ol]:my-2 [&_ol]:list-decimal [&_ol]:pl-5 [&_p]:mb-3 [&_p:last-child]:mb-0 [&_strong]:font-semibold [&_table]:my-2 [&_table]:w-full [&_td]:border-b [&_td]:border-line-2 [&_td]:py-1 [&_th]:border-b [&_th]:border-line [&_th]:py-1 [&_th]:text-left [&_ul]:my-2 [&_ul]:list-disc [&_ul]:pl-5">
+          <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeSanitize]}>
+            {message.content}
+          </ReactMarkdown>
           {message.streaming && (
             <span className="ml-0.5 inline-block h-[18px] w-[2px] translate-y-[3px] bg-sage" style={{ animation: 'mz-blink 1.1s step-end infinite' }} />
           )}
