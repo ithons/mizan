@@ -6,6 +6,7 @@ import { getCredentials } from './credentials';
 import { getDb } from '../db/index';
 import { balancesDiffer, type AccountBalanceChange } from './balanceChanges';
 import { toCents, toDollars } from './money';
+import { isoToUtcDate } from './dates';
 
 export interface CoinbaseSyncResult {
   accountCount: number;
@@ -466,7 +467,7 @@ export async function syncTradeHistory(connectionId: string): Promise<number> {
       const signedAmount = side === 'BUY' ? -amount : amount;
 
       const date = order.created_time
-        ? new Date(order.created_time).toISOString().split('T')[0]
+        ? isoToUtcDate(order.created_time)
         : now.split('T')[0];
 
       const categoryId = side === 'BUY' ? 'cat_crypto_buy' : 'cat_crypto_sell';

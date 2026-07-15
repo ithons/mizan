@@ -1,6 +1,6 @@
 import axios from 'axios';
-import { format } from 'date-fns';
 import { v4 as uuidv4 } from 'uuid';
+import { epochSecondsToUtcDate } from './dates';
 import type Database from 'better-sqlite3';
 import { getCredentials } from './credentials';
 import { getDb } from '../db/index';
@@ -225,11 +225,9 @@ export async function syncSimplefin(): Promise<SimplefinSyncResult> {
     for (const txn of (acct.transactions || [])) {
       const existingTxn = db.prepare('SELECT id FROM transactions WHERE simplefin_transaction_id = ?').get(txn.id);
 
-      // Convert epoch seconds to YYYY-MM-DD in the local timezone.
-      // Note: This relies on the assumption that the server's local timezone matches 
-      // the user's timezone. For a local-first desktop app, this is correct. If deployed 
-      // to a remote VPS, this may cause late-night transactions to land on the wrong day.
-      const date = format(new Date(txn.posted * 1000), 'yyyy-MM-dd');
+      // Normalize the posted epoch to a UTC calendar day so it doesn't drift with the
+      // server's timezone and matches how Coinbase timestamps are handled.
+      const date = epochSecondsToUtcDate(txn.posted);
       let amount: number; // cents, already negative for expenses
       try {
         amount = toCents(parseFinancialAmount(txn.amount, `transaction ${txn.id} amount`));
