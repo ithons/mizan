@@ -118,8 +118,8 @@ export async function syncSimplefin(): Promise<SimplefinSyncResult> {
   const now = new Date().toISOString();
 
   const connection = db.prepare(
-    'SELECT last_synced_at FROM simplefin_connections WHERE access_url = ?'
-  ).get(accessUrl) as { last_synced_at: string | null } | undefined;
+    "SELECT last_synced_at FROM simplefin_connections WHERE id = 'simplefin_primary'"
+  ).get() as { last_synced_at: string | null } | undefined;
   // last_synced_at IS NULL means either a brand-new connection or an explicit
   // user-requested "force full resync" (routes/simplefin.ts POST /resync nulls it).
   const isFirstSync = !connection?.last_synced_at;
@@ -310,8 +310,8 @@ export async function syncSimplefin(): Promise<SimplefinSyncResult> {
   db.prepare(`
     UPDATE simplefin_connections
     SET last_synced_at = ?
-    WHERE access_url = ?
-  `).run(now, accessUrl);
+    WHERE id = 'simplefin_primary'
+  `).run(now);
 
   return { status: 'synced', accountCount, added, modified, removed, skipped, balanceChanges, errors };
 }

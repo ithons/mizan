@@ -269,8 +269,8 @@ async function _runFullSyncInternal(): Promise<void> {
         const hasProviderErrors = simplefinResult.errors.length > 0;
         // Persist reauth state onto the connection so sync-health (and the per-account
         // badges) reflect it; a clean sync clears it back to active.
-        db.prepare(`UPDATE simplefin_connections SET status = ? WHERE access_url = ? AND status != 'removed'`)
-          .run(hasProviderErrors ? 'reauth_required' : 'active', creds.simplefin.accessUrl);
+        db.prepare(`UPDATE simplefin_connections SET status = ? WHERE id = 'simplefin_primary' AND status != 'removed'`)
+          .run(hasProviderErrors ? 'reauth_required' : 'active');
         const runItem = recordSyncRunItem(db, run.id, {
           provider: 'simplefin',
           connection_id: 'simplefin_primary',
@@ -295,8 +295,8 @@ async function _runFullSyncInternal(): Promise<void> {
         }
       } catch (err) {
         const message = (err as Error).message || 'SimpleFIN sync failed';
-        db.prepare(`UPDATE simplefin_connections SET status = 'sync_error' WHERE access_url = ? AND status != 'removed'`)
-          .run(creds.simplefin.accessUrl);
+        db.prepare(`UPDATE simplefin_connections SET status = 'sync_error' WHERE id = 'simplefin_primary' AND status != 'removed'`)
+          .run();
         recordSyncRunItem(db, run.id, {
           provider: 'simplefin',
           connection_id: 'simplefin_primary',

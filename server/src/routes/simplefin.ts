@@ -21,15 +21,17 @@ router.post(
       const decoded = Buffer.from(setupToken, 'base64').toString('utf-8');
       const accessUrl = await axios.post(decoded).then(r => r.data as string);
 
+      // The access URL (which embeds basic-auth) is persisted only in the encrypted
+      // credentials store, never in the DB. The connection row is a non-secret marker.
       updateSimplefin(accessUrl);
 
       const db = getDb();
       const now = new Date().toISOString();
       db.prepare(
-        `INSERT INTO simplefin_connections (id, access_url, status, created_at)
-         VALUES (?, ?, ?, ?)
-         ON CONFLICT(access_url) DO UPDATE SET status = 'active'`
-      ).run('simplefin_primary', accessUrl, 'active', now);
+        `INSERT INTO simplefin_connections (id, status, created_at)
+         VALUES ('simplefin_primary', 'active', ?)
+         ON CONFLICT(id) DO UPDATE SET status = 'active'`
+      ).run(now);
 
       res.json({ data: { success: true } });
 
