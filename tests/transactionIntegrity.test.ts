@@ -231,3 +231,32 @@ test('dismissed transfer pairs are not immediately rediscovered', (t) => {
   refreshTransactionIntegrity(db);
   assert.equal(getTransferCandidatePairs(db).length, 0);
 });
+
+test('confirmed transfer pairs survive a re-sync and are not re-flagged for review', (t) => {
+  const db = setupIntegrityDb();
+  t.after(() => db.close());
+
+  refreshTransactionIntegrity(db);
+  const transferPair = getTransferCandidatePairs(db)[0];
+
+  assert.equal(confirmTransferPair(db, transferPair.pair_id), 2);
+  assert.equal(getTransferCandidatePairs(db).length, 0);
+
+  // Regression: before the fix, transferCandidateRows() excluded only 'dismissed',
+  // so a subsequent integrity recompute re-selected the confirmed pair and rewrote
+  // its transfer_status back to 'candidate', dumping it into the review queue again.
+  refreshTransactionIntegrity(db);
+
+  assert.equal(getTransferCandidatePairs(db).length, 0);
+
+  const rows = db.prepare(`
+    SELECT transfer_status, review_status
+    FROM transactions
+    WHERE id IN ('transfer_out', 'transfer_in')
+  `).all() as Array<{ transfer_status: string; review_status: string }>;
+
+  for (const row of rows) {
+    assert.equal(row.transfer_status, 'confirmed');
+    assert.equal(row.review_status, 'reviewed');
+  }
+});

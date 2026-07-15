@@ -180,7 +180,7 @@ function transferCandidateRows(db: Database.Database): TransferRow[] {
     FROM transactions t
     JOIN accounts a ON a.id = t.account_id
     WHERE t.pending = 0
-      AND t.transfer_status != 'dismissed'
+      AND t.transfer_status NOT IN ('dismissed', 'confirmed')
       AND ABS(t.amount) >= 1
       AND (
         t.category_id IS NULL
