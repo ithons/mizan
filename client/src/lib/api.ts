@@ -590,6 +590,21 @@ export const aiApi = {
       method: 'PUT',
       body: JSON.stringify({ profile }),
     }),
+  listConversations: () =>
+    apiFetch<Array<{ id: string; title: string; updated_at: string; message_count: number }>>(
+      '/api/ai/conversations'
+    ),
+  createConversation: () =>
+    apiFetch<{ id: string }>('/api/ai/conversations', { method: 'POST', body: JSON.stringify({}) }),
+  getConversation: (id: string) =>
+    apiFetch<{ id: string; title: string; messages: ChatMessage[] }>(`/api/ai/conversations/${id}`),
+  appendMessages: (id: string, messages: ChatMessage[]) =>
+    apiFetch<{ success: boolean }>(`/api/ai/conversations/${id}/messages`, {
+      method: 'POST',
+      body: JSON.stringify({ messages }),
+    }),
+  deleteConversation: (id: string) =>
+    apiFetch<{ success: boolean }>(`/api/ai/conversations/${id}`, { method: 'DELETE' }),
   analyze: (question: string, signal?: AbortSignal) =>
     apiFetch<AdvisorAnalysis>('/api/ai/analyze', {
       method: 'POST',

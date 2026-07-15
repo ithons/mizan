@@ -10,43 +10,47 @@ export interface DisplayMessage extends ChatMessage {
   thinkingActive?: boolean;
 }
 
-// Conversation survives navigating away and back within the tab, but not a new session.
-const STORAGE_KEY = 'mizan.advisor.chat';
-
-function loadStoredMessages(): DisplayMessage[] {
-  try {
-    const raw = sessionStorage.getItem(STORAGE_KEY);
-    if (!raw) return [];
-    const parsed: unknown = JSON.parse(raw);
-    return Array.isArray(parsed) ? (parsed as DisplayMessage[]) : [];
-  } catch (err) {
-    console.warn('Failed to restore advisor chat', err);
-    return [];
-  }
-}
+// The active conversation id is remembered across reloads so the thread resumes; the
+// messages themselves live on the server (services/conversations.ts).
+const ACTIVE_KEY = 'mizan.advisor.activeConversation';
 
 function errorMessage(err: unknown, fallback: string) {
   return err instanceof Error && err.message ? err.message : fallback;
 }
 
 export function useAiChat() {
-  const [messages, setMessages] = useState<DisplayMessage[]>(loadStoredMessages);
+  const [messages, setMessages] = useState<DisplayMessage[]>([]);
   const [isStreaming, setIsStreaming] = useState(false);
+  const [conversationId, setConversationId] = useState<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
 
+  // Resume the last conversation on mount, if it still exists.
   useEffect(() => {
-    if (isStreaming) return;
-    try {
-      if (messages.length === 0) {
-        sessionStorage.removeItem(STORAGE_KEY);
-      } else {
-        const settled = messages.map((m) => ({ ...m, streaming: false, thinkingActive: false }));
-        sessionStorage.setItem(STORAGE_KEY, JSON.stringify(settled));
-      }
-    } catch (err) {
-      console.warn('Failed to persist advisor chat', err);
-    }
-  }, [messages, isStreaming]);
+    const active = localStorage.getItem(ACTIVE_KEY);
+    if (!active) return;
+    let cancelled = false;
+    aiApi
+      .getConversation(active)
+      .then((conv) => {
+        if (cancelled) return;
+        setConversationId(conv.id);
+        setMessages(conv.messages.map((m) => ({ ...m, id: crypto.randomUUID() })));
+      })
+      .catch(() => localStorage.removeItem(ACTIVE_KEY));
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const loadConversation = useCallback(async (id: string) => {
+    abortRef.current?.abort();
+    abortRef.current = null;
+    setIsStreaming(false);
+    const conv = await aiApi.getConversation(id);
+    setConversationId(conv.id);
+    localStorage.setItem(ACTIVE_KEY, conv.id);
+    setMessages(conv.messages.map((m) => ({ ...m, id: crypto.randomUUID() })));
+  }, []);
 
   const sendMessage = useCallback(async (userText: string) => {
     if (isStreaming || !userText.trim()) return;
@@ -73,8 +77,33 @@ export function useAiChat() {
     setMessages((prev) => [...prev, userMsg, assistantMsg]);
     setIsStreaming(true);
 
+    // Ensure a conversation exists to persist into. Best-effort: if creation fails, chat
+    // still works, it just isn't saved.
+    let convId = conversationId;
+    if (!convId) {
+      try {
+        const created = await aiApi.createConversation();
+        convId = created.id;
+        setConversationId(created.id);
+        localStorage.setItem(ACTIVE_KEY, created.id);
+      } catch (err) {
+        console.warn('Failed to create conversation; chat will not be saved', err);
+      }
+    }
+
     const controller = new AbortController();
     abortRef.current = controller;
+
+    let assistantAccum = '';
+    const persist = () => {
+      if (!convId || !assistantAccum) return;
+      aiApi
+        .appendMessages(convId, [
+          { role: 'user', content: userMsg.content },
+          { role: 'assistant', content: assistantAccum },
+        ])
+        .catch((err) => console.warn('Failed to persist chat exchange', err));
+    };
 
     let settled = false;
     const finish = () => {
@@ -106,7 +135,10 @@ export function useAiChat() {
     try {
       await aiApi.streamChat(
         history,
-        (chunkText) => updateAssistant((m) => ({ ...m, content: m.content + chunkText })),
+        (chunkText) => {
+          assistantAccum += chunkText;
+          updateAssistant((m) => ({ ...m, content: m.content + chunkText }));
+        },
         () => {},
         (errMsg) => { streamErrorMsg = errMsg; },
         controller.signal,
@@ -121,7 +153,9 @@ export function useAiChat() {
         // No ANTHROPIC_API_KEY or the LLM call failed outright - degrade to the local
         // heuristic's answer text instead of erroring out, if it produced one.
         if (analysis) {
+          assistantAccum = analysis.answer;
           updateAssistant((m) => ({ ...m, content: analysis.answer, analysis, streaming: false, thinkingActive: false }));
+          persist();
           finish();
         } else {
           finishWithError(streamErrorMsg);
@@ -130,6 +164,7 @@ export function useAiChat() {
       }
 
       updateAssistant((m) => ({ ...m, analysis: analysis ?? undefined, streaming: false, thinkingActive: false }));
+      persist();
       finish();
     } catch (err) {
       const isAbort = err instanceof Error && err.name === 'AbortError';
@@ -148,7 +183,7 @@ export function useAiChat() {
         finish();
       }
     }
-  }, [isStreaming, messages]);
+  }, [isStreaming, messages, conversationId]);
 
   const stopStreaming = useCallback(() => {
     abortRef.current?.abort();
@@ -162,7 +197,9 @@ export function useAiChat() {
   const clearChat = useCallback(() => {
     stopStreaming();
     setMessages([]);
+    setConversationId(null);
+    localStorage.removeItem(ACTIVE_KEY);
   }, [stopStreaming]);
 
-  return { messages, isStreaming, sendMessage, stopStreaming, clearChat };
+  return { messages, isStreaming, conversationId, sendMessage, stopStreaming, clearChat, loadConversation };
 }

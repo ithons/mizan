@@ -82,12 +82,46 @@ function AssistantMessage({ message, onConfirmDraft, confirming }: {
   );
 }
 
+function ConversationHistory({ activeId, onSelect }: { activeId: string | null; onSelect: (id: string) => void }) {
+  const [open, setOpen] = useState(false);
+  const { data: conversations } = useQuery({
+    queryKey: ['ai-conversations'],
+    queryFn: () => aiApi.listConversations(),
+    enabled: open,
+  });
+  return (
+    <div className="relative">
+      <TextButton onClick={() => setOpen((v) => !v)}>History</TextButton>
+      {open && (
+        <>
+          <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} />
+          <div className="absolute right-0 z-20 mt-2 max-h-80 w-72 overflow-auto rounded-xl border border-line-2 bg-card p-1 shadow-lg">
+            {(!conversations || conversations.length === 0) && (
+              <div className="px-3 py-3 text-[13px] text-muted-2">No past conversations.</div>
+            )}
+            {conversations?.map((c) => (
+              <button
+                key={c.id}
+                type="button"
+                onClick={() => { onSelect(c.id); setOpen(false); }}
+                className={`block w-full truncate rounded-lg px-3 py-2 text-left text-[13.5px] transition-colors hover:bg-rail ${c.id === activeId ? 'text-ink' : 'text-muted'}`}
+              >
+                {c.title || 'Untitled chat'}
+              </button>
+            ))}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 export function Advisor() {
   const navigate = useNavigate();
   const location = useLocation();
   const qc = useQueryClient();
   const { addToast } = useAppStore();
-  const { messages, isStreaming, sendMessage, stopStreaming, clearChat } = useAiChat();
+  const { messages, isStreaming, conversationId, sendMessage, stopStreaming, clearChat, loadConversation } = useAiChat();
 
   const [input, setInput] = useState('');
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -158,9 +192,10 @@ export function Advisor() {
             : 'Local heuristics only · add an Anthropic API key in Settings for conversational answers'
         }
         actions={
-          messages.length > 0 ? (
-            <TextButton onClick={clearChat}>+ New chat</TextButton>
-          ) : undefined
+          <div className="flex items-center gap-4">
+            <ConversationHistory activeId={conversationId} onSelect={loadConversation} />
+            {messages.length > 0 && <TextButton onClick={clearChat}>+ New chat</TextButton>}
+          </div>
         }
         className="mb-6"
       />

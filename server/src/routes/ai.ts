@@ -3,6 +3,14 @@ import Anthropic from '@anthropic-ai/sdk';
 import { getDb } from '../db/index';
 import { buildAdvisorContextSnapshot, ADVISOR_SYSTEM_PROMPT, ADVISOR_PROFILE_PREFERENCE_KEY } from '../services/aiContext';
 import { getPreference, setPreference } from '../services/preferences';
+import {
+  createConversation,
+  listConversations,
+  getConversation,
+  appendMessages,
+  deleteConversation,
+  type ConversationMessage,
+} from '../services/conversations';
 import { confirmAdvisorDraft, dismissAdvisorDraft } from '../services/advisorDrafts';
 import { analyzeAdvisorQuestion } from '../services/advisorTools';
 import { ADVISOR_TOOLS, runAdvisorTool } from '../services/advisorChatTools';
@@ -26,6 +34,83 @@ router.get('/context', (_req: Request, res: Response, next: NextFunction): void 
         configured: Boolean(process.env.ANTHROPIC_API_KEY),
       },
     });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// --- Persistent chat conversations ---
+
+// GET /api/ai/conversations - list saved conversations, newest first
+router.get('/conversations', (_req: Request, res: Response, next: NextFunction): void => {
+  try {
+    res.json({ data: listConversations(getDb()) });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// POST /api/ai/conversations - start a new (empty) conversation
+router.post('/conversations', (req: Request, res: Response, next: NextFunction): void => {
+  try {
+    const title = typeof req.body?.title === 'string' ? req.body.title : '';
+    res.json({ data: createConversation(getDb(), title) });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// GET /api/ai/conversations/:id - full message history for one conversation
+router.get('/conversations/:id', (req: Request, res: Response, next: NextFunction): void => {
+  try {
+    const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+    const conversation = getConversation(getDb(), id);
+    if (!conversation) {
+      res.status(404).json({ error: 'Conversation not found' });
+      return;
+    }
+    res.json({ data: conversation });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// POST /api/ai/conversations/:id/messages - append a settled exchange
+router.post('/conversations/:id/messages', (req: Request, res: Response, next: NextFunction): void => {
+  try {
+    const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+    const raw = Array.isArray(req.body?.messages) ? req.body.messages : null;
+    if (!raw) {
+      res.status(400).json({ error: 'messages array is required' });
+      return;
+    }
+    const msgs: ConversationMessage[] = [];
+    for (const m of raw) {
+      if ((m?.role === 'user' || m?.role === 'assistant') && typeof m?.content === 'string') {
+        msgs.push({ role: m.role, content: m.content });
+      }
+    }
+    const result = appendMessages(getDb(), id, msgs);
+    if (!result.ok) {
+      res.status(404).json({ error: 'Conversation not found' });
+      return;
+    }
+    res.json({ data: { success: true } });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// DELETE /api/ai/conversations/:id
+router.delete('/conversations/:id', (req: Request, res: Response, next: NextFunction): void => {
+  try {
+    const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+    const result = deleteConversation(getDb(), id);
+    if (result.changed === 0) {
+      res.status(404).json({ error: 'Conversation not found' });
+      return;
+    }
+    res.json({ data: { success: true } });
   } catch (err) {
     next(err);
   }
