@@ -201,7 +201,15 @@ export function detectRecurring(): void {
     const amounts = txns.map(t => Math.abs(t.amount));
     const medianAmount = median(amounts);
 
-    const gapVariance = variance(gaps, medianGap);
+    // Tolerate occasional missed occurrences. A forgotten logging (or a skipped week) shows
+    // up as a single gap that is a near-integer multiple of the base period; fold each gap
+    // back to a per-occurrence gap before measuring regularity, so one skipped week doesn't
+    // spike the variance and reject a genuinely weekly item. The median gap (robust to a few
+    // skips) is the base; classification still uses it unchanged.
+    const perOccurrenceGaps = medianGap > 0
+      ? gaps.map((g) => g / Math.max(1, Math.round(g / medianGap)))
+      : gaps;
+    const gapVariance = variance(perOccurrenceGaps, medianGap);
     const amountVariance = variance(amounts, medianAmount);
 
     if (gapVariance >= 0.2 || amountVariance >= 0.25) continue;
