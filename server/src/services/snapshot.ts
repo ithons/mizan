@@ -1,5 +1,5 @@
 import { v4 as uuidv4 } from 'uuid';
-import { format, subMonths, parseISO, startOfMonth } from 'date-fns';
+import { format, subMonths, startOfMonth } from 'date-fns';
 import type Database from 'better-sqlite3';
 import { getDb } from '../db/index';
 
@@ -157,12 +157,18 @@ export function backfillSnapshots(): void {
     // to replay backwards: subtract amounts that happened after target date
     const laterTransactions = transactions.filter(t => t.date > targetStr);
 
-    // Compute approximate balances at start of target month by reversing later transactions
+    // Compute approximate balances at start of target month by reversing later transactions.
     const approxBalances: Record<string, number> = { ...balances };
     for (const txn of laterTransactions) {
-      if (approxBalances[txn.account_id] !== undefined) {
-        // Reverse the transaction: transactions reduce/increase balance
-        // Sign convention: negative amount = money going out (expense), positive = income
+      if (approxBalances[txn.account_id] === undefined) continue;
+      // Transaction sign: negative = money out (expense), positive = money in (income).
+      // Asset balances move WITH that sign, so undo by subtracting the amount. Liability
+      // balances are stored as positive "amount owed" and move OPPOSITE the sign — a
+      // purchase (negative amount) raises what's owed — so undo by adding the amount.
+      // Reversing both the same way trended credit/loan history the wrong direction.
+      if (accountMap[txn.account_id]?.is_liability) {
+        approxBalances[txn.account_id] += txn.amount;
+      } else {
         approxBalances[txn.account_id] -= txn.amount;
       }
     }
