@@ -45,20 +45,24 @@ async function main() {
   // 1. Run DB migrations
   runMigrations();
 
-  // One-time backlog pass: catches transactions left uncategorized by earlier server
-  // versions (e.g. before auto-categorization was wired into sync). Runs on every boot,
-  // but is a no-op once nothing has a NULL category_id left to fix.
+  // Backlog passes for older data (transactions left uncategorized, account types frozen
+  // by a weaker classifier). Gated behind a cheap COUNT so a clean DB — the common case
+  // after the first boot, and every tsx-watch restart in dev — skips the work entirely.
+  const startupDb = getDb();
   try {
-    autoCategorizeTransactions(getDb());
+    const uncategorized = (startupDb.prepare(
+      'SELECT COUNT(*) AS n FROM transactions WHERE category_id IS NULL'
+    ).get() as { n: number }).n;
+    if (uncategorized > 0) autoCategorizeTransactions(startupDb);
   } catch (err) {
     console.error('[startup] Auto-categorization backfill failed:', err);
   }
 
-  // One-time backlog pass: fixes accounts whose `type` was frozen by an older, weaker
-  // classifier and never re-derived since. Only touches accounts still marked 'auto'
-  // (never a manually-overridden type), so it's safe to run on every boot.
   try {
-    reclassifyAutoAccountTypes(getDb());
+    const autoTyped = (startupDb.prepare(
+      "SELECT COUNT(*) AS n FROM accounts WHERE type_source = 'auto'"
+    ).get() as { n: number }).n;
+    if (autoTyped > 0) reclassifyAutoAccountTypes(startupDb);
   } catch (err) {
     console.error('[startup] Account type reclassification failed:', err);
   }
