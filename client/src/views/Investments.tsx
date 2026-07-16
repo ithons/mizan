@@ -146,7 +146,19 @@ export function Investments() {
   });
 
   const allHoldings = holdings ?? [];
-  const marketValue = allHoldings.reduce((s, h) => s + h.institution_value, 0);
+  const holdingsValue = allHoldings.reduce((s, h) => s + h.institution_value, 0);
+  // The institution's own account balance is the trusted total — it's what net worth and the
+  // snapshot-based trend below use. A provider's holdings list can sum to a slightly different
+  // number than the balance it reports for the same account (e.g. a money-market sweep that
+  // hasn't settled), so the headline uses the account balance and any gap is surfaced, rather
+  // than a holdings sum that silently disagrees with net worth and its own chart.
+  const heldAccountIds = new Set(allHoldings.map((h) => h.account_id));
+  const accountsWithHoldings = (accounts ?? []).filter((a) => heldAccountIds.has(a.id));
+  const trustedValue = accountsWithHoldings.length
+    ? accountsWithHoldings.reduce((s, a) => s + a.current_balance, 0)
+    : holdingsValue;
+  const reconciliationGap = holdingsValue - trustedValue; // positive => holdings exceed balances
+  const marketValue = trustedValue;
   const stats = useMemo(() => getCostBasisStats(allHoldings), [allHoldings]);
 
   const history = report?.history ?? [];
@@ -219,6 +231,14 @@ export function Investments() {
         {/* Holdings */}
         <div className="min-w-0 flex-1">
           <SectionLabel className="mb-2">Holdings</SectionLabel>
+          {Math.abs(reconciliationGap) >= 1 && (
+            <div className="mb-2 text-xs leading-relaxed text-muted-2">
+              Holdings sum to <span className="tabular-nums">{formatWholeCurrency(holdingsValue)}</span>,{' '}
+              <span className="tabular-nums">{formatWholeCurrency(Math.abs(reconciliationGap))}</span>{' '}
+              {reconciliationGap > 0 ? 'above' : 'below'} the account balance your institution reports. The
+              balance is the figure used for net worth.
+            </div>
+          )}
           {allHoldings
             .slice()
             .sort((a, b) => b.institution_value - a.institution_value)
