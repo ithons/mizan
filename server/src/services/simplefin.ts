@@ -8,6 +8,24 @@ import { balancesDiffer, type AccountBalanceChange } from './balanceChanges';
 import { guessAccountTypeAndLiability } from './accountClassification';
 import { toCents, toCentsOrNull, toDollars } from './money';
 
+// We store liability balances as positive "amount owed" and negate what SimpleFIN reports
+// (which normally sends credit balances as negatives). If an institution ever reports an
+// owed balance as a positive number, negating it would store the wrong sign — flag it
+// through the sync result instead of silently corrupting net worth.
+export function liabilityAdjustedCents(
+  balanceMagnitude: number,
+  isLiability: boolean,
+  accountName: string,
+  errors: string[]
+): number {
+  if (isLiability && balanceMagnitude > 0) {
+    const msg = `Account "${accountName}" is a liability but its balance is reported positive; the stored sign may be wrong — verify this institution's balance convention.`;
+    errors.push(msg);
+    console.warn(`[simplefin] ${msg}`);
+  }
+  return toCents(isLiability ? -balanceMagnitude : balanceMagnitude);
+}
+
 interface SimplefinHolding {
   symbol?: string | null;
   description?: string | null;
@@ -138,6 +156,14 @@ export async function syncSimplefin(): Promise<SimplefinSyncResult> {
     const currency = acct.currency || 'USD';
     const institutionName = acct.org?.name || 'SimpleFIN';
 
+    // Balances are stored and reported as USD everywhere. A non-USD account would be
+    // mislabeled/unconverted, so surface it rather than silently treating it as dollars.
+    if (currency !== 'USD') {
+      const msg = `Account "${acct.name}" is in ${currency}, but Mizān treats balances as USD — its value may be misstated.`;
+      errors.push(msg);
+      console.warn(`[simplefin] ${msg}`);
+    }
+
     let balanceMagnitude: number;
     try {
       balanceMagnitude = parseFinancialAmount(acct.balance, `account "${acct.name}" balance`);
@@ -162,7 +188,7 @@ export async function syncSimplefin(): Promise<SimplefinSyncResult> {
     if (existingAcct) {
       accountId = existingAcct.id;
       isLiability = Boolean(existingAcct.is_liability);
-      currentBalance = toCents(isLiability ? -balanceMagnitude : balanceMagnitude);
+      currentBalance = liabilityAdjustedCents(balanceMagnitude, isLiability, acct.name, errors);
 
       // existingAcct.current_balance and currentBalance are both cents here; the
       // display-facing change struct is kept in dollars.
@@ -199,7 +225,7 @@ export async function syncSimplefin(): Promise<SimplefinSyncResult> {
       accountId = uuidv4();
       const guessed = guessAccountTypeAndLiability(acct.name, institutionName);
       isLiability = guessed.isLiability;
-      currentBalance = toCents(isLiability ? -balanceMagnitude : balanceMagnitude);
+      currentBalance = liabilityAdjustedCents(balanceMagnitude, isLiability, acct.name, errors);
 
       db.prepare(`
         INSERT INTO accounts
