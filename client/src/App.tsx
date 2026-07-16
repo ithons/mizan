@@ -8,7 +8,6 @@ const Today = lazy(() => import('./views/Today').then((module) => ({ default: mo
 const Onboarding = lazy(() => import('./views/Onboarding').then((module) => ({ default: module.Onboarding })));
 const Accounts = lazy(() => import('./views/accounts/Accounts').then((module) => ({ default: module.Accounts })));
 const Transactions = lazy(() => import('./views/Transactions').then((module) => ({ default: module.Transactions })));
-const Review = lazy(() => import('./views/Review').then((module) => ({ default: module.Review })));
 const Reports = lazy(() => import('./views/Reports').then((module) => ({ default: module.Reports })));
 const CashFlow = lazy(() => import('./views/CashFlow').then((module) => ({ default: module.CashFlow })));
 const Bills = lazy(() => import('./views/Bills').then((module) => ({ default: module.Bills })));
@@ -45,8 +44,8 @@ function AppRoutes() {
           <Route path="/" element={lazyView(<Today />)} />
           <Route path="/onboarding" element={lazyView(<Onboarding />)} />
           <Route path="/accounts" element={lazyView(<Accounts />)} />
-          {/* Legacy routes retired in the Balance redesign; keep old bookmarks working. */}
-          <Route path="/review" element={lazyView(<Review />)} />
+          {/* Review folded into the Today/inbox flow; redirect old bookmarks. */}
+          <Route path="/review" element={<Navigate to="/" replace />} />
           <Route path="/transactions" element={lazyView(<Transactions />)} />
           <Route path="/cash-flow" element={lazyView(<CashFlow />)} />
           <Route path="/cashflow" element={<Navigate to="/cash-flow" replace />} />

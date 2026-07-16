@@ -8,7 +8,6 @@ const navItems = [
   { to: '/', label: 'Today', shortcut: '1' },
   { to: '/accounts', label: 'Accounts', shortcut: '2' },
   { to: '/transactions', label: 'Transactions', shortcut: '3' },
-  { to: '/review', label: 'Review', shortcut: 'r' },
   { to: '/cash-flow', label: 'Cash flow', shortcut: '4' },
   { to: '/reports', label: 'Reports', shortcut: 'p' },
   { to: '/budget', label: 'Budget', shortcut: '5' },

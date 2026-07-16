@@ -32,6 +32,7 @@ const NAV_TARGETS = [
   { label: 'Accounts', route: '/accounts' },
   { label: 'Transactions', route: '/transactions' },
   { label: 'Cash flow', route: '/cash-flow' },
+  { label: 'Reports', route: '/reports' },
   { label: 'Budget', route: '/budget' },
   { label: 'Bills', route: '/bills' },
   { label: 'Goals', route: '/goals' },
