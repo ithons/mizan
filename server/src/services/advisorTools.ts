@@ -53,11 +53,6 @@ interface SectorAllocationRow {
   count: number;
 }
 
-interface InvestmentTransactionQualityRow {
-  count: number;
-  sale_count: number;
-}
-
 // fmt() takes dollars, but EVERY money value the analyzer reads is integer cents — both
 // the inline sectorRows SQL AND every value returned from service functions (reporting,
 // forecast, budgets, goals, subscriptions, holdings). So every argument to fmt() and every
@@ -619,18 +614,8 @@ function sectorRows(db: Database.Database): SectorAllocationRow[] {
   `).all() as SectorAllocationRow[];
 }
 
-function investmentTransactionQuality(db: Database.Database): InvestmentTransactionQualityRow {
-  return db.prepare(`
-    SELECT
-      COUNT(*) AS count,
-      COALESCE(SUM(CASE WHEN type = 'sell' THEN 1 ELSE 0 END), 0) AS sale_count
-    FROM investment_transactions
-  `).get() as InvestmentTransactionQualityRow;
-}
-
 function analyzeInvestments(db: Database.Database): Pick<AdvisorAnalysis, 'answer' | 'citations'> {
   const holdings = listHoldingsWithMetadata(db);
-  const transactionQuality = investmentTransactionQuality(db);
   if (holdings.length === 0) {
     return {
       answer: 'No current investment holdings are imported, so Mizān cannot analyze portfolio allocation, cost basis quality, or gain quality yet.',
@@ -675,11 +660,6 @@ function analyzeInvestments(db: Database.Database): Pick<AdvisorAnalysis, 'answe
   }
   if (missingSector.length > 0) {
     lines.push(`${missingSector.length} holding${missingSector.length === 1 ? '' : 's'} lack sector metadata.`);
-  }
-  if (transactionQuality.sale_count > 0) {
-    lines.push(`${transactionQuality.sale_count} sale transaction${transactionQuality.sale_count === 1 ? '' : 's'} exist, but realized gain stays unavailable until lot-level sale basis is available.`);
-  } else {
-    lines.push('No imported sale transactions are available for realized gain analysis.');
   }
 
   return {

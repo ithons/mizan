@@ -229,12 +229,6 @@ export function mergeAccounts(
       WHERE account_id = ?
     `).run(targetAccountId, now, sourceAccountId);
 
-    db.prepare(`
-      UPDATE investment_transactions
-      SET account_id = ?
-      WHERE account_id = ?
-    `).run(targetAccountId, sourceAccountId);
-
     // Remove the source account.
     db.prepare('DELETE FROM accounts WHERE id = ?').run(sourceAccountId);
   })();

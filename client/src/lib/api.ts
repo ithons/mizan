@@ -27,7 +27,6 @@ import type {
   Holding,
   HoldingHistoryPoint,
   Security,
-  InvestmentTransaction,
   TransactionReviewSummary,
   PaginatedResponse,
   ChatMessage,
@@ -192,13 +191,6 @@ export const investmentsApi = {
       method: 'PUT',
       body: JSON.stringify(body),
     }),
-  transactions: (params?: { accountId?: string; startDate?: string; endDate?: string }) => {
-    const q = new URLSearchParams();
-    if (params?.accountId) q.set('accountId', params.accountId);
-    if (params?.startDate) q.set('startDate', params.startDate);
-    if (params?.endDate) q.set('endDate', params.endDate);
-    return apiFetch<InvestmentTransaction[]>(`/api/investments/transactions?${q.toString()}`);
-  },
 };
 
 // ─── Categories ──────────────────────────────────────────────────────────────

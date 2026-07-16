@@ -267,19 +267,6 @@ function setupAdvisorDb(): Database.Database {
       updated_at TEXT NOT NULL
     );
 
-    CREATE TABLE investment_transactions (
-      id TEXT PRIMARY KEY,
-      account_id TEXT NOT NULL,
-      date TEXT NOT NULL,
-      type TEXT NOT NULL,
-      security_id TEXT,
-      quantity REAL,
-      price REAL,
-      amount REAL NOT NULL,
-      fees REAL,
-      name TEXT NOT NULL DEFAULT '',
-      created_at TEXT NOT NULL
-    );
 
     CREATE TABLE data_import_runs (
       id TEXT PRIMARY KEY,
@@ -394,12 +381,6 @@ function setupAdvisorDb(): Database.Database {
       ('holding_cash', 'acct_brokerage', 'sec_cash', 500, 1, 500, NULL, NULL, NULL, NULL, 'USD', ?)
   `).run(TEST_NOW, TEST_NOW);
   db.prepare(`
-    INSERT INTO investment_transactions (
-      id, account_id, date, type, security_id, quantity, price, amount, fees, name, created_at
-    )
-    VALUES ('inv_sell', 'acct_brokerage', '2026-06-20', 'sell', 'sec_vti', 1, 100, 100, NULL, 'VTI sale', ?)
-  `).run(TEST_NOW);
-  db.prepare(`
     INSERT INTO data_import_runs (
       id, source, status, rows_seen, rows_imported, rows_invalid,
       duplicate_candidates, transfer_candidates, warnings_count, errors_count, summary, created_at
@@ -503,7 +484,6 @@ test('advisor investment analysis cites cost basis and sector quality', (t) => {
   assert.equal(analysis.intent, 'investments');
   assert.match(analysis.answer, /Cost basis is available for 1\/2 holdings/);
   assert.match(analysis.answer, /lack sector metadata/);
-  assert.match(analysis.answer, /realized gain stays unavailable/);
   assert.ok(analysis.citations.some((citation) => citation.id === 'holding:cost-basis:holding_cash'));
   assert.ok(analysis.citations.some((citation) => citation.id === 'holding:sector:holding_cash'));
 });

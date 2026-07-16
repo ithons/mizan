@@ -298,7 +298,6 @@ router.delete(
         DELETE FROM advisor_actions;
         DELETE FROM advisor_drafts;
         DELETE FROM holdings_history;
-        DELETE FROM investment_transactions;
         DELETE FROM holdings;
         DELETE FROM securities;
         DELETE FROM budget_rollover_ledger;

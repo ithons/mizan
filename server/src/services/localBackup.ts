@@ -7,7 +7,6 @@ export const LOCAL_BACKUP_TABLES = [
   'transactions',
   'securities',
   'holdings',
-  'investment_transactions',
   'budgets',
   'recurring_patterns',
   'merchant_rules',
