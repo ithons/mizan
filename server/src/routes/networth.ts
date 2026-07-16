@@ -1,6 +1,5 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import { getDb } from '../db/index';
-import { takeSnapshot } from '../services/snapshot';
 import { dollarizeFields, toDollars } from '../services/money';
 
 const router = Router();
@@ -55,23 +54,6 @@ router.get('/snapshot', (_req: Request, res: Response, next: NextFunction): void
     const snapshot = db.prepare(
       'SELECT * FROM net_worth_snapshots ORDER BY date DESC LIMIT 1'
     ).get();
-
-    res.json({ data: snapshot ? dollarizeSnapshotRow(snapshot) : null });
-  } catch (err) {
-    next(err);
-  }
-});
-
-// POST /snapshot - take net worth snapshot
-router.post('/snapshot', (_req: Request, res: Response, next: NextFunction): void => {
-  try {
-    takeSnapshot();
-
-    const db = getDb();
-    const today = new Date().toISOString().split('T')[0];
-    const snapshot = db.prepare(
-      'SELECT * FROM net_worth_snapshots WHERE date = ?'
-    ).get(today);
 
     res.json({ data: snapshot ? dollarizeSnapshotRow(snapshot) : null });
   } catch (err) {
