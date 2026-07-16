@@ -20,6 +20,7 @@ import type {
   SyncRun,
   SyncRunDetail,
   CashflowReport,
+  ReportSummary,
   ReportComparisonMode,
   SpendingReport,
   CredentialStatus,
@@ -421,6 +422,13 @@ export const reportsApi = {
     if (params?.startDate) q.set('startDate', params.startDate);
     if (params?.endDate) q.set('endDate', params.endDate);
     return apiFetch<CashflowReport>(`/api/reports/cashflow?${q.toString()}`);
+  },
+  summary: (params?: ReportParams) => {
+    const q = new URLSearchParams();
+    if (params?.startDate) q.set('startDate', params.startDate);
+    if (params?.endDate) q.set('endDate', params.endDate);
+    if (params?.comparison) q.set('comparison', params.comparison);
+    return apiFetch<ReportSummary>(`/api/reports/summary?${q.toString()}`);
   },
   spending: (params?: ReportParams) => {
     const q = new URLSearchParams();
