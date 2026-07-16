@@ -1,26 +1,23 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { epochSecondsToUtcDate, isoToUtcDate } from '../server/src/services/dates';
+import { epochSecondsToLocalDate, isoToLocalDate } from '../server/src/services/dates';
 
-// A transaction posted at 23:30 UTC must land on that UTC calendar day regardless of the
-// process timezone. The old local-tz conversion would push it to the next day in any
-// timezone east of UTC (e.g. UTC+2 -> 01:30 next day).
-test('epochSecondsToUtcDate keeps a near-midnight instant on the UTC day', () => {
-  const epoch = Date.parse('2026-03-15T23:30:00Z') / 1000;
-  assert.equal(epochSecondsToUtcDate(epoch), '2026-03-15');
+// The ingest normalizes provider instants to the server's LOCAL calendar day, matching the
+// local "today"/month boundaries used everywhere else. These tests construct instants in
+// local time (new Date(y, m, d, ...)) so they hold regardless of the machine's timezone.
+
+test('epochSecondsToLocalDate returns the local calendar day of the instant', () => {
+  const localNoon = new Date(2026, 2, 15, 12, 0, 0); // 2026-03-15 12:00 local
+  assert.equal(epochSecondsToLocalDate(localNoon.getTime() / 1000), '2026-03-15');
 });
 
-test('epochSecondsToUtcDate uses UTC, not local time (00:30 UTC stays the same day)', () => {
-  const epoch = Date.parse('2026-03-15T00:30:00Z') / 1000;
-  assert.equal(epochSecondsToUtcDate(epoch), '2026-03-15');
+test('a late-evening local instant stays on its local day (does not drift to the next UTC day)', () => {
+  // Under the old UTC rule this would roll to 2026-03-16 in any timezone behind UTC.
+  const lateLocal = new Date(2026, 2, 15, 23, 30, 0); // 2026-03-15 23:30 local
+  assert.equal(epochSecondsToLocalDate(lateLocal.getTime() / 1000), '2026-03-15');
 });
 
-test('isoToUtcDate normalizes a provider ISO timestamp to the UTC day', () => {
-  assert.equal(isoToUtcDate('2026-07-13T23:59:59Z'), '2026-07-13');
-});
-
-test('SimpleFIN and Coinbase agree on the same instant', () => {
-  const iso = '2026-01-01T05:00:00Z';
-  const epoch = Date.parse(iso) / 1000;
-  assert.equal(epochSecondsToUtcDate(epoch), isoToUtcDate(iso));
+test('isoToLocalDate agrees with epochSecondsToLocalDate for the same instant', () => {
+  const d = new Date(2026, 6, 13, 9, 15, 0);
+  assert.equal(isoToLocalDate(d.toISOString()), epochSecondsToLocalDate(d.getTime() / 1000));
 });

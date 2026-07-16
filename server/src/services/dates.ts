@@ -1,15 +1,19 @@
-// Provider transaction dates are normalized to a UTC calendar day (YYYY-MM-DD).
-// Using UTC rather than the server's local timezone keeps a given instant on the same
-// calendar day regardless of where the process runs, and makes SimpleFIN and Coinbase
-// agree with each other (Coinbase timestamps were already treated as UTC). This matters
-// for daily reports, "this month" boundaries, and recurring detection: a transaction
-// posted just before midnight must not drift onto a different day when the server's tz
-// changes.
+import { format } from 'date-fns';
 
-export function epochSecondsToUtcDate(epochSeconds: number): string {
-  return new Date(epochSeconds * 1000).toISOString().slice(0, 10);
+// Provider transaction instants are normalized to a calendar day (YYYY-MM-DD) in the
+// server's LOCAL timezone. Mizān is single-user and local-first: the process runs on the
+// owner's own machine in one timezone, and every "today"/"this month" boundary elsewhere
+// (snapshot, reporting, recurring, budgets) is already computed in local time. Storing the
+// transaction day in local time keeps the data and those boundaries consistent, and matches
+// how the owner actually reckons a purchase ("I bought this Tuesday") — a late-night
+// transaction stays on the local day it happened rather than drifting to the next UTC day.
+// (Existing rows dated under the old UTC rule reconcile on the next resync, which re-fetches
+// each transaction's full timestamp.)
+
+export function epochSecondsToLocalDate(epochSeconds: number): string {
+  return format(new Date(epochSeconds * 1000), 'yyyy-MM-dd');
 }
 
-export function isoToUtcDate(iso: string): string {
-  return new Date(iso).toISOString().slice(0, 10);
+export function isoToLocalDate(iso: string): string {
+  return format(new Date(iso), 'yyyy-MM-dd');
 }

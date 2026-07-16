@@ -1,6 +1,6 @@
 import axios from 'axios';
 import { v4 as uuidv4 } from 'uuid';
-import { epochSecondsToUtcDate } from './dates';
+import { epochSecondsToLocalDate } from './dates';
 import type Database from 'better-sqlite3';
 import { getCredentials } from './credentials';
 import { getDb } from '../db/index';
@@ -253,7 +253,7 @@ export async function syncSimplefin(): Promise<SimplefinSyncResult> {
 
       // Normalize the posted epoch to a UTC calendar day so it doesn't drift with the
       // server's timezone and matches how Coinbase timestamps are handled.
-      const date = epochSecondsToUtcDate(txn.posted);
+      const date = epochSecondsToLocalDate(txn.posted);
       let amount: number; // cents, already negative for expenses
       try {
         amount = toCents(parseFinancialAmount(txn.amount, `transaction ${txn.id} amount`));
