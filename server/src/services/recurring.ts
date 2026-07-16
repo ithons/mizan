@@ -79,6 +79,10 @@ const STRIP_TRAILING_DIGITS = /\s+\d+$/;
 const STRIP_HASH_DIGITS = /\s*#\d+/g;
 const STRIP_PUNCTUATION = /[^\w\s]/g;
 
+// Aggressive on purpose: strips store numbers, corporate suffixes, and trailing state codes so a
+// merchant's variants ("STARBUCKS #1234 WA", "STARBUCKS #5678 OR") group into one recurring
+// pattern. This is intentionally stronger than transactionIntegrity.normalizeMerchant, which must
+// stay minimal to avoid merging distinct charges into false duplicates. Keep them separate.
 function normalizeMerchant(name: string): string {
   let n = name.toLowerCase().trim();
   n = n.replace(STRIP_PUNCTUATION, ' ');

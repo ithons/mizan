@@ -44,6 +44,11 @@ function shortHash(input: string): string {
   return crypto.createHash('sha256').update(input).digest('hex').slice(0, 16);
 }
 
+// Deliberately minimal, and deliberately NOT the aggressive canonicalizer in recurring.ts.
+// This feeds the duplicate-detection key, so it must keep genuinely distinct charges distinct
+// ("starbucks 1234" vs "starbucks 5678" stay separate). recurring.ts strips store numbers and
+// suffixes on purpose — that's correct for grouping a merchant's recurring charges, but here it
+// would merge separate purchases into false duplicates. The two must not be unified.
 function normalizeMerchant(merchant: string): string {
   return merchant.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
 }
