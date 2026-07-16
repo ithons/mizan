@@ -111,8 +111,6 @@ export function refreshDuplicateCandidates(db: Database.Database): DuplicateDete
   // Process strict groups
   for (const [key, group] of groups) {
     if (group.length < 2) continue;
-    
-    if (group.length < 2) continue;
 
     const ids = group.map((row) => row.id);
     const groupId = `dup_${shortHash(key)}`;
@@ -181,7 +179,9 @@ function transferCandidateRows(db: Database.Database): TransferRow[] {
     JOIN accounts a ON a.id = t.account_id
     WHERE t.pending = 0
       AND t.transfer_status NOT IN ('dismissed', 'confirmed')
-      AND ABS(t.amount) >= 1
+      -- Ignore trivial amounts under 1 dollar. amount is integer cents (migrations
+      -- 018/022); the old threshold of 1 silently became "1 cent" after that migration.
+      AND ABS(t.amount) >= 100
       AND (
         t.category_id IS NULL
         OR t.category_id IN (SELECT id FROM transfer_categories)
