@@ -237,6 +237,12 @@ router.post('/chat', async (req: Request, res: Response, next: NextFunction): Pr
   // result back, and stream again. Bounded so a misbehaving model can't loop forever.
   const MAX_TOOL_ROUNDS = 8;
 
+  // Accumulated across every tool round so we can confirm the ephemeral cache on the stable
+  // prefix (system prompt + snapshot + tool list) actually gets read back rather than re-billed.
+  let cacheReadTokens = 0;
+  let cacheCreationTokens = 0;
+  let uncachedInputTokens = 0;
+
   try {
     for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
       const stream = anthropic.messages.stream({
@@ -284,6 +290,9 @@ router.post('/chat', async (req: Request, res: Response, next: NextFunction): Pr
       }
 
       const message = await stream.finalMessage();
+      cacheReadTokens += message.usage.cache_read_input_tokens ?? 0;
+      cacheCreationTokens += message.usage.cache_creation_input_tokens ?? 0;
+      uncachedInputTokens += message.usage.input_tokens;
       if (message.stop_reason !== 'tool_use') break;
 
       // Run every requested tool (all strictly read-only) and feed the results back.
@@ -301,6 +310,10 @@ router.post('/chat', async (req: Request, res: Response, next: NextFunction): Pr
       conversation.push({ role: 'assistant', content: message.content });
       conversation.push({ role: 'user', content: toolResults });
     }
+
+    console.log(
+      `[ai/chat] cache read ${cacheReadTokens} tok, cache write ${cacheCreationTokens} tok, uncached input ${uncachedInputTokens} tok`
+    );
 
     res.write(`data: ${JSON.stringify({ type: 'done' })}\n\n`);
     res.end();
