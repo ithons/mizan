@@ -119,7 +119,7 @@ router.get('/', (_req: Request, res: Response, next: NextFunction): void => {
           END
         ), 0) AS liquid_assets
       FROM accounts
-      WHERE is_hidden = 0
+      WHERE is_hidden = 0 AND type != 'closed'
     `).get() as AccountSummary;
 
     if (accountSummary.total_accounts === 0) {

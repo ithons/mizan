@@ -8,6 +8,7 @@ export const ACCOUNT_TYPE_LABELS: Record<string, string> = {
   crypto_wallet: 'Crypto Wallet',
   cash: 'Cash',
   other: 'Other',
+  closed: 'Closed',
 };
 
 export const ACCOUNT_TYPE_GROUPS: Record<string, string[]> = {
@@ -16,6 +17,7 @@ export const ACCOUNT_TYPE_GROUPS: Record<string, string[]> = {
   Investments: ['brokerage', 'ira_traditional', 'ira_roth'],
   Crypto: ['crypto_wallet'],
   Manual: ['other'],
+  Closed: ['closed'],
 };
 
 export const FREQUENCY_LABELS: Record<string, string> = {

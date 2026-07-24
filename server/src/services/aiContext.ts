@@ -241,7 +241,7 @@ export function buildFinancialContext(): string {
   const accounts = db.prepare(`
     SELECT type, current_balance, available_balance, is_liability, is_hidden, account_name, institution_name
     FROM accounts
-    WHERE is_hidden = 0
+    WHERE is_hidden = 0 AND type != 'closed'
     ORDER BY type
   `).all() as Array<{
     type: string; current_balance: number; available_balance: number | null;

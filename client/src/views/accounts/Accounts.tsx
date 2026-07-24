@@ -61,6 +61,7 @@ export function Accounts() {
 
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [showHidden, setShowHidden] = useState(false);
+  const [showClosed, setShowClosed] = useState(false);
   const [showAddModal, setShowAddModal] = useState(false);
   const [editing, setEditing] = useState<Account | null>(null);
   const [merging, setMerging] = useState<Account | null>(null);
@@ -100,18 +101,22 @@ export function Accounts() {
 
   const visible = useMemo(() => (accounts ?? []).filter((a) => !a.is_hidden), [accounts]);
   const hidden = useMemo(() => (accounts ?? []).filter((a) => a.is_hidden), [accounts]);
+  // Closed accounts stay in net-worth HISTORY but are kept out of the live sections and the
+  // current net-worth totals — surfaced in their own collapsed section instead.
+  const closed = useMemo(() => visible.filter((a) => a.type === 'closed'), [visible]);
+  const liveVisible = useMemo(() => visible.filter((a) => a.type !== 'closed'), [visible]);
 
   const groups = useMemo(() => {
-    const remaining = new Set(visible.map((a) => a.id));
+    const remaining = new Set(liveVisible.map((a) => a.id));
     return GROUPS.map((g) => {
-      const rows = visible.filter((a) => remaining.has(a.id) && g.match(a));
+      const rows = liveVisible.filter((a) => remaining.has(a.id) && g.match(a));
       rows.forEach((a) => remaining.delete(a.id));
       return { name: g.name, rows, total: rows.reduce((s, a) => s + signedBalance(a), 0) };
     }).filter((g) => g.rows.length > 0);
-  }, [visible]);
+  }, [liveVisible]);
 
-  const assets = visible.reduce((s, a) => s + Math.max(0, signedBalance(a)), 0);
-  const liabilities = visible.reduce((s, a) => s + Math.min(0, signedBalance(a)), 0);
+  const assets = liveVisible.reduce((s, a) => s + Math.max(0, signedBalance(a)), 0);
+  const liabilities = liveVisible.reduce((s, a) => s + Math.min(0, signedBalance(a)), 0);
   const netWorth = assets + liabilities;
 
   const selected = (accounts ?? []).find((a) => a.id === selectedId) ?? null;
@@ -219,7 +224,7 @@ export function Accounts() {
         {/* Grouped account list */}
         <div className="min-w-0 flex-1">
           {isLoading && <SkeletonRows rows={5} />}
-          {!isLoading && visible.length === 0 && (
+          {!isLoading && liveVisible.length === 0 && closed.length === 0 && (
             <div className="py-10 text-[14px] text-muted">
               No accounts yet.{' '}
               <button
@@ -240,6 +245,18 @@ export function Accounts() {
               {g.rows.map((a) => renderRow(a))}
             </div>
           ))}
+          {closed.length > 0 && (
+            <div className="mb-6">
+              <button
+                type="button"
+                onClick={() => setShowClosed((v) => !v)}
+                className="mb-1.5 text-xs text-muted-2 transition-colors hover:text-ink"
+              >
+                {closed.length} closed account{closed.length === 1 ? '' : 's'} · {showClosed ? 'collapse' : 'show'}
+              </button>
+              {showClosed && closed.map((a) => renderRow(a, true))}
+            </div>
+          )}
           {hidden.length > 0 && (
             <div className="mb-6">
               <button

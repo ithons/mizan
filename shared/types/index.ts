@@ -9,7 +9,8 @@ export type AccountType =
   | 'ira_roth'
   | 'crypto_wallet'
   | 'cash'
-  | 'other';
+  | 'other'
+  | 'closed';
 
 export interface Account {
   id: string;

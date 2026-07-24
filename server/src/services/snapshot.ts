@@ -25,7 +25,9 @@ export function takeSnapshot(): void {
   let crypto_assets = 0;
   const breakdown: Record<string, number> = {};
 
-  const liquidTypes = new Set(['checking', 'savings', 'cash']);
+  // 'closed' accounts are former deposit accounts (checking/savings) kept for net-worth history;
+  // they're $0 today so this bucketing is a no-op live, but keeps them liquid in the breakdown.
+  const liquidTypes = new Set(['checking', 'savings', 'cash', 'closed']);
   const investmentTypes = new Set(['brokerage', 'ira_traditional', 'ira_roth']);
 
   for (const account of accounts) {
@@ -152,7 +154,9 @@ export function backfillSnapshots(): void {
     };
   }
 
-  const liquidTypes = new Set(['checking', 'savings', 'cash']);
+  // 'closed' accounts reconstruct their history through the deposit (else) branch below and
+  // bucket as liquid — they were checking/savings before closure.
+  const liquidTypes = new Set(['checking', 'savings', 'cash', 'closed']);
   const investmentTypes = new Set(['brokerage', 'ira_traditional', 'ira_roth']);
 
   // Accounts whose value is market-driven, not transaction-driven. Reversing individual

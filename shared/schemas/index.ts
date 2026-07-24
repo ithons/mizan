@@ -2,7 +2,7 @@ import { z } from 'zod';
 
 export const CreateManualAccountSchema = z.object({
   account_name: z.string().min(1),
-  type: z.enum(['checking', 'savings', 'credit', 'brokerage', 'ira_traditional', 'ira_roth', 'crypto_wallet', 'cash', 'other']),
+  type: z.enum(['checking', 'savings', 'credit', 'brokerage', 'ira_traditional', 'ira_roth', 'crypto_wallet', 'cash', 'other', 'closed']),
   institution_name: z.string().optional().default(''),
   current_balance: z.number().default(0),
   currency: z.string().default('USD'),
@@ -13,7 +13,7 @@ export const CreateManualAccountSchema = z.object({
 export const UpdateAccountSchema = z.object({
   account_name: z.string().min(1).optional(),
   institution_name: z.string().nullable().optional(),
-  type: z.enum(['checking', 'savings', 'credit', 'brokerage', 'ira_traditional', 'ira_roth', 'crypto_wallet', 'cash', 'other']).optional(),
+  type: z.enum(['checking', 'savings', 'credit', 'brokerage', 'ira_traditional', 'ira_roth', 'crypto_wallet', 'cash', 'other', 'closed']).optional(),
   currency: z.string().min(1).optional(),
   is_liability: z.boolean().optional(),
   color: z.string().nullable().optional(),
