@@ -235,7 +235,7 @@ function EditTransactionModal({ transaction, onClose }: { transaction: Transacti
             {save.isPending ? 'Saving…' : 'Save'}
           </InkButton>
           <TextButton onClick={onClose}>Cancel</TextButton>
-          {transaction.is_manual && (
+          {Boolean(transaction.is_manual) && (
             <TextButton onClick={() => remove.mutate()} disabled={remove.isPending} className="ml-auto hover:!text-clay">
               Delete
             </TextButton>

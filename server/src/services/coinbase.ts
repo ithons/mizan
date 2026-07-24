@@ -295,12 +295,6 @@ export async function syncCoinbase(): Promise<CoinbaseSyncResult> {
   let coinCount = 0;
   const balanceChanges: AccountBalanceChange[] = [];
   const seenCurrencies = new Set<string>();
-  // A real connect-route connection that pre-exists this sync keeps its historical
-  // behavior of importing trade history; a synthetic env connection stays
-  // balances-only (crypto trade history is not pulled into the ledger by default).
-  const preExistingConnection = db.prepare(
-    "SELECT id FROM coinbase_connections WHERE status = 'active'"
-  ).get() as CoinbaseConnectionRow | undefined;
   const activeConnectionId = ensureCoinbaseConnection(db, now);
 
   // One consolidated Coinbase account holds every coin as a holding (the Fidelity model),
@@ -400,18 +394,18 @@ export async function syncCoinbase(): Promise<CoinbaseSyncResult> {
   db.prepare('UPDATE accounts SET current_balance = ?, updated_at = ? WHERE id = ?').run(totalCents, now, accountId);
   console.log(`[coinbase] Consolidated account: ${coinCount} coin${coinCount === 1 ? '' : 's'} held, ${zeroedCount} zeroed, ${toDollars(totalCents).toFixed(2)} total`);
 
-  let transactionCount = preExistingConnection
-    ? await syncTradeHistory(preExistingConnection.id)
-    : 0;
+  // Import the full crypto ledger for the active connection: v3 brokerage orders (buy/sell) plus
+  // the v2 ledger (converts/sends/receives/fiat). Both dedup on coinbase_transaction_id and honor
+  // the backfill floor, so running every sync is idempotent — and doing it unconditionally fixes a
+  // prior bug where the .env connection only imported history from the *second* sync onward
+  // (the gate keyed off "pre-existing active connection", which is order-dependent).
+  let transactionCount = await syncTradeHistory(activeConnectionId);
 
-  // The v2 ledger (converts/sends/receives/fiat) is best-effort: a failure here must not fail an
-  // otherwise-successful balance + trade sync.
-  if (preExistingConnection) {
-    try {
-      transactionCount += await syncCoinbaseLedger();
-    } catch (err) {
-      console.warn(`[coinbase] Ledger sync failed (non-fatal): ${err instanceof Error ? err.message : String(err)}`);
-    }
+  // The v2 ledger is best-effort: a failure here must not fail an otherwise-successful sync.
+  try {
+    transactionCount += await syncCoinbaseLedger();
+  } catch (err) {
+    console.warn(`[coinbase] Ledger sync failed (non-fatal): ${err instanceof Error ? err.message : String(err)}`);
   }
 
   db.prepare(

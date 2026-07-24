@@ -199,6 +199,14 @@ export function backfillSnapshots(): void {
           // Money spent to acquire assets (negative cash) RAISES value by its magnitude, so
           // pre-purchase value was lower — undo by subtracting the magnitude.
           approxBalances[txn.account_id] -= Math.abs(txn.amount);
+        } else if (cat === 'cat_crypto_sell') {
+          // A crypto SELL leg is the mirror of a buy leg — undo by ADDING back its magnitude.
+          // This makes a Coinbase convert (a matched crypto_sell + crypto_buy of equal USD) net
+          // to zero in the estimate, instead of the buy leg being counted as a phantom external
+          // contribution. (A real crypto→cash sell is treated as an outflow, a fair approximation.
+          // Fiat deposits/withdrawals into the wallet are left flat, so a buy funded by a separate
+          // deposit isn't double-counted.)
+          approxBalances[txn.account_id] += Math.abs(txn.amount);
         } else if (cat === 'cat_inv_transfer') {
           // Sign-aware external flow: a contribution (+) means value was lower before; a
           // withdrawal/correction (−) means it was higher. Undo by subtracting the amount.

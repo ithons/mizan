@@ -2,6 +2,7 @@ import type { QueryClient } from '@tanstack/react-query';
 
 const FINANCIAL_QUERY_KEYS = [
   'accounts',
+  'account', // per-account detail view queries: ['account', id, 'history'|'holdings'|'transactions']
   'transactions',
   'networth',
   'budgets',

@@ -196,6 +196,10 @@ export function getHoldingHistory(
     | undefined;
   if (!holding) throw httpError('Holding not found', 404);
 
+  // Guard against a non-numeric ?days= (parseInt → NaN) producing '-NaN days', which SQLite
+  // evaluates to NULL and silently returns an empty series. Fall back to the 90-day default.
+  const windowDays = Number.isFinite(days) && days > 0 ? Math.floor(days) : 90;
+
   // institution_value and cost_basis stay in integer cents (dollarized at the route);
   // institution_price (per-unit) and quantity (share count) are not money.
   return db.prepare(`
@@ -203,7 +207,7 @@ export function getHoldingHistory(
     FROM holdings_history
     WHERE account_id = ? AND security_id = ? AND date >= date('now', ?)
     ORDER BY date ASC
-  `).all(holding.account_id, holding.security_id, `-${days} days`) as HoldingHistoryPoint[];
+  `).all(holding.account_id, holding.security_id, `-${windowDays} days`) as HoldingHistoryPoint[];
 }
 
 export function setSecurityMetadata(

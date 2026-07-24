@@ -196,3 +196,29 @@ test('takeSnapshot buckets todays balances and excludes hidden accounts; closed 
     void closeDb;
   }
 });
+
+test('backfillSnapshots nets a Coinbase convert to zero (matched crypto buy + sell legs)', () => {
+  const db = setupDb();
+  _setDbForTesting(db);
+  try {
+    // Crypto wallet worth $500 today. Last month: a BTC->ETH convert (a $100 sell leg + a $100
+    // buy leg, no external money). The estimate for before the convert must be unchanged ($500),
+    // not $400 (the old bug that reversed only the buy leg).
+    db.prepare('INSERT INTO accounts VALUES (?,?,?,?,?)').run('cb', 50000, 0, 0, 'crypto_wallet');
+    const today = format(new Date(), 'yyyy-MM-dd');
+    const ins = db.prepare('INSERT INTO transactions (id,account_id,date,amount,pending,category_id) VALUES (?,?,?,?,?,?)');
+    ins.run('t_sell', 'cb', today, 10000, 0, 'cat_crypto_sell');  // +$100 (coin out)
+    ins.run('t_buy', 'cb', today, -10000, 0, 'cat_crypto_buy');   // -$100 (coin in)
+
+    backfillSnapshots();
+
+    const target = format(startOfMonth(subMonths(new Date(), 1)), 'yyyy-MM-dd');
+    const snap = db.prepare('SELECT crypto_assets, total_assets FROM net_worth_snapshots WHERE date = ?')
+      .get(target) as { crypto_assets: number; total_assets: number };
+    assert.ok(snap);
+    assert.equal(snap.crypto_assets, 50000, 'convert nets to zero: pre-convert crypto still $500');
+    assert.equal(snap.total_assets, 50000);
+  } finally {
+    db.close();
+  }
+});
