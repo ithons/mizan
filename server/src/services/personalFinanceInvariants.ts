@@ -113,6 +113,44 @@ function stalePendingTransactionsIssue(
   );
 }
 
+// Holdings whose account was deleted are dead weight that inflate the portfolio total and can't
+// be reconciled to any account — a real integrity break, not a soft-data-quality nit.
+function orphanHoldingsIssue(db: Database.Database): PersonalFinanceInvariantIssue | null {
+  const orphans = count(
+    db,
+    `SELECT COUNT(*) AS count FROM holdings h
+     LEFT JOIN accounts a ON a.id = h.account_id
+     WHERE a.id IS NULL`
+  );
+  if (orphans === 0) return null;
+  return issue(
+    'orphan-holdings',
+    'Holdings without an account',
+    `${orphans} holding ${orphans === 1 ? 'row references' : 'rows reference'} an account that no longer exists. They inflate the portfolio total and can't be reconciled.`,
+    '/investments',
+    'critical',
+    30
+  );
+}
+
+// A 'closed' account is expected to sit at $0 (it's kept for net-worth history, not live value).
+// A non-zero one leaks into future net-worth snapshots, distorting the current total.
+function closedAccountBalanceIssue(db: Database.Database): PersonalFinanceInvariantIssue | null {
+  const nonZero = db.prepare(
+    "SELECT id, account_name FROM accounts WHERE type = 'closed' AND current_balance != 0"
+  ).all() as AccountRow[];
+  if (nonZero.length === 0) return null;
+  const names = nonZero.map((account) => account.account_name).join(', ');
+  return issue(
+    'closed-account-nonzero',
+    'Closed account has a balance',
+    `Closed ${nonZero.length === 1 ? 'account' : 'accounts'} with a non-zero balance: ${names}. Closed accounts should be $0 so they don't distort current net worth.`,
+    '/accounts',
+    'warning',
+    Math.min(15, nonZero.length * 5)
+  );
+}
+
 export function getPersonalFinanceInvariantIssues(
   db: Database.Database,
   now = new Date()
@@ -120,5 +158,7 @@ export function getPersonalFinanceInvariantIssues(
   return [
     hiddenAccountSnapshotIssue(db),
     stalePendingTransactionsIssue(db, now),
+    orphanHoldingsIssue(db),
+    closedAccountBalanceIssue(db),
   ].filter((item): item is PersonalFinanceInvariantIssue => Boolean(item));
 }

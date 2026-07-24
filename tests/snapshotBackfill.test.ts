@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import Database from 'better-sqlite3';
 import { format, startOfMonth, subMonths } from 'date-fns';
 import { _setDbForTesting, closeDb } from '../server/src/db/index';
-import { backfillSnapshots } from '../server/src/services/snapshot';
+import { backfillSnapshots, takeSnapshot } from '../server/src/services/snapshot';
 
 // backfillSnapshots estimates historical net worth by reversing later transactions off the
 // current balances. Liability balances are stored as positive "amount owed" and move opposite
@@ -40,6 +40,16 @@ function setupDb(): Database.Database {
       liquid_assets INTEGER,
       investment_assets INTEGER,
       crypto_assets INTEGER
+    );
+    CREATE TABLE holdings (
+      id TEXT PRIMARY KEY, account_id TEXT NOT NULL, security_id TEXT NOT NULL,
+      quantity REAL NOT NULL, institution_price REAL NOT NULL, institution_value INTEGER NOT NULL,
+      cost_basis INTEGER
+    );
+    CREATE TABLE holdings_history (
+      id TEXT PRIMARY KEY, account_id TEXT NOT NULL, security_id TEXT NOT NULL, date TEXT NOT NULL,
+      quantity REAL NOT NULL, institution_price REAL NOT NULL, institution_value INTEGER NOT NULL,
+      cost_basis INTEGER, created_at TEXT NOT NULL, UNIQUE(account_id, security_id, date)
     );
   `);
   return db;
@@ -152,6 +162,35 @@ test('backfillSnapshots reaches back to the oldest transaction, past the 12-mont
     assert.ok(snap, `expected an estimated snapshot at ${target}`);
   } finally {
     // The service caches getDb(); drop the test handle so later suites don't reuse it.
+    _setDbForTesting(undefined as unknown as Database.Database);
+    db.close();
+    void closeDb;
+  }
+});
+
+test('takeSnapshot buckets todays balances and excludes hidden accounts; closed accounts add $0', () => {
+  const db = setupDb();
+  _setDbForTesting(db);
+  try {
+    const ins = db.prepare('INSERT INTO accounts (id, current_balance, is_liability, is_hidden, type) VALUES (?,?,?,?,?)');
+    ins.run('chk', 100000, 0, 0, 'checking');   // $1000 liquid
+    ins.run('card', 50000, 1, 0, 'credit');     // $500 owed
+    ins.run('cb', 20000, 0, 0, 'crypto_wallet'); // $200 crypto
+    ins.run('closed', 0, 0, 0, 'closed');        // $0 closed (kept for history)
+    ins.run('hid', 999999, 0, 1, 'checking');    // hidden — must be excluded
+
+    takeSnapshot();
+
+    const today = format(new Date(), 'yyyy-MM-dd');
+    const snap = db.prepare('SELECT * FROM net_worth_snapshots WHERE date = ?').get(today) as Record<string, number>;
+    assert.equal(snap.total_assets, 120000, 'assets = checking + crypto (+ $0 closed), hidden excluded');
+    assert.equal(snap.total_liabilities, 50000);
+    assert.equal(snap.net_worth, 70000);
+    assert.equal(snap.liquid_assets, 100000, 'closed adds $0');
+    assert.equal(snap.crypto_assets, 20000);
+    assert.equal(snap.investment_assets, 0);
+    assert.equal(snap.is_estimated, 0, 'live snapshot is not an estimate');
+  } finally {
     _setDbForTesting(undefined as unknown as Database.Database);
     db.close();
     void closeDb;

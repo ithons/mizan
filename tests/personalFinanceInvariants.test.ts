@@ -10,7 +10,9 @@ function setupInvariantDb(): Database.Database {
     CREATE TABLE accounts (
       id TEXT PRIMARY KEY,
       account_name TEXT NOT NULL,
-      is_hidden INTEGER NOT NULL DEFAULT 0
+      is_hidden INTEGER NOT NULL DEFAULT 0,
+      type TEXT NOT NULL DEFAULT 'checking',
+      current_balance INTEGER NOT NULL DEFAULT 0
     );
 
     CREATE TABLE net_worth_snapshots (
@@ -24,6 +26,12 @@ function setupInvariantDb(): Database.Database {
       id TEXT PRIMARY KEY,
       date TEXT NOT NULL,
       pending INTEGER NOT NULL DEFAULT 0
+    );
+
+    CREATE TABLE holdings (
+      id TEXT PRIMARY KEY,
+      account_id TEXT NOT NULL,
+      security_id TEXT NOT NULL DEFAULT 'sec'
     );
   `);
 
@@ -87,4 +95,32 @@ test('personal finance invariants flag old pending transactions', (t) => {
   assert.equal(issues[0].id, 'stale-pending-transactions');
   assert.equal(issues[0].route, '/transactions?pending=true');
   assert.match(issues[0].message, /older than 7 days/);
+});
+
+test('personal finance invariants flag holdings whose account was deleted', (t) => {
+  const db = setupInvariantDb();
+  t.after(() => db.close());
+
+  db.prepare("INSERT INTO accounts (id, account_name) VALUES ('acct_live', 'Brokerage')").run();
+  db.prepare("INSERT INTO holdings (id, account_id) VALUES ('h_ok', 'acct_live')").run();
+  db.prepare("INSERT INTO holdings (id, account_id) VALUES ('h_orphan', 'acct_gone')").run();
+
+  const issues = getPersonalFinanceInvariantIssues(db, new Date('2026-06-30T12:00:00.000Z'));
+  const orphan = issues.find((i) => i.id === 'orphan-holdings');
+  assert.ok(orphan, 'expected an orphan-holdings issue');
+  assert.equal(orphan?.severity, 'critical');
+});
+
+test('personal finance invariants flag a closed account with a non-zero balance', (t) => {
+  const db = setupInvariantDb();
+  t.after(() => db.close());
+
+  db.prepare("INSERT INTO accounts (id, account_name, type, current_balance) VALUES ('c_ok', 'BofA Checking', 'closed', 0)").run();
+  db.prepare("INSERT INTO accounts (id, account_name, type, current_balance) VALUES ('c_bad', 'Chase Savings', 'closed', 4200)").run();
+
+  const issues = getPersonalFinanceInvariantIssues(db, new Date('2026-06-30T12:00:00.000Z'));
+  const closed = issues.find((i) => i.id === 'closed-account-nonzero');
+  assert.ok(closed, 'expected a closed-account-nonzero issue');
+  assert.match(closed!.message, /Chase Savings/);
+  assert.doesNotMatch(closed!.message, /BofA Checking/);
 });
