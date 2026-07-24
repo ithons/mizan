@@ -104,6 +104,10 @@
   0%, 49% { opacity: 1; }
   50%, 100% { opacity: 0; }
 }
+/* NOTE: `both` keeps the final `transform: translateY(0)` applied forever, and an element with a
+   non-`none` transform becomes the containing block for `position: fixed` descendants. Any overlay
+   rendered INSIDE a view therefore sizes itself to the page, not the viewport — which put dialogs
+   thousands of pixels off-screen on long lists. Overlays must portal to <body> (see Modal.tsx). */
 .mz-screen { animation: mz-rise 0.35s ease both; }
 .mz-rise-fast { animation: mz-rise 0.2s ease both; }
 

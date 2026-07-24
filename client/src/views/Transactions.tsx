@@ -409,7 +409,14 @@ export function Transactions() {
         />
         <button
           type="button"
-          onClick={() => setReviewOnly((v) => !v)}
+          onClick={() => {
+            const turningOn = !reviewOnly;
+            setReviewOnly(turningOn);
+            // The badge counts uncategorized across ALL time, but the range defaults to this month
+            // — where almost none of the backlog lives. Turning the filter on without widening the
+            // range showed "Needs review · 426" above "0 transactions · this month".
+            if (turningOn) setRange('all');
+          }}
           className={`text-[13.5px] text-review-text transition-colors ${
             reviewOnly ? 'rounded-md bg-review-active px-2.5 py-1' : 'hover:opacity-75'
           }`}

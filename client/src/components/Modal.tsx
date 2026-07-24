@@ -1,4 +1,5 @@
 import React, { useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { X } from 'lucide-react';
 
 interface ModalProps {
@@ -21,7 +22,13 @@ export function Modal({ open, onClose, title, children, maxWidth = '480px' }: Mo
 
   if (!open) return null;
 
-  return (
+  // Rendered through a portal to <body>, NOT in place. `.mz-screen` (the wrapper around every
+  // view) keeps a persistent `transform` from its entry animation, and a transformed element
+  // becomes the containing block for `position: fixed` descendants. Rendered inline, this
+  // overlay therefore sized itself to the whole page — on a long list that meant an 8984px-tall
+  // container with the dialog centered ~4400px down, i.e. a blurred screen with nothing on it.
+  // The portal puts it outside that ancestor so `fixed` means the viewport again.
+  return createPortal(
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
       {/* Backdrop */}
       <div
@@ -48,6 +55,7 @@ export function Modal({ open, onClose, title, children, maxWidth = '480px' }: Mo
         {/* Content */}
         <div className="px-6 py-5">{children}</div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }
