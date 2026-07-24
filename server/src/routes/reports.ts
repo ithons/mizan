@@ -2,8 +2,11 @@ import { Router, Request, Response, NextFunction } from 'express';
 import { getDb } from '../db/index';
 import {
   getCashflowReport,
+  getNetWorthAttribution,
   getReportSummary,
   getSpendingReport,
+  getSpendingTrendsReport,
+  getTopMerchantsReport,
 } from '../services/reporting';
 import type {
   CashflowReport,
@@ -143,6 +146,85 @@ router.get('/spending', (req: Request, res: Response, next: NextFunction): void 
         endDate,
         parentOnly: parentOnly === 'true',
       })),
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// GET /trends?startDate&endDate&categoryIds=a,b
+// Per-category monthly spend series. The service existed but had no route, so nothing could reach it.
+router.get('/trends', (req: Request, res: Response, next: NextFunction): void => {
+  try {
+    const db = getDb();
+    const startDate = firstQueryValue(req.query.startDate);
+    const endDate = firstQueryValue(req.query.endDate);
+    const rawCategoryIds = firstQueryValue(req.query.categoryIds);
+    const categoryIds = rawCategoryIds
+      ? rawCategoryIds.split(',').map((id) => id.trim()).filter(Boolean)
+      : undefined;
+
+    const report = getSpendingTrendsReport(db, { startDate, endDate, categoryIds });
+    res.json({
+      data: {
+        months: report.months,
+        series: report.series.map((s) => ({ ...s, values: s.values.map(toDollars) })),
+      },
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// GET /merchants?startDate&endDate&limit
+router.get('/merchants', (req: Request, res: Response, next: NextFunction): void => {
+  try {
+    const db = getDb();
+    const startDate = firstQueryValue(req.query.startDate);
+    const endDate = firstQueryValue(req.query.endDate);
+    const rawLimit = firstQueryValue(req.query.limit);
+    const parsedLimit = rawLimit ? Number.parseInt(rawLimit, 10) : undefined;
+    const limit = parsedLimit !== undefined && Number.isFinite(parsedLimit) ? parsedLimit : undefined;
+
+    const report = getTopMerchantsReport(db, { startDate, endDate, limit });
+    res.json({
+      data: {
+        merchants: report.merchants.map((m) => ({ ...m, total: toDollars(m.total) })),
+        total: toDollars(report.total),
+      },
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// GET /networth-attribution?startDate&endDate
+// Returns null when the window holds fewer than two snapshots — nothing moved to attribute.
+router.get('/networth-attribution', (req: Request, res: Response, next: NextFunction): void => {
+  try {
+    const db = getDb();
+    const startDate = firstQueryValue(req.query.startDate);
+    const endDate = firstQueryValue(req.query.endDate);
+
+    const report = getNetWorthAttribution(db, { startDate, endDate });
+    if (!report) {
+      res.json({ data: null });
+      return;
+    }
+
+    res.json({
+      data: {
+        ...report,
+        start_net_worth: toDollars(report.start_net_worth),
+        end_net_worth: toDollars(report.end_net_worth),
+        delta: toDollars(report.delta),
+        accounts: report.accounts.map((a) => ({
+          ...a,
+          start_balance: toDollars(a.start_balance),
+          end_balance: toDollars(a.end_balance),
+          delta: toDollars(a.delta),
+        })),
+      },
     });
   } catch (err) {
     next(err);

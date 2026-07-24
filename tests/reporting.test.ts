@@ -10,6 +10,8 @@ import {
   getReportSummary,
   getSpendingReport,
   getSpendingTrendsReport,
+  getNetWorthAttribution,
+  getTopMerchantsReport,
 } from '../server/src/services/reporting';
 
 interface CategoryFixture {
@@ -525,4 +527,110 @@ test('a confirmed duplicate stops counting toward spending', (t) => {
   // Sanity: the same row WOULD count if it were an ordinary transaction.
   db.prepare("UPDATE transactions SET duplicate_status = 'none' WHERE id = 'dupe_copy'").run();
   assert.equal(getSpendingReport(db, range).total, before + 100, 'control: it counts when not flagged');
+});
+
+test('top merchants ranks reportable spend and excludes transfers, crypto, and pending', (t) => {
+  const db = setupReportingDb();
+  t.after(() => db.close());
+
+  db.prepare(`
+    INSERT INTO transactions (id, account_id, date, amount, merchant_name, original_name, category_id, pending, transfer_status)
+    VALUES
+      ('cafe_1', 'acct_checking', '2026-06-12', -40, 'Blue Bottle', 'BLUE BOTTLE #12', 'cat_food_restaurants', 0, 'none'),
+      ('cafe_2', 'acct_checking', '2026-06-18', -35, 'Blue Bottle', 'BLUE BOTTLE #12', 'cat_food_restaurants', 0, 'none'),
+      -- No merchant_name: must fall back to original_name rather than collapsing into "Unknown".
+      ('raw_only', 'acct_checking', '2026-06-19', -25, NULL, 'CORNER STORE', 'cat_food', 0, 'none')
+  `).run();
+
+  const report = getTopMerchantsReport(db, { startDate: '2026-06-01', endDate: '2026-06-30' });
+  const byName = new Map(report.merchants.map((m) => [m.merchant, m]));
+
+  const blueBottle = byName.get('Blue Bottle');
+  assert.equal(blueBottle?.total, 75);
+  assert.equal(blueBottle?.transaction_count, 2);
+  assert.equal(blueBottle?.last_date, '2026-06-18');
+  assert.equal(blueBottle?.category_name, 'Restaurants');
+
+  assert.equal(byName.get('CORNER STORE')?.total, 25);
+
+  // The exclusions Reports applies everywhere else must hold here too.
+  assert.equal(byName.has('transfer_out'), false);
+  assert.equal(byName.has('crypto_buy'), false);
+  assert.equal(byName.has('pending_food'), false);
+
+  // restaurant(100) + uncategorized_expense(30) + 75 + 25
+  assert.equal(report.total, 230);
+});
+
+test('top merchants honors the limit and orders by spend', (t) => {
+  const db = setupReportingDb();
+  t.after(() => db.close());
+
+  const report = getTopMerchantsReport(db, { startDate: '2026-06-01', endDate: '2026-06-30', limit: 1 });
+  assert.equal(report.merchants.length, 1);
+  assert.equal(report.merchants[0]?.merchant, 'restaurant');
+  // The total stays the full window total, not the truncated sum, so shares stay honest.
+  assert.equal(report.total, 130);
+});
+
+test('net worth attribution diffs per-account balances between the window snapshots', (t) => {
+  const db = setupReportingDb();
+  t.after(() => db.close());
+
+  const attribution = getNetWorthAttribution(db, {});
+  assert.ok(attribution);
+  assert.equal(attribution.start_date, '2026-05-31');
+  assert.equal(attribution.end_date, '2026-06-30');
+  assert.equal(attribution.delta, 300);
+
+  const byId = new Map(attribution.accounts.map((a) => [a.account_id, a]));
+  assert.equal(byId.get('acct_checking')?.delta, 200);
+  assert.equal(byId.get('acct_checking')?.account_name, 'Everyday Checking');
+
+  // The card's balance fell 300 -> 200. `breakdown` stores debt as a positive amount owed, so
+  // paying it down is a POSITIVE contribution to net worth, not a -100 "loss".
+  const card = byId.get('acct_credit');
+  assert.equal(card?.is_liability, true);
+  assert.equal(card?.start_balance, 300);
+  assert.equal(card?.end_balance, 200);
+  assert.equal(card?.delta, 100);
+
+  // The whole point of attribution: the parts must add up to the headline move.
+  const summed = attribution.accounts.reduce((total, a) => total + a.delta, 0);
+  assert.equal(summed, attribution.delta);
+
+  // Largest absolute mover first, regardless of sign.
+  assert.equal(attribution.accounts[0]?.account_id, 'acct_checking');
+});
+
+test('net worth attribution needs two snapshots and survives a malformed breakdown', (t) => {
+  const db = setupReportingDb();
+  t.after(() => db.close());
+
+  // A single-snapshot window is a point, not a movement.
+  assert.equal(getNetWorthAttribution(db, { startDate: '2026-06-01', endDate: '2026-06-30' }), null);
+
+  db.prepare(`UPDATE net_worth_snapshots SET breakdown = 'not json' WHERE id = 'nw_jun'`).run();
+  const degraded = getNetWorthAttribution(db, {});
+  assert.ok(degraded);
+  // Net worth still moved; the per-account attribution just reads as a drop to zero rather than 500ing.
+  assert.equal(degraded.delta, 300);
+  assert.equal(degraded.accounts.every((a) => a.end_balance === 0), true);
+});
+
+test('an account that appears only in the later snapshot counts its full balance as the move', (t) => {
+  const db = setupReportingDb();
+  t.after(() => db.close());
+
+  db.prepare(`
+    UPDATE net_worth_snapshots
+    SET breakdown = '{"acct_checking":1200,"acct_credit":200,"acct_new":400}'
+    WHERE id = 'nw_jun'
+  `).run();
+
+  const attribution = getNetWorthAttribution(db, {});
+  const added = attribution?.accounts.find((a) => a.account_id === 'acct_new');
+  assert.equal(added?.start_balance, 0);
+  assert.equal(added?.delta, 400);
+  assert.equal(added?.account_name, null); // unknown to the accounts table, still attributed
 });

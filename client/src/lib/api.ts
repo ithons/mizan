@@ -23,6 +23,9 @@ import type {
   ReportSummary,
   ReportComparisonMode,
   SpendingReport,
+  CategoryTrendReport,
+  TopMerchantsReport,
+  NetWorthAttribution,
   CredentialStatus,
   Holding,
   HoldingHistoryPoint,
@@ -450,6 +453,27 @@ export const reportsApi = {
     if (params?.endDate) q.set('endDate', params.endDate);
     if (params?.month) q.set('month', params.month);
     return apiFetch<SpendingReport>(`/api/reports/spending?${q.toString()}`);
+  },
+  trends: (params?: ReportParams & { categoryIds?: string[] }) => {
+    const q = new URLSearchParams();
+    if (params?.startDate) q.set('startDate', params.startDate);
+    if (params?.endDate) q.set('endDate', params.endDate);
+    if (params?.categoryIds?.length) q.set('categoryIds', params.categoryIds.join(','));
+    return apiFetch<CategoryTrendReport>(`/api/reports/trends?${q.toString()}`);
+  },
+  merchants: (params?: ReportParams & { limit?: number }) => {
+    const q = new URLSearchParams();
+    if (params?.startDate) q.set('startDate', params.startDate);
+    if (params?.endDate) q.set('endDate', params.endDate);
+    if (params?.limit) q.set('limit', String(params.limit));
+    return apiFetch<TopMerchantsReport>(`/api/reports/merchants?${q.toString()}`);
+  },
+  // Null when the window holds fewer than two snapshots — there is no movement to attribute.
+  networthAttribution: (params?: ReportParams) => {
+    const q = new URLSearchParams();
+    if (params?.startDate) q.set('startDate', params.startDate);
+    if (params?.endDate) q.set('endDate', params.endDate);
+    return apiFetch<NetWorthAttribution | null>(`/api/reports/networth-attribution?${q.toString()}`);
   },
   investments: (params?: ReportParams) => {
     const q = new URLSearchParams();

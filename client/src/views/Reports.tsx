@@ -6,7 +6,7 @@ import { ASSET_COLORS } from '../lib/chartColors';
 import { formatWholeCurrency } from '../lib/formatters';
 import { Screen, ScreenHeader, SectionLabel, Select, TrendChart } from '../components/balance';
 import { QueryState } from '../components/QueryState';
-import type { NetWorthSnapshot, ReportMetricSummary } from '@shared/types';
+import type { NetWorthSnapshot, ReportComparisonMode, ReportMetricSummary } from '@shared/types';
 
 const LIABILITY_COLOR = '#b5654a'; // clay
 const INCOME_COLOR = '#5c7050'; // deep sage
@@ -27,6 +27,19 @@ const TREND_RANGES = [
   { id: '2y', label: '2Y', months: 24 as number | undefined },
   { id: 'all', label: 'All', months: undefined as number | undefined },
 ] as const;
+
+// The server has supported every one of these comparison windows since the summary report was
+// written; nothing in the UI ever sent one, so every number was silently a prior-period compare.
+const COMPARISONS: Array<{ id: ReportComparisonMode; label: string }> = [
+  { id: 'prior_period', label: 'vs prior period' },
+  { id: 'prior_month', label: 'vs prior month' },
+  { id: 'same_month_last_year', label: 'vs same month last year' },
+  { id: 'trailing_3', label: 'vs trailing 3 months' },
+  { id: 'trailing_12', label: 'vs trailing 12 months' },
+];
+
+// Category-trend window: enough months to read a shape, few enough to stay legible as sparklines.
+const TREND_MONTHS = 6;
 
 function rangeDates(id: RangeId): { startDate: string; endDate: string } {
   const now = new Date();
@@ -99,12 +112,38 @@ function Metric({ label, m, invertColor, isPercent }: { label: string; m: Report
   );
 }
 
+// Small-multiple sparkline for one category's monthly spend. Bars (not a line) because a missing
+// month is a real zero here, and a line would interpolate straight through it.
+function CategorySparkline({ values, color }: { values: number[]; color: string }) {
+  const max = Math.max(1, ...values);
+  return (
+    <div className="flex h-8 items-end gap-[3px]">
+      {values.map((v, i) => (
+        <div
+          key={i}
+          className="flex-1 rounded-[2px]"
+          style={{ height: `${Math.max(v > 0 ? 8 : 2, (v / max) * 100)}%`, background: v > 0 ? color : 'var(--rail, #e6e1d8)' }}
+          title={formatWholeCurrency(v)}
+        />
+      ))}
+    </div>
+  );
+}
+
 export function Reports() {
   const [range, setRange] = useState<RangeId>('this-month');
   const [trendRange, setTrendRange] = useState<string>('all');
+  const [comparison, setComparison] = useState<ReportComparisonMode>('prior_period');
   const [showAllSpending, setShowAllSpending] = useState(false);
   const dates = rangeDates(range);
   const trendMonths = TREND_RANGES.find((r) => r.id === trendRange)?.months;
+
+  // Category trends and net-worth attribution read a fixed trailing window, independent of the
+  // period selector — a one-month window has no trend and (usually) no second snapshot.
+  const trailingDates = {
+    startDate: format(startOfMonth(subMonths(new Date(), TREND_MONTHS - 1)), 'yyyy-MM-dd'),
+    endDate: format(endOfMonth(new Date()), 'yyyy-MM-dd'),
+  };
 
   // Query keys MUST start with a segment listed in queryInvalidation.ts's FINANCIAL_QUERY_KEYS —
   // TanStack matches by array prefix. These used to be ['networth-snapshot'], ['report-summary', …]
@@ -112,7 +151,10 @@ export function Reports() {
   // stale numbers: two screens disagreeing about net worth.
   const snapshotQ = useQuery({ queryKey: ['networth', 'snapshot'], queryFn: () => networthApi.snapshot() });
   const historyQ = useQuery({ queryKey: ['networth', 'history', trendRange], queryFn: () => networthApi.history(trendMonths) });
-  const summaryQ = useQuery({ queryKey: ['reports', 'summary', range], queryFn: () => reportsApi.summary(dates) });
+  const summaryQ = useQuery({ queryKey: ['reports', 'summary', range, comparison], queryFn: () => reportsApi.summary({ ...dates, comparison }) });
+  const trendsQ = useQuery({ queryKey: ['reports', 'trends', trailingDates], queryFn: () => reportsApi.trends(trailingDates) });
+  const merchantsQ = useQuery({ queryKey: ['reports', 'merchants', range], queryFn: () => reportsApi.merchants({ ...dates, limit: 10 }) });
+  const attributionQ = useQuery({ queryKey: ['reports', 'attribution', trailingDates], queryFn: () => reportsApi.networthAttribution(trailingDates) });
   // The dates belong in the key, or a tab left open across a month boundary serves the old window.
   const cashflowDates = rangeDates('three-months');
   const cashflowQ = useQuery({ queryKey: ['reports', 'cashflow', cashflowDates], queryFn: () => reportsApi.cashflow(cashflowDates) });
@@ -123,6 +165,16 @@ export function Reports() {
   const { data: summary } = summaryQ;
   const { data: cashflow } = cashflowQ;
   const { data: spending } = spendingQ;
+  const { data: trends } = trendsQ;
+  const { data: merchants } = merchantsQ;
+  const { data: attribution } = attributionQ;
+
+  // Only categories that actually moved money in the window are worth a sparkline.
+  const trendSeries = (trends?.series ?? [])
+    .map((s) => ({ ...s, sum: s.values.reduce((a, b) => a + b, 0) }))
+    .filter((s) => s.sum > 0)
+    .sort((a, b) => b.sum - a.sum)
+    .slice(0, 6);
 
   const trendPoints = (history ?? []).map((s) => ({ date: s.date, value: s.net_worth }));
   const cashflowMax = Math.max(1, ...(cashflow?.months ?? []).flatMap((m) => [m.income, m.expenses]));
@@ -164,10 +216,15 @@ export function Reports() {
 
         {/* Period summary with range selector */}
         <section>
-          <div className="mb-3 flex items-center justify-between">
+          <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
             <SectionLabel>This period</SectionLabel>
-            <Select value={range} onChange={(v) => setRange(v as RangeId)} clearable={false}
-              placeholder="This month" options={RANGES.map((r) => ({ value: r.id, label: r.label }))} />
+            <div className="flex items-center gap-2">
+              <Select value={range} onChange={(v) => setRange(v as RangeId)} clearable={false}
+                placeholder="This month" options={RANGES.map((r) => ({ value: r.id, label: r.label }))} />
+              <Select value={comparison} onChange={(v) => setComparison(v as ReportComparisonMode)} clearable={false}
+                placeholder="vs prior period" align="right"
+                options={COMPARISONS.map((c) => ({ value: c.id, label: c.label }))} />
+            </div>
           </div>
           <QueryState
             isLoading={summaryQ.isPending}
@@ -177,12 +234,71 @@ export function Reports() {
             label="this period's summary"
           >
             {summary && (
-              <div className="grid grid-cols-2 gap-6 sm:grid-cols-4">
-                <Metric label="Income" m={summary.income} />
-                <Metric label="Expenses" m={summary.expenses} invertColor />
-                <Metric label="Net" m={summary.net} />
-                <Metric label="Savings rate" m={summary.savings_rate} isPercent />
-              </div>
+              <>
+                <div className="grid grid-cols-2 gap-6 sm:grid-cols-4">
+                  <Metric label="Income" m={summary.income} />
+                  <Metric label="Expenses" m={summary.expenses} invertColor />
+                  <Metric label="Net" m={summary.net} />
+                  <Metric label="Savings rate" m={summary.savings_rate} isPercent />
+                </div>
+                {/* Name the baseline: a delta with an unstated comparison window is unreadable. */}
+                <p className="mt-3 text-[12.5px] text-muted-2">
+                  Compared with {summary.comparison_label.toLowerCase()}
+                  {summary.comparison_start_date && summary.comparison_end_date
+                    ? ` · ${summary.comparison_start_date} to ${summary.comparison_end_date}`
+                    : ''}
+                </p>
+              </>
+            )}
+          </QueryState>
+        </section>
+
+        {/* What moved net worth */}
+        <section>
+          <SectionLabel className="mb-3">What moved net worth · last {TREND_MONTHS} months</SectionLabel>
+          <QueryState
+            isLoading={attributionQ.isPending}
+            isError={attributionQ.isError}
+            error={attributionQ.error}
+            onRetry={() => void attributionQ.refetch()}
+            label="net worth attribution"
+          >
+            {attribution ? (
+              <>
+                <p className="mb-3 text-[13.5px] leading-relaxed text-muted">
+                  Net worth {attribution.delta >= 0 ? 'rose' : 'fell'}{' '}
+                  <span className={attribution.delta >= 0 ? 'text-sage-deep' : 'text-clay'}>
+                    {formatWholeCurrency(Math.abs(attribution.delta))}
+                  </span>{' '}
+                  from {attribution.start_date} to {attribution.end_date}.
+                </p>
+                <div className="space-y-2.5">
+                  {attribution.accounts.slice(0, 8).map((a) => {
+                    const max = Math.max(1, ...attribution.accounts.map((x) => Math.abs(x.delta)));
+                    const up = a.delta >= 0;
+                    return (
+                      <div key={a.account_id}>
+                        <div className="mb-1 flex items-baseline justify-between gap-3 text-[13px]">
+                          <span className="truncate text-ink">
+                            {a.account_name ?? 'Unknown account'}
+                            {a.institution_name && <span className="text-muted-2"> · {a.institution_name}</span>}
+                          </span>
+                          <span className={`shrink-0 tabular-nums ${up ? 'text-sage-deep' : 'text-clay'}`}>
+                            {up ? '+' : '−'}{formatWholeCurrency(Math.abs(a.delta))}
+                          </span>
+                        </div>
+                        <div className="h-3 w-full overflow-hidden rounded bg-rail">
+                          <div className="h-full" style={{ width: `${(Math.abs(a.delta) / max) * 100}%`, background: up ? INCOME_COLOR : LIABILITY_COLOR }} />
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </>
+            ) : (
+              <p className="text-[13.5px] text-muted-2">
+                Needs at least two snapshots in this window — they accrue as you sync.
+              </p>
             )}
           </QueryState>
         </section>
@@ -260,6 +376,86 @@ export function Reports() {
                 )}
               </>
             ) : <p className="text-[13.5px] text-muted-2">No spending in this period.</p>}
+          </QueryState>
+        </section>
+
+        {/* Category trends */}
+        <section>
+          <SectionLabel className="mb-3">Category trends · last {TREND_MONTHS} months</SectionLabel>
+          <QueryState
+            isLoading={trendsQ.isPending}
+            isError={trendsQ.isError}
+            error={trendsQ.error}
+            onRetry={() => void trendsQ.refetch()}
+            label="category trends"
+          >
+            {trendSeries.length > 0 ? (
+              <>
+                <div className="grid grid-cols-1 gap-x-8 gap-y-5 sm:grid-cols-2 lg:grid-cols-3">
+                  {trendSeries.map((s) => {
+                    const latest = s.values[s.values.length - 1] ?? 0;
+                    const prior = s.values[s.values.length - 2] ?? 0;
+                    const delta = latest - prior;
+                    return (
+                      <div key={s.category_id}>
+                        <div className="mb-1.5 flex items-baseline justify-between gap-2 text-[13px]">
+                          <span className="truncate text-ink">{s.category_name}</span>
+                          <span className="shrink-0 tabular-nums text-muted">{formatWholeCurrency(latest)}</span>
+                        </div>
+                        <CategorySparkline values={s.values} color={s.color ?? LIQUID_COLOR} />
+                        {delta !== 0 && (
+                          <div className={`mt-1 text-[12px] tabular-nums ${delta > 0 ? 'text-clay' : 'text-sage-deep'}`}>
+                            {delta > 0 ? '▲' : '▼'} {formatWholeCurrency(Math.abs(delta))} vs prior month
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+                <p className="mt-3 text-[11.5px] text-muted-2">
+                  {trends?.months[0]} → {trends?.months[trends.months.length - 1]}
+                </p>
+              </>
+            ) : <p className="text-[13.5px] text-muted-2">No categorized spending in the last {TREND_MONTHS} months.</p>}
+          </QueryState>
+        </section>
+
+        {/* Top merchants */}
+        <section>
+          <SectionLabel className="mb-3">Top merchants · {RANGES.find((r) => r.id === range)?.label.toLowerCase()}</SectionLabel>
+          <QueryState
+            isLoading={merchantsQ.isPending}
+            isError={merchantsQ.isError}
+            error={merchantsQ.error}
+            onRetry={() => void merchantsQ.refetch()}
+            label="top merchants"
+          >
+            {merchants && merchants.merchants.length > 0 ? (
+              <div className="space-y-2.5">
+                {merchants.merchants.map((m) => {
+                  const share = merchants.total > 0 ? (m.total / merchants.total) * 100 : 0;
+                  return (
+                    <div key={m.merchant}>
+                      <div className="mb-1 flex items-baseline justify-between gap-3 text-[13px]">
+                        <span className="truncate text-ink">
+                          {m.merchant}
+                          <span className="text-muted-2">
+                            {' '}· {m.transaction_count}×{m.category_name ? ` · ${m.category_name}` : ''}
+                          </span>
+                        </span>
+                        <span className="shrink-0 tabular-nums text-muted">
+                          {formatWholeCurrency(m.total)}
+                          <span className="text-muted-2"> · {Math.round(share)}%</span>
+                        </span>
+                      </div>
+                      <div className="h-3 w-full overflow-hidden rounded bg-rail">
+                        <div className="h-full" style={{ width: `${share}%`, background: LIQUID_COLOR }} />
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            ) : <p className="text-[13.5px] text-muted-2">No merchant spending in this period.</p>}
           </QueryState>
         </section>
 

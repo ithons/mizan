@@ -24,6 +24,8 @@ import type {
   ReportSummary,
   SpendingReport,
   NetWorthSnapshot,
+  NetWorthAttribution,
+  TopMerchantsReport,
 } from '../../../shared/types';
 
 // Every report object this module returns keeps money TOTALS in integer cents.
@@ -984,5 +986,170 @@ export function getReportSummary(
       .slice(0, 3),
     spending_movers: categoryChanges(currentSpending, previousSpending, 5),
     excluded_flows: getExcludedFlowSummary(db, range),
+  };
+}
+
+// ── Top merchants ─────────────────────────────────────────────────────────────
+// "Where is the money actually going" at a finer grain than category. Merchants are grouped by
+// the cleaned `merchant_name`, falling back to `original_name` for rows no cleaner has touched.
+export function getTopMerchantsReport(
+  db: Database.Database,
+  range: ReportDateRange & { limit?: number }
+): TopMerchantsReport {
+  const { conditions, params } = dateConditions(range);
+  conditions.push('t.amount < 0');
+  conditions.push(expenseCategoryCondition());
+
+  const limit = Math.min(Math.max(range.limit ?? 15, 1), 100);
+
+  // The merchant label is resolved in a CTE rather than a SELECT alias: a correlated subquery
+  // cannot reference an outer alias in SQLite ("no such column: merchant").
+  const rows = db.prepare(`
+    ${excludedCategoriesCte()},
+    reportable AS (
+      SELECT
+        COALESCE(NULLIF(TRIM(t.merchant_name), ''), NULLIF(TRIM(t.original_name), ''), 'Unknown') AS merchant,
+        t.amount AS amount,
+        t.date AS date,
+        t.category_id AS category_id
+      FROM transactions t
+      LEFT JOIN categories c ON c.id = t.category_id
+      WHERE ${conditions.join(' AND ')}
+    )
+    SELECT
+      r.merchant AS merchant,
+      COUNT(*) AS transaction_count,
+      SUM(ABS(r.amount)) AS total,
+      MAX(r.date) AS last_date,
+      -- A merchant can span categories; show the one it lands in most often in this window.
+      (
+        SELECT COALESCE(c2.name, 'Uncategorized')
+        FROM reportable r2
+        LEFT JOIN categories c2 ON c2.id = r2.category_id
+        WHERE r2.merchant = r.merchant
+        GROUP BY r2.category_id
+        ORDER BY COUNT(*) DESC
+        LIMIT 1
+      ) AS category_name
+    FROM reportable r
+    GROUP BY r.merchant
+    ORDER BY total DESC
+    LIMIT ?
+  `).all(...EXCLUDED_REPORT_ROOT_CATEGORY_IDS, ...params, limit) as Array<{
+    merchant: string;
+    transaction_count: number;
+    total: number;
+    last_date: string;
+    category_name: string | null;
+  }>;
+
+  const totalRow = db.prepare(`
+    ${excludedCategoriesCte()}
+    SELECT COALESCE(SUM(ABS(t.amount)), 0) AS total
+    FROM transactions t
+    LEFT JOIN categories c ON c.id = t.category_id
+    WHERE ${conditions.join(' AND ')}
+  `).get(...EXCLUDED_REPORT_ROOT_CATEGORY_IDS, ...params) as { total: number };
+
+  return {
+    merchants: rows.map((row) => ({
+      merchant: row.merchant,
+      transaction_count: row.transaction_count,
+      total: row.total,
+      last_date: row.last_date,
+      category_name: row.category_name,
+    })),
+    total: totalRow.total,
+  };
+}
+
+// ── Net-worth attribution ─────────────────────────────────────────────────────
+// "What moved net worth over this window." Diffs the per-account `breakdown` map of the first and
+// last snapshot in the window. An account missing from one side is treated as 0 there, so accounts
+// opened or closed mid-window show their full balance as the delta rather than being dropped.
+export function getNetWorthAttribution(
+  db: Database.Database,
+  options: { startDate?: string; endDate?: string } = {}
+): NetWorthAttribution | null {
+  const conditions: string[] = [];
+  const params: unknown[] = [];
+  if (options.startDate) { conditions.push('date >= ?'); params.push(options.startDate); }
+  if (options.endDate) { conditions.push('date <= ?'); params.push(options.endDate); }
+  const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+
+  const bounds = db.prepare(`
+    SELECT MIN(date) AS first_date, MAX(date) AS last_date, COUNT(*) AS count
+    FROM net_worth_snapshots ${where}
+  `).get(...params) as { first_date: string | null; last_date: string | null; count: number };
+
+  // One snapshot is a point, not a movement — there is nothing to attribute.
+  if (bounds.count < 2 || !bounds.first_date || !bounds.last_date) return null;
+
+  const snapshotAt = (date: string) => db.prepare(`
+    SELECT date, net_worth, breakdown FROM net_worth_snapshots WHERE date = ? ORDER BY date LIMIT 1
+  `).get(date) as { date: string; net_worth: number; breakdown: string | null } | undefined;
+
+  const start = snapshotAt(bounds.first_date);
+  const end = snapshotAt(bounds.last_date);
+  if (!start || !end) return null;
+
+  const parse = (raw: string | null): Record<string, number> => {
+    if (!raw) return {};
+    try {
+      const parsed = JSON.parse(raw) as Record<string, unknown>;
+      return Object.fromEntries(
+        Object.entries(parsed).filter((entry): entry is [string, number] => typeof entry[1] === 'number')
+      );
+    } catch {
+      return {}; // A malformed breakdown degrades to "no attribution", never a 500.
+    }
+  };
+
+  const startBalances = parse(start.breakdown);
+  const endBalances = parse(end.breakdown);
+
+  const accountRows = db.prepare(
+    'SELECT id, account_name, institution_name, type, is_liability FROM accounts'
+  ).all() as Array<{
+    id: string;
+    account_name: string | null;
+    institution_name: string | null;
+    type: string | null;
+    is_liability: number | null;
+  }>;
+  const accountsById = new Map(accountRows.map((row) => [row.id, row]));
+
+  const accounts = Array.from(new Set([...Object.keys(startBalances), ...Object.keys(endBalances)]))
+    .map((accountId) => {
+      const account = accountsById.get(accountId);
+      const isLiability = account ? account.is_liability === 1 : false;
+      const startBalance = startBalances[accountId] ?? 0;
+      const endBalance = endBalances[accountId] ?? 0;
+      const balanceDelta = endBalance - startBalance;
+      return {
+        account_id: accountId,
+        account_name: account?.account_name ?? null,
+        institution_name: account?.institution_name ?? null,
+        type: account?.type ?? null,
+        is_liability: account ? account.is_liability === 1 : null,
+        start_balance: startBalance,
+        end_balance: endBalance,
+        // Contribution to NET WORTH, not the raw balance change. `breakdown` stores a liability as
+        // a positive amount owed, so a credit-card balance growing by $100 moves net worth DOWN by
+        // $100. Negating here is what makes these deltas sum to the headline net-worth delta —
+        // without it a rising card balance rendered as a green gain.
+        delta: isLiability ? -balanceDelta : balanceDelta,
+      };
+    })
+    .filter((account) => account.delta !== 0)
+    .sort((a, b) => Math.abs(b.delta) - Math.abs(a.delta));
+
+  return {
+    start_date: start.date,
+    end_date: end.date,
+    start_net_worth: start.net_worth,
+    end_net_worth: end.net_worth,
+    delta: end.net_worth - start.net_worth,
+    accounts,
   };
 }

@@ -1001,6 +1001,51 @@ export interface ReportNetWorthEvidence {
   accounts: ReportNetWorthEvidenceAccount[];
 }
 
+export interface TopMerchant {
+  merchant: string;
+  transaction_count: number;
+  total: number;
+  last_date: string;
+  category_name: string | null;
+}
+
+export interface TopMerchantsReport {
+  merchants: TopMerchant[];
+  /** Total reportable spend in the window, so a merchant's share can be shown. */
+  total: number;
+}
+
+export interface NetWorthAttributionAccount {
+  account_id: string;
+  account_name: string | null;
+  institution_name: string | null;
+  type: string | null;
+  is_liability: boolean | null;
+  start_balance: number;
+  end_balance: number;
+  delta: number;
+}
+
+export interface NetWorthAttribution {
+  start_date: string;
+  end_date: string;
+  start_net_worth: number;
+  end_net_worth: number;
+  delta: number;
+  /** Non-zero movers only, largest absolute move first. */
+  accounts: NetWorthAttributionAccount[];
+}
+
+export interface CategoryTrendReport {
+  months: string[];
+  series: Array<{
+    category_id: string;
+    category_name: string;
+    color: string | null;
+    values: number[];
+  }>;
+}
+
 export interface CredentialStatus {
   coinbase: boolean;
   coinbaseFromEnv: boolean;
