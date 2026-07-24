@@ -17,6 +17,7 @@ import { upsertRecurringAdjustment } from './recurringAdjustments';
 import { setManualCostBasis, setSecurityMetadata } from './investmentMetadata';
 import { toCents, toCentsOrNull, toDollars, toDollarsOrNull } from './money';
 import { AdvisorDraftPayloadSchema } from '../../../shared/schemas';
+import { safeJsonParse } from './jsonSafe';
 
 interface CategoryRow {
   id: string;
@@ -1110,5 +1111,102 @@ export function confirmAdvisorDraft(
     changed: result.changed,
     draft: draftAction,
     result: result.result,
+  };
+}
+
+export interface BatchConfirmOutcome {
+  id: string;
+  status: 'applied' | 'skipped';
+  /** Present on 'applied'. */
+  changed?: number;
+  /** Present on 'skipped': why this draft could not be applied. */
+  reason?: string;
+  label?: string;
+}
+
+export interface BatchConfirmResult {
+  applied: number;
+  skipped: number;
+  outcomes: BatchConfirmOutcome[];
+}
+
+/**
+ * Confirm several persisted background-worker drafts in one request.
+ *
+ * Takes draft IDS, not payloads. `confirmAdvisorDraft` accepts a client-supplied payload because a
+ * chat draft never touches the database — but that makes the payload a trust boundary, and handing
+ * a bulk endpoint N arbitrary payloads multiplies the blast radius. Here every payload is read back
+ * from `advisor_drafts`, so a batch can only ever apply work the worker actually proposed.
+ *
+ * Each draft is applied in its own transaction (inside `confirmAdvisorDraft`). One bad draft is
+ * reported and stepped over rather than rolling back the drafts that already succeeded — a partial
+ * apply the caller can see beats an all-or-nothing failure with no explanation.
+ */
+export function confirmAdvisorDraftsByIds(
+  db: Database.Database,
+  ids: string[]
+): BatchConfirmResult {
+  const uniqueIds = Array.from(new Set(ids));
+  const outcomes: BatchConfirmOutcome[] = [];
+
+  for (const id of uniqueIds) {
+    const row = db.prepare(
+      `SELECT id, kind, label, summary, route, payload, changes, citations
+       FROM advisor_drafts WHERE id = ? AND status = 'open'`
+    ).get(id) as
+      | {
+          id: string;
+          kind: string;
+          label: string;
+          summary: string;
+          route: string | null;
+          payload: string;
+          changes: string | null;
+          citations: string | null;
+        }
+      | undefined;
+
+    if (!row) {
+      outcomes.push({ id, status: 'skipped', reason: 'not_found_or_resolved' });
+      continue;
+    }
+
+    let payload: unknown;
+    try {
+      payload = JSON.parse(row.payload);
+    } catch {
+      outcomes.push({ id, status: 'skipped', reason: 'unreadable_payload', label: row.label });
+      continue;
+    }
+
+    const draftAction = {
+      id: row.id,
+      kind: row.kind,
+      label: row.label,
+      summary: row.summary,
+      route: row.route ?? undefined,
+      payload,
+      changes: safeJsonParse<unknown[]>(row.changes ?? '[]', [], `advisor_draft ${row.id} changes`),
+      citations: safeJsonParse<unknown[]>(row.citations ?? '[]', [], `advisor_draft ${row.id} citations`),
+      confirmation_required: true,
+    } as unknown as AdvisorDraftAction;
+
+    try {
+      const result = confirmAdvisorDraft(db, draftAction, true, 'user_confirm');
+      outcomes.push({ id, status: 'applied', changed: result.changed, label: row.label });
+    } catch (err) {
+      outcomes.push({
+        id,
+        status: 'skipped',
+        reason: err instanceof Error ? err.message : 'unknown_error',
+        label: row.label,
+      });
+    }
+  }
+
+  return {
+    applied: outcomes.filter((o) => o.status === 'applied').length,
+    skipped: outcomes.filter((o) => o.status === 'skipped').length,
+    outcomes,
   };
 }

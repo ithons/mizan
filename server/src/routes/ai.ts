@@ -11,7 +11,12 @@ import {
   deleteConversation,
   type ConversationMessage,
 } from '../services/conversations';
-import { confirmAdvisorDraft, dismissAdvisorDraft, listAdvisorActions } from '../services/advisorDrafts';
+import {
+  confirmAdvisorDraft,
+  confirmAdvisorDraftsByIds,
+  dismissAdvisorDraft,
+  listAdvisorActions,
+} from '../services/advisorDrafts';
 import { analyzeAdvisorQuestion } from '../services/advisorTools';
 import { ADVISOR_TOOLS, runAdvisorTool } from '../services/advisorChatTools';
 import { getAdvisorSettings, updateAdvisorSettings } from '../services/advisorSettings';
@@ -228,6 +233,33 @@ router.post('/confirm', (req: Request, res: Response, next: NextFunction): void 
     }
 
     res.json({ data: confirmAdvisorDraft(getDb(), body.draft, body.confirm) });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// POST /api/ai/drafts/confirm - apply several persisted worker drafts at once.
+// Takes ids only: payloads are read back from advisor_drafts so a batch can never apply work the
+// worker did not propose. Partial success is normal and is reported per draft.
+router.post('/drafts/confirm', (req: Request, res: Response, next: NextFunction): void => {
+  try {
+    const raw = req.body?.ids;
+    if (!Array.isArray(raw) || raw.length === 0) {
+      res.status(400).json({ error: 'ids (non-empty array) is required' });
+      return;
+    }
+
+    const ids: string[] = [];
+    for (const entry of raw) {
+      const id = typeof entry === 'string' ? entry.trim() : '';
+      if (!id) {
+        res.status(400).json({ error: 'each id must be a non-empty string' });
+        return;
+      }
+      ids.push(id);
+    }
+
+    res.json({ data: confirmAdvisorDraftsByIds(getDb(), ids) });
   } catch (err) {
     next(err);
   }

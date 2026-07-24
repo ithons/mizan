@@ -707,6 +707,23 @@ export const aiApi = {
     apiFetch<{ success: boolean }>(`/api/ai/drafts/${id}/dismiss`, {
       method: 'POST',
     }),
+  // Ids only — the server reads each payload back from advisor_drafts. Partial success is normal,
+  // so the per-draft outcomes come back rather than a single success flag.
+  confirmDrafts: (ids: string[]) =>
+    apiFetch<{
+      applied: number;
+      skipped: number;
+      outcomes: Array<{
+        id: string;
+        status: 'applied' | 'skipped';
+        changed?: number;
+        reason?: string;
+        label?: string;
+      }>;
+    }>('/api/ai/drafts/confirm', {
+      method: 'POST',
+      body: JSON.stringify({ ids }),
+    }),
 
   streamChat: async (
     messages: ChatMessage[],

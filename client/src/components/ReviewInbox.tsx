@@ -191,6 +191,7 @@ export function ReviewInbox() {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [bulkCategory, setBulkCategory] = useState('');
   const [selectedPatterns, setSelectedPatterns] = useState<Set<string>>(new Set());
+  const [selectedDrafts, setSelectedDrafts] = useState<Set<string>>(new Set());
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   // merchant label -> AI-proposed category. Advisory only; applied on an explicit click.
   const [suggestions, setSuggestions] = useState<Record<string, { id: string; name: string }>>({});
@@ -317,6 +318,21 @@ export function ReviewInbox() {
     onError,
   });
   const dismissDraft = useMutation({ mutationFn: (id: string) => aiApi.dismissDraft(id), onSuccess: invalidate, onError });
+  const confirmDrafts = useMutation({
+    mutationFn: (ids: string[]) => aiApi.confirmDrafts(ids),
+    onSuccess: (result) => {
+      setSelectedDrafts(new Set());
+      // Drafts apply independently, so a batch can partly fail. Naming the count that did NOT apply
+      // is the difference between a trustworthy bulk action and one that quietly drops work.
+      const skipped = result.skipped > 0 ? ` · ${result.skipped} skipped` : '';
+      addToast({
+        type: result.skipped > 0 ? 'error' : 'success',
+        message: `Applied ${result.applied} suggestion${result.applied === 1 ? '' : 's'}${skipped}`,
+      });
+      invalidateAll();
+    },
+    onError,
+  });
   const createRule = useMutation({
     mutationFn: ({ suggestion, categoryId }: { suggestion: MerchantRuleSuggestion; categoryId: string }) =>
       rulesApi.create({ pattern: suggestion.pattern, category_id: categoryId, apply_existing: true }),
@@ -619,11 +635,61 @@ export function ReviewInbox() {
           (counts.ai === 0 ? (
             <p className="py-6 text-[13.5px] text-muted-2">No AI suggestions right now.</p>
           ) : (
-            (summary?.ai_drafts ?? []).map((draft) => {
+            <>
+              {/* Confirming a worker pass one card at a time is the bottleneck the batch endpoint
+                  exists to remove. Overriding a category still needs the per-row picker below, so
+                  bulk confirm applies each draft exactly as proposed. */}
+              <div className="mb-3 flex flex-wrap items-center gap-3 border-b border-line pb-3">
+                <button
+                  type="button"
+                  onClick={() => {
+                    const all = (summary?.ai_drafts ?? []).map((d) => d.id);
+                    setSelectedDrafts((prev) => (prev.size === all.length ? new Set() : new Set(all)));
+                  }}
+                  className="text-[13px] text-muted transition-colors hover:text-ink"
+                >
+                  {selectedDrafts.size === (summary?.ai_drafts ?? []).length ? 'Clear selection' : 'Select all'}
+                </button>
+                {selectedDrafts.size > 0 && (
+                  <>
+                    <span className="text-[13px] text-ink">{selectedDrafts.size} selected</span>
+                    <ActionButton
+                      label={confirmDrafts.isPending ? 'Applying…' : `Confirm ${selectedDrafts.size} as proposed`}
+                      disabled={confirmDrafts.isPending}
+                      onClick={() => confirmDrafts.mutate([...selectedDrafts])}
+                    />
+                  </>
+                )}
+              </div>
+              {(summary?.ai_drafts ?? []).map((draft) => {
               const proposed =
                 draft.payload.kind === 'categorize_transaction' ? draft.payload.category_id : undefined;
+              const checked = selectedDrafts.has(draft.id);
               return (
-                <SectionRow key={draft.id} title={draft.label} sub={draft.summary}>
+                <SectionRow
+                  key={draft.id}
+                  title={draft.label}
+                  sub={draft.summary}
+                  lead={
+                    <button
+                      type="button"
+                      role="checkbox"
+                      aria-checked={checked}
+                      aria-label={`Select suggestion: ${draft.label}`}
+                      onClick={() =>
+                        setSelectedDrafts((prev) => {
+                          const next = new Set(prev);
+                          if (next.has(draft.id)) next.delete(draft.id);
+                          else next.add(draft.id);
+                          return next;
+                        })
+                      }
+                      className={`mt-0.5 h-4 w-4 flex-shrink-0 rounded border transition-colors ${
+                        checked ? 'border-ink bg-ink' : 'border-line-3'
+                      }`}
+                    />
+                  }
+                >
                   {proposed !== undefined ? (
                     <>
                       {/* Pre-filled with the AI's guess so a wrong one can be corrected, not just
@@ -652,7 +718,8 @@ export function ReviewInbox() {
                   <ActionButton label="Dismiss" tone="quiet" onClick={() => dismissDraft.mutate(draft.id)} />
                 </SectionRow>
               );
-            })
+            })}
+            </>
           ))}
 
         {tab === 'transfers' &&
