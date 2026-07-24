@@ -58,7 +58,9 @@ export function createManualAccount(db: Database.Database, input: CreateManualAc
     VALUES (?, 'manual', ?, ?, ?, ?, ?, 1, 0, ?, ?, ?, ?, ?)
   `).run(
     id,
-    input.institution_name,
+    // institution_name is NOT NULL DEFAULT '' but named explicitly in the INSERT, so an
+    // omitted value would bind `undefined` and throw. Fall back to '' at the bind site.
+    input.institution_name ?? '',
     input.account_name,
     input.type,
     toCents(input.current_balance),
