@@ -6,6 +6,7 @@ import { getCredentials } from './credentials';
 import { getDb } from '../db/index';
 import { balancesDiffer, type AccountBalanceChange } from './balanceChanges';
 import { guessAccountTypeAndLiability } from './accountClassification';
+import { isBelowBackfillFloor } from './backfillFloor';
 import { toCents, toCentsOrNull, toDollars } from './money';
 
 // We store liability balances as positive "amount owed" and negate what SimpleFIN reports
@@ -176,10 +177,14 @@ export async function syncSimplefin(): Promise<SimplefinSyncResult> {
     }
 
     const existingAcct = db.prepare(`
-      SELECT id, account_name, current_balance, is_liability, currency
+      SELECT id, account_name, current_balance, is_liability, currency, backfill_floor_date
       FROM accounts
       WHERE simplefin_account_id = ?
     `).get(acct.id) as any;
+
+    // Manual history owns everything below this date; skip anything the provider
+    // serves below it so a deep resync can never duplicate the imported backfill.
+    const backfillFloor: string | null = existingAcct?.backfill_floor_date ?? null;
 
     let accountId: string;
     let isLiability: boolean;
@@ -254,6 +259,12 @@ export async function syncSimplefin(): Promise<SimplefinSyncResult> {
       // Normalize the posted epoch to a UTC calendar day so it doesn't drift with the
       // server's timezone and matches how Coinbase timestamps are handled.
       const date = epochSecondsToLocalDate(txn.posted);
+
+      if (isBelowBackfillFloor(date, backfillFloor)) {
+        skipped++;
+        continue;
+      }
+
       let amount: number; // cents, already negative for expenses
       try {
         amount = toCents(parseFinancialAmount(txn.amount, `transaction ${txn.id} amount`));

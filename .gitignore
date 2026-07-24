@@ -7,3 +7,20 @@ dist/
 .DS_Store
 CLAUDE.md
 AGENT.md
+
+# Historical-backfill data payloads contain real financial history / account names.
+# Keep the machinery (scripts + README + example config) in git, but never the data.
+data/backfill/raw/
+data/backfill/normalized/
+data/backfill/backups/
+data/backfill/floors.json
+data/backfill/jobs.json
+# Raw institution exports (statements/CSVs/PDFs with real financial history) — never commit.
+data/bofa/
+data/chase/
+data/coinbase/
+data/discover/
+data/fidelity/
+data/wealthfront/
+data/captialone/
+data/.DS_Store

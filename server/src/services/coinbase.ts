@@ -7,6 +7,7 @@ import { getDb } from '../db/index';
 import { balancesDiffer, type AccountBalanceChange } from './balanceChanges';
 import { toCents, toDollars } from './money';
 import { isoToLocalDate } from './dates';
+import { isBelowBackfillFloor } from './backfillFloor';
 
 export interface CoinbaseSyncResult {
   accountCount: number;
@@ -450,8 +451,8 @@ export async function syncTradeHistory(connectionId: string): Promise<number> {
 
       const currency = order.product_id.split('-')[0];
       const acct = db.prepare(
-        'SELECT id FROM accounts WHERE coinbase_account_id IS NOT NULL AND native_currency = ?'
-      ).get(currency) as { id: string } | undefined;
+        'SELECT id, backfill_floor_date FROM accounts WHERE coinbase_account_id IS NOT NULL AND native_currency = ?'
+      ).get(currency) as { id: string; backfill_floor_date: string | null } | undefined;
 
       if (!acct) continue;
 
@@ -469,6 +470,10 @@ export async function syncTradeHistory(connectionId: string): Promise<number> {
       const date = order.created_time
         ? isoToLocalDate(order.created_time)
         : now.split('T')[0];
+
+      // Manual history owns everything below this account's floor; never let a deep
+      // pull re-insert a crypto trade the imported backfill already covers.
+      if (isBelowBackfillFloor(date, acct.backfill_floor_date)) continue;
 
       const categoryId = side === 'BUY' ? 'cat_crypto_buy' : 'cat_crypto_sell';
 

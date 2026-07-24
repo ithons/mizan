@@ -1,7 +1,13 @@
 import { v4 as uuidv4 } from 'uuid';
-import { format, subMonths, startOfMonth } from 'date-fns';
+import { format, subMonths, startOfMonth, differenceInCalendarMonths } from 'date-fns';
 import type Database from 'better-sqlite3';
 import { getDb } from '../db/index';
+
+// How far back reverse-replay estimation may run. 12 is the historical floor (keep the
+// chart at least a year even with little data); the upper bound is a 50-year backstop so
+// a stray ancient transaction can't spin the loop for an absurd number of months.
+const MIN_BACKFILL_MONTHS = 12;
+const MAX_BACKFILL_MONTHS = 600;
 
 export function takeSnapshot(): void {
   const db = getDb();
@@ -99,18 +105,26 @@ export function backfillSnapshots(): void {
   const db = getDb();
   const now = new Date();
 
-  // Load all transactions from last 13 months
+  // Load the full posted-transaction history — the backfill extends as far back as the
+  // data goes (post one-time import this can be years), not a fixed window.
   const transactions = db.prepare(`
-    SELECT id, account_id, date, amount
+    SELECT id, account_id, date, amount, category_id
     FROM transactions
-    WHERE date >= ? AND pending = 0
+    WHERE pending = 0
     ORDER BY date ASC
-  `).all(format(subMonths(now, 13), 'yyyy-MM-dd')) as Array<{
+  `).all() as Array<{
     id: string;
     account_id: string;
     date: string;
     amount: number;
+    category_id: string | null;
   }>;
+
+  // Reach back to the month of the oldest transaction (clamped), so imported history
+  // actually produces net-worth points instead of stopping at a 12-month wall.
+  const earliestDate = transactions.length ? transactions[0].date : format(now, 'yyyy-MM-dd');
+  const monthsOfHistory = differenceInCalendarMonths(now, startOfMonth(new Date(`${earliestDate}T00:00:00`)));
+  const monthsBackLimit = Math.min(Math.max(monthsOfHistory, MIN_BACKFILL_MONTHS), MAX_BACKFILL_MONTHS);
 
   // Current balances as the starting point (today's balances)
   const accounts = db.prepare(`
@@ -141,8 +155,17 @@ export function backfillSnapshots(): void {
   const liquidTypes = new Set(['checking', 'savings', 'cash']);
   const investmentTypes = new Set(['brokerage', 'ira_traditional', 'ira_roth']);
 
-  // Walk backwards month by month for 12 months
-  for (let monthsBack = 1; monthsBack <= 12; monthsBack++) {
+  // Accounts whose value is market-driven, not transaction-driven. Reversing individual
+  // buys/sells/dividends off their current value is meaningless (a $100 buy doesn't change
+  // account value, it converts cash to securities). Since transaction data can't
+  // reconstruct market moves, we instead reverse only NEW external money entering the
+  // account (the user's periodic auto-investing / crypto buys) and hold market value flat.
+  // Result: past value ≈ "what you'd contributed by then" — a flagged estimate, not the
+  // reverse-every-trade nonsense.
+  const marketValueTypes = new Set(['brokerage', 'ira_traditional', 'ira_roth', 'crypto_wallet']);
+
+  // Walk backwards month by month across the full history.
+  for (let monthsBack = 1; monthsBack <= monthsBackLimit; monthsBack++) {
     const targetDate = startOfMonth(subMonths(now, monthsBack));
     const targetStr = format(targetDate, 'yyyy-MM-dd');
 
@@ -161,15 +184,42 @@ export function backfillSnapshots(): void {
     const approxBalances: Record<string, number> = { ...balances };
     for (const txn of laterTransactions) {
       if (approxBalances[txn.account_id] === undefined) continue;
+      const meta = accountMap[txn.account_id];
       // Transaction sign: negative = money out (expense), positive = money in (income).
-      // Asset balances move WITH that sign, so undo by subtracting the amount. Liability
-      // balances are stored as positive "amount owed" and move OPPOSITE the sign — a
-      // purchase (negative amount) raises what's owed — so undo by adding the amount.
-      // Reversing both the same way trended credit/loan history the wrong direction.
-      if (accountMap[txn.account_id]?.is_liability) {
+      if (meta && marketValueTypes.has(meta.type)) {
+        // Market-driven account: only external money moving in/out changes value in a way we
+        // can reconstruct; internal buys-with-existing-cash, sells, and dividends leave the
+        // estimate flat (market moves are unknowable from transactions).
+        const cat = txn.category_id ?? '';
+        if (cat === 'cat_inv_buy' || cat === 'cat_crypto_buy') {
+          // Money spent to acquire assets (negative cash) RAISES value by its magnitude, so
+          // pre-purchase value was lower — undo by subtracting the magnitude.
+          approxBalances[txn.account_id] -= Math.abs(txn.amount);
+        } else if (cat === 'cat_inv_transfer') {
+          // Sign-aware external flow: a contribution (+) means value was lower before; a
+          // withdrawal/correction (−) means it was higher. Undo by subtracting the amount.
+          approxBalances[txn.account_id] -= txn.amount;
+        }
+      } else if (meta?.is_liability) {
+        // Liability balances are stored as positive "amount owed" and move OPPOSITE the
+        // sign — a purchase (negative amount) raises what's owed — so undo by adding.
         approxBalances[txn.account_id] += txn.amount;
       } else {
+        // Asset balances move WITH the sign, so undo by subtracting the amount.
         approxBalances[txn.account_id] -= txn.amount;
+      }
+    }
+
+    // Neither a market-driven account nor a liability can sensibly go negative in this
+    // estimate. Market accounts overshoot when reversed contributions exceed today's value
+    // (a market loss/withdrawal we can't see); liabilities overshoot when we have a card's
+    // purchases but not its payments (e.g. a spend-only year-end summary), which would drive
+    // "owed" hugely negative. Clamp both at zero — transaction-based reconstruction is
+    // approximate, and this keeps it from producing nonsense (a phantom asset/liability).
+    for (const id of Object.keys(approxBalances)) {
+      const m = accountMap[id];
+      if (m && (marketValueTypes.has(m.type) || m.is_liability) && approxBalances[id] < 0) {
+        approxBalances[id] = 0;
       }
     }
 

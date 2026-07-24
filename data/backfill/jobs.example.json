@@ -1,0 +1,27 @@
+[
+  {
+    "adapter": "generic-csv",
+    "account_name": "Chase Total Checking",
+    "file": "raw/chase-checking-2019-2024.csv",
+    "options": {
+      "dateColumn": "Posting Date",
+      "dateFormat": "MM/dd/yyyy",
+      "amountColumn": "Amount",
+      "merchantColumn": "Description",
+      "categoryColumn": "Category",
+      "notesColumn": "Memo"
+    }
+  },
+  {
+    "adapter": "generic-csv",
+    "account_name": "Amex Gold",
+    "file": "raw/amex-2020-2024.csv",
+    "options": {
+      "dateColumn": "Date",
+      "dateFormat": "MM/dd/yyyy",
+      "debitColumn": "Debit",
+      "creditColumn": "Credit",
+      "merchantColumn": "Description"
+    }
+  }
+]
