@@ -105,3 +105,78 @@ test('goal forecast allows steady progress without a target date', () => {
   assert.equal(trip?.projected_monthly_contribution, 300);
   assert.equal(summary.incomplete_goal_count, 2);
 });
+
+// `months_until_target` answers "how long until the date I picked". These cover the opposite,
+// forward question: "when does this actually get funded at the rate I'm contributing" — the only
+// one that says anything for a goal with no target date.
+test('projects a completion date from the contribution rate', () => {
+  // Local-time construction on purpose: a UTC literal lands on Jun 30 west of Greenwich and the
+  // asserted date would shift by a day depending on where the suite runs.
+  const now = new Date(2026, 6, 1);
+  const summary = buildGoalForecastSummary({
+    goals: [goal({ remaining_amount: 1200 })],
+    forecast: forecast({ net: 600, days: 30 }),
+    now,
+  });
+
+  const insight = summary.insights[0];
+  // $600/month surplus against $1,200 remaining -> two months.
+  assert.equal(insight.projected_monthly_contribution, 600);
+  assert.equal(insight.projected_months_to_goal, 2);
+  assert.equal(insight.projected_completion_date, '2026-08-31');
+});
+
+test('a goal with no target date still gets a projected completion date', () => {
+  const now = new Date('2026-07-01T00:00:00.000Z');
+  const summary = buildGoalForecastSummary({
+    goals: [goal({ target_date: null, remaining_amount: 1200 })],
+    forecast: forecast({ net: 600, days: 30 }),
+    now,
+  });
+
+  const insight = summary.insights[0];
+  assert.equal(insight.status, 'no_target');
+  assert.equal(insight.months_until_target, null, 'no chosen date to count down to');
+  assert.ok(insight.projected_completion_date, 'but the rate still implies a date');
+});
+
+test('no surplus means no completion date is promised', () => {
+  const summary = buildGoalForecastSummary({
+    goals: [goal({ remaining_amount: 1200 })],
+    forecast: forecast({ net: 0, days: 30 }),
+    now: new Date('2026-07-01T00:00:00.000Z'),
+  });
+
+  const insight = summary.insights[0];
+  assert.equal(insight.status, 'blocked');
+  assert.equal(insight.projected_months_to_goal, null);
+  assert.equal(insight.projected_completion_date, null);
+});
+
+test('the surplus is split across incomplete goals, so each date reflects its share', () => {
+  const now = new Date('2026-07-01T00:00:00.000Z');
+  const summary = buildGoalForecastSummary({
+    goals: [
+      goal({ id: 'a', remaining_amount: 1200 }),
+      goal({ id: 'b', remaining_amount: 1200 }),
+    ],
+    forecast: forecast({ net: 600, days: 30 }),
+    now,
+  });
+
+  // $600 split two ways is $300 each, so each goal takes four months, not two.
+  assert.equal(summary.insights[0].projected_monthly_contribution, 300);
+  assert.equal(summary.insights[0].projected_months_to_goal, 4);
+});
+
+test('a completed goal reports no outstanding projection', () => {
+  const summary = buildGoalForecastSummary({
+    goals: [goal({ remaining_amount: 0, current_amount: 1200, progress_amount: 1200 })],
+    forecast: forecast({ net: 600, days: 30 }),
+    now: new Date('2026-07-01T00:00:00.000Z'),
+  });
+
+  assert.equal(summary.insights[0].status, 'complete');
+  assert.equal(summary.insights[0].projected_months_to_goal, 0);
+  assert.equal(summary.insights[0].projected_completion_date, null);
+});

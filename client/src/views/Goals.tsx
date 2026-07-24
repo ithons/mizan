@@ -4,25 +4,39 @@ import { format, parseISO } from 'date-fns';
 import type { Goal } from '@shared/types';
 import { accountsApi, goalsApi, recurringApi } from '../lib/api';
 import { formatWholeCurrency } from '../lib/formatters';
-import { buildGoalForecastSummary } from '../lib/goalForecast';
+import { buildGoalForecastSummary, type GoalForecastInsight } from '../lib/goalForecast';
 import { invalidateFinancialData } from '../lib/queryInvalidation';
 import { parseDecimalInput } from '../lib/numberInput';
 import { useAppStore } from '../store';
 import { Modal } from '../components/Modal';
 import { Screen, ScreenHeader, ProgressBar, InkButton, TextButton } from '../components/balance';
 
-function goalNote(goal: Goal, projectedMonthly: number): string {
+function goalNote(goal: Goal, insight?: GoalForecastInsight): string {
+  const projectedMonthly = insight?.projected_monthly_contribution ?? 0;
   const parts: string[] = [];
+
   if (projectedMonthly > 0 && goal.remaining_amount > 0) {
     parts.push(`≈${formatWholeCurrency(projectedMonthly)} / month`);
   }
+
   if (goal.remaining_amount <= 0) {
     parts.push('complete');
-  } else if (goal.target_date) {
-    parts.push(`full by ${format(parseISO(goal.target_date), 'MMM yyyy')}`);
-  } else if (goal.progress_amount <= 0) {
-    parts.push('just started');
+  } else {
+    // The target date is what the user ASKED for; the projection is what the contribution rate
+    // actually buys. Showing the target as "full by <date>" claimed the goal would be funded by
+    // then even when the forecast said otherwise — so the two are now labelled separately.
+    if (goal.target_date) {
+      parts.push(`target ${format(parseISO(goal.target_date), 'MMM yyyy')}`);
+    }
+    if (insight?.projected_completion_date) {
+      parts.push(`projected ${format(parseISO(insight.projected_completion_date), 'MMM yyyy')}`);
+    } else if (insight?.status === 'blocked') {
+      parts.push('no projected date at this rate');
+    } else if (!goal.target_date && goal.progress_amount <= 0) {
+      parts.push('just started');
+    }
   }
+
   return parts.join(' · ') || (goal.account_name ? `funded from ${goal.account_name}` : 'no target date');
 }
 
@@ -223,7 +237,7 @@ export function Goals() {
               <div className="mb-3.5 flex items-baseline justify-between">
                 <div>
                   <div className="text-[16.5px] text-ink">{g.name}</div>
-                  <div className="mt-1 text-xs text-muted-2">{goalNote(g, insight?.projected_monthly_contribution ?? 0)}</div>
+                  <div className="mt-1 text-xs text-muted-2">{goalNote(g, insight)}</div>
                 </div>
                 <span className="text-[13px] text-sage">{pct}%</span>
               </div>

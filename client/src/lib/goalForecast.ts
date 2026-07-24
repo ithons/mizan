@@ -1,4 +1,4 @@
-import { differenceInCalendarDays, isValid, parseISO } from 'date-fns';
+import { addDays, differenceInCalendarDays, format, isValid, parseISO } from 'date-fns';
 import type { Goal, RecurringForecast } from '@shared/types';
 
 const MONTH_DAYS = 30.4375;
@@ -15,6 +15,15 @@ export interface GoalForecastInsight {
   required_monthly_contribution: number | null;
   monthly_shortfall: number;
   months_until_target: number | null;
+  /**
+   * Forward projection: how long until the goal is funded AT THE CURRENT CONTRIBUTION RATE.
+   * `months_until_target` is the opposite question — time left against a date the user chose. Both
+   * matter, and for a goal with no target date this is the only one that says anything.
+   * `null` means the projected contribution is zero, so the goal never completes at this rate.
+   */
+  projected_months_to_goal: number | null;
+  /** `projected_months_to_goal` as a yyyy-MM-dd date, for display. */
+  projected_completion_date: string | null;
   message: string;
 }
 
@@ -49,6 +58,18 @@ function targetMonths(targetDate: string | null | undefined, now: Date): number 
   if (!isValid(parsed)) return null;
   const days = differenceInCalendarDays(parsed, now);
   return Math.max(days / MONTH_DAYS, 0);
+}
+
+function projectedCompletion(
+  remaining: number,
+  monthlyContribution: number,
+  now: Date
+): { months: number | null; date: string | null } {
+  if (monthlyContribution <= 0 || remaining <= 0) return { months: null, date: null };
+  const months = remaining / monthlyContribution;
+  // Round up to a whole day: a completion date is a promise, and rounding down would name a date
+  // the money has not actually arrived by.
+  return { months, date: format(addDays(now, Math.ceil(months * MONTH_DAYS)), 'yyyy-MM-dd') };
 }
 
 function goalMessage(
@@ -99,12 +120,15 @@ export function buildGoalForecastSummary({
         required_monthly_contribution: 0,
         monthly_shortfall: 0,
         months_until_target: 0,
+        projected_months_to_goal: 0,
+        projected_completion_date: null,
         message: goalMessage(goal, 'complete', 0, 0, normalizedBudgetOverage),
       };
     }
 
     const expectedMonthlyProgress = Math.min(goal.remaining_amount, projectedPerGoal);
     const monthsUntilTarget = targetMonths(goal.target_date, now);
+    const completion = projectedCompletion(goal.remaining_amount, projectedPerGoal, now);
 
     if (positiveAvailable <= 0) {
       return {
@@ -120,6 +144,9 @@ export function buildGoalForecastSummary({
           ? goal.remaining_amount / monthsUntilTarget
           : goal.remaining_amount,
         months_until_target: monthsUntilTarget,
+        // No surplus means no completion date exists to promise.
+        projected_months_to_goal: null,
+        projected_completion_date: null,
         message: goalMessage(goal, 'blocked', 0, null, normalizedBudgetOverage),
       };
     }
@@ -134,6 +161,8 @@ export function buildGoalForecastSummary({
         required_monthly_contribution: null,
         monthly_shortfall: 0,
         months_until_target: null,
+        projected_months_to_goal: completion.months,
+        projected_completion_date: completion.date,
         message: goalMessage(goal, 'no_target', expectedMonthlyProgress, null, normalizedBudgetOverage),
       };
     }
@@ -153,6 +182,8 @@ export function buildGoalForecastSummary({
       required_monthly_contribution: requiredMonthlyContribution,
       monthly_shortfall: monthlyShortfall,
       months_until_target: monthsUntilTarget,
+      projected_months_to_goal: completion.months,
+      projected_completion_date: completion.date,
       message: goalMessage(goal, status, expectedMonthlyProgress, requiredMonthlyContribution, normalizedBudgetOverage),
     };
   });

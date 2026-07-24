@@ -4,7 +4,7 @@ import { addMonths, format, parseISO, subMonths } from 'date-fns';
 import type { Budget as BudgetType, BudgetGroup, Category } from '@shared/types';
 import { budgetsApi, categoriesApi, flattenCategories } from '../lib/api';
 import { formatWholeCurrency } from '../lib/formatters';
-import { availableBudgetAmount, budgetActualSpend } from '../lib/budgetMath';
+import { availableBudgetAmount, budgetActualSpend, buildBudgetRowMeta } from '../lib/budgetMath';
 import { invalidateFinancialData } from '../lib/queryInvalidation';
 import { parseDecimalInput } from '../lib/numberInput';
 import { useAppStore } from '../store';
@@ -352,6 +352,7 @@ export function Budget() {
             {section.rows.map((b) => {
               const available = availableBudgetAmount(b);
               const spent = budgetActualSpend(b);
+              const meta = buildBudgetRowMeta(b);
               return (
                 <div
                   key={b.id}
@@ -368,6 +369,25 @@ export function Budget() {
                     </span>
                   </div>
                   <ProgressBar fraction={available > 0 ? spent / available : spent > 0 ? 1 : 0} tone={healthTone(spent, available)} />
+                  {(meta.carriedOver !== null || meta.projection) && (
+                    <div className="mt-1.5 flex flex-wrap items-baseline gap-x-3 gap-y-0.5 text-[12px] text-muted-2">
+                      {meta.carriedOver !== null && (
+                        <span>
+                          {meta.carriedOver > 0 ? 'incl. ' : 'after '}
+                          {formatWholeCurrency(Math.abs(meta.carriedOver))}
+                          {meta.carriedOver > 0 ? ' carried over' : ' carried overspend'}
+                        </span>
+                      )}
+                      {meta.projection && (
+                        <span className={meta.projection.over ? 'text-clay' : undefined}>
+                          projected {formatWholeCurrency(meta.projection.spend)} ·{' '}
+                          {formatWholeCurrency(meta.projection.remaining)}{' '}
+                          {meta.projection.over ? 'over' : 'left'}
+                          {meta.projection.confidence !== 'confirmed' && ` (${meta.projection.confidence})`}
+                        </span>
+                      )}
+                    </div>
+                  )}
                 </div>
               );
             })}
