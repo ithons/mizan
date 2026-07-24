@@ -70,6 +70,14 @@ function setupReviewDb(): Database.Database {
       category_id TEXT NOT NULL,
       created_at TEXT NOT NULL
     );
+
+    -- suggestMerchantRules reads skipped suggestions from here.
+    CREATE TABLE app_preferences (
+      key TEXT PRIMARY KEY,
+      value TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
   `);
 
   db.prepare(`
@@ -130,7 +138,10 @@ test('transaction review summary combines review queues from existing data', (t)
   assert.equal(counts.get('pending'), 2);
   assert.equal(counts.get('rule_suggestions'), 1);
   assert.equal(counts.get('recurring_candidates'), 1);
-  assert.equal(summary.total_open, 6);
+  // total_open is the ACTIONABLE total and deliberately excludes `pending`: a pending
+  // authorization can't be acted on (it posts on its own) and the inbox never renders one, so
+  // counting it produced the "N items to review / nothing to review" mismatch. 2 + 1 + 1 = 4.
+  assert.equal(summary.total_open, 4);
 
   assert.equal(summary.rule_suggestions[0].pattern, 'Target');
   assert.equal(summary.rule_suggestions[0].category_id, 'cat_food');
@@ -169,4 +180,30 @@ test('transaction review suppresses rule suggestions already covered by rules', 
 
   assert.equal(ruleQueue?.count, 0);
   assert.equal(summary.rule_suggestions.length, 0);
+});
+
+test('uncategorized counts rows whose review_status is "reviewed" (the dead-zone regression)', (t) => {
+  const db = setupReviewDb();
+  t.after(() => db.close());
+
+  // Categorization side effects (merchant rules, bulk categorize, transfer confirm) set
+  // review_status='reviewed', and a bulk pass once marked 1,735 imported rows reviewed. Gating the
+  // uncategorized count on review_status='open' therefore hid 432 real uncategorized transactions
+  // from the inbox while routes/insights.ts still counted them.
+  db.prepare("UPDATE transactions SET review_status = 'reviewed' WHERE category_id IS NULL").run();
+
+  const summary = getTransactionReviewSummary(db);
+  const uncategorized = summary.queues.find((q) => q.id === 'uncategorized')?.count ?? 0;
+  assert.equal(uncategorized, 2, 'reviewed-but-uncategorized rows must still be counted');
+});
+
+test('an explicitly dismissed transaction is the only thing suppressed from uncategorized', (t) => {
+  const db = setupReviewDb();
+  t.after(() => db.close());
+
+  db.prepare("UPDATE transactions SET review_status = 'dismissed' WHERE id = 'unknown_1'").run();
+
+  const summary = getTransactionReviewSummary(db);
+  const uncategorized = summary.queues.find((q) => q.id === 'uncategorized')?.count ?? 0;
+  assert.equal(uncategorized, 1, "only 'dismissed' suppresses a row");
 });

@@ -6,9 +6,29 @@ import type {
   MerchantRuleSuggestionPreview,
 } from '../../../shared/types';
 import { guessCategoryFromText } from './textCategorization';
+import { getPreference, setPreference } from './preferences';
 
 export interface RuleApplicationResult {
   updated: number;
+}
+
+// Skipped rule suggestions, stored as normalized merchant keys. Kept in app_preferences rather
+// than a dedicated table: it's a small, purely-advisory list with no relational needs.
+export const DISMISSED_RULE_SUGGESTIONS_KEY = 'dismissed_rule_suggestions';
+
+export function getDismissedRuleSuggestions(db: Database.Database): Set<string> {
+  const value = getPreference(db, DISMISSED_RULE_SUGGESTIONS_KEY)?.value;
+  if (!Array.isArray(value)) return new Set();
+  return new Set(value.filter((entry): entry is string => typeof entry === 'string'));
+}
+
+export function dismissRuleSuggestion(db: Database.Database, pattern: string): void {
+  const merchantKey = pattern.trim().toLowerCase();
+  if (!merchantKey) return;
+  const dismissed = getDismissedRuleSuggestions(db);
+  if (dismissed.has(merchantKey)) return;
+  dismissed.add(merchantKey);
+  setPreference(db, DISMISSED_RULE_SUGGESTIONS_KEY, [...dismissed]);
 }
 
 interface MerchantRule {
@@ -358,7 +378,12 @@ export function suggestMerchantRules(db: Database.Database): MerchantRuleSuggest
     LIMIT 10
   `).all() as RawMerchantRuleSuggestion[];
 
-  return rows.map((row) => {
+  // Suggestions are recomputed from scratch on every call, so a skipped one would reappear
+  // forever. Skips are persisted as a list of merchant keys in app_preferences.
+  const dismissed = getDismissedRuleSuggestions(db);
+  const visible = rows.filter((row) => !dismissed.has(row.merchant_key));
+
+  return visible.map((row) => {
     const preview = getRuleSuggestionPreview(db, row.merchant_key);
 
     return {

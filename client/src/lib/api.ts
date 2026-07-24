@@ -70,7 +70,14 @@ async function apiFetch<T>(url: string, options?: RequestInit): Promise<T> {
     return undefined as unknown as T;
   }
 
-  const json = await res.json();
+  // A 200 with a non-JSON body (e.g. the Vite dev middleware serving index.html for an unknown
+  // /api path) would otherwise throw a cryptic "Unexpected token '<'".
+  let json: unknown;
+  try {
+    json = await res.json();
+  } catch {
+    throw new Error(`Unexpected non-JSON response from ${url}`);
+  }
   // Unwrap { data: ... } envelope if present
   if (json && typeof json === 'object' && 'data' in json) {
     return json.data as T;
@@ -250,6 +257,11 @@ export const categoriesApi = {
 export const rulesApi = {
   list: () => apiFetch<MerchantRule[]>('/api/rules'),
   suggestions: () => apiFetch<MerchantRuleSuggestion[]>('/api/rules/suggestions'),
+  dismissSuggestion: (pattern: string) =>
+    apiFetch<{ success: boolean }>('/api/rules/suggestions/dismiss', {
+      method: 'POST',
+      body: JSON.stringify({ pattern }),
+    }),
   create: (body: {
     pattern: string;
     category_id: string;

@@ -236,7 +236,8 @@ function uncategorizedTransactions(db: Database.Database): TransactionRow[] {
     FROM transactions
     WHERE pending = 0
       AND category_id IS NULL
-      AND review_status = 'open'
+      -- Matches transactionReview.ts getCounts(); see the note there on why 'open' is wrong.
+      AND review_status <> 'dismissed'
     ORDER BY date DESC, created_at DESC
     LIMIT 20
   `).all() as TransactionRow[];

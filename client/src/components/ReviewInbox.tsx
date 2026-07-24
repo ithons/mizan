@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { format, parseISO } from 'date-fns';
 import type {
@@ -15,9 +16,21 @@ import { formatCurrency } from '../lib/formatters';
 import { invalidateFinancialData } from '../lib/queryInvalidation';
 import { useAppStore } from '../store';
 import { Screen, ScreenHeader, CategoryPicker } from './balance';
+import { QueryState } from './QueryState';
 
 function merchantLabel(t: Transaction): string {
   return (t.merchant_name || t.original_name).trim();
+}
+
+// A malformed date (e.g. from a hand-edited CSV import) makes date-fns `format` throw
+// RangeError, which — with no ErrorBoundary — used to blank the whole app. Degrade instead.
+function shortDate(value: string): string {
+  try {
+    const parsed = parseISO(value);
+    return Number.isNaN(parsed.getTime()) ? value : format(parsed, 'MMM d');
+  } catch {
+    return value;
+  }
 }
 
 interface QueueItem {
@@ -42,6 +55,7 @@ function ReviewPanel({
   batchCount,
   onBatchConfirm,
   batchPending,
+  uncategorizedTotal,
 }: {
   totalOpen: number;
   items: QueueItem[];
@@ -50,6 +64,7 @@ function ReviewPanel({
   batchCount: number;
   onBatchConfirm: () => void;
   batchPending: boolean;
+  uncategorizedTotal: number;
 }) {
   const [pickedCategory, setPickedCategory] = useState('');
   const focus = items[0];
@@ -141,6 +156,20 @@ function ReviewPanel({
           <div className="mt-1.5 text-[13px] text-muted-2">Nothing left to review.</div>
         </div>
       )}
+
+      {/* The inbox only ever shows a few cards; the historical backlog is worked in bulk in the
+          Transactions workspace (multi-select + bulk categorize), filtered to all time. */}
+      {uncategorizedTotal > 0 && (
+        <Link
+          to="/transactions?uncategorized=1&range=all"
+          className="mt-6 flex items-baseline justify-between border-t border-line pt-3 text-[13px] text-muted transition-colors hover:text-ink"
+        >
+          <span>
+            {uncategorizedTotal} transaction{uncategorizedTotal === 1 ? '' : 's'} still need a category
+          </span>
+          <span className="text-sage-deep">Review all →</span>
+        </Link>
+      )}
     </div>
   );
 }
@@ -152,10 +181,15 @@ export function ReviewInbox() {
   const [hiddenKeys, setHiddenKeys] = useState<Set<string>>(new Set());
   const [leavingKey, setLeavingKey] = useState<string | null>(null);
 
-  const { data: reviewSummary } = useQuery({ queryKey: ['transactions', 'review'], queryFn: () => transactionsApi.review() });
+  const reviewQ = useQuery({ queryKey: ['transactions', 'review'], queryFn: () => transactionsApi.review() });
+  const { data: reviewSummary } = reviewQ;
+  // No reviewStatus gate: 'reviewed' is set as a side effect of categorization, so filtering on
+  // 'open' hid the entire imported backlog. `pending: false` matches the server's count predicate.
+  // Only a handful are shown as cards here — the full backlog is worked in the Transactions
+  // workspace via the "Review all" link below.
   const { data: uncategorizedPage } = useQuery({
     queryKey: ['transactions', 'review', 'uncategorized'],
-    queryFn: () => transactionsApi.list({ uncategorized: true, reviewStatus: 'open', limit: 10 }),
+    queryFn: () => transactionsApi.list({ uncategorized: true, pending: false, limit: 5 }),
   });
   const { data: categories } = useQuery({ queryKey: ['categories'], queryFn: () => categoriesApi.list() });
 
@@ -173,13 +207,21 @@ export function ReviewInbox() {
       next.delete(key);
       return next;
     });
+  // The row plays a 160ms leave animation before it's hidden. A failing action can come back
+  // faster than that (localhost errors return in single-digit ms), and the old version called
+  // unhide() before the key was ever added — so the timeout then hid the row permanently even
+  // though the action failed. Cancel the pending timeout instead, and unhide defensively.
   const resolve = (key: string, run?: (onErrorRestore: () => void) => void) => {
     setLeavingKey(key);
-    window.setTimeout(() => {
+    const timer = window.setTimeout(() => {
       setHiddenKeys((prev) => new Set(prev).add(key));
       setLeavingKey((k) => (k === key ? null : k));
     }, 160);
-    run?.(() => unhide(key));
+    run?.(() => {
+      window.clearTimeout(timer);
+      setLeavingKey((k) => (k === key ? null : k));
+      unhide(key);
+    });
   };
 
   const confirmDraft = useMutation({ mutationFn: (d: AdvisorDraftAction) => aiApi.confirmDraft(d), onSuccess: invalidateReview, onError });
@@ -193,6 +235,11 @@ export function ReviewInbox() {
     mutationFn: ({ suggestion, categoryId }: { suggestion: MerchantRuleSuggestion; categoryId: string }) =>
       rulesApi.create({ pattern: suggestion.pattern, category_id: categoryId, apply_existing: true }),
     onSuccess: () => invalidateFinancialData(qc),
+    onError,
+  });
+  const dismissSuggestion = useMutation({
+    mutationFn: (pattern: string) => rulesApi.dismissSuggestion(pattern),
+    onSuccess: invalidateReview,
     onError,
   });
   const dismissTransaction = useMutation({
@@ -240,7 +287,7 @@ export function ReviewInbox() {
         key,
         kind: 'Categorize',
         title: `${merchantLabel(t)} · ${formatCurrency(t.amount)}`,
-        sub: `${format(parseISO(t.date), 'MMM d')} · ${t.account_name ?? 'unknown account'}`,
+        sub: `${shortDate(t.date)} · ${t.account_name ?? 'unknown account'}`,
         primaryLabel: 'Confirm',
         onPrimary: () => {},
         needsCategory: true,
@@ -262,7 +309,7 @@ export function ReviewInbox() {
         defaultCategory: s.category_id,
         onPickCategory: (categoryId) => resolve(key, (restore) => createRule.mutate({ suggestion: s, categoryId }, { onError: restore })),
         secondaryLabel: 'Skip',
-        onSecondary: () => resolve(key),
+        onSecondary: () => resolve(key, (restore) => dismissSuggestion.mutate(s.pattern, { onError: restore })),
       });
     }
     for (const p of reviewSummary?.recurring_candidates ?? []) {
@@ -284,11 +331,11 @@ export function ReviewInbox() {
         key,
         kind: 'Possible duplicate',
         title: `${g.merchant_name} · ${formatCurrency(g.amount)}`,
-        sub: `${format(parseISO(g.date), 'MMM d')} · ${g.count} identical charges on ${g.account_name}`,
+        sub: `${shortDate(g.date)} · ${g.count} identical charges on ${g.account_name}`,
+        // "Keep both" is the persistent dismissal; a separate local-only "Skip" just made the
+        // card reappear on the next visit, so it's gone.
         primaryLabel: 'Keep both',
         onPrimary: () => resolve(key, (restore) => dismissDuplicate.mutate(g, { onError: restore })),
-        secondaryLabel: 'Skip',
-        onSecondary: () => resolve(key),
       });
     }
     for (const p of reviewSummary?.transfer_candidates ?? []) {
@@ -297,7 +344,7 @@ export function ReviewInbox() {
         key,
         kind: 'Transfer pair',
         title: `${formatCurrency(Math.abs(p.amount))} · ${p.from_account_name} → ${p.to_account_name}`,
-        sub: `${format(parseISO(p.date), 'MMM d')} · looks like a transfer, not spending`,
+        sub: `${shortDate(p.date)} · looks like a transfer, not spending`,
         primaryLabel: 'Confirm',
         onPrimary: () => resolve(key, (restore) => confirmTransfer.mutate(p, { onError: restore })),
         secondaryLabel: 'Not a transfer',
@@ -313,15 +360,26 @@ export function ReviewInbox() {
   const displayedReviewCount = Math.max(0, reviewCount - (allQueueItems.length - queueItems.length));
 
   const highConfidenceRules = (reviewSummary?.rule_suggestions ?? []).filter((s) => s.confidence >= 0.9);
+  // allSettled never rejects, so onError is unreachable here — the result has to be inspected
+  // and reported honestly, otherwise a total failure still toasted "Applied N rules".
   const batchConfirm = useMutation({
     mutationFn: async () => {
-      await Promise.allSettled(
+      const results = await Promise.allSettled(
         highConfidenceRules.map((s) => rulesApi.create({ pattern: s.pattern, category_id: s.category_id, apply_existing: true }))
       );
+      const applied = results.filter((r) => r.status === 'fulfilled').length;
+      const failed = results.length - applied;
+      const firstError = results.find((r): r is PromiseRejectedResult => r.status === 'rejected')?.reason;
+      return { applied, failed, firstError };
     },
-    onSuccess: () => {
+    onSuccess: ({ applied, failed, firstError }) => {
       invalidateFinancialData(qc);
-      addToast({ type: 'success', message: `Applied ${highConfidenceRules.length} rule${highConfidenceRules.length === 1 ? '' : 's'}` });
+      if (applied > 0) {
+        addToast({ type: 'success', message: `Applied ${applied} rule${applied === 1 ? '' : 's'}${failed > 0 ? ` · ${failed} failed` : ''}` });
+      } else {
+        const detail = firstError instanceof Error ? firstError.message : 'please try again';
+        addToast({ type: 'error', message: `Couldn't apply any rules — ${detail}` });
+      }
     },
     onError,
   });
@@ -333,6 +391,16 @@ export function ReviewInbox() {
         sub="Categorizations, rules, recurring bills, duplicates, and transfers to confirm"
         className="mb-6"
       />
+      {/* Without this, a failed request rendered the same "All caught up." as a genuinely empty
+          queue — the user could not tell the server was down. */}
+      <QueryState
+        isLoading={reviewQ.isPending}
+        isError={reviewQ.isError}
+        error={reviewQ.error}
+        onRetry={() => void reviewQ.refetch()}
+        label="your review queue"
+        skeletonRows={4}
+      >
       <ReviewPanel
         totalOpen={displayedReviewCount}
         items={queueItems}
@@ -341,7 +409,9 @@ export function ReviewInbox() {
         batchCount={highConfidenceRules.length}
         onBatchConfirm={() => batchConfirm.mutate()}
         batchPending={batchConfirm.isPending}
+        uncategorizedTotal={reviewSummary?.queues.find((q) => q.id === 'uncategorized')?.count ?? 0}
       />
+      </QueryState>
     </Screen>
   );
 }

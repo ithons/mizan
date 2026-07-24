@@ -7,6 +7,14 @@ function setup(): Database.Database {
   const db = new Database(':memory:');
   db.exec(`
     CREATE TABLE merchant_rules (id TEXT PRIMARY KEY, pattern TEXT NOT NULL, category_id TEXT NOT NULL, created_at TEXT NOT NULL);
+
+    -- suggestMerchantRules reads skipped suggestions from here.
+    CREATE TABLE app_preferences (
+      key TEXT PRIMARY KEY,
+      value TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
     CREATE TABLE transactions (
       id TEXT PRIMARY KEY, merchant_name TEXT, original_name TEXT DEFAULT '', category_id TEXT,
       manually_categorized INTEGER NOT NULL DEFAULT 0, review_status TEXT DEFAULT 'open', updated_at TEXT DEFAULT ''

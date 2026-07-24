@@ -182,7 +182,9 @@ router.get('/', (_req: Request, res: Response, next: NextFunction): void => {
     const reviewQueue = db.prepare(`
       SELECT
         (SELECT COUNT(*) FROM transactions WHERE pending = 0) AS posted_transactions,
-        (SELECT COUNT(*) FROM transactions WHERE pending = 0 AND category_id IS NULL) AS uncategorized_transactions,
+        -- Must match the uncategorized predicate in services/transactionReview.ts getCounts(),
+        -- or this insight and the review badge disagree about the same number.
+        (SELECT COUNT(*) FROM transactions WHERE pending = 0 AND category_id IS NULL AND review_status <> 'dismissed') AS uncategorized_transactions,
         (SELECT COUNT(*) FROM merchant_rules) AS merchant_rules,
         (
           SELECT COUNT(*)

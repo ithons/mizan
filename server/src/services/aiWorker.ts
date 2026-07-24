@@ -78,7 +78,9 @@ export async function runBackgroundAiReview(): Promise<void> {
     const uncategorizedTransactions = db.prepare(`
       SELECT id, merchant_name, original_name, amount, date
       FROM transactions
-      WHERE category_id IS NULL AND pending = 0 AND review_status = 'open'
+      -- Matches transactionReview.ts getCounts(): 'reviewed' is set as a side effect of
+      -- categorization, so gating on 'open' hid the whole imported backlog from the worker.
+      WHERE category_id IS NULL AND pending = 0 AND review_status <> 'dismissed'
       ORDER BY date DESC
       LIMIT 15
     `).all() as Array<{ id: string; merchant_name: string | null; original_name: string; amount: number; date: string }>;

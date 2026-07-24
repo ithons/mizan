@@ -10,6 +10,7 @@ import {
 import {
   applyMerchantRulesToExistingTransactions,
   applyMerchantRuleToMatchingTransactions,
+  dismissRuleSuggestion,
   recategorizeAll,
   suggestMerchantRules,
   upsertMerchantRule,
@@ -74,6 +75,22 @@ router.get('/suggestions', (_req: Request, res: Response, next: NextFunction): v
   try {
     const db = getDb();
     res.json({ data: suggestMerchantRules(db) });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// POST /suggestions/dismiss - permanently skip a rule suggestion (they're recomputed each call,
+// so without this a skipped suggestion reappears on every visit)
+router.post('/suggestions/dismiss', (req: Request, res: Response, next: NextFunction): void => {
+  try {
+    const pattern = typeof req.body?.pattern === 'string' ? req.body.pattern : '';
+    if (!pattern.trim()) {
+      res.status(400).json({ error: 'pattern (string) is required' });
+      return;
+    }
+    dismissRuleSuggestion(getDb(), pattern);
+    res.json({ data: { success: true } });
   } catch (err) {
     next(err);
   }

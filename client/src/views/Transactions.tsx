@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { format, isToday, isYesterday, parseISO, startOfMonth, endOfMonth, subMonths, startOfYear } from 'date-fns';
 import type { Transaction } from '@shared/types';
@@ -262,11 +263,20 @@ export function Transactions() {
   const [editing, setEditing] = useState<Transaction | null>(null);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [bulkCategory, setBulkCategory] = useState('');
+  const [searchParams] = useSearchParams();
 
   useEffect(() => {
     const t = setTimeout(() => setDebouncedSearch(search.trim()), 250);
     return () => clearTimeout(t);
   }, [search]);
+
+  // Deep link from the Review inbox: /transactions?uncategorized=1&range=all lands pre-filtered on
+  // the whole uncategorized backlog (the default this-month range contains almost none of it).
+  useEffect(() => {
+    if (searchParams.get('uncategorized') === '1') setReviewOnly(true);
+    const requested = searchParams.get('range');
+    if (requested && RANGES.some((r) => r.id === requested)) setRange(requested as RangeId);
+  }, [searchParams]);
 
   // Selection doesn't survive a filter change; the visible set is different.
   useEffect(() => {
@@ -286,8 +296,9 @@ export function Transactions() {
       search: debouncedSearch || undefined,
       accountId: accountFilter ? [accountFilter] : undefined,
       categoryId: categoryFilter ? [categoryFilter] : undefined,
+      // "Needs category" means exactly that — no reviewStatus gate. Adding one hid the entire
+      // imported backlog, because categorization side effects set review_status='reviewed'.
       uncategorized: reviewOnly || undefined,
-      reviewStatus: reviewOnly ? ('open' as const) : undefined,
       limit: 100,
     }),
     [range, debouncedSearch, accountFilter, categoryFilter, reviewOnly]
@@ -311,7 +322,9 @@ export function Transactions() {
 
   const transactions = useMemo(() => pages?.pages.flatMap((p) => p.data) ?? [], [pages]);
   const totalCount = pages?.pages[0]?.total ?? 0;
-  const reviewCount = reviewSummary?.total_open ?? 0;
+  // This toggle filters to uncategorized, so it must show the uncategorized count — not the
+  // whole-inbox total, which counts duplicates/transfers/drafts the filter doesn't include.
+  const reviewCount = reviewSummary?.queues.find((q) => q.id === 'uncategorized')?.count ?? 0;
 
   const dayGroups = useMemo(() => {
     const map = new Map<string, Transaction[]>();

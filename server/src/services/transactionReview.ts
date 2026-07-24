@@ -15,17 +15,19 @@ import { toDollars } from './money';
 interface ReviewCounts {
   uncategorized_count: number;
   pending_count: number;
-  duplicate_candidate_count: number;
-  transfer_candidate_count: number;
 }
 
+// A transaction "needs a category" whenever it has none and the user hasn't explicitly dismissed it.
+// It deliberately does NOT require review_status='open': categorization side-effects set 'reviewed'
+// (rules.ts, bulk categorize, transfer confirm), and a bulk pass once marked 1,735 imported rows
+// 'reviewed' — which made 432 uncategorized rows invisible here while routes/insights.ts still
+// counted them, so the app contradicted itself. This predicate is the single source of truth and
+// must stay in sync with the uncategorized count in routes/insights.ts.
 function getCounts(db: Database.Database): ReviewCounts {
   return db.prepare(`
     SELECT
-      SUM(CASE WHEN pending = 0 AND category_id IS NULL AND review_status = 'open' THEN 1 ELSE 0 END) AS uncategorized_count,
-      SUM(CASE WHEN pending = 1 AND review_status = 'open' THEN 1 ELSE 0 END) AS pending_count,
-      SUM(CASE WHEN duplicate_status = 'candidate' THEN 1 ELSE 0 END) AS duplicate_candidate_count,
-      SUM(CASE WHEN transfer_status = 'candidate' AND amount < 0 THEN 1 ELSE 0 END) AS transfer_candidate_count
+      SUM(CASE WHEN pending = 0 AND category_id IS NULL AND review_status <> 'dismissed' THEN 1 ELSE 0 END) AS uncategorized_count,
+      SUM(CASE WHEN pending = 1 AND review_status = 'open' THEN 1 ELSE 0 END) AS pending_count
     FROM transactions
   `).get() as ReviewCounts;
 }
@@ -131,16 +133,19 @@ export function getTransactionReviewSummary(db: Database.Database): TransactionR
       severity: 'info',
     },
     {
+      // Counted per GROUP, matching how the inbox renders them. Counting the underlying
+      // transactions instead made the badge ~2x the number of actionable rows.
       id: 'duplicate_candidates',
       label: 'Possible duplicates',
-      count: counts.duplicate_candidate_count ?? 0,
+      count: duplicateCandidates.length,
       action_label: 'Review',
       severity: 'warning',
     },
     {
+      // Counted per PAIR, matching the rendered rows.
       id: 'transfer_candidates',
       label: 'Detected transfers',
-      count: counts.transfer_candidate_count ?? 0,
+      count: transferCandidates.length,
       action_label: 'Review',
       severity: 'info',
       filters: {
@@ -150,8 +155,15 @@ export function getTransactionReviewSummary(db: Database.Database): TransactionR
     },
   ];
 
+  // 'pending' is reported in `queues` (it drives a Transactions filter) but excluded from the
+  // headline total: a pending authorization isn't actionable — it posts on its own — and counting
+  // it produced the "N items to review / nothing to review" mismatch.
+  const actionableTotal = queues
+    .filter((queue) => queue.id !== 'pending')
+    .reduce((sum, queue) => sum + queue.count, 0);
+
   return {
-    total_open: queues.reduce((sum, queue) => sum + queue.count, 0),
+    total_open: actionableTotal,
     queues,
     rule_suggestions: ruleSuggestions,
     recurring_candidates: recurringCandidates,

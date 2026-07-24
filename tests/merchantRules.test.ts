@@ -26,6 +26,14 @@ function setupDb(): Database.Database {
       created_at TEXT NOT NULL
     );
 
+    -- suggestMerchantRules reads skipped suggestions from here.
+    CREATE TABLE app_preferences (
+      key TEXT PRIMARY KEY,
+      value TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+
     CREATE TABLE transactions (
       id TEXT PRIMARY KEY,
       merchant_name TEXT,
