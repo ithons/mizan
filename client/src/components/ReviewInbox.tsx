@@ -21,6 +21,10 @@ import { QueryState } from './QueryState';
 // pages and defeat the point.
 const BACKLOG_LIMIT = 500;
 
+// Matches MAX_SUGGEST_MERCHANTS on the server: one request lists every merchant in the prompt and
+// gets one object back per merchant, so an unbounded batch would truncate the reply.
+const AI_SUGGEST_BATCH = 60;
+
 function merchantLabel(t: Transaction): string {
   return (t.merchant_name || t.original_name || '').trim() || 'Unknown merchant';
 }
@@ -84,6 +88,8 @@ interface MerchantGroup {
   key: string;
   label: string;
   ids: string[];
+  /** The underlying rows, so a group can be expanded to show exactly what was grouped. */
+  items: Transaction[];
   total: number;
   latestDate: string;
   accountName: string | null;
@@ -96,6 +102,7 @@ function groupByMerchant(transactions: Transaction[]): MerchantGroup[] {
     const existing = map.get(key);
     if (existing) {
       existing.ids.push(t.id);
+      existing.items.push(t);
       existing.total += t.amount;
       if (t.date > existing.latestDate) existing.latestDate = t.date;
     } else {
@@ -103,6 +110,7 @@ function groupByMerchant(transactions: Transaction[]): MerchantGroup[] {
         key,
         label: merchantLabel(t),
         ids: [t.id],
+        items: [t],
         total: t.amount,
         latestDate: t.date,
         accountName: t.account_name ?? null,
@@ -176,6 +184,9 @@ export function ReviewInbox() {
   const [tab, setTab] = useState<TabId>('category');
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [bulkCategory, setBulkCategory] = useState('');
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  // merchant label -> AI-proposed category. Advisory only; applied on an explicit click.
+  const [suggestions, setSuggestions] = useState<Record<string, { id: string; name: string }>>({});
 
   const reviewQ = useQuery({ queryKey: ['transactions', 'review'], queryFn: () => transactionsApi.review() });
   const summary = reviewQ.data;
@@ -234,6 +245,27 @@ export function ReviewInbox() {
   const dismissTransaction = useMutation({
     mutationFn: (id: string) => transactionsApi.markReview(id, 'dismissed'),
     onSuccess: invalidate,
+    onError,
+  });
+  // Asks the model to propose a category per merchant. Nothing is written — the result only
+  // pre-fills each row so a suggestion can be accepted with one click or overridden.
+  const suggestCategories = useMutation({
+    mutationFn: (merchants: string[]) => aiApi.suggestCategories(merchants),
+    onSuccess: (results, merchants) => {
+      setSuggestions((prev) => {
+        const next = { ...prev };
+        for (const r of results) next[r.merchant] = { id: r.category_id, name: r.category_name };
+        return next;
+      });
+      const missed = merchants.length - results.length;
+      addToast({
+        type: results.length > 0 ? 'success' : 'info',
+        message:
+          results.length === 0
+            ? 'No confident suggestions for these merchants'
+            : `Suggested ${results.length} categor${results.length === 1 ? 'y' : 'ies'}${missed > 0 ? ` · ${missed} unclear, left blank` : ''}`,
+      });
+    },
     onError,
   });
   const confirmDraft = useMutation({
@@ -337,6 +369,29 @@ export function ReviewInbox() {
       >
         {tab === 'category' && (
           <>
+            {groups.length > 0 && (
+              <div className="mb-3 flex flex-wrap items-center gap-3">
+                <button
+                  type="button"
+                  disabled={suggestCategories.isPending}
+                  onClick={() =>
+                    suggestCategories.mutate(
+                      groups
+                        .filter((g) => !suggestions[g.label])
+                        .slice(0, AI_SUGGEST_BATCH)
+                        .map((g) => g.label)
+                    )
+                  }
+                  className="rounded-md border border-line-2 px-2.5 py-1 text-[13px] text-ink transition-colors hover:bg-rail disabled:opacity-50"
+                >
+                  {suggestCategories.isPending ? 'Asking AI…' : 'Suggest categories with AI'}
+                </button>
+                <span className="text-xs text-muted-2">
+                  Suggestions are proposals — nothing is applied until you click one.
+                </span>
+              </div>
+            )}
+
             {selectedIds.size > 0 && (
               <div className="mb-3 flex flex-wrap items-center gap-3 rounded-lg border border-line-2 bg-rail px-3 py-2">
                 <span className="text-[13px] text-ink">{selectedIds.size} selected</span>
@@ -361,6 +416,15 @@ export function ReviewInbox() {
               groups.map((group) => {
                 const selected = group.ids.every((id) => selectedIds.has(id));
                 const repeated = group.ids.length > 1;
+                const isOpen = expanded.has(group.key);
+                const suggestion = suggestions[group.label];
+                const applyCategory = (categoryId: string) => {
+                  if (!categoryId) return;
+                  // A repeated merchant applies to its whole cluster at once; a one-off just
+                  // updates that transaction.
+                  if (repeated) categorizeMerchant.mutate({ ids: group.ids, categoryId });
+                  else categorize.mutate({ id: group.ids[0], categoryId });
+                };
                 return (
                   <div key={group.key} className="border-b border-line py-3 last:border-0">
                     <div className="flex items-baseline justify-between gap-4">
@@ -388,23 +452,65 @@ export function ReviewInbox() {
                         {formatCurrency(group.total)}
                       </span>
                     </div>
-                    <div className="mt-2.5">
+
+                    <div className="mt-2.5 flex flex-wrap items-center gap-x-4 gap-y-2">
+                      {suggestion && (
+                        <button
+                          type="button"
+                          onClick={() => applyCategory(suggestion.id)}
+                          className="rounded-md border border-sage-tint-border bg-sage-tint px-2.5 py-1 text-[13px] text-sage-text transition-opacity hover:opacity-80"
+                        >
+                          AI: {suggestion.name} · apply{repeated ? ` to ${group.ids.length}` : ''}
+                        </button>
+                      )}
                       <CategoryPicker
                         value=""
-                        placeholder={repeated ? `Categorize all ${group.ids.length}…` : 'Categorize…'}
+                        placeholder={
+                          suggestion
+                            ? 'or pick another…'
+                            : repeated
+                              ? `Categorize all ${group.ids.length}…`
+                              : 'Categorize…'
+                        }
                         categories={categoryList}
-                        onChange={(categoryId) => {
-                          if (!categoryId) return;
-                          // A repeated merchant applies to its whole cluster at once; a one-off
-                          // just updates that transaction.
-                          if (repeated) {
-                            categorizeMerchant.mutate({ ids: group.ids, categoryId });
-                          } else {
-                            categorize.mutate({ id: group.ids[0], categoryId });
-                          }
-                        }}
+                        onChange={applyCategory}
                       />
+                      {repeated && (
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setExpanded((prev) => {
+                              const next = new Set(prev);
+                              if (next.has(group.key)) next.delete(group.key);
+                              else next.add(group.key);
+                              return next;
+                            })
+                          }
+                          className="text-[13px] text-muted transition-colors hover:text-ink"
+                        >
+                          {isOpen ? 'Hide transactions' : `Show ${group.ids.length} transactions`}
+                        </button>
+                      )}
                     </div>
+
+                    {/* The exact rows behind the group, so it's clear what's being categorized
+                        together — the raw statement text often differs from the grouped label. */}
+                    {isOpen && (
+                      <div className="mt-2 border-l border-line-2 pl-3">
+                        {group.items.map((t) => (
+                          <div key={t.id} className="flex items-baseline justify-between gap-3 py-1.5 text-[13px]">
+                            <div className="min-w-0">
+                              <div className="truncate text-ink-soft">{t.original_name || merchantLabel(t)}</div>
+                              <div className="text-xs text-muted-2">
+                                {shortDate(t.date)}
+                                {t.account_name ? ` · ${t.account_name}` : ''}
+                              </div>
+                            </div>
+                            <span className="flex-shrink-0 tabular-nums text-muted">{formatCurrency(t.amount)}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 );
               })

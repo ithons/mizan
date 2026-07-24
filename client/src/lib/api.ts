@@ -625,6 +625,11 @@ export const aiApi = {
       method: 'PUT',
       body: JSON.stringify({ profile }),
     }),
+  suggestCategories: (merchants: string[]) =>
+    apiFetch<Array<{ merchant: string; category_id: string; category_name: string }>>(
+      '/api/ai/suggest-categories',
+      { method: 'POST', body: JSON.stringify({ merchants }) }
+    ),
   getSettings: () => apiFetch<AdvisorSettings>('/api/ai/settings'),
   saveSettings: (update: AdvisorSettingsUpdate) =>
     apiFetch<AdvisorSettings>('/api/ai/settings', {

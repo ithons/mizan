@@ -15,6 +15,7 @@ import { confirmAdvisorDraft, dismissAdvisorDraft, listAdvisorActions } from '..
 import { analyzeAdvisorQuestion } from '../services/advisorTools';
 import { ADVISOR_TOOLS, runAdvisorTool } from '../services/advisorChatTools';
 import { getAdvisorSettings, updateAdvisorSettings } from '../services/advisorSettings';
+import { suggestCategoriesForMerchants } from '../services/aiCategorySuggest';
 import type { AdvisorConfirmRequest, ChatMessage } from '../../../shared/types';
 
 const router = Router();
@@ -174,6 +175,26 @@ router.put('/settings', (req: Request, res: Response, next: NextFunction): void 
       return;
     }
     res.json({ data: result.settings });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// POST /api/ai/suggest-categories - advisory category proposals for uncategorized merchants.
+// Read-only: nothing is written, the user applies suggestions from the review worklist.
+router.post('/suggest-categories', async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const raw = Array.isArray(req.body?.merchants) ? req.body.merchants : null;
+    if (!raw) {
+      res.status(400).json({ error: 'merchants (string array) is required' });
+      return;
+    }
+    const merchants = raw.filter((m: unknown): m is string => typeof m === 'string');
+    if (!process.env.ANTHROPIC_API_KEY) {
+      res.status(503).json({ error: 'ANTHROPIC_API_KEY is not set — AI suggestions are unavailable' });
+      return;
+    }
+    res.json({ data: await suggestCategoriesForMerchants(getDb(), merchants) });
   } catch (err) {
     next(err);
   }
