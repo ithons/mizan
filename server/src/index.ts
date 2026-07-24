@@ -42,8 +42,16 @@ const HOST = process.env.MIZAN_HOST || '127.0.0.1';
 const HOST_IS_LOOPBACK = HOST === '127.0.0.1' || HOST === 'localhost' || HOST === '::1';
 
 async function main() {
-  // 1. Run DB migrations
-  runMigrations();
+  // 1. Run DB migrations. A failure here is fatal and must be loud: the process exits before the
+  // HTTP log stream exists, so without this the only symptom is "every request fails to fetch"
+  // with nothing in .mizan/logs/server.log to explain it.
+  try {
+    runMigrations();
+  } catch (err) {
+    console.error('[fatal] Database migrations failed — the server cannot start.');
+    console.error('[fatal] Your data was not modified; migrations run in a transaction.');
+    throw err;
+  }
 
   // Backlog passes for older data (transactions left uncategorized, account types frozen
   // by a weaker classifier). Gated behind a cheap COUNT so a clean DB — the common case
@@ -67,8 +75,14 @@ async function main() {
     console.error('[startup] Account type reclassification failed:', err);
   }
 
-  // 2. Load credentials (pre-warm cache)
-  loadCredentials();
+  // 2. Load credentials (pre-warm cache). Decryption depends on the OS keychain, which can fail
+  // (locked keychain, moved .mizan dir) — surface that clearly rather than dying anonymously.
+  try {
+    loadCredentials();
+  } catch (err) {
+    console.error('[fatal] Could not load stored credentials (OS keychain unavailable?).');
+    throw err;
+  }
 
   const app = express();
 
@@ -179,14 +193,39 @@ async function main() {
     startSyncScheduler(syncIntervalMinutes);
   }
 
-  // Graceful shutdown
+  // Graceful shutdown. server.close() waits for every open connection, and the client holds a
+  // permanent SSE stream (/api/sync/status), so with a browser tab open the callback never fires:
+  // Ctrl-C appeared to hang, closeDb() never ran, and the DB was left with a dirty WAL. Force the
+  // exit after a short grace period so a clean checkpoint still happens.
+  let shuttingDown = false;
   const shutdown = () => {
+    if (shuttingDown) return;
+    shuttingDown = true;
     console.log('\n[server] Shutting down...');
     stopSyncScheduler();
-    server.close(() => {
-      closeDb();
+
+    const finish = () => {
+      try {
+        closeDb();
+      } catch (err) {
+        console.error('[server] Error closing the database:', err);
+      }
       process.exit(0);
+    };
+
+    const forceExit = setTimeout(() => {
+      console.warn('[server] Connections still open (SSE clients) — closing anyway.');
+      finish();
+    }, 2000);
+    forceExit.unref();
+
+    server.close(() => {
+      clearTimeout(forceExit);
+      finish();
     });
+    // Drop keep-alive/SSE sockets so the close callback can actually fire.
+    server.closeIdleConnections?.();
+    server.closeAllConnections?.();
   };
   process.on('SIGINT', shutdown);
   process.on('SIGTERM', shutdown);

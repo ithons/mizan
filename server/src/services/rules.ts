@@ -16,6 +16,15 @@ export interface RuleApplicationResult {
 // than a dedicated table: it's a small, purely-advisory list with no relational needs.
 export const DISMISSED_RULE_SUGGESTIONS_KEY = 'dismissed_rule_suggestions';
 
+// Writing a category_id that no longer exists raises "FOREIGN KEY constraint failed", which
+// aborts the whole auto-categorization sync stage — a single stale mapping taking down the entire
+// pass (observed once in a real sync). Callers resolve the valid ids once and skip unknown ones.
+function knownCategoryIds(db: Database.Database): Set<string> {
+  return new Set(
+    (db.prepare('SELECT id FROM categories').all() as Array<{ id: string }>).map((row) => row.id)
+  );
+}
+
 export function getDismissedRuleSuggestions(db: Database.Database): Set<string> {
   const value = getPreference(db, DISMISSED_RULE_SUGGESTIONS_KEY)?.value;
   if (!Array.isArray(value)) return new Set();
@@ -154,6 +163,11 @@ export function applyMerchantRulesToExistingTransactions(
     "UPDATE transactions SET category_id = ?, review_status = 'reviewed', updated_at = ? WHERE id = ?"
   );
 
+  // A rule can outlive its category (categories have been folded/renamed by migrations), and
+  // writing a dangling id fails the FK and aborts the whole stage. Skip those rules instead.
+  const known = knownCategoryIds(db);
+  const staleRulePatterns = new Set<string>();
+
   for (const transaction of transactions) {
     const merchantName = transactionMerchantName(transaction);
     const rule = rules.find((candidate) =>
@@ -161,8 +175,18 @@ export function applyMerchantRulesToExistingTransactions(
     );
 
     if (!rule || rule.category_id === transaction.category_id) continue;
+    if (!known.has(rule.category_id)) {
+      staleRulePatterns.add(rule.pattern);
+      continue;
+    }
     update.run(rule.category_id, now, transaction.id);
     updated++;
+  }
+
+  if (staleRulePatterns.size > 0) {
+    console.warn(
+      `[rules] Skipped rule(s) pointing at a deleted category: ${[...staleRulePatterns].join(', ')}`
+    );
   }
 
   return { updated };
@@ -187,10 +211,12 @@ export function autoCategorizeTransactions(db: Database.Database): RuleApplicati
     'UPDATE transactions SET category_id = ?, updated_at = ? WHERE id = ?'
   );
 
+  const known = knownCategoryIds(db);
   let heuristicUpdated = 0;
   for (const transaction of remaining) {
     const categoryId = guessCategoryFromText(transaction.merchant_name, transaction.original_name);
     if (!categoryId) continue;
+    if (!known.has(categoryId)) continue;
     update.run(categoryId, now, transaction.id);
     heuristicUpdated++;
   }
@@ -217,10 +243,12 @@ export function recategorizeAll(db: Database.Database): RuleApplicationResult {
   const now = new Date().toISOString();
   const update = db.prepare('UPDATE transactions SET category_id = ?, updated_at = ? WHERE id = ?');
 
+  const known = knownCategoryIds(db);
   let heuristicUpdated = 0;
   for (const transaction of remaining) {
     const categoryId = guessCategoryFromText(transaction.merchant_name, transaction.original_name);
     if (!categoryId) continue;
+    if (!known.has(categoryId)) continue;
     update.run(categoryId, now, transaction.id);
     heuristicUpdated++;
   }
