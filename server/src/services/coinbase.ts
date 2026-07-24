@@ -88,6 +88,68 @@ export function upsertCoinbaseHolding(
   `).run(uuidv4(), accountId, securityId, quantity, price, toCents(value), now);
 }
 
+// A Coinbase v2 (App API) transaction. amount/native_amount are SIGNED decimal strings —
+// negative = debit (out), positive = credit (in). native_amount is the USD value.
+export interface CoinbaseV2Transaction {
+  id: string;
+  type: string;
+  status: string;
+  amount: { amount: string; currency: string };
+  native_amount: { amount: string; currency: string };
+  created_at: string;
+}
+
+export interface ClassifiedLedgerTx {
+  categoryId: string;
+  signedCents: number; // integer cents, signed (money in positive, money out negative)
+  merchant: string;
+}
+
+// Maps a v2 transaction to a ledger entry, or null to skip it. buy/sell/advanced_trade_fill are
+// intentionally skipped here — they're imported from the v3 brokerage-orders endpoint
+// (syncTradeHistory) and would double-count. Only completed transactions are imported.
+//
+// Sign convention matches syncTradeHistory: a SELL/receive/deposit is money IN (positive); a
+// BUY/send/withdrawal is money OUT (negative). For send/receive/fiat, native_amount is already
+// signed that way. For a convert leg ('trade'), native_amount is signed by cash direction of the
+// coin (coin out = negative), which is the OPPOSITE of the money sign we want, so it's negated.
+export function classifyCoinbaseLedgerTx(txn: CoinbaseV2Transaction): ClassifiedLedgerTx | null {
+  if (txn.status !== 'completed') return null;
+  const nativeUsd = Number.parseFloat(txn.native_amount?.amount ?? '');
+  if (!Number.isFinite(nativeUsd)) return null;
+  const coin = txn.amount?.currency ?? '';
+  const coinAmount = Number.parseFloat(txn.amount?.amount ?? '0');
+
+  switch (txn.type) {
+    case 'trade': {
+      // A convert has two legs (one per coin sub-account): coin out = a sell, coin in = a buy.
+      const isSell = coinAmount < 0;
+      return {
+        categoryId: isSell ? 'cat_crypto_sell' : 'cat_crypto_buy',
+        signedCents: toCents(-nativeUsd),
+        merchant: `Convert ${isSell ? 'sold' : 'bought'} ${coin}`.trim(),
+      };
+    }
+    case 'send':
+      // 'send' covers external crypto transfers in both directions; the sign picks which.
+      return {
+        categoryId: nativeUsd < 0 ? 'cat_xfer_out' : 'cat_xfer_in',
+        signedCents: toCents(nativeUsd),
+        merchant: `${nativeUsd < 0 ? 'Send' : 'Receive'} ${coin}`.trim(),
+      };
+    case 'receive':
+      return { categoryId: 'cat_xfer_in', signedCents: toCents(nativeUsd), merchant: `Receive ${coin}`.trim() };
+    case 'fiat_deposit':
+      return { categoryId: 'cat_xfer_in', signedCents: toCents(nativeUsd), merchant: 'Coinbase deposit' };
+    case 'fiat_withdrawal':
+      return { categoryId: 'cat_xfer_out', signedCents: toCents(nativeUsd), merchant: 'Coinbase withdrawal' };
+    default:
+      // buy / sell / advanced_trade_fill (v3 covers these) and everything else (staking moves,
+      // rewards, internal transfers) are skipped for now.
+      return null;
+  }
+}
+
 function parseCoinbaseNumber(value: string | undefined, label: string): number {
   const parsed = Number.parseFloat(value ?? '0');
   if (!Number.isFinite(parsed)) {
@@ -338,9 +400,19 @@ export async function syncCoinbase(): Promise<CoinbaseSyncResult> {
   db.prepare('UPDATE accounts SET current_balance = ?, updated_at = ? WHERE id = ?').run(totalCents, now, accountId);
   console.log(`[coinbase] Consolidated account: ${coinCount} coin${coinCount === 1 ? '' : 's'} held, ${zeroedCount} zeroed, ${toDollars(totalCents).toFixed(2)} total`);
 
-  const transactionCount = preExistingConnection
+  let transactionCount = preExistingConnection
     ? await syncTradeHistory(preExistingConnection.id)
     : 0;
+
+  // The v2 ledger (converts/sends/receives/fiat) is best-effort: a failure here must not fail an
+  // otherwise-successful balance + trade sync.
+  if (preExistingConnection) {
+    try {
+      transactionCount += await syncCoinbaseLedger();
+    } catch (err) {
+      console.warn(`[coinbase] Ledger sync failed (non-fatal): ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
 
   db.prepare(
     "UPDATE coinbase_connections SET last_synced_at = ? WHERE status = 'active'"
@@ -467,4 +539,70 @@ export async function syncTradeHistory(connectionId: string): Promise<number> {
   }
 
   return insertedCount;
+}
+
+// Imports the non-trade crypto activity that the v3 brokerage-orders endpoint doesn't expose:
+// converts, sends, receives, and fiat deposits/withdrawals, from the v2 App API. Everything routes
+// to the single consolidated Coinbase account. Deduped on coinbase_transaction_id, floor-guarded,
+// completed-only. Independent of syncTradeHistory (different id space, disjoint types), so it's
+// called guarded — a v2 failure must not fail the whole sync.
+export async function syncCoinbaseLedger(): Promise<number> {
+  const db = getDb();
+  const now = new Date().toISOString();
+
+  const acct = db.prepare(
+    "SELECT id, backfill_floor_date FROM accounts WHERE connection_type = 'coinbase' AND type = 'crypto_wallet' LIMIT 1"
+  ).get() as { id: string; backfill_floor_date: string | null } | undefined;
+  if (!acct) {
+    console.warn('[coinbase] Ledger sync skipped: no Coinbase account');
+    return 0;
+  }
+
+  interface V2Account { id: string }
+  interface V2Page<T> { data: T[]; pagination?: { next_uri: string | null } }
+
+  const insert = db.prepare(`
+    INSERT INTO transactions
+      (id, coinbase_transaction_id, account_id, date, amount, merchant_name,
+       original_name, category_id, pending, is_manual, source_type, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, 0, 'coinbase', ?, ?)
+  `);
+  const existsStmt = db.prepare('SELECT id FROM transactions WHERE coinbase_transaction_id = ?');
+
+  // Page through a v2 list endpoint following pagination.next_uri (already includes the query).
+  async function fetchAll<T>(firstPath: string): Promise<T[]> {
+    const out: T[] = [];
+    let path: string | null = firstPath;
+    while (path) {
+      const page: V2Page<T> = await signedRequest<V2Page<T>>('GET', path);
+      out.push(...(page.data || []));
+      path = page.pagination?.next_uri ?? null;
+    }
+    return out;
+  }
+
+  let inserted = 0;
+  const accounts = await fetchAll<V2Account>('/v2/accounts?limit=100');
+  for (const cbAccount of accounts) {
+    const txns = await fetchAll<CoinbaseV2Transaction>(`/v2/accounts/${cbAccount.id}/transactions?limit=100`);
+    for (const txn of txns) {
+      if (!txn.id) continue;
+      if (existsStmt.get(txn.id)) continue;
+
+      const classified = classifyCoinbaseLedgerTx(txn);
+      if (!classified) continue;
+
+      const date = txn.created_at ? isoToLocalDate(txn.created_at) : now.split('T')[0];
+      // Imported backfill owns dates below the floor; never let a deep pull re-insert them.
+      if (isBelowBackfillFloor(date, acct.backfill_floor_date)) continue;
+
+      insert.run(
+        uuidv4(), txn.id, acct.id, date, classified.signedCents,
+        'Coinbase', classified.merchant, classified.categoryId, now, now
+      );
+      inserted++;
+    }
+  }
+
+  return inserted;
 }
