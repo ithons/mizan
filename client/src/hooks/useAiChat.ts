@@ -16,6 +16,13 @@ const TOOL_LABELS: Record<string, string> = {
   list_transactions: 'Looking through your transactions…',
   spending_by_category: 'Tallying spending by category…',
   monthly_cashflow: 'Checking your monthly cash flow…',
+  get_budgets: 'Reviewing your budgets…',
+  list_goals: 'Checking your goals…',
+  list_holdings: 'Looking at your investments…',
+  get_upcoming_bills: 'Checking upcoming bills…',
+  get_net_worth_history: 'Tracing your net-worth history…',
+  describe_schema: 'Inspecting your data model…',
+  run_sql_query: 'Querying your financial data…',
 };
 
 // The active conversation id is remembered across reloads so the thread resumes; the

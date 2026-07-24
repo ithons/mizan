@@ -35,6 +35,8 @@ import type {
   AdvisorConfirmResponse,
   AdvisorDraftAction,
   AdvisorContextResponse,
+  AdvisorSettings,
+  AdvisorSettingsUpdate,
   AppPreference,
   CsvImportPreview,
   DataImportRun,
@@ -608,6 +610,12 @@ export const aiApi = {
     apiFetch<{ profile: string }>('/api/ai/profile', {
       method: 'PUT',
       body: JSON.stringify({ profile }),
+    }),
+  getSettings: () => apiFetch<AdvisorSettings>('/api/ai/settings'),
+  saveSettings: (update: AdvisorSettingsUpdate) =>
+    apiFetch<AdvisorSettings>('/api/ai/settings', {
+      method: 'PUT',
+      body: JSON.stringify(update),
     }),
   listConversations: () =>
     apiFetch<Array<{ id: string; title: string; updated_at: string; message_count: number }>>(

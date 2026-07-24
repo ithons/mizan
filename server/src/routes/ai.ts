@@ -14,6 +14,7 @@ import {
 import { confirmAdvisorDraft, dismissAdvisorDraft, listAdvisorActions } from '../services/advisorDrafts';
 import { analyzeAdvisorQuestion } from '../services/advisorTools';
 import { ADVISOR_TOOLS, runAdvisorTool } from '../services/advisorChatTools';
+import { getAdvisorSettings, updateAdvisorSettings } from '../services/advisorSettings';
 import type { AdvisorConfirmRequest, ChatMessage } from '../../../shared/types';
 
 const router = Router();
@@ -155,6 +156,29 @@ router.put('/profile', (req: Request, res: Response, next: NextFunction): void =
   }
 });
 
+// GET /api/ai/settings - advisor model/effort/context-section config + the option lists
+router.get('/settings', (_req: Request, res: Response, next: NextFunction): void => {
+  try {
+    res.json({ data: getAdvisorSettings(getDb()) });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// PUT /api/ai/settings - update any subset of the advisor config (server-validated against whitelists)
+router.put('/settings', (req: Request, res: Response, next: NextFunction): void => {
+  try {
+    const result = updateAdvisorSettings(getDb(), req.body);
+    if (!result.ok) {
+      res.status(400).json({ error: result.error });
+      return;
+    }
+    res.json({ data: result.settings });
+  } catch (err) {
+    next(err);
+  }
+});
+
 // POST /api/ai/analyze - local read-tool analysis with provenance
 // Note: Unlike `/chat`, this endpoint is purely a local, heuristic-based regex/DB resolver.
 // It does NOT hit Anthropic or any LLM. It is designed to be sub-millisecond fast for
@@ -227,6 +251,7 @@ router.post('/chat', async (req: Request, res: Response, next: NextFunction): Pr
   res.flushHeaders();
 
   const db = getDb();
+  const { model, effort } = getAdvisorSettings(db);
   const snapshot = buildAdvisorContextSnapshot();
   const systemText = `${ADVISOR_SYSTEM_PROMPT}\n\n${snapshot.context}`;
 
@@ -246,14 +271,16 @@ router.post('/chat', async (req: Request, res: Response, next: NextFunction): Pr
   try {
     for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
       const stream = anthropic.messages.stream({
-        model: 'claude-sonnet-5',
-        // Thinking tokens count against max_tokens; adaptive thinking at medium effort can
-        // spend most of a smaller budget reasoning before ever writing the answer.
+        // model + effort are user-configurable (Settings -> Advisor), server-whitelisted to
+        // the current Claude family in advisorSettings.ts.
+        model,
+        // Thinking tokens count against max_tokens; adaptive thinking can spend most of a
+        // smaller budget reasoning before ever writing the answer.
         max_tokens: 8192,
-        // 'adaptive' is the only valid thinking mode for claude-sonnet-5 (budget_tokens 400s).
+        // 'adaptive' is the only valid thinking mode for the whitelisted models (budget_tokens 400s).
         // display: 'summarized' surfaces visible reasoning text ('omitted' returns empty blocks).
         thinking: { type: 'adaptive', display: 'summarized' },
-        output_config: { effort: 'medium' },
+        output_config: { effort },
         // Stable prefix (prompt + snapshot) is cached; ADVISOR_TOOLS is a fixed list, so the
         // cached prefix holds across every tool round of the conversation.
         system: [

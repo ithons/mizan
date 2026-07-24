@@ -12,6 +12,7 @@ fs.mkdirSync(MIZAN_DIR, { recursive: true });
 fs.mkdirSync(path.join(MIZAN_DIR, 'logs'), { recursive: true });
 
 let _db: Database.Database | null = null;
+let _readonlyDb: Database.Database | null = null;
 
 export function _setDbForTesting(testDb: Database.Database) {
   _db = testDb;
@@ -26,10 +27,25 @@ export function getDb(): Database.Database {
   return _db;
 }
 
+// A separate connection opened in SQLite readonly mode. The engine rejects ANY write on it,
+// so it's the hard security boundary for executing model-authored SQL (the AI advisor's
+// run_sql_query tool) — a write can never reach the real data even if a guard is bypassed.
+export function getReadOnlyDb(): Database.Database {
+  if (!_readonlyDb) {
+    _readonlyDb = new Database(DB_PATH, { readonly: true });
+    _readonlyDb.pragma('foreign_keys = ON');
+  }
+  return _readonlyDb;
+}
+
 export function closeDb(): void {
   if (_db) {
     _db.close();
     _db = null;
+  }
+  if (_readonlyDb) {
+    _readonlyDb.close();
+    _readonlyDb = null;
   }
 }
 

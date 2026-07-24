@@ -1,6 +1,7 @@
 import type Database from 'better-sqlite3';
 import type Anthropic from '@anthropic-ai/sdk';
 import { listTransactions, type TransactionListFilters } from './transactions';
+import { getReadOnlyDb } from '../db/index';
 import { toDollars } from './money';
 
 // Read-only tools the cloud advisor (routes/ai.ts /chat) can call to query the database
@@ -92,6 +93,25 @@ export const ADVISOR_TOOLS: Anthropic.Tool[] = [
       properties: {
         months: { type: 'integer', description: 'Number of months back to include (default 12, max 60).' },
       },
+    },
+  },
+  {
+    name: 'describe_schema',
+    description:
+      'List the database tables and their columns. Call this before run_sql_query to see what you can query. Money columns are stored as INTEGER CENTS (divide by 100 for dollars); dates are TEXT yyyy-MM-dd.',
+    input_schema: { type: 'object', properties: {} },
+  },
+  {
+    name: 'run_sql_query',
+    description:
+      'Run a read-only SQL SELECT against the finance database for anything the other tools do not cover (custom aggregates, joins, cohorts, arbitrary questions). Only SELECT is allowed — the connection is read-only and rejects writes. Call describe_schema first for table/column names. IMPORTANT: money columns (transactions.amount, accounts.current_balance, budgets.amount, net_worth_snapshots.*, holdings.institution_value, etc.) are INTEGER CENTS — divide by 100.0 for dollars. Results are capped at "limit" rows.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        sql: { type: 'string', description: 'A single read-only SELECT statement.' },
+        limit: { type: 'integer', description: 'Max rows to return (default 100, max 500).' },
+      },
+      required: ['sql'],
     },
   },
 ];
@@ -282,6 +302,64 @@ function getNetWorthHistoryTool(db: Database.Database, input: ToolInput): unknow
   };
 }
 
+function quoteIdent(name: string): string {
+  return `"${name.replace(/"/g, '""')}"`;
+}
+
+function describeSchemaTool(): unknown {
+  const rodb = getReadOnlyDb();
+  const tables = rodb
+    .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name")
+    .all() as Array<{ name: string }>;
+  const schema: Record<string, string[]> = {};
+  for (const { name } of tables) {
+    const cols = rodb.prepare(`PRAGMA table_info(${quoteIdent(name)})`).all() as Array<{ name: string; type: string }>;
+    schema[name] = cols.map((c) => `${c.name} ${c.type || 'ANY'}`);
+  }
+  return {
+    schema,
+    note: 'Money columns are INTEGER CENTS (÷100 for dollars). Dates are TEXT yyyy-MM-dd. Query with run_sql_query (read-only SELECT only).',
+  };
+}
+
+// Executes model-authored SQL on the READ-ONLY connection (never the read-write singleton), so a
+// write can't reach the data. Defense in depth: reject non-reader statements up front, and
+// better-sqlite3 only compiles the first statement so a trailing `;DROP ...` is ignored.
+function runSqlQueryTool(input: ToolInput): unknown {
+  const sql = str(input.sql);
+  if (!sql) return { error: 'Provide a SQL SELECT statement in "sql".' };
+  const limit = Math.min(Math.max(Number(input.limit) || 100, 1), 500);
+  const rodb = getReadOnlyDb();
+
+  let stmt: Database.Statement;
+  try {
+    stmt = rodb.prepare(sql);
+  } catch (err) {
+    return { error: `SQL error: ${(err as Error).message}` };
+  }
+  if (!stmt.reader) {
+    return { error: 'Only read-only SELECT queries are allowed.' };
+  }
+
+  try {
+    const rows: unknown[] = [];
+    for (const row of stmt.iterate()) {
+      rows.push(row);
+      if (rows.length > limit) break; // cap memory/time even on a huge cross-join
+    }
+    const truncated = rows.length > limit;
+    if (truncated) rows.length = limit;
+    return {
+      row_count: rows.length,
+      truncated,
+      rows,
+      note: 'Money columns are integer cents — divide by 100 for dollars.',
+    };
+  } catch (err) {
+    return { error: `Query failed: ${(err as Error).message}` };
+  }
+}
+
 export function runAdvisorTool(db: Database.Database, name: string, input: ToolInput): unknown {
   switch (name) {
     case 'list_transactions': return listTransactionsTool(db, input);
@@ -292,6 +370,8 @@ export function runAdvisorTool(db: Database.Database, name: string, input: ToolI
     case 'list_holdings': return listHoldingsTool(db);
     case 'get_upcoming_bills': return getUpcomingBillsTool(db, input);
     case 'get_net_worth_history': return getNetWorthHistoryTool(db, input);
+    case 'describe_schema': return describeSchemaTool();
+    case 'run_sql_query': return runSqlQueryTool(input);
     default: return { error: `Unknown tool: ${name}` };
   }
 }

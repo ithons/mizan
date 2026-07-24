@@ -823,6 +823,28 @@ export interface AdvisorContextResponse {
   tools: AdvisorToolStatus[];
 }
 
+export type AdvisorEffort = 'low' | 'medium' | 'high';
+
+// Advisor chat model/effort/context-section configuration. The option lists are
+// server-authoritative (the model is whitelisted so a tampered client can't
+// point it at an arbitrary string); the client renders its controls from them.
+export interface AdvisorSettings {
+  model: string;
+  effort: AdvisorEffort;
+  context_sections: string[];
+  available: {
+    models: Array<{ id: string; label: string }>;
+    efforts: AdvisorEffort[];
+    sections: Array<{ id: string; label: string }>;
+  };
+}
+
+export interface AdvisorSettingsUpdate {
+  model?: string;
+  effort?: AdvisorEffort;
+  context_sections?: string[];
+}
+
 export interface ApiResponse<T> {
   data: T;
 }

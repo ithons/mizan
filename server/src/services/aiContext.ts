@@ -16,6 +16,7 @@ import { getTransactionReviewSummary } from './transactionReview';
 import { getSyncHealth } from './syncHealth';
 import { buildAdvisorReadTools } from './advisorTools';
 import { getPreference } from './preferences';
+import { getEnabledContextSections } from './advisorSettings';
 
 export const ADVISOR_PROFILE_PREFERENCE_KEY = 'advisor_user_profile';
 
@@ -202,6 +203,10 @@ export function buildFinancialContext(): string {
 
   const lines: string[] = [`## Financial Snapshot - ${format(today, 'MMMM d, yyyy')}`];
 
+  // Which optional context sections to include (unset preference => all on). The
+  // account/net-worth summary and personal profile below are always included.
+  const sections = getEnabledContextSections(db);
+
   // User-provided personal context. Injected here so it reaches the chat prompt, the
   // background worker prompt, and the Settings disclosure panel from one place.
   const profile = getPreference(db, ADVISOR_PROFILE_PREFERENCE_KEY);
@@ -214,19 +219,21 @@ export function buildFinancialContext(): string {
 
   const syncHealth = getSyncHealth(db);
 
-  lines.push('');
-  lines.push('### Data Freshness');
-  lines.push(`  Overall: ${syncHealth.status_label}. ${syncHealth.status_detail}`);
-  if (syncHealth.connections.length === 0) {
-    lines.push('  No live institution connections. Balances and transactions may be manual or empty.');
-  } else {
-    lines.push(`  Connections: ${syncHealth.connection_count}`);
-    lines.push(`  Last successful sync: ${syncHealth.last_synced_at ?? 'Never'}`);
-    lines.push(`  Stale connections: ${syncHealth.stale_count}`);
-    lines.push(`  Connections needing attention: ${syncHealth.attention_count}`);
-    for (const connection of syncHealth.connections.slice(0, 6)) {
-      const ageLabel = connection.age_days === null ? 'never synced' : `${connection.age_days}d ago`;
-      lines.push(`  ${connection.institution_name}: ${connection.status_label}, ${ageLabel}, ${connection.account_count} accounts`);
+  if (sections.has('data_freshness')) {
+    lines.push('');
+    lines.push('### Data Freshness');
+    lines.push(`  Overall: ${syncHealth.status_label}. ${syncHealth.status_detail}`);
+    if (syncHealth.connections.length === 0) {
+      lines.push('  No live institution connections. Balances and transactions may be manual or empty.');
+    } else {
+      lines.push(`  Connections: ${syncHealth.connection_count}`);
+      lines.push(`  Last successful sync: ${syncHealth.last_synced_at ?? 'Never'}`);
+      lines.push(`  Stale connections: ${syncHealth.stale_count}`);
+      lines.push(`  Connections needing attention: ${syncHealth.attention_count}`);
+      for (const connection of syncHealth.connections.slice(0, 6)) {
+        const ageLabel = connection.age_days === null ? 'never synced' : `${connection.age_days}d ago`;
+        lines.push(`  ${connection.institution_name}: ${connection.status_label}, ${ageLabel}, ${connection.account_count} accounts`);
+      }
     }
   }
 
@@ -294,112 +301,121 @@ export function buildFinancialContext(): string {
   lines.push(...acctLines);
 
   // ── Cash Flow (3-month average) ──────────────────────────────────────────
-  const cashflow = getCashflowReport(db, {
-    startDate: threeMonthsAgo,
-    endDate: format(today, 'yyyy-MM-dd'),
-  });
-  const cashflowTotals = cashflow.months.reduce(
-    (totals, month) => ({
-      income: totals.income + month.income,
-      expenses: totals.expenses + month.expenses,
-    }),
-    { income: 0, expenses: 0 }
-  );
+  if (sections.has('cash_flow')) {
+    const cashflow = getCashflowReport(db, {
+      startDate: threeMonthsAgo,
+      endDate: format(today, 'yyyy-MM-dd'),
+    });
+    const cashflowTotals = cashflow.months.reduce(
+      (totals, month) => ({
+        income: totals.income + month.income,
+        expenses: totals.expenses + month.expenses,
+      }),
+      { income: 0, expenses: 0 }
+    );
 
-  const avgIncome = cashflowTotals.income / 3;
-  const avgExpenses = cashflowTotals.expenses / 3;
-  const avgNet = avgIncome - avgExpenses;
+    const avgIncome = cashflowTotals.income / 3;
+    const avgExpenses = cashflowTotals.expenses / 3;
+    const avgNet = avgIncome - avgExpenses;
 
-  lines.push('');
-  lines.push('### Cash Flow - 3-month average');
-  lines.push(`  Income:   ${fmt(toDollars(avgIncome))}/mo`);
-  lines.push(`  Expenses: ${fmt(toDollars(avgExpenses))}/mo`);
-  lines.push(`  Net:      ${fmt(toDollars(avgNet))}/mo`);
+    lines.push('');
+    lines.push('### Cash Flow - 3-month average');
+    lines.push(`  Income:   ${fmt(toDollars(avgIncome))}/mo`);
+    lines.push(`  Expenses: ${fmt(toDollars(avgExpenses))}/mo`);
+    lines.push(`  Net:      ${fmt(toDollars(avgNet))}/mo`);
+  }
 
-  const reportSummary = getReportSummary(db, {
-    startDate: thisMonthStart,
-    endDate: format(today, 'yyyy-MM-dd'),
-  });
-  lines.push('');
-  lines.push(`### Report Summary - ${format(today, 'MMMM')}`);
-  lines.push(`  Income: ${fmt(toDollars(reportSummary.income.current))} (${fmt(toDollars(reportSummary.income.delta))} vs prior period)`);
-  lines.push(`  Spending: ${fmt(toDollars(reportSummary.expenses.current))} (${fmt(toDollars(reportSummary.expenses.delta))} vs prior period)`);
-  lines.push(`  Net cash flow: ${fmt(toDollars(reportSummary.net.current))} (${fmt(toDollars(reportSummary.net.delta))} vs prior period)`);
-  lines.push(`  Savings rate: ${reportSummary.savings_rate.current.toFixed(1)}% (${reportSummary.savings_rate.delta >= 0 ? '+' : ''}${reportSummary.savings_rate.delta.toFixed(1)} pp)`);
-  if (reportSummary.excluded_flows.length > 0) {
-    lines.push('  Excluded from income and spending reports:');
-    for (const flow of reportSummary.excluded_flows) {
-      lines.push(`    ${flow.flow_type}: ${flow.count} transactions, net ${fmt(toDollars(flow.net))}`);
+  if (sections.has('report_summary')) {
+    const reportSummary = getReportSummary(db, {
+      startDate: thisMonthStart,
+      endDate: format(today, 'yyyy-MM-dd'),
+    });
+    lines.push('');
+    lines.push(`### Report Summary - ${format(today, 'MMMM')}`);
+    lines.push(`  Income: ${fmt(toDollars(reportSummary.income.current))} (${fmt(toDollars(reportSummary.income.delta))} vs prior period)`);
+    lines.push(`  Spending: ${fmt(toDollars(reportSummary.expenses.current))} (${fmt(toDollars(reportSummary.expenses.delta))} vs prior period)`);
+    lines.push(`  Net cash flow: ${fmt(toDollars(reportSummary.net.current))} (${fmt(toDollars(reportSummary.net.delta))} vs prior period)`);
+    lines.push(`  Savings rate: ${reportSummary.savings_rate.current.toFixed(1)}% (${reportSummary.savings_rate.delta >= 0 ? '+' : ''}${reportSummary.savings_rate.delta.toFixed(1)} pp)`);
+    if (reportSummary.excluded_flows.length > 0) {
+      lines.push('  Excluded from income and spending reports:');
+      for (const flow of reportSummary.excluded_flows) {
+        lines.push(`    ${flow.flow_type}: ${flow.count} transactions, net ${fmt(toDollars(flow.net))}`);
+      }
     }
   }
 
-  const forecastDays = 60;
-  const forecast = buildRecurringForecast(db, forecastDays);
-  if (forecast.occurrences.length > 0) {
-    lines.push('');
-    lines.push(`### Forward Cash Flow - next ${forecastDays} days`);
-    lines.push(`  Scheduled income: ${fmt(toDollars(forecast.income))}`);
-    lines.push(`  Scheduled bills:  ${fmt(toDollars(forecast.bills))}`);
-    lines.push(`  Scheduled net:    ${fmt(toDollars(forecast.net))}`);
-    // `liquid` is dollars (from dollarized balances); forecast.net is cents.
-    lines.push(`  Liquid after scheduled net: ${fmt(liquid + toDollars(forecast.net))}`);
-    lines.push('  Next scheduled items:');
-    for (const occurrence of forecast.occurrences.slice(0, 10)) {
-      const sign = occurrence.amount >= 0 ? '+' : '-';
-      const status = occurrence.is_confirmed ? 'confirmed' : 'detected';
-      const category = occurrence.category_name ?? 'Uncategorized';
-      const adjustment = occurrence.adjustment_action
-        ? `, ${occurrence.adjustment_action} adjustment from ${occurrence.original_expected_date ?? occurrence.expected_date}`
-        : '';
-      lines.push(
-        `    ${occurrence.expected_date}: ${occurrence.merchant_name} ${sign}${fmt(toDollars(Math.abs(occurrence.amount)))} (${category}, ${occurrence.frequency}, ${status}${adjustment})`
-      );
+  if (sections.has('forecast')) {
+    const forecastDays = 60;
+    const forecast = buildRecurringForecast(db, forecastDays);
+    if (forecast.occurrences.length > 0) {
+      lines.push('');
+      lines.push(`### Forward Cash Flow - next ${forecastDays} days`);
+      lines.push(`  Scheduled income: ${fmt(toDollars(forecast.income))}`);
+      lines.push(`  Scheduled bills:  ${fmt(toDollars(forecast.bills))}`);
+      lines.push(`  Scheduled net:    ${fmt(toDollars(forecast.net))}`);
+      // `liquid` is dollars (from dollarized balances); forecast.net is cents.
+      lines.push(`  Liquid after scheduled net: ${fmt(liquid + toDollars(forecast.net))}`);
+      lines.push('  Next scheduled items:');
+      for (const occurrence of forecast.occurrences.slice(0, 10)) {
+        const sign = occurrence.amount >= 0 ? '+' : '-';
+        const status = occurrence.is_confirmed ? 'confirmed' : 'detected';
+        const category = occurrence.category_name ?? 'Uncategorized';
+        const adjustment = occurrence.adjustment_action
+          ? `, ${occurrence.adjustment_action} adjustment from ${occurrence.original_expected_date ?? occurrence.expected_date}`
+          : '';
+        lines.push(
+          `    ${occurrence.expected_date}: ${occurrence.merchant_name} ${sign}${fmt(toDollars(Math.abs(occurrence.amount)))} (${category}, ${occurrence.frequency}, ${status}${adjustment})`
+        );
+      }
     }
   }
 
   // ── Top Spending Categories (this month) ────────────────────────────────
-  const thisMonthSpending = db.prepare(`
-    SELECT
-      COALESCE(pc.name, c.name, 'Uncategorized') AS category,
-      SUM(ABS(t.amount)) AS total
-    FROM transactions t
-    LEFT JOIN categories c ON c.id = t.category_id
-    LEFT JOIN categories pc ON pc.id = c.parent_id
-    WHERE t.date >= ?
-      AND t.pending = 0
-      AND t.amount < 0
-      AND COALESCE(c.is_income, 0) = 0
-      AND COALESCE(c.is_investment, 0) = 0
-    GROUP BY COALESCE(pc.id, c.id, 'uncategorized')
-    ORDER BY total DESC
-    LIMIT 8
-  `).all(thisMonthStart) as Array<{ category: string; total: number }>;
+  if (sections.has('top_spending')) {
+    const thisMonthSpending = db.prepare(`
+      SELECT
+        COALESCE(pc.name, c.name, 'Uncategorized') AS category,
+        SUM(ABS(t.amount)) AS total
+      FROM transactions t
+      LEFT JOIN categories c ON c.id = t.category_id
+      LEFT JOIN categories pc ON pc.id = c.parent_id
+      WHERE t.date >= ?
+        AND t.pending = 0
+        AND t.amount < 0
+        AND COALESCE(c.is_income, 0) = 0
+        AND COALESCE(c.is_investment, 0) = 0
+      GROUP BY COALESCE(pc.id, c.id, 'uncategorized')
+      ORDER BY total DESC
+      LIMIT 8
+    `).all(thisMonthStart) as Array<{ category: string; total: number }>;
 
-  // Budget context
-  const budgets = db.prepare(`
-    SELECT b.amount, c.name AS category_name,
-      COALESCE(pc.name, c.name) AS parent_category
-    FROM budgets b
-    JOIN categories c ON c.id = b.category_id
-    LEFT JOIN categories pc ON pc.id = c.parent_id
-    WHERE b.period = 'monthly'
-  `).all() as Array<{ amount: number; category_name: string; parent_category: string }>;
-  // budgets.amount and thisMonthSpending.total are inline-SQL cents; dollarize for display.
-  const budgetMap = new Map(budgets.map((b) => [b.parent_category || b.category_name, toDollars(b.amount)]));
+    // Budget context
+    const budgets = db.prepare(`
+      SELECT b.amount, c.name AS category_name,
+        COALESCE(pc.name, c.name) AS parent_category
+      FROM budgets b
+      JOIN categories c ON c.id = b.category_id
+      LEFT JOIN categories pc ON pc.id = c.parent_id
+      WHERE b.period = 'monthly'
+    `).all() as Array<{ amount: number; category_name: string; parent_category: string }>;
+    // budgets.amount and thisMonthSpending.total are inline-SQL cents; dollarize for display.
+    const budgetMap = new Map(budgets.map((b) => [b.parent_category || b.category_name, toDollars(b.amount)]));
 
-  if (thisMonthSpending.length > 0) {
-    lines.push('');
-    lines.push(`### Top Spending - ${format(today, 'MMMM')}`);
-    for (const row of thisMonthSpending) {
-      const total = toDollars(row.total);
-      const budget = budgetMap.get(row.category);
-      const budgetStr = budget ? ` | budget: ${fmt(total)}/${fmt(budget)} (${Math.round((total / budget) * 100)}%)` : '';
-      lines.push(`  ${row.category}: ${fmt(total)}${budgetStr}`);
+    if (thisMonthSpending.length > 0) {
+      lines.push('');
+      lines.push(`### Top Spending - ${format(today, 'MMMM')}`);
+      for (const row of thisMonthSpending) {
+        const total = toDollars(row.total);
+        const budget = budgetMap.get(row.category);
+        const budgetStr = budget ? ` | budget: ${fmt(total)}/${fmt(budget)} (${Math.round((total / budget) * 100)}%)` : '';
+        lines.push(`  ${row.category}: ${fmt(total)}${budgetStr}`);
+      }
     }
   }
 
   // Goals
-  const goals = db.prepare(`
+  if (sections.has('goals')) {
+    const goals = db.prepare(`
     SELECT
       g.name,
       g.type,
@@ -415,50 +431,53 @@ export function buildFinancialContext(): string {
     WHERE g.is_archived = 0
     ORDER BY g.target_date IS NULL ASC, g.target_date ASC, g.created_at ASC
     LIMIT 8
-  `).all() as GoalContextRow[];
+    `).all() as GoalContextRow[];
 
-  if (goals.length > 0) {
-    lines.push('');
-    lines.push('### Goals');
-    for (const goal of goals) {
-      const progress = calculateGoalProgress(goal);
-      const verb = goal.type === 'debt' ? 'paid down' : 'saved';
-      const linked = goal.account_name
-        ? ` | linked to ${goal.account_name}${goal.institution_name ? ` at ${goal.institution_name}` : ''}`
-        : '';
-      const targetDate = goal.target_date ? ` | target: ${goal.target_date}` : '';
-      // progress.* (calculateGoalProgress) and goal.target_amount are both cents.
-      lines.push(
-        `  ${goal.name}: ${fmt(toDollars(progress.progress_amount))} ${verb} of ${fmt(toDollars(goal.target_amount))} (${Math.round(progress.progress_percent)}%), ${fmt(toDollars(progress.remaining_amount))} remaining${targetDate}${linked}`
-      );
+    if (goals.length > 0) {
+      lines.push('');
+      lines.push('### Goals');
+      for (const goal of goals) {
+        const progress = calculateGoalProgress(goal);
+        const verb = goal.type === 'debt' ? 'paid down' : 'saved';
+        const linked = goal.account_name
+          ? ` | linked to ${goal.account_name}${goal.institution_name ? ` at ${goal.institution_name}` : ''}`
+          : '';
+        const targetDate = goal.target_date ? ` | target: ${goal.target_date}` : '';
+        // progress.* (calculateGoalProgress) and goal.target_amount are both cents.
+        lines.push(
+          `  ${goal.name}: ${fmt(toDollars(progress.progress_amount))} ${verb} of ${fmt(toDollars(goal.target_amount))} (${Math.round(progress.progress_percent)}%), ${fmt(toDollars(progress.remaining_amount))} remaining${targetDate}${linked}`
+        );
+      }
     }
   }
 
-  const reviewSummary = getTransactionReviewSummary(db);
+  if (sections.has('review_queue')) {
+    const reviewSummary = getTransactionReviewSummary(db);
 
-  if (reviewSummary.total_open > 0) {
-    lines.push('');
-    lines.push('### Review Queue');
-    lines.push(`  Open review items: ${reviewSummary.total_open}`);
-    for (const queue of reviewSummary.queues) {
-      lines.push(`  ${queue.label}: ${queue.count}`);
+    if (reviewSummary.total_open > 0) {
+      lines.push('');
+      lines.push('### Review Queue');
+      lines.push(`  Open review items: ${reviewSummary.total_open}`);
+      for (const queue of reviewSummary.queues) {
+        lines.push(`  ${queue.label}: ${queue.count}`);
+      }
     }
-  }
 
-  const ruleSuggestions = reviewSummary.rule_suggestions;
-  if (ruleSuggestions.length > 0) {
-    const uncategorizedMatches = ruleSuggestions.reduce(
-      (sum, suggestion) => sum + suggestion.uncategorized_count,
-      0
-    );
-    lines.push('');
-    lines.push('### Rule Suggestions');
-    lines.push(`  Suggested merchant rules: ${ruleSuggestions.length}`);
-    lines.push(`  Uncategorized matches they could clean up: ${uncategorizedMatches}`);
-    for (const suggestion of ruleSuggestions.slice(0, 5)) {
-      lines.push(
-        `  ${suggestion.pattern}: ${suggestion.category_name} (${suggestion.categorized_count} categorized, ${suggestion.uncategorized_count} uncategorized, ${Math.round(suggestion.confidence * 100)}% confidence)`
+    const ruleSuggestions = reviewSummary.rule_suggestions;
+    if (ruleSuggestions.length > 0) {
+      const uncategorizedMatches = ruleSuggestions.reduce(
+        (sum, suggestion) => sum + suggestion.uncategorized_count,
+        0
       );
+      lines.push('');
+      lines.push('### Rule Suggestions');
+      lines.push(`  Suggested merchant rules: ${ruleSuggestions.length}`);
+      lines.push(`  Uncategorized matches they could clean up: ${uncategorizedMatches}`);
+      for (const suggestion of ruleSuggestions.slice(0, 5)) {
+        lines.push(
+          `  ${suggestion.pattern}: ${suggestion.category_name} (${suggestion.categorized_count} categorized, ${suggestion.uncategorized_count} uncategorized, ${Math.round(suggestion.confidence * 100)}% confidence)`
+        );
+      }
     }
   }
 
@@ -488,7 +507,7 @@ export function buildFinancialContext(): string {
     cost_basis: toDollarsOrNull(h.cost_basis),
   }));
 
-  if (holdings.length > 0) {
+  if (sections.has('investments') && holdings.length > 0) {
     const totalPortfolio = holdings.reduce((s, h) => s + h.institution_value, 0);
     const totalCostBasis = holdings.reduce((s, h) => s + (h.cost_basis ?? 0), 0);
     const totalGain = totalCostBasis > 0 ? totalPortfolio - totalCostBasis : null;
@@ -526,7 +545,7 @@ export function buildFinancialContext(): string {
     WHERE date >= ? ORDER BY date ASC
   `).all(sixMonthsAgo) as Array<{ date: string; net_worth: number }>;
 
-  if (nwHistory.length >= 2) {
+  if (sections.has('net_worth_trend') && nwHistory.length >= 2) {
     lines.push('');
     lines.push('### Net Worth Trend (last 6 months)');
     for (const snap of nwHistory) {
@@ -544,7 +563,7 @@ export function buildFinancialContext(): string {
     LIMIT 15
   `).all() as Array<{ date: string; merchant_name: string | null; amount: number; category: string | null; is_income: number }>;
 
-  if (recent.length > 0) {
+  if (sections.has('recent_transactions') && recent.length > 0) {
     lines.push('');
     lines.push('### Recent Transactions');
     for (const tx of recent) {

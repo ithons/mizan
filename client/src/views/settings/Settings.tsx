@@ -13,7 +13,7 @@ import { DataSection } from './DataSection';
 
 const AUTO_APPLY_PREFERENCE_KEY = 'advisor_auto_apply_high_confidence';
 
-type PanelId = 'simplefin' | 'coinbase' | 'import' | 'categories' | 'ai_disclosure' | 'advisor_profile' | 'ai_actions' | null;
+type PanelId = 'simplefin' | 'coinbase' | 'import' | 'categories' | 'ai_disclosure' | 'advisor_profile' | 'advisor_model' | 'ai_actions' | null;
 
 function SettingsRow({
   title,
@@ -160,6 +160,102 @@ function AdvisorContextEditor({ open, onToggle }: { open: boolean; onToggle: () 
               >
                 {save.isPending ? 'Saving…' : 'Save'}
               </button>
+            </div>
+          </div>
+        </ExpandedPanel>
+      )}
+    </>
+  );
+}
+
+function AdvisorModelPanel({ open, onToggle }: { open: boolean; onToggle: () => void }) {
+  const qc = useQueryClient();
+  const { addToast } = useAppStore();
+  const { data: settings } = useQuery({ queryKey: ['ai-settings'], queryFn: () => aiApi.getSettings() });
+  const save = useMutation({
+    mutationFn: (update: Parameters<typeof aiApi.saveSettings>[0]) => aiApi.saveSettings(update),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['ai-settings'] });
+      qc.invalidateQueries({ queryKey: ['ai-context'] });
+      addToast({ type: 'success', message: 'Advisor settings saved' });
+    },
+    onError: (err: Error) => addToast({ type: 'error', message: err.message }),
+  });
+
+  const enabled = new Set(settings?.context_sections ?? []);
+  const modelLabel = settings?.available.models.find((m) => m.id === settings.model)?.label ?? settings?.model ?? '';
+
+  const toggleSection = (id: string) => {
+    if (!settings) return;
+    const next = new Set(enabled);
+    if (next.has(id)) next.delete(id);
+    else next.add(id);
+    save.mutate({ context_sections: [...next] });
+  };
+
+  return (
+    <>
+      <SettingsRow
+        title="Model & context"
+        sub={settings ? `${modelLabel} · ${settings.effort} effort · ${enabled.size}/${settings.available.sections.length} context sections` : 'Choose model, effort, and what the advisor sees'}
+        trailing={<span className="text-muted">{open ? 'Hide' : 'Configure →'}</span>}
+        onClick={onToggle}
+      />
+      {open && settings && (
+        <ExpandedPanel>
+          <div className="space-y-5">
+            <div>
+              <div className="mb-1.5 text-[13px] font-medium text-ink">Model</div>
+              <div className="flex flex-wrap gap-2">
+                {settings.available.models.map((m) => (
+                  <button
+                    key={m.id}
+                    type="button"
+                    disabled={save.isPending}
+                    onClick={() => save.mutate({ model: m.id })}
+                    className={`rounded-lg border px-3 py-2 text-[13px] transition-colors disabled:opacity-50 ${
+                      settings.model === m.id ? 'border-sage bg-sage/10 text-ink' : 'border-line-2 text-muted hover:bg-rail'
+                    }`}
+                  >
+                    {m.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div>
+              <div className="mb-1.5 text-[13px] font-medium text-ink">Reasoning effort</div>
+              <div className="flex gap-2">
+                {settings.available.efforts.map((e) => (
+                  <button
+                    key={e}
+                    type="button"
+                    disabled={save.isPending}
+                    onClick={() => save.mutate({ effort: e })}
+                    className={`rounded-lg border px-3 py-2 text-[13px] capitalize transition-colors disabled:opacity-50 ${
+                      settings.effort === e ? 'border-sage bg-sage/10 text-ink' : 'border-line-2 text-muted hover:bg-rail'
+                    }`}
+                  >
+                    {e}
+                  </button>
+                ))}
+              </div>
+              <p className="mt-1.5 text-xs text-muted-2">Higher effort reasons more before answering, at more tokens and latency.</p>
+            </div>
+
+            <div>
+              <div className="mb-1.5 text-[13px] font-medium text-ink">Financial context sections</div>
+              <p className="mb-2 text-xs text-muted-2">
+                What the snapshot injected into every prompt includes. Accounts, net worth, and your personal context are always sent.
+              </p>
+              <div className="space-y-2">
+                {settings.available.sections.map((s) => (
+                  <label key={s.id} className="flex cursor-pointer items-center justify-between gap-3">
+                    <span className="text-[13.5px] text-ink">{s.label}</span>
+                    <Toggle on={enabled.has(s.id)} onChange={() => toggleSection(s.id)} disabled={save.isPending} />
+                  </label>
+                ))}
+              </div>
             </div>
           </div>
         </ExpandedPanel>
@@ -328,6 +424,9 @@ export function Settings() {
                 </ExpandedPanel>
               )}
             </>
+          )}
+          {aiContext?.configured && (
+            <AdvisorModelPanel open={openPanel === 'advisor_model'} onToggle={() => toggle('advisor_model')} />
           )}
           {aiContext?.configured && (
             <AiActionsPanel open={openPanel === 'ai_actions'} onToggle={() => toggle('ai_actions')} />
