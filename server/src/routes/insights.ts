@@ -7,6 +7,7 @@ import { buildRecurringForecast } from '../services/recurringForecast';
 import { suggestMerchantRules } from '../services/rules';
 import { getAnomalyInsights } from '../services/anomalyInsights';
 import { toDollars } from '../services/money';
+import { excludedFromTotalsSql } from '../services/transactionFilters';
 import type { Insight, InsightSeverity } from '../../../shared/types';
 
 const router = Router();
@@ -279,6 +280,7 @@ router.get('/', (_req: Request, res: Response, next: NextFunction): void => {
        AND t.date BETWEEN ? AND ?
        AND t.amount < 0
        AND t.pending = 0
+       AND ${excludedFromTotalsSql('t')}
       WHERE b.period = 'monthly' OR b.period = ?
       GROUP BY b.id
       ORDER BY spent / NULLIF(b.amount, 0) DESC

@@ -36,7 +36,9 @@ function setupBudgetDb(): Database.Database {
       recurring_id TEXT,
       date TEXT NOT NULL,
       amount REAL NOT NULL,
-      pending INTEGER NOT NULL DEFAULT 0
+      pending INTEGER NOT NULL DEFAULT 0,
+      transfer_status TEXT NOT NULL DEFAULT 'none',
+      duplicate_status TEXT NOT NULL DEFAULT 'none'
     );
 
     CREATE TABLE recurring_patterns (
@@ -233,4 +235,36 @@ test('rollover ledger records month by month carryover math', (t) => {
     WHERE budget_id = 'budget_food'
   `).get() as { count: number };
   assert.equal(persisted.count, 3);
+});
+
+test('budget spend excludes confirmed duplicates and transfers', (t) => {
+  const db = setupBudgetDb();
+  t.after(() => db.close());
+
+  const control = getMonthlyBudgetsWithProjection(db, 2026, 6, new Date('2026-06-15T12:00:00.000Z'))
+    .find((budget) => budget.category_id === 'cat_food');
+  assert.equal(control?.spent, 100);
+
+  // Three rows Reports already excludes; budgets must agree or the same month shows two numbers.
+  db.prepare(`
+    INSERT INTO transactions (id, category_id, recurring_id, date, amount, pending, transfer_status, duplicate_status)
+    VALUES
+      ('june_food_dupe', 'cat_food', NULL, '2026-06-04', -100, 0, 'none', 'confirmed'),
+      ('june_food_xfer', 'cat_food', NULL, '2026-06-06', -250, 0, 'confirmed', 'none'),
+      ('june_food_xfer_maybe', 'cat_food', NULL, '2026-06-07', -175, 0, 'candidate', 'none')
+  `).run();
+
+  const after = getMonthlyBudgetsWithProjection(db, 2026, 6, new Date('2026-06-15T12:00:00.000Z'))
+    .find((budget) => budget.category_id === 'cat_food');
+  assert.equal(after?.spent, 100);
+
+  // Control: an ordinary row on the same day still counts, so the filter isn't dropping everything.
+  db.prepare(`
+    INSERT INTO transactions (id, category_id, recurring_id, date, amount, pending, transfer_status, duplicate_status)
+    VALUES ('june_food_real', 'cat_food', NULL, '2026-06-08', -60, 0, 'none', 'none')
+  `).run();
+
+  const withReal = getMonthlyBudgetsWithProjection(db, 2026, 6, new Date('2026-06-15T12:00:00.000Z'))
+    .find((budget) => budget.category_id === 'cat_food');
+  assert.equal(withReal?.spent, 160);
 });

@@ -1,4 +1,5 @@
 import type Database from 'better-sqlite3';
+import { excludedFromTotalsSql } from './transactionFilters';
 import { addDays, addMonths, format, isBefore, parseISO, subMonths } from 'date-fns';
 import type { Budget, BudgetRolloverLedgerEntry, RecurringPattern } from '../../../shared/types';
 
@@ -110,6 +111,7 @@ function spendingByMonth(
       AND date < ?
       AND amount < 0
       AND pending = 0
+      AND ${excludedFromTotalsSql()}
     GROUP BY substr(date, 1, 7)
   `).all(
     ...ids,
@@ -266,6 +268,7 @@ export function getMonthlyBudgetsWithProjection(
      AND t.date BETWEEN ? AND ?
      AND t.amount < 0
      AND t.pending = 0
+     AND ${excludedFromTotalsSql('t')}
     WHERE b.period = 'monthly' OR b.period = ?
     GROUP BY b.id
     ORDER BY c.name ASC

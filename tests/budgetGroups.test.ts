@@ -33,7 +33,9 @@ function setupDb(): Database.Database {
       recurring_id TEXT,
       date TEXT NOT NULL,
       amount REAL NOT NULL,
-      pending INTEGER NOT NULL DEFAULT 0
+      pending INTEGER NOT NULL DEFAULT 0,
+      transfer_status TEXT NOT NULL DEFAULT 'none',
+      duplicate_status TEXT NOT NULL DEFAULT 'none'
     );
 
     CREATE TABLE recurring_patterns (

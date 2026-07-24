@@ -9,6 +9,7 @@ import type {
 } from '../../../shared/types';
 import { getDb } from '../db/index';
 import { toDollars, toDollarsOrNull } from './money';
+import { excludedFromTotalsSql } from './transactionFilters';
 import { calculateGoalProgress } from './goalProgress';
 import { buildRecurringForecast } from './recurringForecast';
 import { getCashflowReport, getReportSummary } from './reporting';
@@ -384,6 +385,7 @@ export function buildFinancialContext(): string {
         AND t.amount < 0
         AND COALESCE(c.is_income, 0) = 0
         AND COALESCE(c.is_investment, 0) = 0
+        AND ${excludedFromTotalsSql('t')}
       GROUP BY COALESCE(pc.id, c.id, 'uncategorized')
       ORDER BY total DESC
       LIMIT 8
