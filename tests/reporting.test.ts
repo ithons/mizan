@@ -62,6 +62,8 @@ function setupReportingDb(): Database.Database {
       category_id TEXT,
       pending INTEGER NOT NULL DEFAULT 0,
       transfer_status TEXT NOT NULL DEFAULT 'none',
+      -- Reports exclude confirmed duplicates (a redundant copy would double the spend).
+      duplicate_status TEXT NOT NULL DEFAULT 'none',
       created_at TEXT NOT NULL DEFAULT '2026-06-30T00:00:00.000Z',
       updated_at TEXT NOT NULL DEFAULT '2026-06-30T00:00:00.000Z'
     );
@@ -498,4 +500,29 @@ test('net worth evidence links a snapshot to prior values and account balances',
       balance: 200,
     },
   ]);
+});
+
+test('a confirmed duplicate stops counting toward spending', (t) => {
+  const db = setupReportingDb();
+  t.after(() => db.close());
+
+  const range = { startDate: '2026-06-01', endDate: '2026-06-30' };
+  const before = getSpendingReport(db, range).total;
+
+  // Simulate the user resolving a duplicate: one copy kept, the redundant copy flagged.
+  // It is FLAGGED rather than deleted because a provider row would return on the next sync.
+  db.prepare(`
+    INSERT INTO transactions (id, account_id, date, amount, merchant_name, original_name, category_id, pending, transfer_status, duplicate_status)
+    VALUES ('dupe_copy', 'acct_checking', '2026-06-07', -100, 'restaurant', 'restaurant', 'cat_food_restaurants', 0, 'none', 'confirmed')
+  `).run();
+
+  assert.equal(
+    getSpendingReport(db, range).total,
+    before,
+    'a confirmed duplicate must not inflate spending'
+  );
+
+  // Sanity: the same row WOULD count if it were an ordinary transaction.
+  db.prepare("UPDATE transactions SET duplicate_status = 'none' WHERE id = 'dupe_copy'").run();
+  assert.equal(getSpendingReport(db, range).total, before + 100, 'control: it counts when not flagged');
 });

@@ -99,6 +99,9 @@ function reportableCategoryCondition(): string {
   return `(
     (t.category_id IS NULL OR t.category_id NOT IN (SELECT id FROM excluded_report_categories))
     AND COALESCE(t.transfer_status, 'none') NOT IN ('candidate','confirmed')
+    -- A confirmed duplicate is a redundant copy the user resolved; counting it would double the
+    -- spend. (Provider rows can't be deleted — the next sync re-inserts them — so they're flagged.)
+    AND COALESCE(t.duplicate_status, 'none') <> 'confirmed'
   )`;
 }
 

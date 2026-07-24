@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { format, parseISO } from 'date-fns';
 import type {
   AdvisorDraftAction,
@@ -16,9 +16,9 @@ import { useAppStore } from '../store';
 import { Screen, ScreenHeader, CategoryPicker } from './balance';
 import { QueryState } from './QueryState';
 
-// The whole uncategorized backlog is loaded at once (server caps `limit` at 500) so merchants can
-// be grouped accurately — grouping only a page at a time would split "14 Klarna charges" across
-// pages and defeat the point.
+// Page size for the uncategorized backlog, matching the server's `limit` cap. Pages are merged
+// before grouping so a merchant's cluster is never split across page boundaries — grouping one
+// page at a time would show "5 Klarna" on page 1 and "4 Klarna" on page 2 and defeat the point.
 const BACKLOG_LIMIT = 500;
 
 // Matches MAX_SUGGEST_MERCHANTS on the server: one request lists every merchant in the prompt and
@@ -191,9 +191,14 @@ export function ReviewInbox() {
 
   const reviewQ = useQuery({ queryKey: ['transactions', 'review'], queryFn: () => transactionsApi.review() });
   const summary = reviewQ.data;
-  const backlogQ = useQuery({
+  // Paged rather than a single capped fetch: merchant grouping needs the whole backlog to be
+  // accurate, and the server caps `limit` at 500, so anything larger must page and be merged.
+  const backlogQ = useInfiniteQuery({
     queryKey: ['transactions', 'review', 'backlog'],
-    queryFn: () => transactionsApi.list({ uncategorized: true, pending: false, limit: BACKLOG_LIMIT }),
+    queryFn: ({ pageParam }) =>
+      transactionsApi.list({ uncategorized: true, pending: false, limit: BACKLOG_LIMIT, page: pageParam }),
+    initialPageParam: 1,
+    getNextPageParam: (last) => (last.page * last.limit < last.total ? last.page + 1 : undefined),
   });
   const { data: categories } = useQuery({ queryKey: ['categories'], queryFn: () => categoriesApi.list() });
   const categoryList = categories ?? [];
@@ -323,6 +328,20 @@ export function ReviewInbox() {
     onSuccess: invalidate,
     onError,
   });
+  // Keeps one copy and flags the rest as confirmed duplicates, which reporting excludes. They are
+  // flagged rather than deleted because a provider row would just come back on the next sync.
+  const confirmDuplicate = useMutation({
+    mutationFn: ({ groupId, keepId }: { groupId: string; keepId: string }) =>
+      transactionsApi.confirmDuplicateGroup(groupId, keepId),
+    onSuccess: (result) => {
+      invalidateAll();
+      addToast({
+        type: 'success',
+        message: `Excluded ${result.excluded} duplicate cop${result.excluded === 1 ? 'y' : 'ies'} from reports`,
+      });
+    },
+    onError,
+  });
   const confirmTransfer = useMutation({
     mutationFn: (p: TransferCandidatePair) => transactionsApi.confirmTransferPair(p.pair_id),
     onSuccess: invalidateAll,
@@ -334,8 +353,8 @@ export function ReviewInbox() {
     onError,
   });
 
-  const backlog = backlogQ.data?.data ?? [];
-  const backlogTotal = backlogQ.data?.total ?? 0;
+  const backlog = useMemo(() => backlogQ.data?.pages.flatMap((p) => p.data) ?? [], [backlogQ.data]);
+  const backlogTotal = backlogQ.data?.pages[0]?.total ?? 0;
   const groups = useMemo(() => groupByMerchant(backlog), [backlog]);
   // Once suggestions exist, float the groups that have one to the top. Default order is by cluster
   // size, and the largest clusters tend to be exactly the ones the model declines (Klarna and other
@@ -558,10 +577,17 @@ export function ReviewInbox() {
               })
             )}
 
-            {backlogTotal > backlog.length && (
-              <p className="pt-3 text-xs text-muted-2">
-                Showing {backlog.length} of {backlogTotal}. Categorize some to load the rest.
-              </p>
+            {backlogQ.hasNextPage && (
+              <button
+                type="button"
+                onClick={() => void backlogQ.fetchNextPage()}
+                disabled={backlogQ.isFetchingNextPage}
+                className="mt-3 text-[13px] text-muted transition-colors hover:text-ink disabled:opacity-50"
+              >
+                {backlogQ.isFetchingNextPage
+                  ? 'Loading…'
+                  : `Load more · ${backlogTotal - backlog.length} remaining`}
+              </button>
             )}
           </>
         )}
@@ -635,7 +661,17 @@ export function ReviewInbox() {
                 right={formatCurrency(g.amount)}
               >
                 <ActionButton label="Keep both" onClick={() => dismissDuplicate.mutate(g.group_id)} />
-                <span className="text-xs text-muted-2">To remove one, open it in Transactions.</span>
+                <ActionButton
+                  label={`It's a duplicate · exclude ${g.count - 1}`}
+                  tone="quiet"
+                  disabled={confirmDuplicate.isPending || g.transaction_ids.length < 2}
+                  onClick={() =>
+                    confirmDuplicate.mutate({ groupId: g.group_id, keepId: g.transaction_ids[0] })
+                  }
+                />
+                <span className="text-xs text-muted-2">
+                  Excluded copies stay in Transactions but stop counting toward spending.
+                </span>
               </SectionRow>
             ))
           ))}

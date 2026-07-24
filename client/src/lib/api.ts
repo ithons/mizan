@@ -157,6 +157,12 @@ export const transactionsApi = {
       method: 'PATCH',
       body: JSON.stringify({ status }),
     }),
+  // Resolve as a real duplicate: keep one copy, exclude the rest from reports.
+  confirmDuplicateGroup: (groupId: string, keepId: string) =>
+    apiFetch<{ excluded: number }>(
+      `/api/transactions/duplicates/${encodeURIComponent(groupId)}/confirm`,
+      { method: 'POST', body: JSON.stringify({ keepId }) }
+    ),
   dismissDuplicateGroup: (groupId: string) =>
     apiFetch<{ updated: number }>(`/api/transactions/duplicates/${encodeURIComponent(groupId)}/dismiss`, {
       method: 'POST',

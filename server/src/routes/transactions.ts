@@ -6,6 +6,7 @@ import { detectRecurring } from '../services/recurring';
 import { getTransactionReviewSummary } from '../services/transactionReview';
 import {
   confirmTransferPair,
+  confirmDuplicateGroup,
   dismissDuplicateGroup,
   dismissTransferPair,
   refreshTransactionIntegrity,
@@ -354,6 +355,37 @@ router.post('/duplicates/:groupId/dismiss', (req: Request, res: Response, next: 
     const changed = dismissDuplicateGroup(db, groupId);
     refreshTransactionIntegrity(db);
     res.json({ data: { updated: changed } });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// POST /duplicates/:groupId/confirm - resolve a group as a REAL duplicate: keep one copy, exclude
+// the rest from reports. Body: { keepId }.
+router.post('/duplicates/:groupId/confirm', (req: Request, res: Response, next: NextFunction): void => {
+  try {
+    const db = getDb();
+    const groupId = Array.isArray(req.params.groupId) ? req.params.groupId[0] : req.params.groupId;
+    const keepId = typeof req.body?.keepId === 'string' ? req.body.keepId : '';
+    if (!keepId) {
+      res.status(400).json({ error: 'keepId (string) is required' });
+      return;
+    }
+
+    const result = confirmDuplicateGroup(db, groupId, keepId);
+    if (!result.ok) {
+      res.status(result.reason === 'group_not_found' ? 404 : 400).json({
+        error:
+          result.reason === 'group_not_found'
+            ? 'Duplicate group not found'
+            : 'keepId must be one of the transactions in this group',
+      });
+      return;
+    }
+
+    // Recompute so the resolved group leaves the review queue immediately.
+    refreshTransactionIntegrity(db);
+    res.json({ data: { excluded: result.excluded } });
   } catch (err) {
     next(err);
   }

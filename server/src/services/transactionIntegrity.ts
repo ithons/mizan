@@ -82,7 +82,9 @@ export function refreshDuplicateCandidates(db: Database.Database): DuplicateDete
       t.source_type
     FROM transactions t
     JOIN accounts a ON a.id = t.account_id
-    WHERE t.duplicate_status != 'dismissed'
+    -- Both resolutions are sticky: 'dismissed' (keep both) and 'confirmed' (redundant copy,
+    -- excluded from reports). Re-scanning either would resurrect a decision the user already made.
+    WHERE t.duplicate_status NOT IN ('dismissed', 'confirmed')
     ORDER BY t.date DESC, t.created_at DESC
   `).all() as DuplicateRow[];
 
@@ -330,6 +332,53 @@ export function dismissDuplicateGroup(db: Database.Database, groupId: string): n
   `).run(groupId);
 
   return result.changes;
+}
+
+export type ConfirmDuplicateResult =
+  | { ok: true; excluded: number }
+  | { ok: false; reason: 'group_not_found' | 'keep_not_in_group' };
+
+/**
+ * Resolves a duplicate group as a REAL duplicate: the kept row kepts counting, every other copy is
+ * marked `duplicate_status = 'confirmed'`, which reporting excludes from income/expense totals.
+ *
+ * Marking rather than deleting is deliberate. Provider rows (SimpleFIN/Coinbase) are re-inserted by
+ * the next sync — `deleteTransaction` refuses them for exactly this reason — so a delete would
+ * silently come back. A flag survives re-sync and is reversible.
+ */
+export function confirmDuplicateGroup(
+  db: Database.Database,
+  groupId: string,
+  keepTransactionId: string
+): ConfirmDuplicateResult {
+  const rows = db.prepare(
+    "SELECT id FROM transactions WHERE duplicate_group_id = ? AND duplicate_status = 'candidate'"
+  ).all(groupId) as Array<{ id: string }>;
+
+  if (rows.length === 0) return { ok: false, reason: 'group_not_found' };
+  if (!rows.some((r) => r.id === keepTransactionId)) return { ok: false, reason: 'keep_not_in_group' };
+
+  const now = new Date().toISOString();
+  let excluded = 0;
+  const apply = db.transaction(() => {
+    // The survivor: resolved, still counts.
+    db.prepare(`
+      UPDATE transactions
+      SET duplicate_status = 'dismissed', duplicate_group_id = NULL,
+          review_status = 'reviewed', updated_at = ?
+      WHERE id = ?
+    `).run(now, keepTransactionId);
+
+    // The redundant copies: excluded from reports.
+    excluded = db.prepare(`
+      UPDATE transactions
+      SET duplicate_status = 'confirmed', review_status = 'reviewed', updated_at = ?
+      WHERE duplicate_group_id = ? AND duplicate_status = 'candidate' AND id <> ?
+    `).run(now, groupId, keepTransactionId).changes;
+  });
+  apply();
+
+  return { ok: true, excluded };
 }
 
 export function confirmTransferPair(db: Database.Database, pairId: string): number {
