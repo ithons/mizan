@@ -187,6 +187,7 @@ export function ReviewInbox() {
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   // merchant label -> AI-proposed category. Advisory only; applied on an explicit click.
   const [suggestions, setSuggestions] = useState<Record<string, { id: string; name: string }>>({});
+  const [suggestProgress, setSuggestProgress] = useState<{ done: number; total: number } | null>(null);
 
   const reviewQ = useQuery({ queryKey: ['transactions', 'review'], queryFn: () => transactionsApi.review() });
   const summary = reviewQ.data;
@@ -249,23 +250,53 @@ export function ReviewInbox() {
   });
   // Asks the model to propose a category per merchant. Nothing is written — the result only
   // pre-fills each row so a suggestion can be accepted with one click or overridden.
+  //
+  // Runs the whole backlog in sequential batches (the endpoint caps each request, since the prompt
+  // lists every merchant and the reply returns one object each). Sequential rather than parallel:
+  // it keeps cost predictable, avoids rate limits, and lets chips appear as they arrive.
   const suggestCategories = useMutation({
-    mutationFn: (merchants: string[]) => aiApi.suggestCategories(merchants),
-    onSuccess: (results, merchants) => {
-      setSuggestions((prev) => {
-        const next = { ...prev };
-        for (const r of results) next[r.merchant] = { id: r.category_id, name: r.category_name };
-        return next;
-      });
-      const missed = merchants.length - results.length;
+    mutationFn: async (merchants: string[]) => {
+      let suggested = 0;
+      let failure: Error | null = null;
+      setSuggestProgress({ done: 0, total: merchants.length });
+
+      for (let i = 0; i < merchants.length; i += AI_SUGGEST_BATCH) {
+        const batch = merchants.slice(i, i + AI_SUGGEST_BATCH);
+        try {
+          const results = await aiApi.suggestCategories(batch);
+          // Applied per batch so partial progress survives a later failure.
+          setSuggestions((prev) => {
+            const next = { ...prev };
+            for (const r of results) next[r.merchant] = { id: r.category_id, name: r.category_name };
+            return next;
+          });
+          suggested += results.length;
+        } catch (err) {
+          failure = err instanceof Error ? err : new Error('Suggestion request failed');
+          break;
+        }
+        setSuggestProgress({ done: Math.min(i + batch.length, merchants.length), total: merchants.length });
+      }
+      return { suggested, total: merchants.length, failure };
+    },
+    onSuccess: ({ suggested, total, failure }) => {
+      if (failure) {
+        addToast({
+          type: 'error',
+          message: `Stopped after ${suggested} suggestion${suggested === 1 ? '' : 's'} — ${failure.message}`,
+        });
+        return;
+      }
+      const declined = total - suggested;
       addToast({
-        type: results.length > 0 ? 'success' : 'info',
+        type: suggested > 0 ? 'success' : 'info',
         message:
-          results.length === 0
-            ? 'No confident suggestions for these merchants'
-            : `Suggested ${results.length} categor${results.length === 1 ? 'y' : 'ies'}${missed > 0 ? ` · ${missed} unclear, left blank` : ''}`,
+          suggested === 0
+            ? 'No confident suggestions — these merchants are too ambiguous to guess'
+            : `Suggested ${suggested} of ${total}${declined > 0 ? ` · ${declined} left blank (unclear)` : ''}`,
       });
     },
+    onSettled: () => setSuggestProgress(null),
     onError,
   });
   const confirmDraft = useMutation({
@@ -306,6 +337,16 @@ export function ReviewInbox() {
   const backlog = backlogQ.data?.data ?? [];
   const backlogTotal = backlogQ.data?.total ?? 0;
   const groups = useMemo(() => groupByMerchant(backlog), [backlog]);
+  // Once suggestions exist, float the groups that have one to the top. Default order is by cluster
+  // size, and the largest clusters tend to be exactly the ones the model declines (Klarna and other
+  // BNPL/person-to-person descriptors), which otherwise buries every actionable proposal.
+  const orderedGroups = useMemo(() => {
+    if (Object.keys(suggestions).length === 0) return groups;
+    return [...groups].sort((a, b) => {
+      const rank = (g: MerchantGroup) => (suggestions[g.label] ? 0 : 1);
+      return rank(a) - rank(b) || b.ids.length - a.ids.length;
+    });
+  }, [groups, suggestions]);
 
   const counts: Record<TabId, number> = {
     category: summary?.queues.find((q) => q.id === 'uncategorized')?.count ?? 0,
@@ -369,28 +410,29 @@ export function ReviewInbox() {
       >
         {tab === 'category' && (
           <>
-            {groups.length > 0 && (
-              <div className="mb-3 flex flex-wrap items-center gap-3">
-                <button
-                  type="button"
-                  disabled={suggestCategories.isPending}
-                  onClick={() =>
-                    suggestCategories.mutate(
-                      groups
-                        .filter((g) => !suggestions[g.label])
-                        .slice(0, AI_SUGGEST_BATCH)
-                        .map((g) => g.label)
-                    )
-                  }
-                  className="rounded-md border border-line-2 px-2.5 py-1 text-[13px] text-ink transition-colors hover:bg-rail disabled:opacity-50"
-                >
-                  {suggestCategories.isPending ? 'Asking AI…' : 'Suggest categories with AI'}
-                </button>
-                <span className="text-xs text-muted-2">
-                  Suggestions are proposals — nothing is applied until you click one.
-                </span>
-              </div>
-            )}
+            {groups.length > 0 && (() => {
+              // Every merchant that doesn't already have a proposal — the mutation batches them.
+              const pending = groups.filter((g) => !suggestions[g.label]).map((g) => g.label);
+              return (
+                <div className="mb-3 flex flex-wrap items-center gap-3">
+                  <button
+                    type="button"
+                    disabled={suggestCategories.isPending || pending.length === 0}
+                    onClick={() => suggestCategories.mutate(pending)}
+                    className="rounded-md border border-line-2 px-2.5 py-1 text-[13px] text-ink transition-colors hover:bg-rail disabled:opacity-50"
+                  >
+                    {suggestProgress
+                      ? `Suggesting… ${suggestProgress.done}/${suggestProgress.total}`
+                      : pending.length === 0
+                        ? 'All merchants have a suggestion'
+                        : `Suggest categories with AI · ${pending.length}`}
+                  </button>
+                  <span className="text-xs text-muted-2">
+                    Proposals only — nothing is applied until you click one.
+                  </span>
+                </div>
+              );
+            })()}
 
             {selectedIds.size > 0 && (
               <div className="mb-3 flex flex-wrap items-center gap-3 rounded-lg border border-line-2 bg-rail px-3 py-2">
@@ -413,7 +455,7 @@ export function ReviewInbox() {
             {groups.length === 0 ? (
               <p className="py-6 text-[13.5px] text-muted-2">Nothing needs a category. </p>
             ) : (
-              groups.map((group) => {
+              orderedGroups.map((group) => {
                 const selected = group.ids.every((id) => selectedIds.has(id));
                 const repeated = group.ids.length > 1;
                 const isOpen = expanded.has(group.key);
