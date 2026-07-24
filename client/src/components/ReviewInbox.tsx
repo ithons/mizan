@@ -127,19 +127,25 @@ function SectionRow({
   title,
   sub,
   right,
+  lead,
   children,
 }: {
   title: string;
   sub: string;
   right?: React.ReactNode;
+  /** Optional leading control (a selection checkbox for rows that support bulk actions). */
+  lead?: React.ReactNode;
   children?: React.ReactNode;
 }) {
   return (
     <div className="border-b border-line py-3 last:border-0">
       <div className="flex items-baseline justify-between gap-4">
-        <div className="min-w-0">
-          <div className="truncate text-[14.5px] text-ink">{title}</div>
-          <div className="mt-0.5 text-xs text-muted-2">{sub}</div>
+        <div className="flex min-w-0 items-start gap-3">
+          {lead}
+          <div className="min-w-0">
+            <div className="truncate text-[14.5px] text-ink">{title}</div>
+            <div className="mt-0.5 text-xs text-muted-2">{sub}</div>
+          </div>
         </div>
         {right && <div className="flex-shrink-0 tabular-nums text-[14px] text-ink">{right}</div>}
       </div>
@@ -184,6 +190,7 @@ export function ReviewInbox() {
   const [tab, setTab] = useState<TabId>('category');
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [bulkCategory, setBulkCategory] = useState('');
+  const [selectedPatterns, setSelectedPatterns] = useState<Set<string>>(new Set());
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   // merchant label -> AI-proposed category. Advisory only; applied on an explicit click.
   const [suggestions, setSuggestions] = useState<Record<string, { id: string; name: string }>>({});
@@ -314,6 +321,22 @@ export function ReviewInbox() {
     mutationFn: ({ suggestion, categoryId }: { suggestion: MerchantRuleSuggestion; categoryId: string }) =>
       rulesApi.create({ pattern: suggestion.pattern, category_id: categoryId, apply_existing: true }),
     onSuccess: invalidateAll,
+    onError,
+  });
+  const approveSuggestions = useMutation({
+    mutationFn: (patterns: string[]) =>
+      rulesApi.approveSuggestions(patterns.map((pattern) => ({ pattern }))),
+    onSuccess: (result) => {
+      setSelectedPatterns(new Set());
+      // Report what actually happened. A partially-skipped approval that renders as plain success
+      // is how a user ends up trusting rules that were never created.
+      const skipped = result.skipped.length > 0 ? ` · ${result.skipped.length} skipped` : '';
+      addToast({
+        type: result.skipped.length > 0 ? 'error' : 'success',
+        message: `${result.approved} rule${result.approved === 1 ? '' : 's'} created · ${result.applied} categorized${skipped}`,
+      });
+      invalidateAll();
+    },
     onError,
   });
   const dismissSuggestion = useMutation({
@@ -697,27 +720,75 @@ export function ReviewInbox() {
           (counts.rules === 0 ? (
             <p className="py-6 text-[13.5px] text-muted-2">No rule suggestions.</p>
           ) : (
-            (summary?.rule_suggestions ?? []).map((s) => (
-              <SectionRow
-                key={`${s.pattern}:${s.category_id}`}
-                title={`${s.pattern} → always categorize as…`}
-                sub={`applies to ${s.affected_transaction_ids.length} transaction${
-                  s.affected_transaction_ids.length === 1 ? '' : 's'
-                } · suggested: ${s.category_name}`}
-              >
-                <CategoryPicker
-                  value={s.category_id}
-                  categories={categoryList}
-                  placeholder="Category"
-                  onChange={(categoryId) => createRule.mutate({ suggestion: s, categoryId })}
-                />
-                <ActionButton
-                  label="Create rule"
-                  onClick={() => createRule.mutate({ suggestion: s, categoryId: s.category_id })}
-                />
-                <ActionButton label="Skip" tone="quiet" onClick={() => dismissSuggestion.mutate(s.pattern)} />
-              </SectionRow>
-            ))
+            <>
+              {/* Approving one at a time is the bottleneck when the backlog is dozens of merchants
+                  deep; each row still keeps its own picker for the ones needing a different call. */}
+              <div className="mb-3 flex flex-wrap items-center gap-3 border-b border-line pb-3">
+                <button
+                  type="button"
+                  onClick={() => {
+                    const all = (summary?.rule_suggestions ?? []).map((s) => s.pattern);
+                    setSelectedPatterns((prev) => (prev.size === all.length ? new Set() : new Set(all)));
+                  }}
+                  className="text-[13px] text-muted transition-colors hover:text-ink"
+                >
+                  {selectedPatterns.size === (summary?.rule_suggestions ?? []).length ? 'Clear selection' : 'Select all'}
+                </button>
+                {selectedPatterns.size > 0 && (
+                  <>
+                    <span className="text-[13px] text-ink">{selectedPatterns.size} selected</span>
+                    <ActionButton
+                      label={approveSuggestions.isPending ? 'Approving…' : `Approve ${selectedPatterns.size} as suggested`}
+                      disabled={approveSuggestions.isPending}
+                      onClick={() => approveSuggestions.mutate([...selectedPatterns])}
+                    />
+                  </>
+                )}
+              </div>
+              {(summary?.rule_suggestions ?? []).map((s) => {
+                const checked = selectedPatterns.has(s.pattern);
+                return (
+                  <SectionRow
+                    key={`${s.pattern}:${s.category_id}`}
+                    title={`${s.pattern} → always categorize as…`}
+                    sub={`applies to ${s.affected_transaction_ids.length} transaction${
+                      s.affected_transaction_ids.length === 1 ? '' : 's'
+                    } · suggested: ${s.category_name}`}
+                    lead={
+                      <button
+                        type="button"
+                        role="checkbox"
+                        aria-checked={checked}
+                        aria-label={`Select rule for ${s.pattern}`}
+                        onClick={() =>
+                          setSelectedPatterns((prev) => {
+                            const next = new Set(prev);
+                            if (next.has(s.pattern)) next.delete(s.pattern);
+                            else next.add(s.pattern);
+                            return next;
+                          })
+                        }
+                        className={`mt-0.5 h-4 w-4 flex-shrink-0 rounded border transition-colors ${
+                          checked ? 'border-ink bg-ink' : 'border-line-3'
+                        }`}
+                      />
+                    }
+                  >
+                    <CategoryPicker
+                      value={s.category_id}
+                      categories={categoryList}
+                      placeholder="Category"
+                      onChange={(categoryId) => createRule.mutate({ suggestion: s, categoryId })}
+                    />
+                    <ActionButton
+                      label="Create rule"
+                      onClick={() => createRule.mutate({ suggestion: s, categoryId: s.category_id })}
+                    />
+                    <ActionButton label="Skip" tone="quiet" onClick={() => dismissSuggestion.mutate(s.pattern)} />
+                  </SectionRow>
+                );
+              })}
+            </>
           ))}
       </QueryState>
 

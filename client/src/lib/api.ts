@@ -271,6 +271,17 @@ export const rulesApi = {
       method: 'POST',
       body: JSON.stringify({ pattern }),
     }),
+  // Approves N suggestions in one request. Only patterns travel — the server recomputes which
+  // transactions each one touches, so approving cannot relabel rows the preview didn't show.
+  approveSuggestions: (approvals: Array<{ pattern: string; category_id?: string }>) =>
+    apiFetch<{
+      approved: number;
+      applied: number;
+      skipped: Array<{ pattern: string; reason: 'unknown_pattern' | 'unknown_category' }>;
+    }>('/api/rules/suggestions/approve', {
+      method: 'POST',
+      body: JSON.stringify({ approvals }),
+    }),
   create: (body: {
     pattern: string;
     category_id: string;

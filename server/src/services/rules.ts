@@ -431,3 +431,77 @@ export function suggestMerchantRules(db: Database.Database): MerchantRuleSuggest
     };
   });
 }
+
+export interface RuleSuggestionApproval {
+  pattern: string;
+  /** Optional override; defaults to the suggestion's own proposed category. */
+  category_id?: string;
+}
+
+export interface ApproveRuleSuggestionsResult {
+  approved: number;
+  applied: number;
+  /** Patterns that could not be approved, with the reason, so the UI never reports a silent no-op. */
+  skipped: Array<{ pattern: string; reason: 'unknown_pattern' | 'unknown_category' }>;
+}
+
+/**
+ * Approve several rule suggestions at once: upsert each merchant rule and categorize exactly the
+ * transactions that suggestion said it would affect.
+ *
+ * The affected ids are recomputed server-side from `suggestMerchantRules` rather than taken from the
+ * request. A client-supplied id list would let a stale page (or a bug) relabel arbitrary rows, and
+ * "applies to N transactions" has to mean the N the server can still vouch for.
+ *
+ * Deliberately NOT `applyMerchantRulesToExistingTransactions`: that matches by substring and 0.86
+ * fuzzy similarity, so approving a rule for "AMK BIG BEND BASIN STO" would also sweep in
+ * "AMK BIG BEND BASIN STORE". Exact ids keep the blast radius equal to the preview the user saw.
+ */
+export function approveMerchantRuleSuggestions(
+  db: Database.Database,
+  approvals: RuleSuggestionApproval[]
+): ApproveRuleSuggestionsResult {
+  const suggestions = new Map(
+    suggestMerchantRules(db).map((suggestion) => [suggestion.pattern, suggestion])
+  );
+  const known = knownCategoryIds(db);
+  const now = new Date().toISOString();
+
+  const result: ApproveRuleSuggestionsResult = { approved: 0, applied: 0, skipped: [] };
+
+  const run = db.transaction(() => {
+    for (const approval of approvals) {
+      const suggestion = suggestions.get(approval.pattern);
+      if (!suggestion) {
+        result.skipped.push({ pattern: approval.pattern, reason: 'unknown_pattern' });
+        continue;
+      }
+
+      const categoryId = approval.category_id ?? suggestion.category_id;
+      if (!known.has(categoryId)) {
+        result.skipped.push({ pattern: approval.pattern, reason: 'unknown_category' });
+        continue;
+      }
+
+      upsertMerchantRule(db, suggestion.pattern, categoryId, now);
+      result.approved += 1;
+
+      const ids = suggestion.affected_transaction_ids;
+      if (ids.length === 0) continue;
+
+      // `category_id IS NULL` guard: between building the suggestion and approving it the user may
+      // have categorized a row by hand. Their choice wins over a bulk approval.
+      const placeholders = ids.map(() => '?').join(',');
+      const applied = db.prepare(`
+        UPDATE transactions
+        SET category_id = ?, review_status = 'reviewed', manually_categorized = 1, updated_at = ?
+        WHERE id IN (${placeholders}) AND category_id IS NULL
+      `).run(categoryId, now, ...ids);
+
+      result.applied += applied.changes;
+    }
+  });
+
+  run();
+  return result;
+}

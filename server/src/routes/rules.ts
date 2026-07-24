@@ -10,6 +10,7 @@ import {
 import {
   applyMerchantRulesToExistingTransactions,
   applyMerchantRuleToMatchingTransactions,
+  approveMerchantRuleSuggestions,
   dismissRuleSuggestion,
   recategorizeAll,
   suggestMerchantRules,
@@ -91,6 +92,34 @@ router.post('/suggestions/dismiss', (req: Request, res: Response, next: NextFunc
     }
     dismissRuleSuggestion(getDb(), pattern);
     res.json({ data: { success: true } });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// POST /suggestions/approve - approve several suggestions at once.
+// Each approval carries only a pattern (plus an optional category override); the affected
+// transaction ids are recomputed server-side so a stale page cannot relabel arbitrary rows.
+router.post('/suggestions/approve', (req: Request, res: Response, next: NextFunction): void => {
+  try {
+    const raw = req.body?.approvals;
+    if (!Array.isArray(raw) || raw.length === 0) {
+      res.status(400).json({ error: 'approvals (non-empty array) is required' });
+      return;
+    }
+
+    const approvals: Array<{ pattern: string; category_id?: string }> = [];
+    for (const entry of raw) {
+      const pattern = typeof entry?.pattern === 'string' ? entry.pattern.trim() : '';
+      if (!pattern) {
+        res.status(400).json({ error: 'each approval requires a pattern (string)' });
+        return;
+      }
+      const categoryId = typeof entry?.category_id === 'string' ? entry.category_id : undefined;
+      approvals.push({ pattern, category_id: categoryId });
+    }
+
+    res.json({ data: approveMerchantRuleSuggestions(getDb(), approvals) });
   } catch (err) {
     next(err);
   }
