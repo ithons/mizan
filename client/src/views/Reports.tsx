@@ -5,6 +5,7 @@ import { networthApi, reportsApi } from '../lib/api';
 import { ASSET_COLORS } from '../lib/chartColors';
 import { formatWholeCurrency } from '../lib/formatters';
 import { Screen, ScreenHeader, SectionLabel, Select, TrendChart } from '../components/balance';
+import { QueryState } from '../components/QueryState';
 import type { NetWorthSnapshot, ReportMetricSummary } from '@shared/types';
 
 const LIABILITY_COLOR = '#b5654a'; // clay
@@ -101,19 +102,35 @@ function Metric({ label, m, invertColor, isPercent }: { label: string; m: Report
 export function Reports() {
   const [range, setRange] = useState<RangeId>('this-month');
   const [trendRange, setTrendRange] = useState<string>('all');
+  const [showAllSpending, setShowAllSpending] = useState(false);
   const dates = rangeDates(range);
   const trendMonths = TREND_RANGES.find((r) => r.id === trendRange)?.months;
 
-  const { data: snapshot } = useQuery({ queryKey: ['networth-snapshot'], queryFn: () => networthApi.snapshot() });
-  const { data: history } = useQuery({ queryKey: ['networth-history', trendRange], queryFn: () => networthApi.history(trendMonths) });
-  const { data: summary } = useQuery({ queryKey: ['report-summary', range], queryFn: () => reportsApi.summary(dates) });
-  const { data: cashflow } = useQuery({ queryKey: ['report-cashflow-6'], queryFn: () => reportsApi.cashflow(rangeDates('three-months')) });
-  const { data: spending } = useQuery({ queryKey: ['report-spending', range], queryFn: () => reportsApi.spending(dates) });
+  // Query keys MUST start with a segment listed in queryInvalidation.ts's FINANCIAL_QUERY_KEYS —
+  // TanStack matches by array prefix. These used to be ['networth-snapshot'], ['report-summary', …]
+  // etc., which matched nothing, so a sync refreshed Accounts and Today but left Reports showing
+  // stale numbers: two screens disagreeing about net worth.
+  const snapshotQ = useQuery({ queryKey: ['networth', 'snapshot'], queryFn: () => networthApi.snapshot() });
+  const historyQ = useQuery({ queryKey: ['networth', 'history', trendRange], queryFn: () => networthApi.history(trendMonths) });
+  const summaryQ = useQuery({ queryKey: ['reports', 'summary', range], queryFn: () => reportsApi.summary(dates) });
+  // The dates belong in the key, or a tab left open across a month boundary serves the old window.
+  const cashflowDates = rangeDates('three-months');
+  const cashflowQ = useQuery({ queryKey: ['reports', 'cashflow', cashflowDates], queryFn: () => reportsApi.cashflow(cashflowDates) });
+  const spendingQ = useQuery({ queryKey: ['reports', 'spending', range], queryFn: () => reportsApi.spending(dates) });
+
+  const { data: snapshot } = snapshotQ;
+  const { data: history } = historyQ;
+  const { data: summary } = summaryQ;
+  const { data: cashflow } = cashflowQ;
+  const { data: spending } = spendingQ;
 
   const trendPoints = (history ?? []).map((s) => ({ date: s.date, value: s.net_worth }));
   const cashflowMax = Math.max(1, ...(cashflow?.months ?? []).flatMap((m) => [m.income, m.expenses]));
-  const topSpending = (spending?.categories ?? []).slice(0, 8);
-  const spendingMax = Math.max(1, ...topSpending.map((c) => c.amount));
+  // Show every category (previously capped at 8 with no way to see the rest — the user could not
+  // see their own spending breakdown, including the Uncategorized bucket).
+  const allSpending = spending?.categories ?? [];
+  const topSpending = showAllSpending ? allSpending : allSpending.slice(0, 8);
+  const spendingMax = Math.max(1, ...allSpending.map((c) => c.amount));
 
   return (
     <Screen size="wide" contained>
@@ -129,12 +146,20 @@ export function Reports() {
               options={TREND_RANGES.map((r) => ({ value: r.id, label: r.label }))} align="right"
             />
           </div>
-          {snapshot && (
-            <div className="mb-3 font-serif text-3xl text-ink tabular-nums">{formatWholeCurrency(snapshot.net_worth)}</div>
-          )}
-          {trendPoints.length >= 2
-            ? <TrendChart history={trendPoints} height={140} />
-            : <p className="text-[13.5px] text-muted-2">Not enough snapshots yet for a trend — they accrue as you sync.</p>}
+          <QueryState
+            isLoading={snapshotQ.isPending || historyQ.isPending}
+            isError={snapshotQ.isError || historyQ.isError}
+            error={snapshotQ.error ?? historyQ.error}
+            onRetry={() => { void snapshotQ.refetch(); void historyQ.refetch(); }}
+            label="net worth"
+          >
+            {snapshot && (
+              <div className="mb-3 font-serif text-3xl text-ink tabular-nums">{formatWholeCurrency(snapshot.net_worth)}</div>
+            )}
+            {trendPoints.length >= 2
+              ? <TrendChart history={trendPoints} height={140} />
+              : <p className="text-[13.5px] text-muted-2">Not enough snapshots yet for a trend — they accrue as you sync.</p>}
+          </QueryState>
         </section>
 
         {/* Period summary with range selector */}
@@ -144,19 +169,34 @@ export function Reports() {
             <Select value={range} onChange={(v) => setRange(v as RangeId)} clearable={false}
               placeholder="This month" options={RANGES.map((r) => ({ value: r.id, label: r.label }))} />
           </div>
-          {summary ? (
-            <div className="grid grid-cols-2 gap-6 sm:grid-cols-4">
-              <Metric label="Income" m={summary.income} />
-              <Metric label="Expenses" m={summary.expenses} invertColor />
-              <Metric label="Net" m={summary.net} />
-              <Metric label="Savings rate" m={summary.savings_rate} isPercent />
-            </div>
-          ) : <p className="text-[13.5px] text-muted-2">Loading…</p>}
+          <QueryState
+            isLoading={summaryQ.isPending}
+            isError={summaryQ.isError}
+            error={summaryQ.error}
+            onRetry={() => void summaryQ.refetch()}
+            label="this period's summary"
+          >
+            {summary && (
+              <div className="grid grid-cols-2 gap-6 sm:grid-cols-4">
+                <Metric label="Income" m={summary.income} />
+                <Metric label="Expenses" m={summary.expenses} invertColor />
+                <Metric label="Net" m={summary.net} />
+                <Metric label="Savings rate" m={summary.savings_rate} isPercent />
+              </div>
+            )}
+          </QueryState>
         </section>
 
         {/* Monthly cash flow (last 3 months) */}
         <section>
           <SectionLabel className="mb-3">Cash flow · last 3 months</SectionLabel>
+          <QueryState
+            isLoading={cashflowQ.isPending}
+            isError={cashflowQ.isError}
+            error={cashflowQ.error}
+            onRetry={() => void cashflowQ.refetch()}
+            label="cash flow"
+          >
           <div className="space-y-3">
             {(cashflow?.months ?? []).map((m) => (
               <div key={m.month}>
@@ -181,26 +221,46 @@ export function Reports() {
             <span className="flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-sm" style={{ background: INCOME_COLOR }} />Income</span>
             <span className="flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-sm" style={{ background: LIABILITY_COLOR }} />Expenses</span>
           </div>
+          </QueryState>
         </section>
 
         {/* Spending by category */}
         <section>
           <SectionLabel className="mb-3">Spending by category · {RANGES.find((r) => r.id === range)?.label.toLowerCase()}</SectionLabel>
-          {topSpending.length > 0 ? (
-            <div className="space-y-2.5">
-              {topSpending.map((c) => (
-                <div key={c.category_id}>
-                  <div className="mb-1 flex items-baseline justify-between text-[13px]">
-                    <span className="text-ink">{c.category_name}</span>
-                    <span className="tabular-nums text-muted">{formatWholeCurrency(c.amount)}</span>
-                  </div>
-                  <div className="h-4 w-full overflow-hidden rounded bg-rail">
-                    <div className="h-full" style={{ width: `${(c.amount / spendingMax) * 100}%`, background: c.color ?? LIQUID_COLOR }} />
-                  </div>
+          <QueryState
+            isLoading={spendingQ.isPending}
+            isError={spendingQ.isError}
+            error={spendingQ.error}
+            onRetry={() => void spendingQ.refetch()}
+            label="spending"
+          >
+            {topSpending.length > 0 ? (
+              <>
+                <div className="space-y-2.5">
+                  {topSpending.map((c) => (
+                    <div key={c.category_id}>
+                      <div className="mb-1 flex items-baseline justify-between text-[13px]">
+                        <span className="text-ink">{c.category_name}</span>
+                        <span className="tabular-nums text-muted">{formatWholeCurrency(c.amount)}</span>
+                      </div>
+                      <div className="h-4 w-full overflow-hidden rounded bg-rail">
+                        <div className="h-full" style={{ width: `${(c.amount / spendingMax) * 100}%`, background: c.color ?? LIQUID_COLOR }} />
+                      </div>
+                    </div>
+                  ))}
                 </div>
-              ))}
-            </div>
-          ) : <p className="text-[13.5px] text-muted-2">No spending in this period.</p>}
+                {allSpending.length > 8 && (
+                  <button
+                    type="button"
+                    onClick={() => setShowAllSpending((v) => !v)}
+                    className="mt-3 text-[13px] text-muted transition-colors hover:text-ink"
+                  >
+                    {showAllSpending ? 'Show top 8' : `Show all ${allSpending.length} categories`}
+                  </button>
+                )}
+              </>
+            ) : <p className="text-[13.5px] text-muted-2">No spending in this period.</p>}
+          </QueryState>
         </section>
 
         {/* Debt payoff distribution */}

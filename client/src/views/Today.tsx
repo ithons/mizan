@@ -187,7 +187,7 @@ export function Today() {
             </div>
           </StatLink>
         )}
-        <StatLink to="/transactions" label="To review">
+        <StatLink to="/review" label="To review">
           <div className="font-serif text-[22px] leading-tight text-ink tabular-nums">{reviewCount}</div>
         </StatLink>
       </div>

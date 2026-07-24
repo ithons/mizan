@@ -2,6 +2,7 @@ import { lazy, Suspense, type ReactNode } from 'react';
 import { Routes, Route, Navigate } from 'react-router-dom';
 import { Layout } from './components/Layout';
 import { ToastContainer } from './components/Toast';
+import { ErrorBoundary } from './components/ErrorBoundary';
 import { useSyncStatus } from './hooks/useSyncStatus';
 
 const Today = lazy(() => import('./views/Today').then((module) => ({ default: module.Today })));
@@ -32,8 +33,14 @@ function ViewFallback() {
   );
 }
 
+// Each view gets its own boundary so a render throw is contained to that screen — the nav rail
+// stays usable and the user can navigate away instead of facing a blank page.
 function lazyView(view: ReactNode) {
-  return <Suspense fallback={<ViewFallback />}>{view}</Suspense>;
+  return (
+    <ErrorBoundary>
+      <Suspense fallback={<ViewFallback />}>{view}</Suspense>
+    </ErrorBoundary>
+  );
 }
 
 function AppRoutes() {
