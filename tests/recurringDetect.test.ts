@@ -19,13 +19,19 @@ function setupDb(): Database.Database {
       merchant_name TEXT,
       original_name TEXT NOT NULL DEFAULT '',
       pending INTEGER NOT NULL DEFAULT 0,
-      recurring_id TEXT
+      recurring_id TEXT,
+      category_id TEXT,
+      -- Detection skips transfers and confirmed duplicates: they are not spending, and card
+      -- payments have a rigid cadence with a wild amount, which the relaxed amount gate would admit.
+      transfer_status TEXT NOT NULL DEFAULT 'none',
+      duplicate_status TEXT NOT NULL DEFAULT 'none'
     );
     CREATE TABLE recurring_patterns (
       id TEXT PRIMARY KEY,
       merchant_name TEXT NOT NULL UNIQUE,
       category_id TEXT,
       average_amount INTEGER NOT NULL,
+      amount_variance REAL NOT NULL DEFAULT 0,
       frequency TEXT NOT NULL,
       last_seen TEXT NOT NULL,
       next_expected TEXT NOT NULL,
@@ -146,17 +152,70 @@ test('rejects irregular gaps (high gap variance)', () => {
   }
 });
 
-test('rejects high amount variance even with regular gaps', () => {
+// This pair replaces an earlier test that rejected ANY pattern with amount CV >= 0.25. That gate
+// threw away the most valuable recurring items on real data: a weekly paycheck tracking hours
+// (gap CV 0.11, amount CV 0.43), a monthly interest credit, a utility bill. A varying amount is now
+// disqualifying only when the cadence is also loose.
+test('admits a varying amount when the cadence is rigid, and records the variance', () => {
   const db = setupDb();
   _setDbForTesting(db);
   try {
     const ins = db.prepare(
       'INSERT INTO transactions (id, date, amount, merchant_name, original_name, pending) VALUES (?,?,?,?,?,0)'
     );
-    // Monthly cadence but wildly varying amounts (CV well over 0.25).
+    // Exactly-monthly cadence (gap CV 0), amounts all over the place — the paycheck shape.
     const amts = [-1000, -9000, -2000, -8000];
     amts.forEach((a, i) =>
       ins.run(`varamt_${i}`, format(subDays(new Date(), 30 * (amts.length - 1 - i)), 'yyyy-MM-dd'), a, 'VarAmt', 'VARAMT')
+    );
+    detectRecurring();
+
+    const row = db.prepare(
+      'SELECT frequency, amount_variance FROM recurring_patterns WHERE merchant_name = ?'
+    ).get('varamt') as { frequency: string; amount_variance: number } | undefined;
+    assert.equal(row?.frequency, 'monthly');
+    // Recorded, not discarded: the forecast renders this as "~$X · varies" rather than a firm bill.
+    assert.ok((row?.amount_variance ?? 0) >= 0.25);
+  } finally {
+    db.close();
+  }
+});
+
+test('still rejects a varying amount when the cadence is only loosely regular', () => {
+  const db = setupDb();
+  _setDbForTesting(db);
+  try {
+    const ins = db.prepare(
+      'INSERT INTO transactions (id, date, amount, merchant_name, original_name, pending) VALUES (?,?,?,?,?,0)'
+    );
+    // Gaps 30/22/38/30 -> gap CV ~0.19: regular enough to pass the base gate, too loose to earn the
+    // variable-amount exception. Amount CV ~0.71.
+    const offsets = [120, 90, 68, 30, 0];
+    const amts = [-1000, -9000, -2000, -8000, -1500];
+    offsets.forEach((off, i) =>
+      ins.run(`loose_${i}`, format(subDays(new Date(), off), 'yyyy-MM-dd'), amts[i], 'Loose', 'LOOSE')
+    );
+    detectRecurring();
+    assert.equal((db.prepare('SELECT COUNT(*) AS n FROM recurring_patterns').get() as { n: number }).n, 0);
+  } finally {
+    db.close();
+  }
+});
+
+test('detection ignores transfers and confirmed duplicates', () => {
+  const db = setupDb();
+  _setDbForTesting(db);
+  try {
+    const ins = db.prepare(
+      `INSERT INTO transactions (id, date, amount, merchant_name, original_name, pending, transfer_status, duplicate_status, category_id)
+       VALUES (?,?,?,?,?,0,?,?,?)`
+    );
+    // A card payment: rigid monthly cadence, wild amount. Without the exclusion the relaxed gate
+    // would book it as a recurring bill and double-count the spending it settles.
+    const amts = [-69300, -146500, -55200, -109600];
+    amts.forEach((a, i) =>
+      ins.run(`pay_${i}`, format(subDays(new Date(), 30 * (amts.length - 1 - i)), 'yyyy-MM-dd'), a,
+        'Payment Thank You', 'PAYMENT THANK YOU', 'confirmed', 'none', null)
     );
     detectRecurring();
     assert.equal((db.prepare('SELECT COUNT(*) AS n FROM recurring_patterns').get() as { n: number }).n, 0);

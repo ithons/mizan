@@ -21,7 +21,11 @@ interface RecurringForecastRow {
   is_confirmed: number;
   transaction_count: number;
   average_signed_amount: number;
+  amount_variance: number | null;
 }
+
+/** Matches detection's AMOUNT_VARIANCE_MAX: above it, the stored amount is a median, not a bill. */
+const AMOUNT_VARIES_THRESHOLD = 0.25;
 
 function nextOccurrenceDate(date: Date, frequency: Frequency): Date {
   switch (frequency) {
@@ -100,6 +104,10 @@ function buildOccurrence(
     frequency: pattern.frequency,
     expected_date: expectedDate,
     amount,
+    // A user-adjusted occurrence is an exact figure the user supplied, so it is never "varies".
+    amount_varies: adjustment?.action === 'adjust' && adjustment.adjusted_amount != null
+      ? false
+      : (pattern.amount_variance ?? 0) >= AMOUNT_VARIES_THRESHOLD,
     is_income: amount > 0,
     is_confirmed: Boolean(pattern.is_confirmed),
     confidence,
@@ -135,6 +143,7 @@ export function buildRecurringForecast(
       rp.next_expected,
       rp.is_confirmed,
       rp.transaction_count,
+      rp.amount_variance,
       c.name AS category_name,
       c.color AS category_color,
       COALESCE(

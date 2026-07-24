@@ -249,6 +249,12 @@ export interface RecurringPattern {
   category_id?: string | null;
   average_amount: number;
   average_signed_amount?: number | null;
+  /**
+   * Coefficient of variation of this pattern's amounts. Patterns admitted on cadence alone (a
+   * paycheck tracking hours, a utility bill) carry a high value here, and `average_amount` is only
+   * a median for them — surface it as approximate rather than as a known amount.
+   */
+  amount_variance?: number;
   frequency: 'weekly' | 'biweekly' | 'monthly' | 'quarterly' | 'annual';
   last_seen: string;
   next_expected: string;
@@ -286,6 +292,8 @@ export interface RecurringForecastOccurrence {
   frequency: RecurringPattern['frequency'];
   expected_date: string;
   amount: number;
+  /** True when the pattern's amount moves materially; `amount` is a median estimate, not a bill. */
+  amount_varies?: boolean;
   is_income: boolean;
   is_confirmed: boolean;
   confidence: number;

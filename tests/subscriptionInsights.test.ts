@@ -20,6 +20,7 @@ function setupDb(): Database.Database {
       merchant_name TEXT NOT NULL,
       category_id TEXT,
       average_amount REAL NOT NULL,
+      amount_variance REAL NOT NULL DEFAULT 0,
       frequency TEXT NOT NULL,
       last_seen TEXT NOT NULL,
       next_expected TEXT NOT NULL,

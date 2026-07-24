@@ -125,7 +125,8 @@ function isBillPattern(p: RecurringPattern): boolean {
 
 function occurrenceMeta(o: RecurringForecastOccurrence): string {
   const freq = o.frequency.charAt(0).toUpperCase() + o.frequency.slice(1);
-  return `${freq} · ${o.confidence_label}${o.status === 'overdue' ? ' · overdue' : ''}`;
+  const varies = o.amount_varies ? ' · amount varies' : '';
+  return `${freq} · ${o.confidence_label}${varies}${o.status === 'overdue' ? ' · overdue' : ''}`;
 }
 
 export function Bills() {
@@ -226,6 +227,9 @@ export function Bills() {
                   <div className="mt-0.5 text-xs text-muted-2">{skipped ? 'Skipped this occurrence' : occurrenceMeta(o)}</div>
                 </div>
                 <span className={`font-serif text-[18px] tabular-nums ${o.is_income ? 'text-sage-deep' : 'text-ink'}`}>
+                  {/* A variable-amount pattern (paycheck, utility bill) stores a median, not a bill.
+                      The tilde keeps it from reading as a figure the provider actually quoted. */}
+                  {o.amount_varies ? '~' : ''}
                   {formatCurrency(Math.abs(o.adjusted_amount ?? o.amount), { showSign: o.is_income })}
                 </span>
                 {skipped ? (

@@ -10,6 +10,7 @@ import {
 import { getDb } from '../db/index';
 import { compareTwoStrings } from "string-similarity";
 import { toCents } from './money';
+import { excludedFromTotalsSql } from './transactionFilters';
 
 export type RecurringFrequency = 'weekly' | 'biweekly' | 'monthly' | 'quarterly' | 'annual';
 
@@ -110,6 +111,11 @@ function median(values: number[]): number {
     : (sorted[mid - 1] + sorted[mid]) / 2;
 }
 
+const GAP_VARIANCE_MAX = 0.2;
+const AMOUNT_VARIANCE_MAX = 0.25;
+/** Cadence bar a pattern must clear to be admitted on timing alone, with a variable amount. */
+const STRICT_GAP_VARIANCE_MAX = 0.15;
+
 function classifyFrequency(
   medianGap: number
 ): 'weekly' | 'biweekly' | 'monthly' | 'quarterly' | 'annual' | null {
@@ -145,11 +151,20 @@ export function detectRecurring(): void {
     original_name: string;
   }
 
-  // 1. Load all non-pending transactions from last 13 months
+  // 1. Load all non-pending transactions from last 13 months.
+  //
+  // Transfers and confirmed duplicates are excluded for the same reason every other total excludes
+  // them: they are not spending. It also keeps the relaxed amount gate honest — card payments
+  // ("PAYMENT THANK YOU", "AUTOMATIC PAYMENT") have a rigid monthly cadence and a wildly varying
+  // amount, so they would otherwise be admitted as recurring bills and double-count against the
+  // spending they are paying off.
   const transactions = db.prepare(`
     SELECT id, date, amount, merchant_name, original_name
     FROM transactions
-    WHERE pending = 0 AND date >= ?
+    WHERE pending = 0
+      AND date >= ?
+      AND ${excludedFromTotalsSql()}
+      AND COALESCE(category_id, '') NOT LIKE 'cat_xfer%'
     ORDER BY date ASC
   `).all(cutoff) as TxnRow[];
 
@@ -216,7 +231,15 @@ export function detectRecurring(): void {
     const gapVariance = variance(perOccurrenceGaps, medianGap);
     const amountVariance = variance(amounts, medianAmount);
 
-    if (gapVariance >= 0.2 || amountVariance >= 0.25) continue;
+    // An irregular cadence is disqualifying no matter how steady the amounts look — that is what
+    // separates a subscription from a merchant you simply visit often (Chipotle, MBTA, DoorDash all
+    // land here on real data).
+    if (gapVariance >= GAP_VARIANCE_MAX) continue;
+
+    // A moving amount is NOT disqualifying when the cadence is tight. Requiring both gates rejected
+    // every variable-amount commitment: a weekly paycheck (gap CV 0.11, amount CV 0.43), a monthly
+    // interest credit, a utility bill. The stricter cadence bar is the price of relaxing the amount.
+    if (amountVariance >= AMOUNT_VARIANCE_MAX && gapVariance >= STRICT_GAP_VARIANCE_MAX) continue;
 
     const lastTxn = txns[txns.length - 1];
     const nextExpected = format(
@@ -238,12 +261,13 @@ export function detectRecurring(): void {
       patternId = existing.id;
       db.prepare(`
         UPDATE recurring_patterns
-        SET frequency = ?, average_amount = ?, last_seen = ?, next_expected = ?,
+        SET frequency = ?, average_amount = ?, amount_variance = ?, last_seen = ?, next_expected = ?,
             transaction_count = ?, is_active = 1, updated_at = ?
         WHERE id = ?
       `).run(
         frequency,
         medianAmount,
+        amountVariance,
         lastTxn.date,
         nextExpected,
         txns.length,
@@ -254,14 +278,15 @@ export function detectRecurring(): void {
       patternId = uuidv4();
       db.prepare(`
         INSERT INTO recurring_patterns
-          (id, merchant_name, frequency, average_amount, last_seen, next_expected,
+          (id, merchant_name, frequency, average_amount, amount_variance, last_seen, next_expected,
            is_active, is_confirmed, transaction_count, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, 1, 0, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, 1, 0, ?, ?, ?)
       `).run(
         patternId,
         normalizedName,
         frequency,
         medianAmount,
+        amountVariance,
         lastTxn.date,
         nextExpected,
         txns.length,
