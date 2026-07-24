@@ -1,11 +1,9 @@
-import { useEffect, useMemo, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { format, parseISO } from 'date-fns';
 import type {
   AdvisorDraftAction,
   Category,
-  DuplicateCandidateGroup,
   MerchantRuleSuggestion,
   RecurringPattern,
   Transaction,
@@ -18,8 +16,29 @@ import { useAppStore } from '../store';
 import { Screen, ScreenHeader, CategoryPicker } from './balance';
 import { QueryState } from './QueryState';
 
+// The whole uncategorized backlog is loaded at once (server caps `limit` at 500) so merchants can
+// be grouped accurately — grouping only a page at a time would split "14 Klarna charges" across
+// pages and defeat the point.
+const BACKLOG_LIMIT = 500;
+
 function merchantLabel(t: Transaction): string {
-  return (t.merchant_name || t.original_name).trim();
+  return (t.merchant_name || t.original_name || '').trim() || 'Unknown merchant';
+}
+
+// Mirrors the server's merchant_key normalization (services/rules.ts) closely enough to group
+// what a rule would treat as one merchant.
+function merchantKey(t: Transaction): string {
+  return merchantLabel(t).toLowerCase();
+}
+
+// date-fns `format` throws RangeError on an unparseable date; degrade instead of blanking the view.
+function shortDate(value: string): string {
+  try {
+    const parsed = parseISO(value);
+    return Number.isNaN(parsed.getTime()) ? value : format(parsed, 'MMM d, yyyy');
+  } catch {
+    return value;
+  }
 }
 
 function findCategoryName(categories: Category[], id: string): string | null {
@@ -32,12 +51,9 @@ function findCategoryName(categories: Category[], id: string): string | null {
 }
 
 /**
- * Rewrites a `categorize_transaction` draft to use the category the user actually picked.
- *
- * The server applies the client-supplied payload, so overriding `category_id` is enough to change
- * the outcome — but the label and the change record are what land in the AI audit trail, so they
- * are rewritten too. Otherwise the log would read "Categorize X as Restaurants" for a transaction
- * the user filed under Gas.
+ * Rewrites a `categorize_transaction` draft to the category the user actually picked.
+ * The server applies the client-supplied payload, so overriding `category_id` changes the outcome —
+ * the label and change record are rewritten too so the AI audit trail doesn't claim something else.
  */
 function withCategoryOverride(
   draft: AdvisorDraftAction,
@@ -52,10 +68,10 @@ function withCategoryOverride(
 
   return {
     ...draft,
-    // "Categorize FOO as Restaurants" -> "Categorize FOO as Gas"
-    label: name && previousName && draft.label.endsWith(` as ${previousName}`)
-      ? `${draft.label.slice(0, -` as ${previousName}`.length)} as ${name}`
-      : draft.label,
+    label:
+      name && previousName && draft.label.endsWith(` as ${previousName}`)
+        ? `${draft.label.slice(0, -` as ${previousName}`.length)} as ${name}`
+        : draft.label,
     summary: name ? `${draft.summary} (you chose ${name})` : draft.summary,
     payload: { ...draft.payload, category_id: categoryId },
     changes: draft.changes.map((change) =>
@@ -64,424 +80,474 @@ function withCategoryOverride(
   };
 }
 
-// A malformed date (e.g. from a hand-edited CSV import) makes date-fns `format` throw
-// RangeError, which — with no ErrorBoundary — used to blank the whole app. Degrade instead.
-function shortDate(value: string): string {
-  try {
-    const parsed = parseISO(value);
-    return Number.isNaN(parsed.getTime()) ? value : format(parsed, 'MMM d');
-  } catch {
-    return value;
-  }
+interface MerchantGroup {
+  key: string;
+  label: string;
+  ids: string[];
+  total: number;
+  latestDate: string;
+  accountName: string | null;
 }
 
-interface QueueItem {
-  key: string;
-  kind: string;
+function groupByMerchant(transactions: Transaction[]): MerchantGroup[] {
+  const map = new Map<string, MerchantGroup>();
+  for (const t of transactions) {
+    const key = merchantKey(t);
+    const existing = map.get(key);
+    if (existing) {
+      existing.ids.push(t.id);
+      existing.total += t.amount;
+      if (t.date > existing.latestDate) existing.latestDate = t.date;
+    } else {
+      map.set(key, {
+        key,
+        label: merchantLabel(t),
+        ids: [t.id],
+        total: t.amount,
+        latestDate: t.date,
+        accountName: t.account_name ?? null,
+      });
+    }
+  }
+  // Biggest clusters first — that's where the backlog collapses fastest.
+  return [...map.values()].sort(
+    (a, b) => b.ids.length - a.ids.length || (a.latestDate < b.latestDate ? 1 : -1)
+  );
+}
+
+function SectionRow({
+  title,
+  sub,
+  right,
+  children,
+}: {
   title: string;
   sub: string;
-  primaryLabel: string;
-  onPrimary: () => void;
-  needsCategory?: boolean;
-  defaultCategory?: string;
-  onPickCategory?: (categoryId: string) => void;
-  secondaryLabel?: string;
-  onSecondary?: () => void;
-}
-
-function ReviewPanel({
-  totalOpen,
-  items,
-  categories,
-  leavingKey,
-  batchCount,
-  onBatchConfirm,
-  batchPending,
-  uncategorizedTotal,
-}: {
-  totalOpen: number;
-  items: QueueItem[];
-  categories: Category[];
-  leavingKey: string | null;
-  batchCount: number;
-  onBatchConfirm: () => void;
-  batchPending: boolean;
-  uncategorizedTotal: number;
+  right?: React.ReactNode;
+  children?: React.ReactNode;
 }) {
-  const [pickedCategory, setPickedCategory] = useState('');
-  // Only the focused card has action buttons, so the queued rows below it need to be selectable —
-  // otherwise you can only ever act on whatever happens to be first. Falls back to the head of the
-  // list when the selected item is resolved and disappears.
-  const [focusKey, setFocusKey] = useState<string | null>(null);
-  const focus = items.find((i) => i.key === focusKey) ?? items[0];
-  const rest = items.filter((i) => i.key !== focus?.key).slice(0, 5);
-  const leaving = focus != null && leavingKey === focus.key;
-
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  useEffect(() => setPickedCategory(focus?.defaultCategory ?? ''), [focus?.key]);
-
   return (
-    <div className="w-full max-w-[560px]">
-      <div className="mb-4 flex items-baseline justify-between">
-        <span className="font-serif text-xl text-ink">Inbox</span>
-        <span className="text-xs text-muted">
-          {totalOpen} item{totalOpen === 1 ? '' : 's'}
-        </span>
-      </div>
-
-      {focus ? (
-        <>
-          <div
-            key={focus.key}
-            className={`mz-rise-fast border-l-2 border-sage-soft pl-[18px] transition-all duration-150 ${
-              leaving ? '-translate-y-1 opacity-0' : ''
-            }`}
-          >
-            <div className="mb-1.5 text-[11px] uppercase tracking-[0.15em] text-muted-2">{focus.kind}</div>
-            <div className="mb-0.5 text-[15.5px] text-ink">{focus.title}</div>
-            <div className="text-[13px] leading-normal text-muted">{focus.sub}</div>
-            {focus.needsCategory && (
-              <CategoryPicker
-                className="mt-3"
-                value={pickedCategory}
-                onChange={setPickedCategory}
-                placeholder="Pick a category…"
-                categories={categories}
-              />
-            )}
-            <div className="mt-3.5 flex items-center gap-5 text-[13.5px]">
-              <button
-                type="button"
-                disabled={focus.needsCategory && !pickedCategory}
-                onClick={() => {
-                  if (focus.needsCategory) {
-                    if (pickedCategory) focus.onPickCategory?.(pickedCategory);
-                  } else {
-                    focus.onPrimary();
-                  }
-                }}
-                className="border-b border-ink pb-0.5 text-ink transition-opacity disabled:opacity-40"
-              >
-                {focus.primaryLabel}
-              </button>
-              {focus.secondaryLabel && focus.onSecondary && (
-                <button type="button" onClick={focus.onSecondary} className="text-muted transition-colors hover:text-ink">
-                  {focus.secondaryLabel}
-                </button>
-              )}
-            </div>
-          </div>
-
-          {rest.length > 0 && (
-            <div className="mt-6 flex flex-col">
-              {rest.map((item) => (
-                <button
-                  key={item.key}
-                  type="button"
-                  onClick={() => setFocusKey(item.key)}
-                  className="group border-t border-line px-0.5 py-3 text-left transition-colors hover:bg-rail"
-                >
-                  <div className="text-sm text-ink">
-                    {item.kind} · {item.title}
-                  </div>
-                  <div className="mt-0.5 flex items-baseline justify-between gap-3 text-xs text-muted-2">
-                    <span className="truncate">{item.sub}</span>
-                    <span className="flex-shrink-0 text-muted-2 opacity-0 transition-opacity group-hover:opacity-100">
-                      Review →
-                    </span>
-                  </div>
-                </button>
-              ))}
-            </div>
-          )}
-
-          {batchCount > 0 && (
-            <button
-              type="button"
-              onClick={onBatchConfirm}
-              disabled={batchPending}
-              className="mt-6 rounded-md border border-sage-tint-border bg-sage-tint px-3 py-1.5 text-xs text-sage-text transition-opacity hover:opacity-80 disabled:opacity-50"
-            >
-              {batchPending ? 'Applying…' : `Confirm all high-confidence (${batchCount})`}
-            </button>
-          )}
-        </>
-      ) : (
-        <div className="border-l-2 border-sage-soft pl-[18px]">
-          <div className="font-serif text-[19px] font-light text-sage">All caught up.</div>
-          <div className="mt-1.5 text-[13px] text-muted-2">Nothing left to review.</div>
+    <div className="border-b border-line py-3 last:border-0">
+      <div className="flex items-baseline justify-between gap-4">
+        <div className="min-w-0">
+          <div className="truncate text-[14.5px] text-ink">{title}</div>
+          <div className="mt-0.5 text-xs text-muted-2">{sub}</div>
         </div>
-      )}
-
-      {/* The inbox only ever shows a few cards; the historical backlog is worked in bulk in the
-          Transactions workspace (multi-select + bulk categorize), filtered to all time. */}
-      {uncategorizedTotal > 0 && (
-        <Link
-          to="/transactions?uncategorized=1&range=all"
-          className="mt-6 flex items-baseline justify-between border-t border-line pt-3 text-[13px] text-muted transition-colors hover:text-ink"
-        >
-          <span>
-            {uncategorizedTotal} transaction{uncategorizedTotal === 1 ? '' : 's'} still need a category
-          </span>
-          <span className="text-sage-deep">Review all →</span>
-        </Link>
-      )}
+        {right && <div className="flex-shrink-0 tabular-nums text-[14px] text-ink">{right}</div>}
+      </div>
+      {children && <div className="mt-2.5 flex flex-wrap items-center gap-4 text-[13.5px]">{children}</div>}
     </div>
   );
 }
+
+function ActionButton({
+  label,
+  onClick,
+  disabled,
+  tone = 'primary',
+}: {
+  label: string;
+  onClick: () => void;
+  disabled?: boolean;
+  tone?: 'primary' | 'quiet';
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      className={
+        tone === 'primary'
+          ? 'border-b border-ink pb-0.5 text-ink transition-opacity disabled:opacity-40'
+          : 'text-muted transition-colors hover:text-ink disabled:opacity-40'
+      }
+    >
+      {label}
+    </button>
+  );
+}
+
+type TabId = 'category' | 'ai' | 'transfers' | 'duplicates' | 'recurring' | 'rules';
 
 export function ReviewInbox() {
   const qc = useQueryClient();
   const { addToast } = useAppStore();
 
-  const [hiddenKeys, setHiddenKeys] = useState<Set<string>>(new Set());
-  const [leavingKey, setLeavingKey] = useState<string | null>(null);
+  const [tab, setTab] = useState<TabId>('category');
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [bulkCategory, setBulkCategory] = useState('');
 
   const reviewQ = useQuery({ queryKey: ['transactions', 'review'], queryFn: () => transactionsApi.review() });
-  const { data: reviewSummary } = reviewQ;
-  // No reviewStatus gate: 'reviewed' is set as a side effect of categorization, so filtering on
-  // 'open' hid the entire imported backlog. `pending: false` matches the server's count predicate.
-  // Only a handful are shown as cards here — the full backlog is worked in the Transactions
-  // workspace via the "Review all" link below.
-  const { data: uncategorizedPage } = useQuery({
-    queryKey: ['transactions', 'review', 'uncategorized'],
-    queryFn: () => transactionsApi.list({ uncategorized: true, pending: false, limit: 5 }),
+  const summary = reviewQ.data;
+  const backlogQ = useQuery({
+    queryKey: ['transactions', 'review', 'backlog'],
+    queryFn: () => transactionsApi.list({ uncategorized: true, pending: false, limit: BACKLOG_LIMIT }),
   });
   const { data: categories } = useQuery({ queryKey: ['categories'], queryFn: () => categoriesApi.list() });
+  const categoryList = categories ?? [];
 
-  const reviewCount = reviewSummary?.total_open ?? 0;
-
-  const invalidateReview = () => {
-    qc.invalidateQueries({ queryKey: ['transactions'] });
-    qc.invalidateQueries({ queryKey: ['recurring'] });
-  };
   const onError = (err: Error) => addToast({ type: 'error', message: err.message });
-
-  const unhide = (key: string) =>
-    setHiddenKeys((prev) => {
-      const next = new Set(prev);
-      next.delete(key);
-      return next;
-    });
-  // The row plays a 160ms leave animation before it's hidden. A failing action can come back
-  // faster than that (localhost errors return in single-digit ms), and the old version called
-  // unhide() before the key was ever added — so the timeout then hid the row permanently even
-  // though the action failed. Cancel the pending timeout instead, and unhide defensively.
-  const resolve = (key: string, run?: (onErrorRestore: () => void) => void) => {
-    setLeavingKey(key);
-    const timer = window.setTimeout(() => {
-      setHiddenKeys((prev) => new Set(prev).add(key));
-      setLeavingKey((k) => (k === key ? null : k));
-    }, 160);
-    run?.(() => {
-      window.clearTimeout(timer);
-      setLeavingKey((k) => (k === key ? null : k));
-      unhide(key);
-    });
+  // No optimistic hiding: rows disappear when the refetched data no longer contains them. The old
+  // inbox hid rows on a timer and tried to restore them on failure, which raced and permanently
+  // hid items whose action had actually errored.
+  const invalidate = () => {
+    void qc.invalidateQueries({ queryKey: ['transactions'] });
+    void qc.invalidateQueries({ queryKey: ['recurring'] });
   };
+  const invalidateAll = () => invalidateFinancialData(qc);
 
-  const confirmDraft = useMutation({ mutationFn: (d: AdvisorDraftAction) => aiApi.confirmDraft(d), onSuccess: invalidateReview, onError });
-  const dismissDraft = useMutation({ mutationFn: (id: string) => aiApi.dismissDraft(id), onSuccess: invalidateReview, onError });
   const categorize = useMutation({
-    mutationFn: ({ id, categoryId }: { id: string; categoryId: string }) => transactionsApi.update(id, { category_id: categoryId }),
-    onSuccess: () => invalidateFinancialData(qc),
+    mutationFn: ({ id, categoryId }: { id: string; categoryId: string }) =>
+      transactionsApi.update(id, { category_id: categoryId }),
+    onSuccess: invalidateAll,
     onError,
   });
-  const createRule = useMutation({
-    mutationFn: ({ suggestion, categoryId }: { suggestion: MerchantRuleSuggestion; categoryId: string }) =>
-      rulesApi.create({ pattern: suggestion.pattern, category_id: categoryId, apply_existing: true }),
-    onSuccess: () => invalidateFinancialData(qc),
+  const bulkCategorize = useMutation({
+    mutationFn: ({ ids, categoryId }: { ids: string[]; categoryId: string }) =>
+      transactionsApi.bulkCategory(ids, categoryId),
+    onSuccess: (_r, { ids }) => {
+      invalidateAll();
+      setSelectedIds(new Set());
+      setBulkCategory('');
+      addToast({ type: 'success', message: `Categorized ${ids.length} transaction${ids.length === 1 ? '' : 's'}` });
+    },
     onError,
   });
-  const dismissSuggestion = useMutation({
-    mutationFn: (pattern: string) => rulesApi.dismissSuggestion(pattern),
-    onSuccess: invalidateReview,
+  // Applies to exactly the ids in the group — and `bulkCategorizeTransactions` already upserts a
+  // merchant rule per distinct merchant, so future transactions are covered too.
+  //
+  // Deliberately NOT rulesApi.create(apply_existing): rule matching is substring + fuzzy, so a rule
+  // built from a group label would silently sweep in neighbouring merchants ("AMK BIG BEND BASIN
+  // STO" also matches "…STORE", and a generic label like "SERVICE FEE" matches far too much).
+  const categorizeMerchant = useMutation({
+    mutationFn: ({ ids, categoryId }: { ids: string[]; categoryId: string }) =>
+      transactionsApi.bulkCategory(ids, categoryId),
+    onSuccess: (_r, { ids }) => {
+      invalidateAll();
+      addToast({
+        type: 'success',
+        message: `Categorized ${ids.length} transaction${ids.length === 1 ? '' : 's'} · rule saved for next time`,
+      });
+    },
     onError,
   });
   const dismissTransaction = useMutation({
     mutationFn: (id: string) => transactionsApi.markReview(id, 'dismissed'),
-    onSuccess: invalidateReview,
+    onSuccess: invalidate,
     onError,
   });
-  const confirmRecurring = useMutation({ mutationFn: (p: RecurringPattern) => recurringApi.confirm(p.id), onSuccess: invalidateReview, onError });
-  const dismissRecurring = useMutation({ mutationFn: (p: RecurringPattern) => recurringApi.dismiss(p.id), onSuccess: invalidateReview, onError });
+  const confirmDraft = useMutation({
+    mutationFn: (d: AdvisorDraftAction) => aiApi.confirmDraft(d),
+    onSuccess: invalidateAll,
+    onError,
+  });
+  const dismissDraft = useMutation({ mutationFn: (id: string) => aiApi.dismissDraft(id), onSuccess: invalidate, onError });
+  const createRule = useMutation({
+    mutationFn: ({ suggestion, categoryId }: { suggestion: MerchantRuleSuggestion; categoryId: string }) =>
+      rulesApi.create({ pattern: suggestion.pattern, category_id: categoryId, apply_existing: true }),
+    onSuccess: invalidateAll,
+    onError,
+  });
+  const dismissSuggestion = useMutation({
+    mutationFn: (pattern: string) => rulesApi.dismissSuggestion(pattern),
+    onSuccess: invalidate,
+    onError,
+  });
+  const confirmRecurring = useMutation({ mutationFn: (p: RecurringPattern) => recurringApi.confirm(p.id), onSuccess: invalidate, onError });
+  const dismissRecurring = useMutation({ mutationFn: (p: RecurringPattern) => recurringApi.dismiss(p.id), onSuccess: invalidate, onError });
   const dismissDuplicate = useMutation({
-    mutationFn: (g: DuplicateCandidateGroup) => transactionsApi.dismissDuplicateGroup(g.group_id),
-    onSuccess: invalidateReview,
+    mutationFn: (groupId: string) => transactionsApi.dismissDuplicateGroup(groupId),
+    onSuccess: invalidate,
     onError,
   });
   const confirmTransfer = useMutation({
     mutationFn: (p: TransferCandidatePair) => transactionsApi.confirmTransferPair(p.pair_id),
-    onSuccess: invalidateReview,
+    onSuccess: invalidateAll,
     onError,
   });
   const dismissTransfer = useMutation({
     mutationFn: (p: TransferCandidatePair) => transactionsApi.dismissTransferPair(p.pair_id),
-    onSuccess: invalidateReview,
+    onSuccess: invalidate,
     onError,
   });
 
-  const allQueueItems = useMemo<QueueItem[]>(() => {
-    const items: QueueItem[] = [];
+  const backlog = backlogQ.data?.data ?? [];
+  const backlogTotal = backlogQ.data?.total ?? 0;
+  const groups = useMemo(() => groupByMerchant(backlog), [backlog]);
 
-    for (const draft of reviewSummary?.ai_drafts ?? []) {
-      const key = `draft:${draft.id}`;
-      // A category suggestion gets a picker pre-filled with the AI's proposal, so a wrong guess
-      // can be corrected in place. Without it the only options were Confirm (accept a wrong
-      // category) or Dismiss (leave the transaction uncategorized) — neither of which is "fix it".
-      const proposed =
-        draft.payload.kind === 'categorize_transaction' ? draft.payload.category_id : undefined;
-      const isCategorize = proposed !== undefined;
-      items.push({
-        key,
-        kind: 'Suggestion',
-        title: draft.label,
-        sub: draft.summary,
-        primaryLabel: 'Confirm',
-        onPrimary: () => resolve(key, (restore) => confirmDraft.mutate(draft, { onError: restore })),
-        needsCategory: isCategorize,
-        defaultCategory: proposed,
-        onPickCategory: isCategorize
-          ? (categoryId) =>
-              resolve(key, (restore) =>
-                confirmDraft.mutate(withCategoryOverride(draft, categoryId, categories ?? []), { onError: restore })
-              )
-          : undefined,
-        secondaryLabel: 'Dismiss',
-        onSecondary: () => resolve(key, (restore) => dismissDraft.mutate(draft.id, { onError: restore })),
-      });
-    }
-    for (const t of uncategorizedPage?.data ?? []) {
-      const key = `categorize:${t.id}`;
-      items.push({
-        key,
-        kind: 'Categorize',
-        title: `${merchantLabel(t)} · ${formatCurrency(t.amount)}`,
-        sub: `${shortDate(t.date)} · ${t.account_name ?? 'unknown account'}`,
-        primaryLabel: 'Confirm',
-        onPrimary: () => {},
-        needsCategory: true,
-        onPickCategory: (categoryId) => resolve(key, (restore) => categorize.mutate({ id: t.id, categoryId }, { onError: restore })),
-        secondaryLabel: 'Skip',
-        onSecondary: () => resolve(key, (restore) => dismissTransaction.mutate(t.id, { onError: restore })),
-      });
-    }
-    for (const s of reviewSummary?.rule_suggestions ?? []) {
-      const key = `rule:${s.pattern}:${s.category_id}`;
-      items.push({
-        key,
-        kind: 'New rule',
-        title: `${s.pattern} → always categorize as…`,
-        sub: `applies to ${s.affected_transaction_ids.length} transaction${s.affected_transaction_ids.length === 1 ? '' : 's'} · suggested: ${s.category_name}`,
-        primaryLabel: 'Confirm',
-        onPrimary: () => {},
-        needsCategory: true,
-        defaultCategory: s.category_id,
-        onPickCategory: (categoryId) => resolve(key, (restore) => createRule.mutate({ suggestion: s, categoryId }, { onError: restore })),
-        secondaryLabel: 'Skip',
-        onSecondary: () => resolve(key, (restore) => dismissSuggestion.mutate(s.pattern, { onError: restore })),
-      });
-    }
-    for (const p of reviewSummary?.recurring_candidates ?? []) {
-      const key = `recurring:${p.id}`;
-      items.push({
-        key,
-        kind: 'Confirm recurring',
-        title: `${p.merchant_name} · ${formatCurrency(p.average_amount)}`,
-        sub: `${p.frequency} · seen ${p.transaction_count} times`,
-        primaryLabel: 'Confirm',
-        onPrimary: () => resolve(key, (restore) => confirmRecurring.mutate(p, { onError: restore })),
-        secondaryLabel: 'Not recurring',
-        onSecondary: () => resolve(key, (restore) => dismissRecurring.mutate(p, { onError: restore })),
-      });
-    }
-    for (const g of reviewSummary?.duplicate_candidates ?? []) {
-      const key = `dupe:${g.group_id}`;
-      items.push({
-        key,
-        kind: 'Possible duplicate',
-        title: `${g.merchant_name} · ${formatCurrency(g.amount)}`,
-        sub: `${shortDate(g.date)} · ${g.count} identical charges on ${g.account_name}`,
-        // "Keep both" is the persistent dismissal; a separate local-only "Skip" just made the
-        // card reappear on the next visit, so it's gone.
-        primaryLabel: 'Keep both',
-        onPrimary: () => resolve(key, (restore) => dismissDuplicate.mutate(g, { onError: restore })),
-      });
-    }
-    for (const p of reviewSummary?.transfer_candidates ?? []) {
-      const key = `transfer:${p.pair_id}`;
-      items.push({
-        key,
-        kind: 'Transfer pair',
-        title: `${formatCurrency(Math.abs(p.amount))} · ${p.from_account_name} → ${p.to_account_name}`,
-        sub: `${shortDate(p.date)} · looks like a transfer, not spending`,
-        primaryLabel: 'Confirm',
-        onPrimary: () => resolve(key, (restore) => confirmTransfer.mutate(p, { onError: restore })),
-        secondaryLabel: 'Not a transfer',
-        onSecondary: () => resolve(key, (restore) => dismissTransfer.mutate(p, { onError: restore })),
-      });
-    }
+  const counts: Record<TabId, number> = {
+    category: summary?.queues.find((q) => q.id === 'uncategorized')?.count ?? 0,
+    ai: summary?.ai_drafts.length ?? 0,
+    transfers: summary?.transfer_candidates.length ?? 0,
+    duplicates: summary?.duplicate_candidates.length ?? 0,
+    recurring: summary?.recurring_candidates.length ?? 0,
+    rules: summary?.rule_suggestions.length ?? 0,
+  };
+  const TABS: Array<{ id: TabId; label: string }> = [
+    { id: 'category', label: 'Needs category' },
+    { id: 'ai', label: 'AI suggestions' },
+    { id: 'transfers', label: 'Transfers' },
+    { id: 'duplicates', label: 'Duplicates' },
+    { id: 'recurring', label: 'Recurring' },
+    { id: 'rules', label: 'Rule suggestions' },
+  ];
 
-    return items;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [reviewSummary, uncategorizedPage]);
-
-  const queueItems = useMemo(() => allQueueItems.filter((i) => !hiddenKeys.has(i.key)), [allQueueItems, hiddenKeys]);
-  const displayedReviewCount = Math.max(0, reviewCount - (allQueueItems.length - queueItems.length));
-
-  const highConfidenceRules = (reviewSummary?.rule_suggestions ?? []).filter((s) => s.confidence >= 0.9);
-  // allSettled never rejects, so onError is unreachable here — the result has to be inspected
-  // and reported honestly, otherwise a total failure still toasted "Applied N rules".
-  const batchConfirm = useMutation({
-    mutationFn: async () => {
-      const results = await Promise.allSettled(
-        highConfidenceRules.map((s) => rulesApi.create({ pattern: s.pattern, category_id: s.category_id, apply_existing: true }))
-      );
-      const applied = results.filter((r) => r.status === 'fulfilled').length;
-      const failed = results.length - applied;
-      const firstError = results.find((r): r is PromiseRejectedResult => r.status === 'rejected')?.reason;
-      return { applied, failed, firstError };
-    },
-    onSuccess: ({ applied, failed, firstError }) => {
-      invalidateFinancialData(qc);
-      if (applied > 0) {
-        addToast({ type: 'success', message: `Applied ${applied} rule${applied === 1 ? '' : 's'}${failed > 0 ? ` · ${failed} failed` : ''}` });
-      } else {
-        const detail = firstError instanceof Error ? firstError.message : 'please try again';
-        addToast({ type: 'error', message: `Couldn't apply any rules — ${detail}` });
-      }
-    },
-    onError,
-  });
+  const toggleSelected = (ids: string[]) =>
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      const allSelected = ids.every((id) => next.has(id));
+      ids.forEach((id) => (allSelected ? next.delete(id) : next.add(id)));
+      return next;
+    });
 
   return (
     <Screen>
       <ScreenHeader
         title="Review"
-        sub="Categorizations, rules, recurring bills, duplicates, and transfers to confirm"
-        className="mb-6"
+        sub="Everything waiting on a decision — categorize in bulk, confirm suggestions, resolve duplicates"
+        className="mb-5"
       />
-      {/* Without this, a failed request rendered the same "All caught up." as a genuinely empty
-          queue — the user could not tell the server was down. */}
+
+      {/* Filter strip: every queue visible with its real count, so nothing is hidden behind a card */}
+      <div className="mb-5 flex flex-wrap gap-2">
+        {TABS.map((t) => (
+          <button
+            key={t.id}
+            type="button"
+            onClick={() => setTab(t.id)}
+            className={`rounded-md px-2.5 py-1 text-[13px] transition-colors ${
+              tab === t.id ? 'bg-review-active text-review-text' : 'text-muted hover:text-ink'
+            }`}
+          >
+            {t.label} · {counts[t.id]}
+          </button>
+        ))}
+      </div>
+
       <QueryState
-        isLoading={reviewQ.isPending}
-        isError={reviewQ.isError}
-        error={reviewQ.error}
-        onRetry={() => void reviewQ.refetch()}
+        isLoading={reviewQ.isPending || (tab === 'category' && backlogQ.isPending)}
+        isError={reviewQ.isError || (tab === 'category' && backlogQ.isError)}
+        error={reviewQ.error ?? backlogQ.error}
+        onRetry={() => {
+          void reviewQ.refetch();
+          void backlogQ.refetch();
+        }}
         label="your review queue"
-        skeletonRows={4}
+        skeletonRows={5}
       >
-      <ReviewPanel
-        totalOpen={displayedReviewCount}
-        items={queueItems}
-        categories={categories ?? []}
-        leavingKey={leavingKey}
-        batchCount={highConfidenceRules.length}
-        onBatchConfirm={() => batchConfirm.mutate()}
-        batchPending={batchConfirm.isPending}
-        uncategorizedTotal={reviewSummary?.queues.find((q) => q.id === 'uncategorized')?.count ?? 0}
-      />
+        {tab === 'category' && (
+          <>
+            {selectedIds.size > 0 && (
+              <div className="mb-3 flex flex-wrap items-center gap-3 rounded-lg border border-line-2 bg-rail px-3 py-2">
+                <span className="text-[13px] text-ink">{selectedIds.size} selected</span>
+                <CategoryPicker
+                  value={bulkCategory}
+                  onChange={setBulkCategory}
+                  categories={categoryList}
+                  placeholder="Categorize as…"
+                />
+                <ActionButton
+                  label={bulkCategorize.isPending ? 'Applying…' : 'Apply'}
+                  disabled={!bulkCategory || bulkCategorize.isPending}
+                  onClick={() => bulkCategorize.mutate({ ids: [...selectedIds], categoryId: bulkCategory })}
+                />
+                <ActionButton label="Clear" tone="quiet" onClick={() => setSelectedIds(new Set())} />
+              </div>
+            )}
+
+            {groups.length === 0 ? (
+              <p className="py-6 text-[13.5px] text-muted-2">Nothing needs a category. </p>
+            ) : (
+              groups.map((group) => {
+                const selected = group.ids.every((id) => selectedIds.has(id));
+                const repeated = group.ids.length > 1;
+                return (
+                  <div key={group.key} className="border-b border-line py-3 last:border-0">
+                    <div className="flex items-baseline justify-between gap-4">
+                      <button
+                        type="button"
+                        onClick={() => toggleSelected(group.ids)}
+                        className="flex min-w-0 items-baseline gap-2 text-left"
+                        aria-pressed={selected}
+                      >
+                        <span
+                          className={`mt-1 h-3.5 w-3.5 flex-shrink-0 rounded-[3px] border ${
+                            selected ? 'border-ink bg-ink' : 'border-line-3'
+                          }`}
+                        />
+                        <span className="min-w-0">
+                          <span className="block truncate text-[14.5px] text-ink">{group.label}</span>
+                          <span className="mt-0.5 block text-xs text-muted-2">
+                            {repeated
+                              ? `${group.ids.length} transactions · latest ${shortDate(group.latestDate)}`
+                              : `${shortDate(group.latestDate)}${group.accountName ? ` · ${group.accountName}` : ''}`}
+                          </span>
+                        </span>
+                      </button>
+                      <span className="flex-shrink-0 tabular-nums text-[14px] text-ink">
+                        {formatCurrency(group.total)}
+                      </span>
+                    </div>
+                    <div className="mt-2.5">
+                      <CategoryPicker
+                        value=""
+                        placeholder={repeated ? `Categorize all ${group.ids.length}…` : 'Categorize…'}
+                        categories={categoryList}
+                        onChange={(categoryId) => {
+                          if (!categoryId) return;
+                          // A repeated merchant applies to its whole cluster at once; a one-off
+                          // just updates that transaction.
+                          if (repeated) {
+                            categorizeMerchant.mutate({ ids: group.ids, categoryId });
+                          } else {
+                            categorize.mutate({ id: group.ids[0], categoryId });
+                          }
+                        }}
+                      />
+                    </div>
+                  </div>
+                );
+              })
+            )}
+
+            {backlogTotal > backlog.length && (
+              <p className="pt-3 text-xs text-muted-2">
+                Showing {backlog.length} of {backlogTotal}. Categorize some to load the rest.
+              </p>
+            )}
+          </>
+        )}
+
+        {tab === 'ai' &&
+          (counts.ai === 0 ? (
+            <p className="py-6 text-[13.5px] text-muted-2">No AI suggestions right now.</p>
+          ) : (
+            (summary?.ai_drafts ?? []).map((draft) => {
+              const proposed =
+                draft.payload.kind === 'categorize_transaction' ? draft.payload.category_id : undefined;
+              return (
+                <SectionRow key={draft.id} title={draft.label} sub={draft.summary}>
+                  {proposed !== undefined ? (
+                    <>
+                      {/* Pre-filled with the AI's guess so a wrong one can be corrected, not just
+                          accepted or thrown away. */}
+                      <CategoryPicker
+                        value={proposed}
+                        categories={categoryList}
+                        placeholder="Category"
+                        onChange={(categoryId) =>
+                          confirmDraft.mutate(withCategoryOverride(draft, categoryId, categoryList))
+                        }
+                      />
+                      <ActionButton
+                        label="Confirm"
+                        disabled={confirmDraft.isPending}
+                        onClick={() => confirmDraft.mutate(draft)}
+                      />
+                    </>
+                  ) : (
+                    <ActionButton
+                      label="Confirm"
+                      disabled={confirmDraft.isPending}
+                      onClick={() => confirmDraft.mutate(draft)}
+                    />
+                  )}
+                  <ActionButton label="Dismiss" tone="quiet" onClick={() => dismissDraft.mutate(draft.id)} />
+                </SectionRow>
+              );
+            })
+          ))}
+
+        {tab === 'transfers' &&
+          (counts.transfers === 0 ? (
+            <p className="py-6 text-[13.5px] text-muted-2">No transfer pairs to confirm.</p>
+          ) : (
+            (summary?.transfer_candidates ?? []).map((p) => (
+              <SectionRow
+                key={p.pair_id}
+                title={`${p.from_account_name} → ${p.to_account_name}`}
+                sub={`${shortDate(p.date)} · looks like a transfer, not spending`}
+                right={formatCurrency(Math.abs(p.amount))}
+              >
+                <ActionButton label="Confirm transfer" onClick={() => confirmTransfer.mutate(p)} />
+                <ActionButton label="Not a transfer" tone="quiet" onClick={() => dismissTransfer.mutate(p)} />
+              </SectionRow>
+            ))
+          ))}
+
+        {tab === 'duplicates' &&
+          (counts.duplicates === 0 ? (
+            <p className="py-6 text-[13.5px] text-muted-2">No possible duplicates.</p>
+          ) : (
+            (summary?.duplicate_candidates ?? []).map((g) => (
+              <SectionRow
+                key={g.group_id}
+                title={g.merchant_name}
+                sub={`${shortDate(g.date)} · ${g.count} identical charges on ${g.account_name}`}
+                right={formatCurrency(g.amount)}
+              >
+                <ActionButton label="Keep both" onClick={() => dismissDuplicate.mutate(g.group_id)} />
+                <span className="text-xs text-muted-2">To remove one, open it in Transactions.</span>
+              </SectionRow>
+            ))
+          ))}
+
+        {tab === 'recurring' &&
+          (counts.recurring === 0 ? (
+            <p className="py-6 text-[13.5px] text-muted-2">No recurring patterns to confirm.</p>
+          ) : (
+            (summary?.recurring_candidates ?? []).map((p) => (
+              <SectionRow
+                key={p.id}
+                title={p.merchant_name}
+                sub={`${p.frequency} · seen ${p.transaction_count} times`}
+                right={formatCurrency(p.average_amount)}
+              >
+                <ActionButton label="Confirm" onClick={() => confirmRecurring.mutate(p)} />
+                <ActionButton label="Not recurring" tone="quiet" onClick={() => dismissRecurring.mutate(p)} />
+              </SectionRow>
+            ))
+          ))}
+
+        {tab === 'rules' &&
+          (counts.rules === 0 ? (
+            <p className="py-6 text-[13.5px] text-muted-2">No rule suggestions.</p>
+          ) : (
+            (summary?.rule_suggestions ?? []).map((s) => (
+              <SectionRow
+                key={`${s.pattern}:${s.category_id}`}
+                title={`${s.pattern} → always categorize as…`}
+                sub={`applies to ${s.affected_transaction_ids.length} transaction${
+                  s.affected_transaction_ids.length === 1 ? '' : 's'
+                } · suggested: ${s.category_name}`}
+              >
+                <CategoryPicker
+                  value={s.category_id}
+                  categories={categoryList}
+                  placeholder="Category"
+                  onChange={(categoryId) => createRule.mutate({ suggestion: s, categoryId })}
+                />
+                <ActionButton
+                  label="Create rule"
+                  onClick={() => createRule.mutate({ suggestion: s, categoryId: s.category_id })}
+                />
+                <ActionButton label="Skip" tone="quiet" onClick={() => dismissSuggestion.mutate(s.pattern)} />
+              </SectionRow>
+            ))
+          ))}
       </QueryState>
+
+      {/* Dismissing a single transaction stays available from the category tab's row menu in
+          Transactions; keeping it off the worklist keeps each row to one decision. */}
+      {tab === 'category' && selectedIds.size > 0 && (
+        <button
+          type="button"
+          onClick={() => [...selectedIds].forEach((id) => dismissTransaction.mutate(id))}
+          className="mt-4 text-xs text-muted-2 transition-colors hover:text-ink"
+        >
+          Or dismiss {selectedIds.size} selected (hide without categorizing)
+        </button>
+      )}
     </Screen>
   );
 }
