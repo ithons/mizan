@@ -13,6 +13,7 @@ const RULES: CategoryRule[] = [
   { categoryId: 'cat_xfer_cc', keywords: [
     'automatic payment', 'autopay', 'internet payment', 'payment thank you',
     'credit card payment', 'directpay full balance', 'bill pay to',
+    'online payment from', 'online payment to',
   ] },
   { categoryId: 'cat_inv_transfer', keywords: ['electronic funds transfer', 'cash contribution', 'fidelity brokerage'] },
 
@@ -34,19 +35,21 @@ const RULES: CategoryRule[] = [
   ] },
   { categoryId: 'cat_food_coffee', keywords: [
     'starbucks', "peet's", 'dunkin', 'coffee', 'blue bottle', 'philz', 'teado', 'george howell',
-    'tatte', 'jaho', 'pavement', 'blank street', 'caffe nero', 'boba', 'bubble tea', 'moge tee', 'meet fresh',
+    'tatte', 'jaho', 'pavement', 'blank street', 'caffe nero', 'caffe bene', 'boba', 'bubble tea', 'moge tee', 'meet fresh',
   ] },
   { categoryId: 'cat_food_groceries', keywords: [
     'whole foods', 'wholefds', 'trader joe', 'safeway', 'kroger', 'wegmans', 'publix',
     'grocery', 'aldi', 'stop & shop', 'stop and shop', 'sprouts farmers', 'concord market',
     "trader joe's", 'h mart', 'harris teeter', 'star market', 'big y', 'the butcherie', 'market on camp',
+    'costco whse', 'costco wholesale', 'wawa', 'patch orchard',
   ] },
   { categoryId: 'cat_food_restaurants', keywords: [
     'chipotle', "mcdonald", 'chick-fil-a', 'chickfila', 'starbucks reserve', 'cava',
     'pizza', 'sushi', 'restaurant', 'bistro', 'taqueria', 'burger', 'diner', 'courtyard cafe',
-    'mit dining', 'dig inn', 'sweetgreen', 'life alive', 'super vanak', 'taco bell', 'shake shack',
+    'mit dining', 'dig inn', 'sweetgreen', 'life alive', 'super vanak', 'cafe vanak', 'taco bell', 'shake shack',
     'raising canes', 'cheesecake', 'flour bakery', 'naco taco', 'tst*', 'kabob', 'grille',
     'vending', 'nayax', 'koury', 'lestat', 'in-n-out', 'burger king',
+    'o bread', 'lobstah', 'microcreamery', 'sebs snack',
   ] },
   { categoryId: 'cat_food_bars', keywords: ['brewery', 'brewing co', 'tavern', ' pub', 'taproom', 'lamplighter', 'wine', 'liquor', 'smoke shop'] },
 
@@ -75,11 +78,12 @@ const RULES: CategoryRule[] = [
   { categoryId: 'cat_transport_transit', keywords: [
     'mbta', 'mta*nyct', 'nyct paygo', 'metro card', 'metrocard', 'bart', 'septa', 'caltrain',
     'transit auth', 'clipper', 'green mountain transit', 'njt-paygo', 'path tapp', 'nyc ferry',
+    'southeastern pennsylva', 'septa',
   ] },
   { categoryId: 'cat_transport_auto', keywords: ['auto loan', 'car payment', 'auto finance'] },
 
   // Newer top-level categories
-  { categoryId: 'cat_pets', keywords: ['chewy', 'petco', 'petsmart', 'trupanion', 'veterinary', ' vet ', 'pet supplies', 'aspca'] },
+  { categoryId: 'cat_pets', keywords: ['chewy', 'petco', 'petsmart', 'trupanion', 'veterinary', ' vet ', 'pet supplies', 'aspca', 'cambridgevet'] },
   { categoryId: 'cat_fees', keywords: ['overdraft', 'atm fee', 'service charge', 'wire fee', 'foreign transaction fee', 'bank fee', 'late fee', 'rmv e-service', 'rmv boston', 'registry of motor'] },
   { categoryId: 'cat_gifts', keywords: ['gofundme', 'donation', 'red cross', 'charity', 'patreon'] },
 
@@ -90,10 +94,12 @@ const RULES: CategoryRule[] = [
   ] },
   { categoryId: 'cat_home_internet', keywords: ['comcast', 'xfinity', 'spectrum internet', 'fios'] },
   { categoryId: 'cat_home_phone', keywords: ['verizon wireless', 'at&t', 'att.com', 't-mobile', 'tmobile', 'mint mobile'] },
+  // Parent Home catch-all (after the specific home rules) — campus/coin laundry.
+  { categoryId: 'cat_home', keywords: ['serviceworks', 'csc service', 'laundry', 'laundromat'] },
 
   // Health
   { categoryId: 'cat_health_pharmacy', keywords: ['cvs', 'walgreens', 'rite aid', 'pharmacy'] },
-  { categoryId: 'cat_health_medical', keywords: ['medical', 'clinic', 'hospital', 'urgent care', 'physician', 'dental', 'dentist', 'mit med', 'cambridge health'] },
+  { categoryId: 'cat_health_medical', keywords: ['medical', 'clinic', 'hospital', 'urgent care', 'physician', 'dental', 'dentist', 'mit med', 'cambridge health', 'warby parker'] },
   { categoryId: 'cat_health_fitness', keywords: ['planet fitness', 'equinox', 'peloton', ' gym', 'yoga studio', 'crossfit', 'mit recreation'] },
 
   // Entertainment
@@ -103,7 +109,7 @@ const RULES: CategoryRule[] = [
     'youtube premium', 'youtube tv', 'apple tv', 'paramount+', 'peacock',
   ] },
   { categoryId: 'cat_ent_games', keywords: ['steam', 'playstation', 'xbox', 'nintendo', 'epic games'] },
-  { categoryId: 'cat_ent_events', keywords: ['ticketmaster', 'eventbrite', 'stubhub', 'live nation', 'seatgeek', 'tcktweb', 'six flags', 'symphony', 'gogol bordello', 'admit one', 'mit dsl', 'museum', 'aquarium', 'zoo'] },
+  { categoryId: 'cat_ent_events', keywords: ['ticketmaster', 'eventbrite', 'stubhub', 'live nation', 'seatgeek', 'tcktweb', 'six flags', 'symphony', 'gogol bordello', 'admit one', 'mit dsl', 'outing club', 'museum', 'aquarium', 'zoo'] },
 
   // Travel — intercity carriers and car rental before local transit / rideshare above.
   { categoryId: 'cat_travel_intercity', keywords: ['wanderu', 'amtrak', 'peter pan bus', 'greyhound', 'megabus', 'flixbus', 'lirr'] },
@@ -114,7 +120,7 @@ const RULES: CategoryRule[] = [
   { categoryId: 'cat_travel_hotels', keywords: ['marriott', 'hilton', 'hyatt', 'airbnb', 'hotel', 'motel', 'campground', 'samesun'] },
 
   // Shopping catch-alls (after more specific categories above so e.g. Target pharmacy runs still win)
-  { categoryId: 'cat_shop_general', keywords: ['target', 'walmart', 'wal-mart', 'costco wholesale', 'miniso', 'newbury comics', 'sticker mule', 'firstleaf', ' rei ', 'converse', 'ikea', 'goodwill', 'usps'] },
+  { categoryId: 'cat_shop_general', keywords: ['target', 'walmart', 'wal-mart', 't j maxx', 'tj maxx', 'tjmaxx', 'marshalls', 'homegoods', 'miniso', 'newbury comics', 'sticker mule', 'firstleaf', ' rei ', 'converse', 'ikea', 'goodwill', 'usps'] },
 
   // Misc
   { categoryId: 'cat_subscriptions', keywords: ['subscription', 'nytimes', 'collegeboard*profile'] },

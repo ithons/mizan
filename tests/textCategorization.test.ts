@@ -31,6 +31,22 @@ test('audit fixes: payments/contributions never read as spend, and new categorie
   assert.equal(guessCategoryFromText(null, 'Zipcar Trip'), 'cat_transport_share');
 });
 
+test('phase-B clear-win keywords catch the previously-stuck merchants', () => {
+  assert.equal(guessCategoryFromText(null, 'COSTCO WHSE #0333'), 'cat_food_groceries');
+  assert.equal(guessCategoryFromText(null, 'WAWA 55 PHILADELPHIA, PA'), 'cat_food_groceries');
+  assert.equal(guessCategoryFromText(null, 'T J MAXX 1447 BOSTON, MA'), 'cat_shop_general');
+  assert.equal(guessCategoryFromText(null, 'WARBY PARKER NEW YORK CITYNY'), 'cat_health_medical');
+  assert.equal(guessCategoryFromText(null, 'CSC ServiceWorks, Inc. Plainview NY'), 'cat_home');
+  assert.equal(guessCategoryFromText(null, 'MIT OUTING CLUB 617-253-3608 MA'), 'cat_ent_events');
+  assert.equal(guessCategoryFromText(null, 'CAFE VANAK BELMONT, MA'), 'cat_food_restaurants');
+  assert.equal(guessCategoryFromText(null, 'CAMBRIDGEVET.COM 161-76616255 MA'), 'cat_pets');
+  assert.equal(guessCategoryFromText(null, 'SOUTHEASTERN PENNSYLVAPHILADELPHIA, PA'), 'cat_transport_transit');
+  // Card payment "online payment from CHK …" is a credit-card payment, not spend/income.
+  assert.equal(guessCategoryFromText(null, 'Online payment from CHK 8618'), 'cat_xfer_cc');
+  // Precision: 'LaserMaxx' (laser tag) must NOT be caught by the TJ Maxx keyword.
+  assert.equal(guessCategoryFromText(null, 'SQ *LASERMAXX DANVERS'), null);
+});
+
 test('returns null for unrecognized or empty text', () => {
   assert.equal(guessCategoryFromText(null, ''), null);
   assert.equal(guessCategoryFromText(null, 'SOME RANDOM MERCHANT XYZ 4521'), null);
