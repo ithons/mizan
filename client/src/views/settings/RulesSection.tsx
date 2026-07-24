@@ -5,7 +5,7 @@ import { formatCurrency, formatDate } from '../../lib/formatters';
 import { useAppStore } from '../../store';
 import { invalidateFinancialData } from '../../lib/queryInvalidation';
 import { PageLoader } from '../../components/LoadingSpinner';
-import { InkButton, SectionLabel, TextButton } from '../../components/balance';
+import { InkButton, SectionLabel, TextButton, CategoryPicker } from '../../components/balance';
 import type { MerchantRule, MerchantRuleSuggestion } from '@shared/types';
 
 export function RulesSection() {
@@ -136,12 +136,10 @@ export function RulesSection() {
           onKeyDown={(e) => e.key === 'Enter' && saveRule()}
           placeholder="Merchant contains…"
         />
-        <select className="mz-field" value={categoryId} onChange={(e) => setCategoryId(e.target.value)}>
-          <option value="">Category</option>
-          {categories.map((category) => (
-            <option key={category.id} value={category.id}>{category.name}</option>
-          ))}
-        </select>
+        <CategoryPicker
+          variant="field" value={categoryId} categories={categoriesTree} onChange={setCategoryId}
+          placeholder="Category" clearable={false} className="flex-1"
+        />
         <InkButton onClick={saveRule} disabled={createMutation.isPending}>
           {createMutation.isPending ? 'Adding…' : 'Add'}
         </InkButton>

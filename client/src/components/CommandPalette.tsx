@@ -29,6 +29,7 @@ const ALLOWED_PALETTE_DRAFTS = new Set([
 
 const NAV_TARGETS = [
   { label: 'Today', route: '/' },
+  { label: 'Review', route: '/review' },
   { label: 'Accounts', route: '/accounts' },
   { label: 'Transactions', route: '/transactions' },
   { label: 'Cash flow', route: '/cash-flow' },

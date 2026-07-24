@@ -19,6 +19,14 @@ const RANGES = [
 ] as const;
 type RangeId = (typeof RANGES)[number]['id'];
 
+// Net-worth trend window. `undefined` months = full history (server applies no floor), so the
+// chart can show data back to the earliest snapshot (2023) instead of a hardcoded year.
+const TREND_RANGES = [
+  { id: '1y', label: '1Y', months: 12 as number | undefined },
+  { id: '2y', label: '2Y', months: 24 as number | undefined },
+  { id: 'all', label: 'All', months: undefined as number | undefined },
+] as const;
+
 function rangeDates(id: RangeId): { startDate: string; endDate: string } {
   const now = new Date();
   const fmt = (d: Date) => format(d, 'yyyy-MM-dd');
@@ -92,10 +100,12 @@ function Metric({ label, m, invertColor, isPercent }: { label: string; m: Report
 
 export function Reports() {
   const [range, setRange] = useState<RangeId>('this-month');
+  const [trendRange, setTrendRange] = useState<string>('all');
   const dates = rangeDates(range);
+  const trendMonths = TREND_RANGES.find((r) => r.id === trendRange)?.months;
 
   const { data: snapshot } = useQuery({ queryKey: ['networth-snapshot'], queryFn: () => networthApi.snapshot() });
-  const { data: history } = useQuery({ queryKey: ['networth-history', 12], queryFn: () => networthApi.history(12) });
+  const { data: history } = useQuery({ queryKey: ['networth-history', trendRange], queryFn: () => networthApi.history(trendMonths) });
   const { data: summary } = useQuery({ queryKey: ['report-summary', range], queryFn: () => reportsApi.summary(dates) });
   const { data: cashflow } = useQuery({ queryKey: ['report-cashflow-6'], queryFn: () => reportsApi.cashflow(rangeDates('three-months')) });
   const { data: spending } = useQuery({ queryKey: ['report-spending', range], queryFn: () => reportsApi.spending(dates) });
@@ -112,7 +122,13 @@ export function Reports() {
       <div className="max-w-[860px] space-y-12">
         {/* Net worth trend */}
         <section>
-          <SectionLabel className="mb-2">Net worth</SectionLabel>
+          <div className="mb-2 flex items-center justify-between">
+            <SectionLabel>Net worth</SectionLabel>
+            <Select
+              value={trendRange} onChange={setTrendRange} placeholder="Range" clearable={false}
+              options={TREND_RANGES.map((r) => ({ value: r.id, label: r.label }))} align="right"
+            />
+          </div>
           {snapshot && (
             <div className="mb-3 font-serif text-3xl text-ink tabular-nums">{formatWholeCurrency(snapshot.net_worth)}</div>
           )}

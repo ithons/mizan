@@ -9,7 +9,7 @@ import { invalidateFinancialData } from '../lib/queryInvalidation';
 import { parseDecimalInput } from '../lib/numberInput';
 import { useAppStore } from '../store';
 import { Modal } from '../components/Modal';
-import { Screen, ScreenHeader, SectionLabel, ProgressBar, healthTone, InkButton, TextButton } from '../components/balance';
+import { Screen, ScreenHeader, SectionLabel, ProgressBar, healthTone, InkButton, TextButton, CategoryPicker } from '../components/balance';
 
 function BudgetModal({
   open,
@@ -43,9 +43,6 @@ function BudgetModal({
   }, [editing, open]);
 
   const budgetedIds = new Set(budgets.map((b) => b.category_id));
-  const options = flattenCategories(categories).filter(
-    (c) => !c.is_income && (editing ? c.id === editing.category_id || !budgetedIds.has(c.id) : !budgetedIds.has(c.id))
-  );
 
   const save = useMutation({
     mutationFn: () => {
@@ -77,14 +74,11 @@ function BudgetModal({
       <div className="space-y-4">
         <div>
           <label className="mz-label">Category</label>
-          <select className="mz-field" value={categoryId} onChange={(e) => setCategoryId(e.target.value)} disabled={Boolean(editing)}>
-            <option value="">Pick a category…</option>
-            {options.map((c) => (
-              <option key={c.id} value={c.id}>
-                {c.parent_id ? `· ${c.name}` : c.name}
-              </option>
-            ))}
-          </select>
+          <CategoryPicker
+            variant="field" value={categoryId} categories={categories} onChange={setCategoryId}
+            placeholder="Pick a category…" disabled={Boolean(editing)}
+            filter={(c) => !c.is_income && (editing ? c.id === editing.category_id || !budgetedIds.has(c.id) : !budgetedIds.has(c.id))}
+          />
         </div>
         <div>
           <label className="mz-label">Monthly amount</label>

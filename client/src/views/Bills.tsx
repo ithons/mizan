@@ -8,7 +8,7 @@ import { formatCurrency, formatWholeCurrency } from '../lib/formatters';
 import { parseDecimalInput } from '../lib/numberInput';
 import { useAppStore } from '../store';
 import { Modal } from '../components/Modal';
-import { Screen, ScreenHeader, SectionLabel, InkButton, TextButton } from '../components/balance';
+import { Screen, ScreenHeader, SectionLabel, InkButton, TextButton, CategoryPicker } from '../components/balance';
 
 const FREQUENCY_OPTIONS: Array<RecurringPattern['frequency']> = ['weekly', 'biweekly', 'monthly', 'quarterly', 'annual'];
 
@@ -86,15 +86,10 @@ function BillModal({ open, onClose, categories }: { open: boolean; onClose: () =
           </div>
           <div className="flex-1">
             <label className="mz-label">Category</label>
-            <select className="mz-field" value={categoryId} onChange={(e) => setCategoryId(e.target.value)}>
-              <option value="">Uncategorized (bill)</option>
-              {flat.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.parent_id ? `· ${c.name}` : c.name}
-                  {c.is_income ? ' (income)' : ''}
-                </option>
-              ))}
-            </select>
+            <CategoryPicker
+              variant="field" value={categoryId} categories={categories} onChange={setCategoryId}
+              placeholder="Uncategorized (bill)"
+            />
           </div>
         </div>
         <p className="text-[12px] text-muted-2">

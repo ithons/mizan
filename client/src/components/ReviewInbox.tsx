@@ -10,11 +10,11 @@ import type {
   Transaction,
   TransferCandidatePair,
 } from '@shared/types';
-import { aiApi, categoriesApi, flattenCategories, recurringApi, rulesApi, transactionsApi } from '../lib/api';
+import { aiApi, categoriesApi, recurringApi, rulesApi, transactionsApi } from '../lib/api';
 import { formatCurrency } from '../lib/formatters';
 import { invalidateFinancialData } from '../lib/queryInvalidation';
 import { useAppStore } from '../store';
-import { ScreenHeader, Select } from './balance';
+import { Screen, ScreenHeader, CategoryPicker } from './balance';
 
 function merchantLabel(t: Transaction): string {
   return (t.merchant_name || t.original_name).trim();
@@ -80,15 +80,12 @@ function ReviewPanel({
             <div className="mb-0.5 text-[15.5px] text-ink">{focus.title}</div>
             <div className="text-[13px] leading-normal text-muted">{focus.sub}</div>
             {focus.needsCategory && (
-              <Select
+              <CategoryPicker
                 className="mt-3"
                 value={pickedCategory}
                 onChange={setPickedCategory}
                 placeholder="Pick a category…"
-                options={flattenCategories(categories).map((c) => ({
-                  value: c.id,
-                  label: c.parent_id ? `· ${c.name}` : c.name,
-                }))}
+                categories={categories}
               />
             )}
             <div className="mt-3.5 flex items-center gap-5 text-[13.5px]">
@@ -330,7 +327,7 @@ export function ReviewInbox() {
   });
 
   return (
-    <>
+    <Screen>
       <ScreenHeader
         title="Review"
         sub="Categorizations, rules, recurring bills, duplicates, and transfers to confirm"
@@ -345,6 +342,6 @@ export function ReviewInbox() {
         onBatchConfirm={() => batchConfirm.mutate()}
         batchPending={batchConfirm.isPending}
       />
-    </>
+    </Screen>
   );
 }

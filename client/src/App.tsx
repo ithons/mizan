@@ -16,6 +16,7 @@ const Goals = lazy(() => import('./views/Goals').then((module) => ({ default: mo
 const Investments = lazy(() => import('./views/Investments').then((module) => ({ default: module.Investments })));
 const Settings = lazy(() => import('./views/settings/Settings').then((module) => ({ default: module.Settings })));
 const Advisor = lazy(() => import('./views/Advisor').then((module) => ({ default: module.Advisor })));
+const ReviewInbox = lazy(() => import('./components/ReviewInbox').then((module) => ({ default: module.ReviewInbox })));
 
 function ViewFallback() {
   return (
@@ -44,8 +45,7 @@ function AppRoutes() {
           <Route path="/" element={lazyView(<Today />)} />
           <Route path="/onboarding" element={lazyView(<Onboarding />)} />
           <Route path="/accounts" element={lazyView(<Accounts />)} />
-          {/* Review folded into the Today/inbox flow; redirect old bookmarks. */}
-          <Route path="/review" element={<Navigate to="/" replace />} />
+          <Route path="/review" element={lazyView(<ReviewInbox />)} />
           <Route path="/transactions" element={lazyView(<Transactions />)} />
           <Route path="/cash-flow" element={lazyView(<CashFlow />)} />
           <Route path="/cashflow" element={<Navigate to="/cash-flow" replace />} />

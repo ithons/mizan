@@ -1,15 +1,15 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { format, isToday, isYesterday, parseISO, startOfMonth, endOfMonth, subMonths, startOfYear } from 'date-fns';
-import type { Category, Transaction } from '@shared/types';
-import { categoriesApi, accountsApi, flattenCategories, transactionsApi } from '../lib/api';
+import type { Transaction } from '@shared/types';
+import { categoriesApi, accountsApi, transactionsApi } from '../lib/api';
 import { formatCurrency } from '../lib/formatters';
 import { invalidateFinancialData } from '../lib/queryInvalidation';
 import { parseDecimalInput } from '../lib/numberInput';
 import { useAppStore } from '../store';
 import { Modal } from '../components/Modal';
 import { SkeletonRows } from '../components/SkeletonLoader';
-import { Screen, ScreenHeader, CategoryPill, InkButton, Select, TextButton } from '../components/balance';
+import { Screen, ScreenHeader, CategoryPill, InkButton, Select, TextButton, CategoryPicker } from '../components/balance';
 
 // ─── Date-range presets ───────────────────────────────────────────────────────
 
@@ -50,14 +50,6 @@ function dayLabel(dateStr: string): string {
 
 function merchantLabel(t: Transaction): string {
   return (t.merchant_name || t.original_name).trim();
-}
-
-function categoryOptions(categories: Category[]) {
-  return flattenCategories(categories).map((c) => (
-    <option key={c.id} value={c.id}>
-      {c.parent_id ? `· ${c.name}` : c.name}
-    </option>
-  ));
 }
 
 // ─── Add / edit transaction modals ────────────────────────────────────────────
@@ -155,10 +147,10 @@ function AddTransactionModal({ open, onClose }: { open: boolean; onClose: () => 
           </div>
           <div className="flex-1">
             <label className="mz-label">Category</label>
-            <select className="mz-field" value={form.category_id} onChange={(e) => setForm({ ...form, category_id: e.target.value })}>
-              <option value="">Uncategorized</option>
-              {categoryOptions(categories ?? [])}
-            </select>
+            <CategoryPicker
+              variant="field" value={form.category_id} categories={categories ?? []}
+              onChange={(v) => setForm({ ...form, category_id: v })} placeholder="Uncategorized"
+            />
           </div>
         </div>
         <div>
@@ -229,10 +221,10 @@ function EditTransactionModal({ transaction, onClose }: { transaction: Transacti
         </div>
         <div>
           <label className="mz-label">Category</label>
-          <select className="mz-field" value={categoryId} onChange={(e) => setCategoryId(e.target.value)}>
-            <option value="">Uncategorized</option>
-            {categoryOptions(categories ?? [])}
-          </select>
+          <CategoryPicker
+            variant="field" value={categoryId} categories={categories ?? []}
+            onChange={setCategoryId} placeholder="Uncategorized"
+          />
         </div>
         <div>
           <label className="mz-label">Notes</label>
@@ -389,14 +381,11 @@ export function Transactions() {
             .filter((a) => !a.is_hidden)
             .map((a) => ({ value: a.id, label: a.account_name }))}
         />
-        <Select
+        <CategoryPicker
           value={categoryFilter}
           onChange={setCategoryFilter}
           placeholder="Category"
-          options={flattenCategories(categories ?? []).map((c) => ({
-            value: c.id,
-            label: c.parent_id ? `· ${c.name}` : c.name,
-          }))}
+          categories={categories ?? []}
         />
         <Select
           value={range}
@@ -424,15 +413,12 @@ export function Transactions() {
               <span className="text-[13px] text-ink">
                 {selectedIds.size} selected
               </span>
-              <Select
+              <CategoryPicker
                 value={bulkCategory}
                 onChange={setBulkCategory}
                 placeholder="Set category…"
                 clearable={false}
-                options={flattenCategories(categories ?? []).map((c) => ({
-                  value: c.id,
-                  label: c.parent_id ? `· ${c.name}` : c.name,
-                }))}
+                categories={categories ?? []}
               />
               <button
                 type="button"

@@ -112,6 +112,9 @@ export function updateAccount(db: Database.Database, id: string, input: UpdateAc
   if (input.account_name !== undefined) {
     updates.push('account_name = ?');
     values.push(input.account_name);
+    // Mark the name user-owned so SimpleFIN sync stops overwriting it (mirrors type_source).
+    updates.push('name_source = ?');
+    values.push('manual');
   }
   if (input.institution_name !== undefined) {
     updates.push('institution_name = ?');

@@ -177,7 +177,7 @@ export async function syncSimplefin(): Promise<SimplefinSyncResult> {
     }
 
     const existingAcct = db.prepare(`
-      SELECT id, account_name, current_balance, is_liability, currency, backfill_floor_date
+      SELECT id, account_name, current_balance, is_liability, currency, backfill_floor_date, name_source
       FROM accounts
       WHERE simplefin_account_id = ?
     `).get(acct.id) as any;
@@ -209,18 +209,21 @@ export async function syncSimplefin(): Promise<SimplefinSyncResult> {
         });
       }
 
+      // Preserve a user's manual rename: only refresh account_name from the provider when the
+      // name hasn't been overridden (name_source != 'manual'). Mirrors the type_source guard.
+      const keepName = existingAcct.name_source === 'manual';
       db.prepare(`
         UPDATE accounts
         SET connection_id = 'simplefin_primary',
             institution_name = ?,
-            account_name = ?,
+            ${keepName ? '' : 'account_name = ?,'}
             current_balance = ?,
             currency = ?,
             updated_at = ?
         WHERE id = ?
       `).run(
         institutionName,
-        acct.name,
+        ...(keepName ? [] : [acct.name]),
         currentBalance,
         currency,
         now,

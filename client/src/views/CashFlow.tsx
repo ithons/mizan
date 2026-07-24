@@ -9,6 +9,9 @@ const RANGES = [
   { id: 'month', label: 'Month', months: 1 },
   { id: 'six-months', label: '6 months', months: 6 },
   { id: 'year', label: 'Year', months: 12 },
+  { id: 'two-years', label: '2 years', months: 24 },
+  // Wide enough to cover all imported history (back to 2023); the date math below just works.
+  { id: 'all', label: 'All', months: 120 },
 ] as const;
 type RangeId = (typeof RANGES)[number]['id'];
 

@@ -7,5 +7,6 @@ export { BalanceScale } from './BalanceScale';
 export { Row } from './Row';
 export { TextButton, InkButton } from './buttons';
 export { Select, type SelectOption } from './Select';
+export { CategoryPicker } from './CategoryPicker';
 export { Tooltip } from './Tooltip';
 export { TrendChart } from './TrendChart';

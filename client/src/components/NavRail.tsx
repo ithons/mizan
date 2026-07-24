@@ -6,6 +6,7 @@ import { useAppStore } from '../store';
 
 const navItems = [
   { to: '/', label: 'Today', shortcut: '1' },
+  { to: '/review', label: 'Review', shortcut: 'r' },
   { to: '/accounts', label: 'Accounts', shortcut: '2' },
   { to: '/transactions', label: 'Transactions', shortcut: '3' },
   { to: '/cash-flow', label: 'Cash flow', shortcut: '4' },
