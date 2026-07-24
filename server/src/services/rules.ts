@@ -102,27 +102,6 @@ export function upsertMerchantRule(
   return id;
 }
 
-export function applyMerchantRulesToTransaction(
-  db: Database.Database,
-  transactionId: string,
-  merchantName: string
-): boolean {
-  const rules = db.prepare(
-    'SELECT pattern, category_id FROM merchant_rules ORDER BY created_at DESC'
-  ).all() as MerchantRule[];
-
-  for (const rule of rules) {
-    if (merchantMatchesRulePattern(merchantName, rule.pattern)) {
-      db.prepare(
-        'UPDATE transactions SET category_id = ?, updated_at = ? WHERE id = ?'
-      ).run(rule.category_id, new Date().toISOString(), transactionId);
-      return true;
-    }
-  }
-
-  return false;
-}
-
 export function applyMerchantRulesToExistingTransactions(
   db: Database.Database,
   options: { onlyUncategorized?: boolean; skipManual?: boolean } = {}

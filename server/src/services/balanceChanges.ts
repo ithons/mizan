@@ -33,8 +33,10 @@ function formatSignedMoney(value: number, currency?: string | null): string {
   return `${sign}${formatMoney(Math.abs(value), currency)}`;
 }
 
+// Callers pass integer cents, so any real change is at least 1 cent. (The old 0.005 threshold
+// was a sub-cent float-noise guard from the dollars era and is a no-op on integers.)
 export function balancesDiffer(previousBalance: number, newBalance: number): boolean {
-  return Math.abs(newBalance - previousBalance) >= 0.005;
+  return Math.round(newBalance) !== Math.round(previousBalance);
 }
 
 export function describeBalanceChange(change: AccountBalanceChange): string {

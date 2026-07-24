@@ -60,67 +60,6 @@ export function startSyncRun(
   return getSyncRun(db, id);
 }
 
-export function startSyncRunItem(
-  db: Database.Database,
-  runId: string,
-  provider: SyncRunItemProvider,
-  connectionId: string | null,
-  institutionName: string
-): SyncRunItem {
-  const now = new Date().toISOString();
-  const id = uuidv4();
-
-  db.prepare(`
-    INSERT INTO sync_run_items (
-      id,
-      run_id,
-      provider,
-      connection_id,
-      institution_name,
-      status,
-      started_at
-    )
-    VALUES (?, ?, ?, ?, ?, 'running', ?)
-  `).run(id, runId, provider, connectionId, institutionName, now);
-
-  return getSyncRunItem(db, id);
-}
-
-export function finishSyncRunItem(
-  db: Database.Database,
-  itemId: string,
-  options: FinishSyncRunItemOptions
-): SyncRunItem {
-  db.prepare(`
-    UPDATE sync_run_items
-    SET status = ?,
-        completed_at = ?,
-        accounts_seen = ?,
-        transactions_added = ?,
-        transactions_modified = ?,
-        transactions_removed = ?,
-        transactions_skipped = ?,
-        error_code = ?,
-        error_message = ?,
-        recovery_action = ?
-    WHERE id = ?
-  `).run(
-    options.status,
-    new Date().toISOString(),
-    options.accounts_seen ?? 0,
-    options.transactions_added ?? 0,
-    options.transactions_modified ?? 0,
-    options.transactions_removed ?? 0,
-    options.transactions_skipped ?? 0,
-    options.error_code ?? null,
-    options.error_message ?? null,
-    options.recovery_action ?? null,
-    itemId
-  );
-
-  return getSyncRunItem(db, itemId);
-}
-
 export function recordSyncRunItem(
   db: Database.Database,
   runId: string,

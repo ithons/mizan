@@ -45,7 +45,11 @@ test('balance changes invert net worth impact for liabilities', () => {
   );
 });
 
-test('balance difference threshold ignores sub-cent noise', () => {
-  assert.equal(balancesDiffer(100, 100.004), false);
-  assert.equal(balancesDiffer(100, 100.01), true);
+test('balancesDiffer works on integer cents: any whole-cent change fires, sub-cent noise does not', () => {
+  // Callers pass integer cents. Equal cents = no change.
+  assert.equal(balancesDiffer(10000, 10000), false);
+  // A one-cent change fires.
+  assert.equal(balancesDiffer(10000, 10001), true);
+  // Sub-cent fractional noise (below a whole cent) is ignored.
+  assert.equal(balancesDiffer(10000, 10000.4), false);
 });
