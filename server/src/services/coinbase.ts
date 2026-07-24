@@ -44,15 +44,6 @@ function ensureCoinbaseConnection(db: Database.Database, now: string): string {
   return row.id;
 }
 
-interface CoinbaseAccountRow {
-  id: string;
-  coinbase_account_id: string;
-  account_name?: string;
-  current_balance?: number;
-  is_liability?: number;
-  currency?: string | null;
-}
-
 export class CoinbaseApiError extends Error {
   constructor(message: string, public status?: number) {
     super(message);
@@ -239,9 +230,9 @@ export async function syncCoinbase(): Promise<CoinbaseSyncResult> {
 
   let cursor: string | undefined;
   let hasNext = true;
-  let syncedCount = 0;
+  let coinCount = 0;
   const balanceChanges: AccountBalanceChange[] = [];
-  const seenAccountIds = new Set<string>();
+  const seenCurrencies = new Set<string>();
   // A real connect-route connection that pre-exists this sync keeps its historical
   // behavior of importing trade history; a synthetic env connection stays
   // balances-only (crypto trade history is not pulled into the ledger by default).
@@ -249,6 +240,28 @@ export async function syncCoinbase(): Promise<CoinbaseSyncResult> {
     "SELECT id FROM coinbase_connections WHERE status = 'active'"
   ).get() as CoinbaseConnectionRow | undefined;
   const activeConnectionId = ensureCoinbaseConnection(db, now);
+
+  // One consolidated Coinbase account holds every coin as a holding (the Fidelity model),
+  // rather than one account per coin. Resolve or create it up front; the per-coin balances
+  // become holdings and the account balance is their sum (computed below).
+  const existingAcct = db.prepare(
+    "SELECT id, account_name, current_balance FROM accounts WHERE connection_type = 'coinbase' AND type = 'crypto_wallet' LIMIT 1"
+  ).get() as { id: string; account_name: string; current_balance: number } | undefined;
+  const accountId = existingAcct?.id ?? uuidv4();
+  if (!existingAcct) {
+    db.prepare(`
+      INSERT INTO accounts
+        (id, coinbase_account_id, connection_id, connection_type, institution_name,
+         account_name, type, current_balance, currency, is_manual, is_hidden, is_liability, sort_order, created_at, updated_at)
+      VALUES (?, NULL, ?, 'coinbase', 'Coinbase', 'Coinbase', 'crypto_wallet', 0, 'USD', 0, 0, 0, 0, ?, ?)
+    `).run(accountId, activeConnectionId, now, now);
+  } else {
+    // Keep the account anchored to the active connection. account_name is left untouched:
+    // Coinbase never renames (a user rename, or the consolidation migration's name, persists).
+    db.prepare(
+      'UPDATE accounts SET connection_id = COALESCE(?, connection_id), updated_at = ? WHERE id = ?'
+    ).run(activeConnectionId, now, accountId);
+  }
 
   while (hasNext) {
     const params = new URLSearchParams({ limit: '250' });
@@ -260,87 +273,31 @@ export async function syncCoinbase(): Promise<CoinbaseSyncResult> {
     );
 
     for (const account of data.accounts || []) {
-      seenAccountIds.add(account.uuid);
-
       const currency = account.available_balance?.currency || account.currency;
       const balanceValue = parseCoinbaseNumber(
         account.available_balance?.value,
         `${currency} available balance`
       );
-      const existing = db.prepare(
-        'SELECT id, account_name, current_balance, is_liability, currency FROM accounts WHERE coinbase_account_id = ?'
-      ).get(account.uuid) as
-        | {
-            id: string;
-            account_name: string;
-            current_balance: number;
-            is_liability: number;
-            currency: string | null;
-          }
-        | undefined;
 
-      if (balanceValue <= 0 && !existing) continue;
+      // A coin at zero balance is dropped from the account by the zero-out pass below.
+      if (balanceValue <= 0) continue;
 
-      // Price each holding independently: a single unpriceable/delisted coin must not
-      // abort the whole sync run. Skip it (it stays in seenAccountIds so it isn't
-      // pruned as stale) and continue with the rest.
+      // Price each holding independently: a single unpriceable/delisted coin must not abort
+      // the whole run. Mark it seen so its last-known holding is kept (not zeroed), and skip.
       let spotPrice: number;
       try {
-        spotPrice = balanceValue === 0 ? 0 : await getUsdSpotPrice(currency);
+        spotPrice = await getUsdSpotPrice(currency);
       } catch (err) {
         const message = err instanceof Error ? err.message : 'unknown pricing error';
-        console.warn(`[coinbase] Skipping ${currency} account ${account.uuid}: ${message}`);
+        console.warn(`[coinbase] Skipping ${currency}: ${message}`);
+        seenCurrencies.add(currency);
         continue;
       }
-      const currentBalance = balanceValue * spotPrice; // dollars
-      const currentBalanceCents = toCents(currentBalance);
-      const accountId = existing?.id ?? uuidv4();
 
-      if (existing) {
-        // existing.current_balance and currentBalanceCents are both cents; the
-        // display-facing change struct is kept in dollars. native_balance is a coin
-        // quantity, not money, and stays as-is.
-        if (balancesDiffer(existing.current_balance, currentBalanceCents)) {
-          balanceChanges.push({
-            accountId: existing.id,
-            accountName: existing.account_name,
-            provider: 'coinbase',
-            previousBalance: toDollars(existing.current_balance),
-            newBalance: currentBalance,
-            isLiability: Boolean(existing.is_liability),
-            currency: existing.currency ?? 'USD',
-          });
-        }
-
-        db.prepare(`
-          UPDATE accounts
-          SET connection_id = COALESCE(?, connection_id),
-              native_currency = ?, native_balance = ?, current_balance = ?,
-              updated_at = ?
-          WHERE id = ?
-        `).run(activeConnectionId, currency, balanceValue, currentBalanceCents, now, existing.id);
-      } else {
-        db.prepare(`
-          INSERT INTO accounts
-            (id, coinbase_account_id, connection_id, connection_type, institution_name,
-             account_name, type, current_balance, native_currency, native_balance,
-             currency, is_manual, is_hidden, is_liability, sort_order, created_at, updated_at)
-          VALUES (?, ?, ?, 'coinbase', 'Coinbase', ?, 'crypto_wallet', ?, ?, ?, 'USD', 0, 0, 0, 0, ?, ?)
-        `).run(
-          accountId,
-          account.uuid,
-          activeConnectionId,
-          account.name || currency,
-          currentBalanceCents,
-          currency,
-          balanceValue,
-          now,
-          now
-        );
-      }
-
-      upsertCoinbaseHolding(db, accountId, currency, balanceValue, spotPrice, currentBalance, now);
-      syncedCount++;
+      const value = balanceValue * spotPrice; // dollars
+      upsertCoinbaseHolding(db, accountId, currency, balanceValue, spotPrice, value, now);
+      seenCurrencies.add(currency);
+      coinCount++;
     }
 
     hasNext = data.has_next || false;
@@ -348,36 +305,38 @@ export async function syncCoinbase(): Promise<CoinbaseSyncResult> {
     if (!hasNext) break;
   }
 
-  const staleAccounts = db.prepare(`
-    SELECT id, coinbase_account_id, account_name, current_balance, is_liability, currency
-    FROM accounts
-    WHERE connection_type = 'coinbase'
-      AND coinbase_account_id IS NOT NULL
-  `).all() as CoinbaseAccountRow[];
-
-  let staleAccountCount = 0;
-  for (const account of staleAccounts) {
-    if (seenAccountIds.has(account.coinbase_account_id)) continue;
-
-    if (balancesDiffer(account.current_balance ?? 0, 0)) {
-      balanceChanges.push({
-        accountId: account.id,
-        accountName: account.account_name ?? 'Coinbase account',
-        provider: 'coinbase',
-        previousBalance: toDollars(account.current_balance ?? 0),
-        newBalance: 0,
-        isLiability: Boolean(account.is_liability),
-        currency: account.currency ?? 'USD',
-      });
-    }
-
-    db.prepare(`
-      UPDATE accounts
-      SET current_balance = 0, native_balance = 0, updated_at = ?
-      WHERE id = ?
-    `).run(now, account.id);
-    staleAccountCount++;
+  // Zero out coins fully sold since the last sync so they drop out of the account total.
+  const held = db.prepare(
+    'SELECT h.id AS holding_id, s.ticker FROM holdings h JOIN securities s ON s.id = h.security_id WHERE h.account_id = ?'
+  ).all(accountId) as Array<{ holding_id: string; ticker: string | null }>;
+  let zeroedCount = 0;
+  for (const row of held) {
+    if (row.ticker && seenCurrencies.has(row.ticker)) continue;
+    db.prepare(
+      'UPDATE holdings SET quantity = 0, institution_value = 0, updated_at = ? WHERE id = ?'
+    ).run(now, row.holding_id);
+    zeroedCount++;
   }
+
+  // The account balance is the sum of its holdings (authoritative, already in cents).
+  const totalCents = (db.prepare(
+    'SELECT COALESCE(SUM(institution_value), 0) AS total FROM holdings WHERE account_id = ?'
+  ).get(accountId) as { total: number }).total;
+
+  const previousCents = existingAcct?.current_balance ?? 0;
+  if (balancesDiffer(previousCents, totalCents)) {
+    balanceChanges.push({
+      accountId,
+      accountName: existingAcct?.account_name ?? 'Coinbase',
+      provider: 'coinbase',
+      previousBalance: toDollars(previousCents),
+      newBalance: toDollars(totalCents),
+      isLiability: false,
+      currency: 'USD',
+    });
+  }
+  db.prepare('UPDATE accounts SET current_balance = ?, updated_at = ? WHERE id = ?').run(totalCents, now, accountId);
+  console.log(`[coinbase] Consolidated account: ${coinCount} coin${coinCount === 1 ? '' : 's'} held, ${zeroedCount} zeroed, ${toDollars(totalCents).toFixed(2)} total`);
 
   const transactionCount = preExistingConnection
     ? await syncTradeHistory(preExistingConnection.id)
@@ -388,9 +347,10 @@ export async function syncCoinbase(): Promise<CoinbaseSyncResult> {
   ).run(now);
 
   return {
-    accountCount: syncedCount,
+    // One consolidated account; coinCount is how many coins it holds this run.
+    accountCount: 1,
     transactionCount,
-    staleAccountCount,
+    staleAccountCount: zeroedCount,
     balanceChanges,
   };
 }
@@ -430,6 +390,16 @@ export async function syncTradeHistory(connectionId: string): Promise<number> {
     return 0;
   }
 
+  // All coins now live in one consolidated account; every trade routes to it.
+  const acct = db.prepare(
+    "SELECT id, backfill_floor_date FROM accounts WHERE connection_type = 'coinbase' AND type = 'crypto_wallet' LIMIT 1"
+  ).get() as { id: string; backfill_floor_date: string | null } | undefined;
+
+  if (!acct) {
+    console.warn('[coinbase] Trade history skipped: no Coinbase account');
+    return 0;
+  }
+
   while (hasNext) {
     const params = new URLSearchParams({
       order_status: 'FILLED',
@@ -450,11 +420,6 @@ export async function syncTradeHistory(connectionId: string): Promise<number> {
       if (existing) continue;
 
       const currency = order.product_id.split('-')[0];
-      const acct = db.prepare(
-        'SELECT id, backfill_floor_date FROM accounts WHERE coinbase_account_id IS NOT NULL AND native_currency = ?'
-      ).get(currency) as { id: string; backfill_floor_date: string | null } | undefined;
-
-      if (!acct) continue;
 
       const side = order.side.toUpperCase();
       if (side !== 'BUY' && side !== 'SELL') {
