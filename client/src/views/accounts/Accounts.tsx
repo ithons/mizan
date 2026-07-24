@@ -297,10 +297,10 @@ export function Accounts() {
               ))}
             </div>
             <div className="mt-6 flex flex-col items-start gap-3">
-              <TextButton variant="primary" onClick={() => setEditing(selected)}>
-                Edit account
+              <TextButton variant="primary" onClick={() => navigate(`/accounts/${selected.id}`)}>
+                View details →
               </TextButton>
-              <TextButton onClick={() => navigate('/transactions')}>View transactions →</TextButton>
+              <TextButton onClick={() => setEditing(selected)}>Edit account</TextButton>
               <TextButton onClick={() => toggleHidden.mutate(selected)}>
                 {selected.is_hidden ? 'Unhide from lists' : 'Hide from lists'}
               </TextButton>

@@ -11,6 +11,7 @@ import { dollarizeFields } from '../services/money';
 import {
   createManualAccount,
   deleteAccount,
+  getAccountBalanceHistory,
   listAccounts,
   mergeAccounts,
   updateAccount,
@@ -36,6 +37,17 @@ router.get('/', (_req: Request, res: Response, next: NextFunction): void => {
   try {
     const db = getDb();
     res.json({ data: listAccounts(db).map(accountToDollars) });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// GET /:id/history - this account's balance over time (from net-worth snapshot breakdowns)
+router.get('/:id/history', (req: Request, res: Response, next: NextFunction): void => {
+  try {
+    const db = getDb();
+    const history = getAccountBalanceHistory(db, routeId(req.params.id));
+    res.json({ data: history.map((point) => dollarizeFields({ ...point }, ['balance'])) });
   } catch (err) {
     next(err);
   }

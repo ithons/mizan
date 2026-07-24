@@ -15,6 +15,35 @@ type AccountRow = Record<string, unknown> & {
 // The list endpoint coerces the SQLite integer booleans to real booleans (so the client
 // doesn't render a literal "0"); the single-account responses deliberately return the raw
 // row, matching long-standing behavior. Don't unify the two without checking the client.
+export interface AccountBalancePoint {
+  date: string;
+  balance: number; // integer cents; route dollarizes
+}
+
+// Per-account balance over time, pulled from the per-account breakdown already stored in each
+// net_worth_snapshot. Snapshots from before the account existed simply don't list it, so they're
+// skipped. This reuses net-worth history rather than maintaining a second balance ledger.
+export function getAccountBalanceHistory(db: Database.Database, accountId: string): AccountBalancePoint[] {
+  const rows = db.prepare(
+    'SELECT date, breakdown FROM net_worth_snapshots ORDER BY date ASC'
+  ).all() as Array<{ date: string; breakdown: string }>;
+
+  const out: AccountBalancePoint[] = [];
+  for (const row of rows) {
+    let breakdown: Record<string, unknown>;
+    try {
+      breakdown = JSON.parse(row.breakdown) as Record<string, unknown>;
+    } catch {
+      continue;
+    }
+    const cents = breakdown[accountId];
+    if (typeof cents === 'number' && Number.isFinite(cents)) {
+      out.push({ date: row.date, balance: cents });
+    }
+  }
+  return out;
+}
+
 export function listAccounts(db: Database.Database): Record<string, unknown>[] {
   return (db.prepare(`
     SELECT a.*

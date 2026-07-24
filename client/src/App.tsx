@@ -7,6 +7,7 @@ import { useSyncStatus } from './hooks/useSyncStatus';
 const Today = lazy(() => import('./views/Today').then((module) => ({ default: module.Today })));
 const Onboarding = lazy(() => import('./views/Onboarding').then((module) => ({ default: module.Onboarding })));
 const Accounts = lazy(() => import('./views/accounts/Accounts').then((module) => ({ default: module.Accounts })));
+const AccountDetail = lazy(() => import('./views/accounts/AccountDetail').then((module) => ({ default: module.AccountDetail })));
 const Transactions = lazy(() => import('./views/Transactions').then((module) => ({ default: module.Transactions })));
 const Reports = lazy(() => import('./views/Reports').then((module) => ({ default: module.Reports })));
 const CashFlow = lazy(() => import('./views/CashFlow').then((module) => ({ default: module.CashFlow })));
@@ -45,6 +46,7 @@ function AppRoutes() {
           <Route path="/" element={lazyView(<Today />)} />
           <Route path="/onboarding" element={lazyView(<Onboarding />)} />
           <Route path="/accounts" element={lazyView(<Accounts />)} />
+          <Route path="/accounts/:id" element={lazyView(<AccountDetail />)} />
           <Route path="/review" element={lazyView(<ReviewInbox />)} />
           <Route path="/transactions" element={lazyView(<Transactions />)} />
           <Route path="/cash-flow" element={lazyView(<CashFlow />)} />

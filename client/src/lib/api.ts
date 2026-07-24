@@ -82,6 +82,8 @@ async function apiFetch<T>(url: string, options?: RequestInit): Promise<T> {
 
 export const accountsApi = {
   list: () => apiFetch<Account[]>('/api/accounts'),
+  history: (id: string) =>
+    apiFetch<Array<{ date: string; balance: number }>>(`/api/accounts/${id}/history`),
   createManual: (body: {
     account_name: string;
     type: string;
