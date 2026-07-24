@@ -22,6 +22,48 @@ function merchantLabel(t: Transaction): string {
   return (t.merchant_name || t.original_name).trim();
 }
 
+function findCategoryName(categories: Category[], id: string): string | null {
+  for (const category of categories) {
+    if (category.id === id) return category.name;
+    const child = category.children?.find((c) => c.id === id);
+    if (child) return child.name;
+  }
+  return null;
+}
+
+/**
+ * Rewrites a `categorize_transaction` draft to use the category the user actually picked.
+ *
+ * The server applies the client-supplied payload, so overriding `category_id` is enough to change
+ * the outcome — but the label and the change record are what land in the AI audit trail, so they
+ * are rewritten too. Otherwise the log would read "Categorize X as Restaurants" for a transaction
+ * the user filed under Gas.
+ */
+function withCategoryOverride(
+  draft: AdvisorDraftAction,
+  categoryId: string,
+  categories: Category[]
+): AdvisorDraftAction {
+  if (draft.payload.kind !== 'categorize_transaction') return draft;
+  if (draft.payload.category_id === categoryId) return draft;
+
+  const name = findCategoryName(categories, categoryId);
+  const previousName = findCategoryName(categories, draft.payload.category_id);
+
+  return {
+    ...draft,
+    // "Categorize FOO as Restaurants" -> "Categorize FOO as Gas"
+    label: name && previousName && draft.label.endsWith(` as ${previousName}`)
+      ? `${draft.label.slice(0, -` as ${previousName}`.length)} as ${name}`
+      : draft.label,
+    summary: name ? `${draft.summary} (you chose ${name})` : draft.summary,
+    payload: { ...draft.payload, category_id: categoryId },
+    changes: draft.changes.map((change) =>
+      change.field.toLowerCase().includes('category') && name ? { ...change, after: name } : change
+    ),
+  };
+}
+
 // A malformed date (e.g. from a hand-edited CSV import) makes date-fns `format` throw
 // RangeError, which — with no ErrorBoundary — used to blank the whole app. Degrade instead.
 function shortDate(value: string): string {
@@ -67,8 +109,12 @@ function ReviewPanel({
   uncategorizedTotal: number;
 }) {
   const [pickedCategory, setPickedCategory] = useState('');
-  const focus = items[0];
-  const rest = items.slice(1, 6);
+  // Only the focused card has action buttons, so the queued rows below it need to be selectable —
+  // otherwise you can only ever act on whatever happens to be first. Falls back to the head of the
+  // list when the selected item is resolved and disappears.
+  const [focusKey, setFocusKey] = useState<string | null>(null);
+  const focus = items.find((i) => i.key === focusKey) ?? items[0];
+  const rest = items.filter((i) => i.key !== focus?.key).slice(0, 5);
   const leaving = focus != null && leavingKey === focus.key;
 
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -129,12 +175,22 @@ function ReviewPanel({
           {rest.length > 0 && (
             <div className="mt-6 flex flex-col">
               {rest.map((item) => (
-                <div key={item.key} className="border-t border-line px-0.5 py-3">
+                <button
+                  key={item.key}
+                  type="button"
+                  onClick={() => setFocusKey(item.key)}
+                  className="group border-t border-line px-0.5 py-3 text-left transition-colors hover:bg-rail"
+                >
                   <div className="text-sm text-ink">
                     {item.kind} · {item.title}
                   </div>
-                  <div className="mt-0.5 text-xs text-muted-2">{item.sub}</div>
-                </div>
+                  <div className="mt-0.5 flex items-baseline justify-between gap-3 text-xs text-muted-2">
+                    <span className="truncate">{item.sub}</span>
+                    <span className="flex-shrink-0 text-muted-2 opacity-0 transition-opacity group-hover:opacity-100">
+                      Review →
+                    </span>
+                  </div>
+                </button>
               ))}
             </div>
           )}
@@ -270,6 +326,12 @@ export function ReviewInbox() {
 
     for (const draft of reviewSummary?.ai_drafts ?? []) {
       const key = `draft:${draft.id}`;
+      // A category suggestion gets a picker pre-filled with the AI's proposal, so a wrong guess
+      // can be corrected in place. Without it the only options were Confirm (accept a wrong
+      // category) or Dismiss (leave the transaction uncategorized) — neither of which is "fix it".
+      const proposed =
+        draft.payload.kind === 'categorize_transaction' ? draft.payload.category_id : undefined;
+      const isCategorize = proposed !== undefined;
       items.push({
         key,
         kind: 'Suggestion',
@@ -277,6 +339,14 @@ export function ReviewInbox() {
         sub: draft.summary,
         primaryLabel: 'Confirm',
         onPrimary: () => resolve(key, (restore) => confirmDraft.mutate(draft, { onError: restore })),
+        needsCategory: isCategorize,
+        defaultCategory: proposed,
+        onPickCategory: isCategorize
+          ? (categoryId) =>
+              resolve(key, (restore) =>
+                confirmDraft.mutate(withCategoryOverride(draft, categoryId, categories ?? []), { onError: restore })
+              )
+          : undefined,
         secondaryLabel: 'Dismiss',
         onSecondary: () => resolve(key, (restore) => dismissDraft.mutate(draft.id, { onError: restore })),
       });
