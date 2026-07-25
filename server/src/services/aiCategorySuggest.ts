@@ -1,4 +1,4 @@
-import Anthropic from '@anthropic-ai/sdk';
+import { getAnthropicClient } from './anthropicClient';
 import type Database from 'better-sqlite3';
 
 export interface CategorySuggestion {
@@ -15,12 +15,6 @@ const SUGGEST_MODEL = 'claude-haiku-4-5';
 // object per merchant, so an unbounded list would blow past max_tokens and truncate the JSON.
 export const MAX_SUGGEST_MERCHANTS = 60;
 
-function getClient(): Anthropic | null {
-  const apiKey = process.env.ANTHROPIC_API_KEY;
-  if (!apiKey) return null;
-  return new Anthropic({ apiKey });
-}
-
 /**
  * Proposes a category for each merchant label. Suggestions are advisory only — nothing is written;
  * the user applies them from the review worklist.
@@ -33,7 +27,7 @@ export async function suggestCategoriesForMerchants(
   db: Database.Database,
   merchants: string[]
 ): Promise<CategorySuggestion[]> {
-  const anthropic = getClient();
+  const anthropic = getAnthropicClient();
   if (!anthropic) return [];
 
   const unique = [...new Set(merchants.map((m) => m.trim()).filter(Boolean))].slice(0, MAX_SUGGEST_MERCHANTS);

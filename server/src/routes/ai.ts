@@ -1,6 +1,11 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import Anthropic from '@anthropic-ai/sdk';
 import { getDb } from '../db/index';
+import {
+  anthropicCredentialSource,
+  getAnthropicClient,
+  hasAnthropicCredentials,
+} from '../services/anthropicClient';
 import { buildAdvisorContextSnapshot, ADVISOR_SYSTEM_PROMPT, ADVISOR_PROFILE_PREFERENCE_KEY } from '../services/aiContext';
 import { getPreference, setPreference } from '../services/preferences';
 import {
@@ -26,9 +31,13 @@ import type { AdvisorConfirmRequest, ChatMessage } from '../../../shared/types';
 const router = Router();
 
 function getClient(): Anthropic {
-  const apiKey = process.env.ANTHROPIC_API_KEY;
-  if (!apiKey) throw new Error('ANTHROPIC_API_KEY is not set in your .env file');
-  return new Anthropic({ apiKey });
+  const client = getAnthropicClient();
+  if (!client) {
+    throw new Error(
+      'No Anthropic credentials found. Set ANTHROPIC_API_KEY in .env, or ANTHROPIC_AUTH_TOKEN, or sign in with `ant auth login`.'
+    );
+  }
+  return client;
 }
 
 // GET /api/ai/context - return the financial context snapshot (for the UI preview panel)
@@ -38,7 +47,8 @@ router.get('/context', (_req: Request, res: Response, next: NextFunction): void 
     res.json({
       data: {
         ...snapshot,
-        configured: Boolean(process.env.ANTHROPIC_API_KEY),
+        configured: hasAnthropicCredentials(),
+        credential_source: anthropicCredentialSource(),
       },
     });
   } catch (err) {
@@ -195,8 +205,8 @@ router.post('/suggest-categories', async (req: Request, res: Response, next: Nex
       return;
     }
     const merchants = raw.filter((m: unknown): m is string => typeof m === 'string');
-    if (!process.env.ANTHROPIC_API_KEY) {
-      res.status(503).json({ error: 'ANTHROPIC_API_KEY is not set — AI suggestions are unavailable' });
+    if (!hasAnthropicCredentials()) {
+      res.status(503).json({ error: 'No Anthropic credentials configured — AI suggestions are unavailable' });
       return;
     }
     res.json({ data: await suggestCategoriesForMerchants(getDb(), merchants) });

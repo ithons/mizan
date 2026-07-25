@@ -1,6 +1,7 @@
 import { v4 as uuidv4 } from 'uuid';
 import Anthropic from '@anthropic-ai/sdk';
 import { getDb } from '../db/index';
+import { getAnthropicClient } from './anthropicClient';
 import { buildFinancialContext } from './aiContext';
 import { getTransactionReviewSummary } from './transactionReview';
 import type { AdvisorDraftAction, AdvisorDraftPayload, AdvisorCitation, AdvisorDraftChange } from '../../../shared/types';
@@ -39,21 +40,15 @@ function draftTargetKey(payload: AdvisorDraftPayload): string {
   }
 }
 
-function getClient(): Anthropic | null {
-  const apiKey = process.env.ANTHROPIC_API_KEY;
-  if (!apiKey) return null;
-  return new Anthropic({ apiKey });
-}
-
 // Re-entrancy guard: the worker is fired via setTimeout after every sync, and it awaits a
 // slow LLM call, so two passes could otherwise overlap (rapid syncs) and double-apply or
 // race each other's draft supersession. Only one pass runs at a time.
 let workerRunning = false;
 
 export async function runBackgroundAiReview(): Promise<void> {
-  const anthropic = getClient();
+  const anthropic = getAnthropicClient();
   if (!anthropic) {
-    console.log('[ai-worker] Skipped: ANTHROPIC_API_KEY is not configured');
+    console.log('[ai-worker] Skipped: no Anthropic credentials configured (API key, auth token, or `ant auth login` profile).');
     return;
   }
   if (workerRunning) {
