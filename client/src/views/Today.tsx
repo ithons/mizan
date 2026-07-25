@@ -8,6 +8,7 @@ import { formatWholeCurrency } from '../lib/formatters';
 import { computeSafeToSpend } from '../lib/safeToSpend';
 import { useEasedValue } from '../lib/useEasedValue';
 import { useAppStore } from '../store';
+import { QueryErrorBanner } from '../components/QueryErrorBanner';
 import { Screen, BalanceScale, TextButton } from '../components/balance';
 
 function greeting(): string {
@@ -33,13 +34,33 @@ export function Today() {
   const addToast = useAppStore((s) => s.addToast);
   const currentMonth = format(new Date(), 'yyyy-MM');
 
-  const { data: snapshot } = useQuery({ queryKey: ['networth', 'snapshot'], queryFn: () => networthApi.snapshot(), retry: false });
-  const { data: history } = useQuery({ queryKey: ['networth', 'history', 1], queryFn: () => networthApi.history(1), retry: false });
-  const { data: reviewSummary } = useQuery({ queryKey: ['transactions', 'review'], queryFn: () => transactionsApi.review() });
-  const { data: forecast } = useQuery({ queryKey: ['recurring', 'forecast', 30], queryFn: () => recurringApi.forecast(30) });
-  const { data: budgets } = useQuery({ queryKey: ['budgets', currentMonth], queryFn: () => budgetsApi.getMonth(currentMonth) });
-  const { data: goals } = useQuery({ queryKey: ['goals'], queryFn: () => goalsApi.list() });
-  const { data: insights } = useQuery({ queryKey: ['insights'], queryFn: () => insightsApi.list() });
+  const snapshotQ = useQuery({ queryKey: ['networth', 'snapshot'], queryFn: () => networthApi.snapshot(), retry: false });
+  const historyQ = useQuery({ queryKey: ['networth', 'history', 1], queryFn: () => networthApi.history(1), retry: false });
+  const reviewQ = useQuery({ queryKey: ['transactions', 'review'], queryFn: () => transactionsApi.review() });
+  const forecastQ = useQuery({ queryKey: ['recurring', 'forecast', 30], queryFn: () => recurringApi.forecast(30) });
+  const budgetsQ = useQuery({ queryKey: ['budgets', currentMonth], queryFn: () => budgetsApi.getMonth(currentMonth) });
+  const goalsQ = useQuery({ queryKey: ['goals'], queryFn: () => goalsApi.list() });
+  const insightsQ = useQuery({ queryKey: ['insights'], queryFn: () => insightsApi.list() });
+
+  const snapshot = snapshotQ.data;
+  const history = historyQ.data;
+  const reviewSummary = reviewQ.data;
+  const forecast = forecastQ.data;
+  const budgets = budgetsQ.data;
+  const goals = goalsQ.data;
+  const insights = insightsQ.data;
+
+  // Without this every one of the failures below rendered as an empty state: "$0", "Nothing due",
+  // "All caught up" — a dead request and a quiet month looked identical.
+  const failableQueries = [
+    { query: snapshotQ, label: 'net worth' },
+    { query: historyQ, label: 'net worth history' },
+    { query: reviewQ, label: 'review queue' },
+    { query: forecastQ, label: 'upcoming bills' },
+    { query: budgetsQ, label: 'budgets' },
+    { query: goalsQ, label: 'goals' },
+    { query: insightsQ, label: 'insights' },
+  ];
 
   const netWorth = snapshot?.net_worth ?? 0;
   const totalAssets = snapshot?.total_assets ?? 0;
@@ -104,6 +125,8 @@ export function Today() {
           <span className="font-mono text-[11px] text-faint">⌘K</span>
         </button>
       </div>
+
+      <QueryErrorBanner items={failableQueries} className="mt-6" />
 
       {/* Greeting */}
       <div className="mt-7 flex-shrink-0">

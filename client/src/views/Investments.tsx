@@ -8,6 +8,7 @@ import { parseDecimalInput } from '../lib/numberInput';
 import { ALLOCATION_LENSES, getAllocationSlices, getCostBasisStats, type AllocationLens } from '../lib/investmentAnalytics';
 import { useAppStore } from '../store';
 import { Modal } from '../components/Modal';
+import { QueryErrorBanner } from '../components/QueryErrorBanner';
 import { Screen, SectionLabel, InkButton, TextButton, TrendChart } from '../components/balance';
 
 const RANGES = [
@@ -138,12 +139,22 @@ export function Investments() {
   const months = RANGES.find((r) => r.id === range)!.months;
   const startDate = months ? format(subMonths(new Date(), months), 'yyyy-MM-dd') : undefined;
 
-  const { data: holdings } = useQuery({ queryKey: ['holdings'], queryFn: () => investmentsApi.holdings() });
-  const { data: accounts } = useQuery({ queryKey: ['accounts'], queryFn: () => accountsApi.list() });
-  const { data: report } = useQuery({
+  const holdingsQ = useQuery({ queryKey: ['holdings'], queryFn: () => investmentsApi.holdings() });
+  const holdings = holdingsQ.data;
+  const accountsQ = useQuery({ queryKey: ['accounts'], queryFn: () => accountsApi.list() });
+  const accounts = accountsQ.data;
+  const reportQ = useQuery({
     queryKey: ['reports-investments', range],
     queryFn: () => reportsApi.investments(startDate ? { startDate } : undefined),
   });
+  const report = reportQ.data;
+
+  // A failed request used to render as an empty section, indistinguishable from no data.
+  const failableQueries = [
+    { query: holdingsQ, label: 'holdings' },
+    { query: accountsQ, label: 'accounts' },
+    { query: reportQ, label: 'investment report' },
+  ];
 
   const allHoldings = holdings ?? [];
   const holdingsValue = allHoldings.reduce((s, h) => s + h.institution_value, 0);
@@ -176,6 +187,7 @@ export function Investments() {
 
   return (
     <Screen size="wide">
+      <QueryErrorBanner items={failableQueries} className="mb-5" />
       <div className="mb-3 flex flex-shrink-0 items-end justify-between">
         <div>
           <h1 className="font-serif text-[27px] font-normal leading-tight text-ink">Investments</h1>

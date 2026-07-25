@@ -9,6 +9,7 @@ import { invalidateFinancialData } from '../lib/queryInvalidation';
 import { parseDecimalInput } from '../lib/numberInput';
 import { useAppStore } from '../store';
 import { Modal } from '../components/Modal';
+import { QueryErrorBanner } from '../components/QueryErrorBanner';
 import { Screen, ScreenHeader, SectionLabel, ProgressBar, healthTone, InkButton, TextButton, CategoryPicker } from '../components/balance';
 
 function BudgetModal({
@@ -237,9 +238,19 @@ export function Budget() {
   const [groupModalOpen, setGroupModalOpen] = useState(false);
   const [editingGroup, setEditingGroup] = useState<BudgetGroup | null>(null);
 
-  const { data: budgets } = useQuery({ queryKey: ['budgets', month], queryFn: () => budgetsApi.getMonth(month) });
-  const { data: groups } = useQuery({ queryKey: ['budgets', 'groups', month], queryFn: () => budgetsApi.groups(month) });
-  const { data: categories } = useQuery({ queryKey: ['categories'], queryFn: () => categoriesApi.list() });
+  const budgetsQ = useQuery({ queryKey: ['budgets', month], queryFn: () => budgetsApi.getMonth(month) });
+  const budgets = budgetsQ.data;
+  const groupsQ = useQuery({ queryKey: ['budgets', 'groups', month], queryFn: () => budgetsApi.groups(month) });
+  const groups = groupsQ.data;
+  const categoriesQ = useQuery({ queryKey: ['categories'], queryFn: () => categoriesApi.list() });
+  const categories = categoriesQ.data;
+
+  // A failed request used to render as an empty section, indistinguishable from no data.
+  const failableQueries = [
+    { query: budgetsQ, label: 'budgets' },
+    { query: groupsQ, label: 'budget groups' },
+    { query: categoriesQ, label: 'categories' },
+  ];
 
   const allBudgets = budgets ?? [];
   const totalBudgeted = allBudgets.reduce((s, b) => s + availableBudgetAmount(b), 0);
@@ -325,6 +336,7 @@ export function Budget() {
         }
         className="mb-6"
       />
+      <QueryErrorBanner items={failableQueries} className="mb-5" />
 
       <div className="flex-1">
         {grouped.map((section) => (

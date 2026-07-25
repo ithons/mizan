@@ -10,6 +10,7 @@ import { parseDecimalInput } from '../lib/numberInput';
 import { useAppStore } from '../store';
 import { Modal } from '../components/Modal';
 import { SkeletonRows } from '../components/SkeletonLoader';
+import { QueryErrorBanner } from '../components/QueryErrorBanner';
 import { Screen, ScreenHeader, CategoryPill, InkButton, Select, TextButton, CategoryPicker } from '../components/balance';
 
 // ─── Date-range presets ───────────────────────────────────────────────────────
@@ -304,21 +305,28 @@ export function Transactions() {
     [range, debouncedSearch, accountFilter, categoryFilter, reviewOnly]
   );
 
-  const {
-    data: pages,
-    isLoading,
-    hasNextPage,
-    isFetchingNextPage,
-    fetchNextPage,
-  } = useInfiniteQuery({
+  const pagesQ = useInfiniteQuery({
     queryKey: ['transactions', filters],
     queryFn: ({ pageParam }) => transactionsApi.list({ ...filters, page: pageParam }),
     initialPageParam: 1,
     getNextPageParam: (last) => (last.page * last.limit < last.total ? last.page + 1 : undefined),
   });
-  const { data: reviewSummary } = useQuery({ queryKey: ['transactions', 'review'], queryFn: () => transactionsApi.review() });
-  const { data: accounts } = useQuery({ queryKey: ['accounts'], queryFn: () => accountsApi.list() });
-  const { data: categories } = useQuery({ queryKey: ['categories'], queryFn: () => categoriesApi.list() });
+  const { data: pages, isLoading, hasNextPage, isFetchingNextPage, fetchNextPage } = pagesQ;
+
+  const reviewQ = useQuery({ queryKey: ['transactions', 'review'], queryFn: () => transactionsApi.review() });
+  const accountsQ = useQuery({ queryKey: ['accounts'], queryFn: () => accountsApi.list() });
+  const categoriesQ = useQuery({ queryKey: ['categories'], queryFn: () => categoriesApi.list() });
+  const reviewSummary = reviewQ.data;
+  const accounts = accountsQ.data;
+  const categories = categoriesQ.data;
+
+  // A failed request used to render as an empty list, indistinguishable from no matches.
+  const failableQueries = [
+    { query: pagesQ, label: 'transactions' },
+    { query: reviewQ, label: 'review counts' },
+    { query: accountsQ, label: 'accounts' },
+    { query: categoriesQ, label: 'categories' },
+  ];
 
   const transactions = useMemo(() => pages?.pages.flatMap((p) => p.data) ?? [], [pages]);
   const totalCount = pages?.pages[0]?.total ?? 0;
@@ -374,6 +382,7 @@ export function Transactions() {
         }
         className="mb-6"
       />
+      <QueryErrorBanner items={failableQueries} className="mb-5" />
 
       {/* Controls row */}
       <div className="mb-6 flex flex-shrink-0 flex-wrap items-center gap-5">

@@ -3,6 +3,7 @@ import { useQuery } from '@tanstack/react-query';
 import { format, parseISO, startOfMonth, subMonths } from 'date-fns';
 import { reportsApi } from '../lib/api';
 import { formatWholeCurrency } from '../lib/formatters';
+import { QueryErrorBanner } from '../components/QueryErrorBanner';
 import { Screen, ScreenHeader, SectionLabel, ProgressBar } from '../components/balance';
 
 const RANGES = [
@@ -24,14 +25,22 @@ export function CashFlow() {
   const startDate = format(startOfMonth(subMonths(new Date(), months - 1)), 'yyyy-MM-dd');
   const endDate = format(new Date(), 'yyyy-MM-dd');
 
-  const { data: cashflow } = useQuery({
+  const cashflowQ = useQuery({
     queryKey: ['cashflow', startDate, endDate],
     queryFn: () => reportsApi.cashflow({ startDate, endDate }),
   });
-  const { data: spending } = useQuery({
+  const cashflow = cashflowQ.data;
+  const spendingQ = useQuery({
     queryKey: ['spending', currentMonth],
     queryFn: () => reportsApi.spending({ month: currentMonth }),
   });
+  const spending = spendingQ.data;
+
+  // A failed request used to render as an empty section, indistinguishable from no data.
+  const failableQueries = [
+    { query: cashflowQ, label: 'cash flow' },
+    { query: spendingQ, label: 'spending' },
+  ];
 
   const series = cashflow?.months ?? [];
   const income = series.reduce((s, m) => s + m.income, 0);
@@ -76,6 +85,7 @@ export function CashFlow() {
         ))}
         className="mb-6"
       />
+      <QueryErrorBanner items={failableQueries} className="mb-5" />
 
       {/* 3-up summary for the selected period */}
       <div className="mb-6 grid flex-shrink-0 grid-cols-3 gap-3 lg:gap-4">

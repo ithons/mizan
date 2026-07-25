@@ -8,6 +8,7 @@ import { formatCurrency, formatWholeCurrency } from '../lib/formatters';
 import { parseDecimalInput } from '../lib/numberInput';
 import { useAppStore } from '../store';
 import { Modal } from '../components/Modal';
+import { QueryErrorBanner } from '../components/QueryErrorBanner';
 import { Screen, ScreenHeader, SectionLabel, InkButton, TextButton, CategoryPicker } from '../components/balance';
 
 const FREQUENCY_OPTIONS: Array<RecurringPattern['frequency']> = ['weekly', 'biweekly', 'monthly', 'quarterly', 'annual'];
@@ -137,9 +138,19 @@ export function Bills() {
   const [showIncome, setShowIncome] = useState(false);
   const [showAdd, setShowAdd] = useState(false);
 
-  const { data: forecast } = useQuery({ queryKey: ['recurring', 'forecast', 30], queryFn: () => recurringApi.forecast(30) });
-  const { data: patterns } = useQuery({ queryKey: ['recurring'], queryFn: () => recurringApi.list() });
-  const { data: categories } = useQuery({ queryKey: ['categories'], queryFn: () => categoriesApi.list() });
+  const forecastQ = useQuery({ queryKey: ['recurring', 'forecast', 30], queryFn: () => recurringApi.forecast(30) });
+  const forecast = forecastQ.data;
+  const patternsQ = useQuery({ queryKey: ['recurring'], queryFn: () => recurringApi.list() });
+  const patterns = patternsQ.data;
+  const categoriesQ = useQuery({ queryKey: ['categories'], queryFn: () => categoriesApi.list() });
+  const categories = categoriesQ.data;
+
+  // A failed request used to render as an empty section, indistinguishable from no data.
+  const failableQueries = [
+    { query: forecastQ, label: 'upcoming bills' },
+    { query: patternsQ, label: 'recurring items' },
+    { query: categoriesQ, label: 'categories' },
+  ];
 
   const bills = useMemo(() => (patterns ?? []).filter(isBillPattern), [patterns]);
   const monthlyTotal = bills.reduce((s, p) => s + monthlyAmount(p), 0);
@@ -194,6 +205,7 @@ export function Bills() {
         actions={<InkButton onClick={() => setShowAdd(true)}>+ Add bill</InkButton>}
         className="mb-6"
       />
+      <QueryErrorBanner items={failableQueries} className="mb-5" />
 
       <div className="flex min-h-0 flex-1 flex-col gap-10 lg:flex-row lg:gap-12">
         {/* Upcoming list */}

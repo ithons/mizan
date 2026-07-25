@@ -9,6 +9,7 @@ import { invalidateFinancialData } from '../lib/queryInvalidation';
 import { parseDecimalInput } from '../lib/numberInput';
 import { useAppStore } from '../store';
 import { Modal } from '../components/Modal';
+import { QueryErrorBanner } from '../components/QueryErrorBanner';
 import { Screen, ScreenHeader, ProgressBar, InkButton, TextButton } from '../components/balance';
 
 function goalNote(goal: Goal, insight?: GoalForecastInsight): string {
@@ -167,8 +168,16 @@ export function Goals() {
   const [editing, setEditing] = useState<Goal | null>(null);
   const [showArchived, setShowArchived] = useState(false);
 
-  const { data: goals } = useQuery({ queryKey: ['goals', 'all'], queryFn: () => goalsApi.list({ includeArchived: true }) });
-  const { data: forecast } = useQuery({ queryKey: ['recurring', 'forecast', 30], queryFn: () => recurringApi.forecast(30) });
+  const goalsQ = useQuery({ queryKey: ['goals', 'all'], queryFn: () => goalsApi.list({ includeArchived: true }) });
+  const goals = goalsQ.data;
+  const forecastQ = useQuery({ queryKey: ['recurring', 'forecast', 30], queryFn: () => recurringApi.forecast(30) });
+  const forecast = forecastQ.data;
+
+  // A failed request used to render as an empty section, indistinguishable from no data.
+  const failableQueries = [
+    { query: goalsQ, label: 'goals' },
+    { query: forecastQ, label: 'recurring forecast' },
+  ];
 
   const restore = useMutation({
     mutationFn: (goal: Goal) => goalsApi.update(goal.id, { is_archived: false }),
@@ -219,6 +228,7 @@ export function Goals() {
         }
         className="mb-8"
       />
+      <QueryErrorBanner items={failableQueries} className="mb-5" />
 
       <div className="grid flex-1 content-start gap-x-12 gap-y-5 md:grid-cols-2">
         {active.map((g) => {
