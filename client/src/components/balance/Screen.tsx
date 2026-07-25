@@ -43,7 +43,14 @@ export function ScreenHeader({ title, sub, actions, className = '' }: ScreenHead
         <h1 className="font-serif text-[27px] font-normal leading-tight text-ink">{title}</h1>
         {sub && <div className="mt-1 text-[13.5px] text-muted">{sub}</div>}
       </div>
-      {actions && <div className="flex items-baseline gap-6 text-[13.5px]">{actions}</div>}
+      {/* Wrap as a group, never mid-label: at phone widths a non-wrapping row squeezed the actions
+          until "+ New group" broke across two lines. `whitespace-nowrap` keeps each action intact
+          and lets the row reflow instead. */}
+      {actions && (
+        <div className="flex flex-wrap items-baseline gap-x-6 gap-y-2 whitespace-nowrap text-[13.5px]">
+          {actions}
+        </div>
+      )}
     </div>
   );
 }
