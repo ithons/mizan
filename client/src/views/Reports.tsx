@@ -176,7 +176,7 @@ export function Reports() {
     .sort((a, b) => b.sum - a.sum)
     .slice(0, 6);
 
-  const trendPoints = (history ?? []).map((s) => ({ date: s.date, value: s.net_worth }));
+  const trendPoints = (history ?? []).map((s) => ({ date: s.date, value: s.net_worth, estimated: Boolean(s.is_estimated) }));
   const cashflowMax = Math.max(1, ...(cashflow?.months ?? []).flatMap((m) => [m.income, m.expenses]));
   // Show every category (previously capped at 8 with no way to see the rest — the user could not
   // see their own spending breakdown, including the Uncategorized bucket).

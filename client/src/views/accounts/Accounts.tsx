@@ -74,7 +74,7 @@ export function Accounts() {
     retry: false,
   });
   const netWorthHistory = useMemo(
-    () => (snapshots ?? []).map((s) => ({ date: s.date, value: s.net_worth })),
+    () => (snapshots ?? []).map((s) => ({ date: s.date, value: s.net_worth, estimated: Boolean(s.is_estimated) })),
     [snapshots]
   );
   const { data: syncHealth } = useQuery({ queryKey: ['sync', 'health'], queryFn: () => syncApi.health(), retry: false });

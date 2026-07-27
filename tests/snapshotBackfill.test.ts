@@ -3,12 +3,23 @@ import assert from 'node:assert/strict';
 import Database from 'better-sqlite3';
 import { format, startOfMonth, subMonths } from 'date-fns';
 import { _setDbForTesting, closeDb } from '../server/src/db/index';
-import { backfillSnapshots, takeSnapshot } from '../server/src/services/snapshot';
+import { backfillSnapshots, estimateFloorMonth, takeSnapshot } from '../server/src/services/snapshot';
 
 // backfillSnapshots estimates historical net worth by reversing later transactions off the
 // current balances. Liability balances are stored as positive "amount owed" and move opposite
 // the transaction sign (a purchase is a negative amount but raises what's owed), so they must
 // be reversed in the opposite direction from asset balances. This guards that split.
+
+// Reverse-replay only runs for months the ledger actually reaches back to (see
+// estimateFloorMonth): otherwise "undo every later transaction off today's balance" just
+// restates today's balance under a past date. These fixtures test the DIRECTION of the
+// reversal, and use "last month" only as a convenient target, so each one needs an anchor
+// transaction old enough to establish coverage. The anchor is dated before the target month,
+// so it is never among the transactions being reversed and never perturbs the arithmetic.
+function anchorCoverage(db: Database.Database, accountId: string): void {
+  db.prepare('INSERT INTO transactions (id,account_id,date,amount,pending) VALUES (?,?,?,?,?)')
+    .run(`anchor_${accountId}`, accountId, format(subMonths(new Date(), 4), 'yyyy-MM-dd'), 0, 0);
+}
 
 function setupDb(): Database.Database {
   const db = new Database(':memory:');
@@ -62,6 +73,8 @@ test('backfillSnapshots reverses liability purchases in the correct direction', 
     // Current state: checking holds $1000, card owes $500 (positive "amount owed").
     db.prepare('INSERT INTO accounts VALUES (?,?,?,?,?)').run('acc_check', 100000, 0, 0, 'checking');
     db.prepare('INSERT INTO accounts VALUES (?,?,?,?,?)').run('acc_card', 50000, 1, 0, 'credit');
+    anchorCoverage(db, 'acc_check');
+    anchorCoverage(db, 'acc_card');
 
     // Two transactions dated today (after every backfilled month):
     //  - a $200 expense on checking (negative), and
@@ -98,6 +111,7 @@ test('backfillSnapshots reverses only contributions for market-driven accounts',
     // sell (internal reshuffle), and a $5 dividend. Only the contribution should move the
     // estimated past value; reversing the buy/sell/dividend would be market-blind nonsense.
     db.prepare('INSERT INTO accounts VALUES (?,?,?,?,?)').run('acc_inv', 200000, 0, 0, 'brokerage');
+    anchorCoverage(db, 'acc_inv');
     const today = format(new Date(), 'yyyy-MM-dd');
     const ins = db.prepare('INSERT INTO transactions (id,account_id,date,amount,pending,category_id) VALUES (?,?,?,?,?,?)');
     ins.run('t_contrib', 'acc_inv', today, -10000, 0, 'cat_inv_buy');   // $100 new money in
@@ -128,6 +142,11 @@ test('backfillSnapshots clamps a spend-only card liability at zero instead of go
     // Card is paid off today ($0 owed). We have only its purchases (a spend-only import),
     // no payments — reversing purchases alone would drive "owed" to −$500 (a phantom asset).
     db.prepare('INSERT INTO accounts VALUES (?,?,?,?,?)').run('acc_card', 0, 1, 0, 'credit');
+    // A zero-balance account has nothing to reconstruct, so it never establishes coverage on
+    // its own. A funded checking account alongside it puts the month in range.
+    db.prepare('INSERT INTO accounts VALUES (?,?,?,?,?)').run('acc_check', 100000, 0, 0, 'checking');
+    anchorCoverage(db, 'acc_card');
+    anchorCoverage(db, 'acc_check');
     const today = format(new Date(), 'yyyy-MM-dd');
     db.prepare('INSERT INTO transactions (id,account_id,date,amount,pending) VALUES (?,?,?,?,?)')
       .run('t_buy', 'acc_card', today, -50000, 0);
@@ -205,6 +224,7 @@ test('backfillSnapshots nets a Coinbase convert to zero (matched crypto buy + se
     // buy leg, no external money). The estimate for before the convert must be unchanged ($500),
     // not $400 (the old bug that reversed only the buy leg).
     db.prepare('INSERT INTO accounts VALUES (?,?,?,?,?)').run('cb', 50000, 0, 0, 'crypto_wallet');
+    anchorCoverage(db, 'cb');
     const today = format(new Date(), 'yyyy-MM-dd');
     const ins = db.prepare('INSERT INTO transactions (id,account_id,date,amount,pending,category_id) VALUES (?,?,?,?,?,?)');
     ins.run('t_sell', 'cb', today, 10000, 0, 'cat_crypto_sell');  // +$100 (coin out)
@@ -220,5 +240,93 @@ test('backfillSnapshots nets a Coinbase convert to zero (matched crypto buy + se
     assert.equal(snap.total_assets, 50000);
   } finally {
     db.close();
+  }
+});
+
+// ── Coverage gate ────────────────────────────────────────────────────────────
+// Reverse-replay produces a number for any month you ask for, but past the end of the ledger
+// that number is just today's balance restated. On real data this manufactured 20 consecutive
+// months with identical breakdowns, rendered on the same line as measured snapshots.
+
+test('estimateFloorMonth is bounded by the account whose history starts latest', () => {
+  const floor = estimateFloorMonth(
+    [
+      { id: 'old', current_balance: 100000 },
+      { id: 'new', current_balance: 50000 },
+    ],
+    new Map([
+      ['old', '2024-03-15'],
+      ['new', '2026-03-10'],
+    ])
+  );
+  // 'new' only has history back to March 2026, so nothing before that is reconstructable for
+  // the portfolio as a whole, however deep 'old' happens to go.
+  assert.equal(floor, '2026-03-01');
+});
+
+test('estimateFloorMonth ignores accounts with nothing to reconstruct', () => {
+  const floor = estimateFloorMonth(
+    [
+      { id: 'funded', current_balance: 100000 },
+      { id: 'static', current_balance: 38000 },  // manual cash: no transactions, never moves
+      { id: 'emptied', current_balance: 0 },     // closed/paid off: no value to reconstruct
+    ],
+    new Map([
+      ['funded', '2024-03-15'],
+      ['emptied', '2026-07-01'],
+    ])
+  );
+  assert.equal(floor, '2024-03-01');
+});
+
+test('estimateFloorMonth returns null when nothing that holds value has any history', () => {
+  assert.equal(estimateFloorMonth([{ id: 'cash', current_balance: 38000 }], new Map()), null);
+});
+
+test('backfillSnapshots emits nothing for months the ledger does not reach', () => {
+  const db = setupDb();
+  _setDbForTesting(db);
+  try {
+    db.prepare('INSERT INTO accounts VALUES (?,?,?,?,?)').run('acc_check', 100000, 0, 0, 'checking');
+    // History starts 3 months ago. Anything older than that is unknowable.
+    db.prepare('INSERT INTO transactions (id,account_id,date,amount,pending) VALUES (?,?,?,?,?)')
+      .run('t1', 'acc_check', format(subMonths(new Date(), 3), 'yyyy-MM-dd'), -5000, 0);
+
+    backfillSnapshots();
+
+    const inRange = format(startOfMonth(subMonths(new Date(), 2)), 'yyyy-MM-dd');
+    const outOfRange = format(startOfMonth(subMonths(new Date(), 6)), 'yyyy-MM-dd');
+    assert.ok(
+      db.prepare('SELECT id FROM net_worth_snapshots WHERE date = ?').get(inRange),
+      'a month inside the covered window is still estimated'
+    );
+    assert.equal(
+      db.prepare('SELECT id FROM net_worth_snapshots WHERE date = ?').get(outOfRange),
+      undefined,
+      'a month older than the ledger must produce no snapshot at all'
+    );
+  } finally {
+    _setDbForTesting(undefined as unknown as Database.Database);
+    db.close();
+    void closeDb;
+  }
+});
+
+test('backfillSnapshots writes nothing when no funded account has any history', () => {
+  const db = setupDb();
+  _setDbForTesting(db);
+  try {
+    // A manual cash account with a balance and no transactions ever. Every "estimate" here
+    // would be $380 copied backwards forever, which is what the old code produced.
+    db.prepare('INSERT INTO accounts VALUES (?,?,?,?,?)').run('wallet', 38000, 0, 0, 'cash');
+
+    backfillSnapshots();
+
+    const count = db.prepare('SELECT COUNT(*) AS n FROM net_worth_snapshots').get() as { n: number };
+    assert.equal(count.n, 0);
+  } finally {
+    _setDbForTesting(undefined as unknown as Database.Database);
+    db.close();
+    void closeDb;
   }
 });

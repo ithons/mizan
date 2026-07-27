@@ -3,11 +3,46 @@ import { format, subMonths, startOfMonth, differenceInCalendarMonths } from 'dat
 import type Database from 'better-sqlite3';
 import { getDb } from '../db/index';
 
-// How far back reverse-replay estimation may run. 12 is the historical floor (keep the
-// chart at least a year even with little data); the upper bound is a 50-year backstop so
-// a stray ancient transaction can't spin the loop for an absurd number of months.
-const MIN_BACKFILL_MONTHS = 12;
+// Upper bound on reverse-replay estimation: a 50-year backstop so a stray ancient
+// transaction can't spin the loop for an absurd number of months. There is deliberately no
+// MINIMUM. There used to be one (12 months, "keep the chart at least a year even with little
+// data"), and it manufactured exactly the kind of number this app should never show: see
+// estimateFloorMonth below.
 const MAX_BACKFILL_MONTHS = 600;
+
+/**
+ * The earliest month reverse-replay can say anything real about.
+ *
+ * Estimation works by taking today's balance and undoing every transaction since. That only
+ * carries information for as far back as the ledger actually reaches. Past that point the
+ * arithmetic still runs and still produces a number, but the number is just today's balance
+ * again: not an estimate of the past, an assertion that nothing ever changed.
+ *
+ * On real data that produced 20 consecutive months with byte-identical breakdowns, drawn on
+ * the same chart line as measured snapshots with nothing to distinguish them.
+ *
+ * An account is exempt when it has no transactions at all (a manual cash account, say): its
+ * balance is static as far as the ledger knows, so carrying it back adds no false movement.
+ * An account sitting at zero today is exempt too, since there is no value to reconstruct.
+ * Everything else has to have history reaching back to the month, or the month is unknowable
+ * and we emit nothing for it.
+ */
+export function estimateFloorMonth(
+  accounts: Array<{ id: string; current_balance: number }>,
+  firstTransactionByAccount: Map<string, string>
+): string | null {
+  let floor: string | null = null;
+
+  for (const account of accounts) {
+    if (account.current_balance === 0) continue;
+    const firstSeen = firstTransactionByAccount.get(account.id);
+    if (!firstSeen) continue;
+    if (!floor || firstSeen > floor) floor = firstSeen;
+  }
+
+  if (!floor) return null;
+  return format(startOfMonth(new Date(`${floor}T00:00:00`)), 'yyyy-MM-dd');
+}
 
 export function takeSnapshot(): void {
   const db = getDb();
@@ -123,10 +158,10 @@ export function backfillSnapshots(): void {
   }>;
 
   // Reach back to the month of the oldest transaction (clamped), so imported history
-  // actually produces net-worth points instead of stopping at a 12-month wall.
+  // actually produces net-worth points instead of stopping at a fixed wall.
   const earliestDate = transactions.length ? transactions[0].date : format(now, 'yyyy-MM-dd');
   const monthsOfHistory = differenceInCalendarMonths(now, startOfMonth(new Date(`${earliestDate}T00:00:00`)));
-  const monthsBackLimit = Math.min(Math.max(monthsOfHistory, MIN_BACKFILL_MONTHS), MAX_BACKFILL_MONTHS);
+  const monthsBackLimit = Math.min(Math.max(monthsOfHistory, 0), MAX_BACKFILL_MONTHS);
 
   // Current balances as the starting point (today's balances)
   const accounts = db.prepare(`
@@ -140,6 +175,19 @@ export function backfillSnapshots(): void {
     is_hidden: number;
     type: string;
   }>;
+
+  // transactions is ordered by date ASC, so the first row seen per account is its earliest.
+  const firstTransactionByAccount = new Map<string, string>();
+  for (const txn of transactions) {
+    if (!firstTransactionByAccount.has(txn.account_id)) {
+      firstTransactionByAccount.set(txn.account_id, txn.date);
+    }
+  }
+
+  const coverageFloor = estimateFloorMonth(accounts, firstTransactionByAccount);
+  // Nothing that holds value today has any ledger history: every "estimate" would be a copy
+  // of today's balances wearing a past date.
+  if (!coverageFloor) return;
 
   const balances: Record<string, number> = {};
   for (const account of accounts) {
@@ -172,6 +220,9 @@ export function backfillSnapshots(): void {
   for (let monthsBack = 1; monthsBack <= monthsBackLimit; monthsBack++) {
     const targetDate = startOfMonth(subMonths(now, monthsBack));
     const targetStr = format(targetDate, 'yyyy-MM-dd');
+
+    // Walking backwards, so the first month past the coverage floor ends the run.
+    if (targetStr < coverageFloor) break;
 
     // Check if snapshot already exists for this month
     const existing = db.prepare(
