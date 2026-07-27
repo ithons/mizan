@@ -21,6 +21,7 @@ import {
   confirmAdvisorDraftsByIds,
   dismissAdvisorDraft,
   listAdvisorActions,
+  undoAdvisorAction,
 } from '../services/advisorDrafts';
 import { analyzeAdvisorQuestion } from '../services/advisorTools';
 import { ADVISOR_TOOLS, runAdvisorTool } from '../services/advisorChatTools';
@@ -137,6 +138,28 @@ router.delete('/conversations/:id', (req: Request, res: Response, next: NextFunc
 router.get('/actions', (_req: Request, res: Response, next: NextFunction): void => {
   try {
     res.json({ data: listAdvisorActions(getDb()) });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// POST /api/ai/actions/:id/undo - reverse every categorization an AI action made.
+// Each affected row carries the action id and the category it displaced, so this restores the
+// exact prior state. Rows the user has edited by hand since are skipped (a manual edit clears
+// category_action_id), and any merchant rule the action created is left alone.
+router.post('/actions/:id/undo', (req: Request, res: Response, next: NextFunction): void => {
+  try {
+    const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+    const result = undoAdvisorAction(getDb(), id);
+    if (!result.ok) {
+      res.status(result.reason === 'not_found' ? 404 : 409).json({
+        error: result.reason === 'not_found'
+          ? 'Action not found'
+          : 'Nothing left to undo: those rows have since been changed by hand.',
+      });
+      return;
+    }
+    res.json({ data: result });
   } catch (err) {
     next(err);
   }
@@ -385,7 +408,10 @@ router.post('/chat', async (req: Request, res: Response, next: NextFunction): Pr
       uncachedInputTokens += message.usage.input_tokens;
       if (message.stop_reason !== 'tool_use') break;
 
-      // Run every requested tool (all strictly read-only) and feed the results back.
+      // Run every requested tool and feed the results back. Most are pure SELECTs; two
+      // (categorize_transactions, create_merchant_rule) write, scoped to the autonomous domain
+      // and routed through confirmAdvisorDraft so each one lands in the audit trail and is
+      // undoable by action id. Model-authored SQL still runs on the read-only connection only.
       const toolResults: Anthropic.ToolResultBlockParam[] = [];
       for (const block of message.content) {
         if (block.type === 'tool_use') {

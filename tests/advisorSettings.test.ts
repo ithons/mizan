@@ -4,11 +4,13 @@ import Database from 'better-sqlite3';
 import {
   getAdvisorSettings,
   updateAdvisorSettings,
-  getEnabledContextSections,
   DEFAULT_ADVISOR_MODEL,
   DEFAULT_ADVISOR_EFFORT,
-  ADVISOR_CONTEXT_SECTIONS,
 } from '../server/src/services/advisorSettings';
+
+// The per-section context allowlist is gone. It existed to limit how much of the financial
+// snapshot reached the model, and it defaulted to sending a subset, so its only effect was a
+// worse answer. The snapshot is always complete now; model and effort remain configurable.
 
 function freshDb(): Database.Database {
   const db = new Database(':memory:');
@@ -23,13 +25,11 @@ function freshDb(): Database.Database {
   return db;
 }
 
-test('defaults when nothing is stored: default model/effort, all sections on', () => {
+test('defaults when nothing is stored', () => {
   const db = freshDb();
   const s = getAdvisorSettings(db);
   assert.equal(s.model, DEFAULT_ADVISOR_MODEL);
   assert.equal(s.effort, DEFAULT_ADVISOR_EFFORT);
-  assert.equal(s.context_sections.length, ADVISOR_CONTEXT_SECTIONS.length);
-  assert.equal(getEnabledContextSections(db).size, ADVISOR_CONTEXT_SECTIONS.length);
 });
 
 test('valid updates persist and round-trip', () => {
@@ -49,25 +49,8 @@ test('REJECTS an off-whitelist model (the security boundary) and does not persis
   assert.equal(getAdvisorSettings(db).model, DEFAULT_ADVISOR_MODEL);
 });
 
-test('REJECTS an invalid effort and an invalid section id', () => {
+test('REJECTS an invalid effort', () => {
   const db = freshDb();
   assert.equal(updateAdvisorSettings(db, { effort: 'max' }).ok, false);
-  assert.equal(updateAdvisorSettings(db, { context_sections: ['not_a_section'] }).ok, false);
-});
-
-test('context_sections can be narrowed, and getEnabledContextSections reflects it', () => {
-  const db = freshDb();
-  const r = updateAdvisorSettings(db, { context_sections: ['goals', 'investments'] });
-  assert.ok(r.ok);
-  const enabled = getEnabledContextSections(db);
-  assert.equal(enabled.size, 2);
-  assert.ok(enabled.has('goals'));
-  assert.ok(!enabled.has('recent_transactions'));
-});
-
-test('an empty context_sections array means "none on" (distinct from unset = all on)', () => {
-  const db = freshDb();
-  const r = updateAdvisorSettings(db, { context_sections: [] });
-  assert.ok(r.ok);
-  assert.equal(getEnabledContextSections(db).size, 0);
+  assert.equal(getAdvisorSettings(db).effort, DEFAULT_ADVISOR_EFFORT);
 });

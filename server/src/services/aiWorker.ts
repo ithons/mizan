@@ -1,23 +1,18 @@
 import { v4 as uuidv4 } from 'uuid';
-import Anthropic from '@anthropic-ai/sdk';
 import { getDb } from '../db/index';
 import { getAnthropicClient } from './anthropicClient';
 import { buildFinancialContext } from './aiContext';
 import { getTransactionReviewSummary } from './transactionReview';
 import type { AdvisorDraftAction, AdvisorDraftPayload, AdvisorCitation, AdvisorDraftChange } from '../../../shared/types';
 import { buildRecurringForecast } from './recurringForecast';
-import { getPreference } from './preferences';
-import { confirmAdvisorDraft } from './advisorDrafts';
+import { confirmAdvisorDraft, isAutonomousDraftKind } from './advisorDrafts';
 import { toDollars } from './money';
 import { AiWorkerDraftSchema } from '../../../shared/schemas';
 
-// categorize_transaction / create_merchant_rule drafts at or above this confidence
-// auto-apply without a manual review step; anything lower stays in the normal
-// 'open' review queue. Gated by the Settings toggle (preference below); defaults
-// on because that was the behavior before the toggle existed.
-const AUTO_APPLY_CONFIDENCE_THRESHOLD = 0.9;
-const AUTO_APPLIABLE_KINDS = new Set(['categorize_transaction', 'create_merchant_rule']);
-export const AUTO_APPLY_PREFERENCE_KEY = 'advisor_auto_apply_high_confidence';
+// Which drafts apply unattended is decided by AUTONOMOUS_DRAFT_KINDS (advisorDrafts.ts): a
+// domain boundary the owner set, not a confidence score the model reported about itself.
+// Categorization and merchant rules apply on arrival; everything that changes a target the
+// owner set waits in the review queue.
 
 // Stable identity for the entity a draft acts on. Two drafts with the same key are
 // two suggestions about the same thing, so a fresh pass supersedes the old one; a
@@ -111,7 +106,7 @@ Allowed 'kind' values: 'categorize_transaction', 'create_merchant_rule', 'create
 
 For a 'categorize_transaction' draft, "payload.transaction_id" MUST be copied exactly from the "id" field of one of the transactions listed under "Uncategorized transactions" below, and "payload.category_id" MUST be copied exactly from the "id" field of one of the categories listed under "Valid categories" below. Never invent a transaction id or use a category's display name in place of its id — an id that doesn't match exactly will silently fail to apply.
 
-For 'categorize_transaction' and 'create_merchant_rule' drafts only, also include a top-level "confidence" field (a number from 0 to 1) reflecting how certain you are the category is correct given the merchant name and transaction history. Only use confidence >= 0.9 when the merchant is unambiguous (e.g. a well-known chain with a single obvious category); use a lower value whenever the merchant name is generic, ambiguous, or you're guessing. High-confidence drafts of these two kinds are applied automatically without human review, so err toward a lower score when unsure. 'create_merchant_rule' payloads must include "apply_existing": true.
+'categorize_transaction' and 'create_merchant_rule' drafts are APPLIED IMMEDIATELY, with no human review. Every other kind waits for the user to confirm it. Categorization is reversible in one click and every row records that you set it, so prefer acting to hedging: a wrong category is cheap and visible. If a merchant is genuinely ambiguous, leave it uncategorized rather than guessing, because a wrong rule keeps applying itself to future transactions. 'create_merchant_rule' payloads must include "apply_existing": true.
 
 Your context is:
 ${context}
@@ -140,7 +135,6 @@ Example JSON format for each kind you're likely to use:
     "summary": "Trupanion (-$39.02) is pet insurance.",
     "route": "/transactions",
     "payload": { "kind": "categorize_transaction", "transaction_id": "<id copied from the list above>", "category_id": "<id copied from the list above>" },
-    "confidence": 0.95,
     "changes": [{ "field": "category", "before": "Uncategorized", "after": "Health" }],
     "citations": []
   },
@@ -150,7 +144,6 @@ Example JSON format for each kind you're likely to use:
     "summary": "Auto-categorize future Trupanion charges as Health.",
     "route": "/transactions",
     "payload": { "kind": "create_merchant_rule", "pattern": "Trupanion", "category_id": "<id copied from the list above>", "apply_existing": true },
-    "confidence": 0.95,
     "changes": [],
     "citations": []
   }
@@ -202,9 +195,6 @@ Example JSON format for each kind you're likely to use:
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
 
-    const autoApplyPref = getPreference(db, AUTO_APPLY_PREFERENCE_KEY);
-    const autoApplyEnabled = autoApplyPref ? autoApplyPref.value === true : true;
-
     db.transaction(() => {
       // Trust boundary: drafts came straight from the model as raw JSON. Validate
       // each against the strict schema up front, so we also know which entities this
@@ -242,13 +232,7 @@ Example JSON format for each kind you're likely to use:
         const route = draft.route || '/review';
         let status: 'open' | 'confirmed' = 'open';
 
-        const canAutoApply =
-          autoApplyEnabled &&
-          AUTO_APPLIABLE_KINDS.has(draft.kind) &&
-          typeof draft.confidence === 'number' &&
-          draft.confidence >= AUTO_APPLY_CONFIDENCE_THRESHOLD;
-
-        if (canAutoApply) {
+        if (isAutonomousDraftKind(draft.kind)) {
           const action: AdvisorDraftAction = {
             id,
             kind: draft.kind as AdvisorDraftAction['kind'],

@@ -191,7 +191,7 @@ export function Advisor() {
         title="Advisor"
         sub={
           context?.configured
-            ? 'Runs on your machine · sends data to the model only when you ask'
+            ? 'Sees your whole financial picture · can categorize and write rules on its own'
             : 'Local heuristics only · add an Anthropic API key in Settings for conversational answers'
         }
         actions={
@@ -277,7 +277,7 @@ export function Advisor() {
             </div>
           ))}
           <div className="mt-4 text-xs leading-[1.55] text-muted-2">
-            This snapshot stays on your machine. A question sends only what's needed to answer it.
+            Anything it changes is listed under Settings → What the AI has done, and can be undone there.
           </div>
         </div>
       </div>

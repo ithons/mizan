@@ -660,6 +660,10 @@ export const aiApi = {
         created_at: string;
       }>
     >('/api/ai/actions'),
+  // Reverses every categorization the action made, restoring each row's prior category. Rows
+  // edited by hand since are skipped, and any rule the action created stays.
+  undoAction: (id: string) =>
+    apiFetch<{ ok: boolean; reverted: number }>(`/api/ai/actions/${id}/undo`, { method: 'POST' }),
   getProfile: () => apiFetch<{ profile: string }>('/api/ai/profile'),
   saveProfile: (profile: string) =>
     apiFetch<{ profile: string }>('/api/ai/profile', {

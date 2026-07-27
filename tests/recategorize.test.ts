@@ -16,6 +16,7 @@ function setup(): Database.Database {
       updated_at TEXT NOT NULL
     );
     CREATE TABLE transactions (
+      category_source TEXT, category_action_id TEXT, category_previous_id TEXT,
       id TEXT PRIMARY KEY, merchant_name TEXT, original_name TEXT DEFAULT '', category_id TEXT,
       manually_categorized INTEGER NOT NULL DEFAULT 0, review_status TEXT DEFAULT 'open', updated_at TEXT DEFAULT ''
     );

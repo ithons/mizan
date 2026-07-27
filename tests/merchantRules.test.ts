@@ -35,6 +35,7 @@ function setupDb(): Database.Database {
     );
 
     CREATE TABLE transactions (
+      category_source TEXT, category_action_id TEXT, category_previous_id TEXT,
       id TEXT PRIMARY KEY,
       merchant_name TEXT,
       original_name TEXT NOT NULL,

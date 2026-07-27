@@ -305,6 +305,10 @@ export function updateTransaction(
   const values: unknown[] = [];
 
   if (input.category_id !== undefined) {
+    // category_previous_id must be captured before category_id is overwritten, so it comes
+    // first in the SET list (SQLite evaluates the right-hand sides against the original row,
+    // but keeping the order explicit stops a later reshuffle from breaking it silently).
+    updates.push('category_previous_id = category_id');
     updates.push('category_id = ?');
     values.push(categoryId);
     if (categoryId) {
@@ -314,6 +318,11 @@ export function updateTransaction(
     // pass never overwrites it.
     updates.push('manually_categorized = ?');
     values.push(categoryId ? 1 : 0);
+    // A hand edit is the highest-authority source, and it detaches the row from whatever AI
+    // action previously owned it: undoing that action must not reach back into a human choice.
+    updates.push('category_source = ?');
+    values.push(categoryId ? 'human' : null);
+    updates.push('category_action_id = NULL');
   }
   if (input.notes !== undefined) {
     updates.push('notes = ?');
@@ -447,9 +456,12 @@ export function bulkCategorizeTransactions(
       throw new Error('MISSING_TRANSACTIONS');
     }
 
-    db.prepare(
-      `UPDATE transactions SET category_id = ?, review_status = 'reviewed', manually_categorized = 1, updated_at = ? WHERE id IN (${placeholders})`
-    ).run(categoryId, now, ...transactionIds);
+    db.prepare(`
+      UPDATE transactions
+      SET category_id = ?, review_status = 'reviewed', manually_categorized = 1, updated_at = ?,
+          category_source = 'human', category_action_id = NULL, category_previous_id = category_id
+      WHERE id IN (${placeholders})
+    `).run(categoryId, now, ...transactionIds);
 
     const patterns = new Set(
       selectedTransactions

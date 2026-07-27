@@ -826,6 +826,8 @@ export interface AdvisorAnalysis {
 export interface AdvisorContextResponse {
   context: string;
   configured: boolean;
+  /** Which credential form the SDK resolved. Never the secret itself. */
+  credential_source?: 'api_key' | 'auth_token' | 'oauth_profile' | 'none';
   generated_at: string;
   sync_health: SyncHealth;
   actions: AdvisorAction[];
@@ -840,18 +842,15 @@ export type AdvisorEffort = 'low' | 'medium' | 'high';
 export interface AdvisorSettings {
   model: string;
   effort: AdvisorEffort;
-  context_sections: string[];
   available: {
     models: Array<{ id: string; label: string }>;
     efforts: AdvisorEffort[];
-    sections: Array<{ id: string; label: string }>;
   };
 }
 
 export interface AdvisorSettingsUpdate {
   model?: string;
   effort?: AdvisorEffort;
-  context_sections?: string[];
 }
 
 export interface ApiResponse<T> {

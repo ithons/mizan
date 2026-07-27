@@ -11,9 +11,7 @@ import { CategoriesSection } from './CategoriesSection';
 import { RulesSection } from './RulesSection';
 import { DataSection } from './DataSection';
 
-const AUTO_APPLY_PREFERENCE_KEY = 'advisor_auto_apply_high_confidence';
-
-type PanelId = 'simplefin' | 'coinbase' | 'import' | 'categories' | 'ai_disclosure' | 'advisor_profile' | 'advisor_model' | 'ai_actions' | null;
+type PanelId = 'simplefin' | 'coinbase' | 'import' | 'categories' | 'advisor_profile' | 'advisor_model' | 'ai_actions' | null;
 
 function SettingsRow({
   title,
@@ -44,41 +42,48 @@ function SettingsRow({
   );
 }
 
-function Toggle({ on, onChange, disabled }: { on: boolean; onChange: (next: boolean) => void; disabled?: boolean }) {
-  return (
-    <button
-      type="button"
-      role="switch"
-      aria-checked={on}
-      disabled={disabled}
-      onClick={(e) => {
-        e.stopPropagation();
-        onChange(!on);
-      }}
-      className={`relative h-5 w-[34px] rounded-[11px] transition-colors disabled:opacity-50 ${on ? 'bg-sage' : 'bg-line-3'}`}
-    >
-      <span
-        className={`absolute top-0.5 h-4 w-4 rounded-full bg-card transition-all ${on ? 'right-0.5' : 'left-0.5'}`}
-      />
-    </button>
-  );
-}
-
 function ExpandedPanel({ children }: { children: ReactNode }) {
   return <div className="mb-2 mt-1 rounded-xl border border-line-2 bg-card p-5">{children}</div>;
 }
 
+const UNDOABLE_AI_KINDS = new Set(['categorize_transaction', 'create_merchant_rule']);
+
+// The SDK accepts three credential forms, not just an env API key (services/anthropicClient.ts).
+// /api/ai/context already reported which one is in use; nothing displayed it.
+const CREDENTIAL_SOURCE_LABEL: Record<string, string> = {
+  api_key: 'ANTHROPIC_API_KEY',
+  auth_token: 'ANTHROPIC_AUTH_TOKEN',
+  oauth_profile: 'signed in via `ant auth login`',
+  none: 'no credential found',
+};
+
 function AiActionsPanel({ open, onToggle }: { open: boolean; onToggle: () => void }) {
+  const qc = useQueryClient();
+  const { addToast } = useAppStore();
   const { data: actions } = useQuery({
     queryKey: ['ai-actions'],
     queryFn: () => aiApi.listActions(),
     enabled: open,
   });
+
+  const undo = useMutation({
+    mutationFn: (id: string) => aiApi.undoAction(id),
+    onSuccess: (res) => {
+      addToast({
+        type: 'success',
+        message: `Reverted ${res.reverted} transaction${res.reverted === 1 ? '' : 's'}`,
+      });
+      // Categories moved, so every derived surface is stale: reports, budgets, review counts.
+      qc.invalidateQueries();
+    },
+    onError: (err: Error) => addToast({ type: 'error', message: err.message }),
+  });
+
   return (
     <>
       <SettingsRow
         title="What the AI has done"
-        sub="Every action the AI applied to your data — auto-applied or confirmed by you"
+        sub="Every action the AI applied to your data, and the ones you can put back"
         trailing={<span className="text-muted">{open ? 'Hide' : 'Review →'}</span>}
         onClick={onToggle}
       />
@@ -94,11 +99,23 @@ function AiActionsPanel({ open, onToggle }: { open: boolean; onToggle: () => voi
                     <div className="text-[14px] text-ink">{a.label}</div>
                     <div className="mt-0.5 text-xs text-muted-2">{a.summary}</div>
                   </div>
-                  <div className="flex-shrink-0 text-right text-[11px] text-muted-2">
-                    <div className={a.source === 'worker_auto' ? 'text-warning' : 'text-sage-deep'}>
-                      {a.source === 'worker_auto' ? 'auto-applied' : 'you confirmed'}
+                  <div className="flex flex-shrink-0 items-start gap-3">
+                    <div className="text-right text-[11px] text-muted-2">
+                      <div className={a.source === 'worker_auto' ? 'text-warning' : 'text-sage-deep'}>
+                        {a.source === 'worker_auto' ? 'auto-applied' : 'you confirmed'}
+                      </div>
+                      <div>{formatCompactRelative(a.created_at)}</div>
                     </div>
-                    <div>{formatCompactRelative(a.created_at)}</div>
+                    {UNDOABLE_AI_KINDS.has(a.kind) && (
+                      <button
+                        type="button"
+                        disabled={undo.isPending}
+                        onClick={() => undo.mutate(a.id)}
+                        className="mt-0.5 whitespace-nowrap border-b border-line-3 pb-0.5 text-[12px] text-muted transition-colors hover:text-ink disabled:opacity-40"
+                      >
+                        Undo
+                      </button>
+                    )}
                   </div>
                 </div>
               ))}
@@ -182,22 +199,13 @@ function AdvisorModelPanel({ open, onToggle }: { open: boolean; onToggle: () => 
     onError: (err: Error) => addToast({ type: 'error', message: err.message }),
   });
 
-  const enabled = new Set(settings?.context_sections ?? []);
   const modelLabel = settings?.available.models.find((m) => m.id === settings.model)?.label ?? settings?.model ?? '';
-
-  const toggleSection = (id: string) => {
-    if (!settings) return;
-    const next = new Set(enabled);
-    if (next.has(id)) next.delete(id);
-    else next.add(id);
-    save.mutate({ context_sections: [...next] });
-  };
 
   return (
     <>
       <SettingsRow
-        title="Model & context"
-        sub={settings ? `${modelLabel} · ${settings.effort} effort · ${enabled.size}/${settings.available.sections.length} context sections` : 'Choose model, effort, and what the advisor sees'}
+        title="Model & effort"
+        sub={settings ? `${modelLabel} · ${settings.effort} effort` : 'Choose the model and how hard it thinks'}
         trailing={<span className="text-muted">{open ? 'Hide' : 'Configure →'}</span>}
         onClick={onToggle}
       />
@@ -242,21 +250,6 @@ function AdvisorModelPanel({ open, onToggle }: { open: boolean; onToggle: () => 
               </div>
               <p className="mt-1.5 text-xs text-muted-2">Higher effort reasons more before answering, at more tokens and latency.</p>
             </div>
-
-            <div>
-              <div className="mb-1.5 text-[13px] font-medium text-ink">Financial context sections</div>
-              <p className="mb-2 text-xs text-muted-2">
-                What the snapshot injected into every prompt includes. Accounts, net worth, and your personal context are always sent.
-              </p>
-              <div className="space-y-2">
-                {settings.available.sections.map((s) => (
-                  <label key={s.id} className="flex cursor-pointer items-center justify-between gap-3">
-                    <span className="text-[13.5px] text-ink">{s.label}</span>
-                    <Toggle on={enabled.has(s.id)} onChange={() => toggleSection(s.id)} disabled={save.isPending} />
-                  </label>
-                ))}
-              </div>
-            </div>
           </div>
         </ExpandedPanel>
       )}
@@ -265,7 +258,6 @@ function AdvisorModelPanel({ open, onToggle }: { open: boolean; onToggle: () => 
 }
 
 export function Settings() {
-  const qc = useQueryClient();
   const { addToast } = useAppStore();
   const [searchParams] = useSearchParams();
   const [openPanel, setOpenPanel] = useState<PanelId>(null);
@@ -283,17 +275,6 @@ export function Settings() {
   const { data: aiContext } = useQuery({ queryKey: ['ai-context'], queryFn: () => aiApi.getContext() });
   const { data: categories } = useQuery({ queryKey: ['categories'], queryFn: () => categoriesApi.list() });
   const { data: rules } = useQuery({ queryKey: ['rules'], queryFn: () => rulesApi.list() });
-  const { data: autoApplyPref } = useQuery({
-    queryKey: ['settings', 'preferences', AUTO_APPLY_PREFERENCE_KEY],
-    queryFn: () => settingsApi.getPreference<boolean>(AUTO_APPLY_PREFERENCE_KEY),
-  });
-
-  const setAutoApply = useMutation({
-    mutationFn: (value: boolean) => settingsApi.setPreference(AUTO_APPLY_PREFERENCE_KEY, value),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['settings', 'preferences', AUTO_APPLY_PREFERENCE_KEY] }),
-    onError: (err: Error) => addToast({ type: 'error', message: err.message }),
-  });
-
   const backup = useMutation({
     mutationFn: () => settingsApi.exportBackupJson(),
     onSuccess: () => addToast({ type: 'success', message: 'Backup downloaded' }),
@@ -309,7 +290,6 @@ export function Settings() {
   const coinbaseAccounts = (accounts ?? []).filter((a) => a.connection_type === 'coinbase').length;
   const categoryCount = flattenCategories(categories ?? []).length;
   const ruleCount = (rules ?? []).length;
-  const autoApply = autoApplyPref?.value ?? true;
 
   const toggle = (panel: PanelId) => setOpenPanel((prev) => (prev === panel ? null : panel));
   const statusText = (connected: boolean) =>
@@ -319,7 +299,7 @@ export function Settings() {
     <Screen size="editorial">
       <div className="mb-8 flex-shrink-0">
         <h1 className="font-serif text-[27px] font-normal leading-tight text-ink">Settings</h1>
-        <div className="mt-1 text-[13.5px] text-muted">Everything runs on your machine · no account, no cloud</div>
+        <div className="mt-1 text-[13.5px] text-muted">Connections, the advisor, and your data</div>
       </div>
 
       <div className="flex-1 pb-8">
@@ -379,52 +359,13 @@ export function Settings() {
             title="Anthropic API key"
             sub={
               aiContext?.configured
-                ? 'Conversational chat enabled'
-                : 'Set ANTHROPIC_API_KEY in .env to enable conversational chat · optional'
+                ? `Conversational chat enabled · ${CREDENTIAL_SOURCE_LABEL[aiContext.credential_source ?? 'none']}`
+                : 'Set ANTHROPIC_API_KEY or ANTHROPIC_AUTH_TOKEN, or sign in with `ant auth login` · optional'
             }
             trailing={
               aiContext?.configured ? <span className="text-sage-deep">Set</span> : <span className="text-muted-2">Not set</span>
             }
           />
-          {aiContext?.configured && (
-            <>
-              <SettingsRow
-                title="What Mizān sends to Anthropic"
-                sub="AI is enabled · review exactly what leaves your machine"
-                trailing={<span className="text-muted">{openPanel === 'ai_disclosure' ? 'Hide' : 'Review →'}</span>}
-                onClick={() => toggle('ai_disclosure')}
-              />
-              {openPanel === 'ai_disclosure' && (
-                <ExpandedPanel>
-                  <div className="space-y-3 text-[13.5px] leading-relaxed text-muted">
-                    <p>
-                      Because <span className="text-ink">ANTHROPIC_API_KEY</span> is set, Mizān sends the financial
-                      snapshot below to Anthropic's API in two cases: every time you send a message in Advisor, and
-                      automatically after every sync, when the background worker proposes drafts. Nothing is sent when
-                      no key is configured.
-                    </p>
-                    <p>
-                      In Advisor, the model can also call read-only tools to look up your transactions, spending by
-                      category, and monthly cash flow — so specific rows may be sent in response to what you ask.
-                    </p>
-                    <p>
-                      The background worker sends a bit more than the snapshot below: your category list and up to 15 of
-                      your uncategorized transactions (merchant and amount), so it can propose categorizations.
-                      Confirming an auto-categorization also creates a merchant rule so similar transactions are handled
-                      the same way in future.
-                    </p>
-                    <p>
-                      Each sync also fetches crypto spot prices from Coinbase. That request carries no personal data.
-                    </p>
-                    <p className="text-ink">This is the base snapshot, regenerated live:</p>
-                    <pre className="max-h-80 overflow-auto whitespace-pre-wrap rounded-lg border border-line-2 bg-rail p-3 font-mono text-[12px] text-ink">
-                      {aiContext.context || 'No context available yet — run a sync first.'}
-                    </pre>
-                  </div>
-                </ExpandedPanel>
-              )}
-            </>
-          )}
           {aiContext?.configured && (
             <AdvisorModelPanel open={openPanel === 'advisor_model'} onToggle={() => toggle('advisor_model')} />
           )}
@@ -435,10 +376,13 @@ export function Settings() {
             open={openPanel === 'advisor_profile'}
             onToggle={() => toggle('advisor_profile')}
           />
+          {/* What the AI applies unattended is a fixed domain boundary now, not a dial: it
+              categorizes and writes merchant rules on its own, and everything that changes a
+              target you set waits for you. Stated rather than configured. */}
           <SettingsRow
-            title="Auto-apply high-confidence drafts"
-            sub="Categorization & rules over 90% confidence"
-            trailing={<Toggle on={autoApply} onChange={(v) => setAutoApply.mutate(v)} disabled={setAutoApply.isPending} />}
+            title="What the AI can do on its own"
+            sub="Categorizes transactions and writes merchant rules · budgets, goals, and bills always wait for you"
+            trailing={<span className="text-muted-2">Always on</span>}
             last
           />
         </div>

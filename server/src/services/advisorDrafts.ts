@@ -80,6 +80,29 @@ interface HoldingDraftRow {
   sector: string | null;
 }
 
+/**
+ * Draft kinds the AI applies on its own, with no confirmation step.
+ *
+ * The boundary is drawn by DOMAIN, not by the model's confidence in itself. Categorization and
+ * merchant rules are observations about data that already exists: the model is reading a
+ * merchant name and saying what it is, and a wrong answer is visible on the row and reversible
+ * by action id. Everything else changes a target the owner set (a budget, a goal, a cost basis,
+ * whether a recurring charge is real), where the model has no way to know the intent behind the
+ * number and being wrong is not obviously visible.
+ *
+ * This replaces a self-reported `confidence >= 0.9` gate. That number was written by the model,
+ * about the model, in the same JSON blob as the change it was proposing, which makes it a
+ * boundary the model asserts rather than one the owner set.
+ */
+export const AUTONOMOUS_DRAFT_KINDS: ReadonlySet<string> = new Set([
+  'categorize_transaction',
+  'create_merchant_rule',
+]);
+
+export function isAutonomousDraftKind(kind: string): boolean {
+  return AUTONOMOUS_DRAFT_KINDS.has(kind);
+}
+
 function normalize(value: string): string {
   return value.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
 }
@@ -762,15 +785,25 @@ export function buildAdvisorDrafts(
   }).slice(0, 4);
 }
 
-function confirmMerchantRule(db: Database.Database, payload: Extract<AdvisorDraftPayload, { kind: 'create_merchant_rule' }>): {
+function confirmMerchantRule(
+  db: Database.Database,
+  payload: Extract<AdvisorDraftPayload, { kind: 'create_merchant_rule' }>,
+  actionId: string
+): {
   changed: number;
   result: unknown;
 } {
   assertCategory(db, payload.category_id);
   const now = new Date().toISOString();
   const ruleId = upsertMerchantRule(db, payload.pattern, payload.category_id, now);
+  // Rows swept in by the rule carry this action's id, so undoing the action reverts the whole
+  // blast radius and not just the one transaction that motivated it. That matters here: rule
+  // matching is substring plus 0.86 fuzzy similarity across the entire ledger.
   const applied = payload.apply_existing
-    ? applyMerchantRulesToExistingTransactions(db, { onlyUncategorized: true }).updated
+    ? applyMerchantRulesToExistingTransactions(db, {
+        onlyUncategorized: true,
+        provenance: { source: 'ai', actionId },
+      }).updated
     : 0;
 
   return {
@@ -779,7 +812,11 @@ function confirmMerchantRule(db: Database.Database, payload: Extract<AdvisorDraf
   };
 }
 
-function confirmCategorizeTransaction(db: Database.Database, payload: Extract<AdvisorDraftPayload, { kind: 'categorize_transaction' }>): {
+function confirmCategorizeTransaction(
+  db: Database.Database,
+  payload: Extract<AdvisorDraftPayload, { kind: 'categorize_transaction' }>,
+  actionId: string
+): {
   changed: number;
   result: unknown;
 } {
@@ -796,11 +833,19 @@ function confirmCategorizeTransaction(db: Database.Database, payload: Extract<Ad
     UPDATE transactions
     SET category_id = ?,
         review_status = 'reviewed',
-        updated_at = ?
+        updated_at = ?,
+        category_source = 'ai',
+        category_action_id = ?,
+        category_previous_id = category_id
     WHERE id = ?
-  `).run(payload.category_id, now, payload.transaction_id);
+  `).run(payload.category_id, now, actionId, payload.transaction_id);
 
-  upsertMerchantRule(db, transaction.merchant_name || transaction.original_name, category.id, now);
+  // Deliberately does NOT mint a merchant rule. It used to, on every categorization, built from
+  // `merchant_name || original_name` (raw bank description text on SimpleFIN rows) and then
+  // matched fuzzily across the ledger. That was survivable when categorization needed a human
+  // click; now that it runs unattended, every AI decision would silently install a standing
+  // fuzzy rule nobody asked for. A rule is created when a draft asks for one
+  // (create_merchant_rule), or when the user categorizes by hand and teaches the app directly.
   refreshTransactionIntegrity(db);
 
   return {
@@ -1019,6 +1064,48 @@ export interface AdvisorActionLog {
   created_at: string;
 }
 
+export interface UndoAdvisorActionResult {
+  ok: boolean;
+  reason?: 'not_found' | 'nothing_to_undo';
+  reverted: number;
+}
+
+/**
+ * Reverse every categorization an AI action made.
+ *
+ * Each row it touched carries the action id and the category it displaced, so this restores the
+ * exact prior state rather than blanket-clearing to uncategorized (which would throw away a
+ * correction the AI made to a wrongly-categorized row).
+ *
+ * Rows the user has since edited by hand are skipped: `updateTransaction` clears
+ * category_action_id on a manual edit precisely so an undo cannot reach back through a human
+ * decision made after the fact.
+ *
+ * A merchant rule the action created is left in place. Deleting it would be a second, unasked
+ * change, and the rule is visible and removable in Settings; undo here means "put the ledger
+ * back", not "erase that this happened". The action stays in the audit trail for the same
+ * reason.
+ */
+export function undoAdvisorAction(db: Database.Database, actionId: string): UndoAdvisorActionResult {
+  const action = db.prepare('SELECT id FROM advisor_actions WHERE id = ?').get(actionId);
+  if (!action) return { ok: false, reason: 'not_found', reverted: 0 };
+
+  const now = new Date().toISOString();
+  const result = db.prepare(`
+    UPDATE transactions
+    SET category_id = category_previous_id,
+        category_previous_id = NULL,
+        category_action_id = NULL,
+        category_source = CASE WHEN category_previous_id IS NULL THEN NULL ELSE 'rule' END,
+        review_status = CASE WHEN category_previous_id IS NULL THEN 'open' ELSE review_status END,
+        updated_at = ?
+    WHERE category_action_id = ?
+  `).run(now, actionId);
+
+  if (result.changes === 0) return { ok: false, reason: 'nothing_to_undo', reverted: 0 };
+  return { ok: true, reverted: result.changes };
+}
+
 export function listAdvisorActions(db: Database.Database, limit = 50): AdvisorActionLog[] {
   return db.prepare(`
     SELECT id, kind, label, summary, source, created_at
@@ -1051,13 +1138,18 @@ export function confirmAdvisorDraft(
     throw new Error(`Invalid draft payload: ${detail}`);
   }
 
+  // Generated before the handlers run, not after: the categorization paths stamp it onto every
+  // row they touch (category_action_id), which is what makes "undo everything this action did"
+  // a single query rather than a reconstruction.
+  const actionId = uuidv4();
+
   const apply = db.transaction(() => {
     let result: { changed: number; result: unknown };
     switch (draftAction.payload.kind) {
       case 'create_merchant_rule':
-        result = confirmMerchantRule(db, draftAction.payload); break;
+        result = confirmMerchantRule(db, draftAction.payload, actionId); break;
       case 'categorize_transaction':
-        result = confirmCategorizeTransaction(db, draftAction.payload); break;
+        result = confirmCategorizeTransaction(db, draftAction.payload, actionId); break;
       case 'update_budget':
         result = confirmBudget(db, draftAction.payload); break;
       case 'update_goal_target':
@@ -1092,7 +1184,7 @@ export function confirmAdvisorDraft(
       INSERT INTO advisor_actions (id, kind, label, summary, source, payload, created_at)
       VALUES (?, ?, ?, ?, ?, ?, ?)
     `).run(
-      uuidv4(),
+      actionId,
       draftAction.kind,
       draftAction.label,
       draftAction.summary,

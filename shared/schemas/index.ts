@@ -243,7 +243,10 @@ export const AiWorkerDraftSchema = z
     label: z.string().min(1),
     summary: z.string().min(1),
     route: z.string().optional(),
-    confidence: z.number().min(0).max(1).optional(),
+    // `confidence` was a self-reported 0-1 score that gated auto-apply. It is gone: what applies
+    // unattended is now decided by draft KIND (AUTONOMOUS_DRAFT_KINDS), a boundary the owner
+    // sets. Still accepted-and-ignored so a model that volunteers one is not rejected wholesale.
+    confidence: z.number().optional(),
     payload: AdvisorDraftPayloadSchema,
     changes: z.array(z.object({
       field: z.string(),

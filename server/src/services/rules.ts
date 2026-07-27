@@ -12,6 +12,26 @@ export interface RuleApplicationResult {
   updated: number;
 }
 
+/**
+ * What set a transaction's category, recorded on the row (migration 041).
+ *
+ * 'human'     the user chose it, by hand or in a bulk selection
+ * 'rule'      a merchant rule matched
+ * 'heuristic' the local text classifier guessed it
+ * 'ai'        a model-authored draft, carrying the advisor_actions id that applied it
+ *
+ * The audit trail in Settings answers "what has the AI done". This answers the question the
+ * user actually asks while looking at a number: "why is THIS row in THIS category", and it is
+ * what makes an AI action reversible.
+ */
+export type CategorySource = 'human' | 'rule' | 'heuristic' | 'ai';
+
+export interface CategoryProvenance {
+  source: CategorySource;
+  /** advisor_actions.id, set only for source 'ai'. */
+  actionId?: string | null;
+}
+
 // Skipped rule suggestions, stored as normalized merchant keys. Kept in app_preferences rather
 // than a dedicated table: it's a small, purely-advisory list with no relational needs.
 export const DISMISSED_RULE_SUGGESTIONS_KEY = 'dismissed_rule_suggestions';
@@ -133,7 +153,7 @@ export function upsertMerchantRule(
 
 export function applyMerchantRulesToExistingTransactions(
   db: Database.Database,
-  options: { onlyUncategorized?: boolean; skipManual?: boolean } = {}
+  options: { onlyUncategorized?: boolean; skipManual?: boolean; provenance?: CategoryProvenance } = {}
 ): RuleApplicationResult {
   const onlyUncategorized = options.onlyUncategorized ?? true;
   const rules = db.prepare(
@@ -144,7 +164,12 @@ export function applyMerchantRulesToExistingTransactions(
 
   const clauses: string[] = [];
   if (onlyUncategorized) clauses.push('category_id IS NULL');
-  if (options.skipManual) clauses.push('manually_categorized = 0');
+  // Two markers for the same thing, because they were introduced years apart and neither is
+  // reliable alone. manually_categorized (026) is the older flag and a bulk re-categorization
+  // pass can clear it wholesale (it currently reads 0 on every row here, though 92 were set
+  // earlier). category_source (041) records provenance per write. Honor both, so a hand-made
+  // choice survives a full re-check even if one marker has been wiped.
+  if (options.skipManual) clauses.push("manually_categorized = 0 AND COALESCE(category_source, '') <> 'human'");
   const conditions = clauses.length > 0 ? `WHERE ${clauses.join(' AND ')}` : '';
   const transactions = db.prepare(`
     SELECT id, merchant_name, original_name, category_id
@@ -159,9 +184,15 @@ export function applyMerchantRulesToExistingTransactions(
 
   const now = new Date().toISOString();
   let updated = 0;
-  const update = db.prepare(
-    "UPDATE transactions SET category_id = ?, review_status = 'reviewed', updated_at = ? WHERE id = ?"
-  );
+  // A rule application driven by an AI draft inherits that draft's provenance, so undoing the
+  // action reverts the rows the rule swept in as well as the one it was proposed for.
+  const provenance = options.provenance ?? { source: 'rule' as const };
+  const update = db.prepare(`
+    UPDATE transactions
+    SET category_id = ?, review_status = 'reviewed', updated_at = ?,
+        category_source = ?, category_action_id = ?, category_previous_id = category_id
+    WHERE id = ?
+  `);
 
   // A rule can outlive its category (categories have been folded/renamed by migrations), and
   // writing a dangling id fails the FK and aborts the whole stage. Skip those rules instead.
@@ -179,7 +210,7 @@ export function applyMerchantRulesToExistingTransactions(
       staleRulePatterns.add(rule.pattern);
       continue;
     }
-    update.run(rule.category_id, now, transaction.id);
+    update.run(rule.category_id, now, provenance.source, provenance.actionId ?? null, transaction.id);
     updated++;
   }
 
@@ -207,9 +238,12 @@ export function autoCategorizeTransactions(db: Database.Database): RuleApplicati
   `).all() as Array<{ id: string; merchant_name: string | null; original_name: string }>;
 
   const now = new Date().toISOString();
-  const update = db.prepare(
-    'UPDATE transactions SET category_id = ?, updated_at = ? WHERE id = ?'
-  );
+  const update = db.prepare(`
+    UPDATE transactions
+    SET category_id = ?, updated_at = ?,
+        category_source = 'heuristic', category_previous_id = category_id
+    WHERE id = ?
+  `);
 
   const known = knownCategoryIds(db);
   let heuristicUpdated = 0;
@@ -238,10 +272,16 @@ export function recategorizeAll(db: Database.Database): RuleApplicationResult {
     SELECT id, merchant_name, original_name
     FROM transactions
     WHERE category_id IS NULL AND manually_categorized = 0
+      AND COALESCE(category_source, '') <> 'human'
   `).all() as Array<{ id: string; merchant_name: string | null; original_name: string }>;
 
   const now = new Date().toISOString();
-  const update = db.prepare('UPDATE transactions SET category_id = ?, updated_at = ? WHERE id = ?');
+  const update = db.prepare(`
+    UPDATE transactions
+    SET category_id = ?, updated_at = ?,
+        category_source = 'heuristic', category_previous_id = category_id
+    WHERE id = ?
+  `);
 
   const known = knownCategoryIds(db);
   let heuristicUpdated = 0;
@@ -261,7 +301,7 @@ export function applyMerchantRuleToMatchingTransactions(
   pattern: string,
   categoryId: string,
   now = new Date().toISOString(),
-  options: { overwrite?: boolean } = {}
+  options: { overwrite?: boolean; provenance?: CategoryProvenance } = {}
 ): RuleApplicationResult {
   const normalizedPattern = pattern.trim();
   if (!normalizedPattern) return { updated: 0 };
@@ -277,11 +317,15 @@ export function applyMerchantRuleToMatchingTransactions(
     ${scanWhere}
   `).all() as TransactionRuleCandidate[];
 
+  const provenance = options.provenance ?? { source: 'rule' as const };
   const update = db.prepare(`
     UPDATE transactions
     SET category_id = ?,
         review_status = 'reviewed',
-        updated_at = ?
+        updated_at = ?,
+        category_source = ?,
+        category_action_id = ?,
+        category_previous_id = category_id
     WHERE id = ?
       ${guard}
   `);
@@ -290,7 +334,7 @@ export function applyMerchantRuleToMatchingTransactions(
   for (const transaction of transactions) {
     if (!merchantMatchesRulePattern(transactionMerchantName(transaction), normalizedPattern)) continue;
     if (options.overwrite && transaction.category_id === categoryId) continue; // already correct
-    const result = update.run(categoryId, now, transaction.id);
+    const result = update.run(categoryId, now, provenance.source, provenance.actionId ?? null, transaction.id);
     updated += result.changes;
   }
 
@@ -494,7 +538,8 @@ export function approveMerchantRuleSuggestions(
       const placeholders = ids.map(() => '?').join(',');
       const applied = db.prepare(`
         UPDATE transactions
-        SET category_id = ?, review_status = 'reviewed', manually_categorized = 1, updated_at = ?
+        SET category_id = ?, review_status = 'reviewed', manually_categorized = 1, updated_at = ?,
+            category_source = 'human', category_action_id = NULL, category_previous_id = category_id
         WHERE id IN (${placeholders}) AND category_id IS NULL
       `).run(categoryId, now, ...ids);
 
