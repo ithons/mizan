@@ -223,3 +223,36 @@ test('detection ignores transfers and confirmed duplicates', () => {
     db.close();
   }
 });
+
+// merchant_name is UNIQUE and detection upserts against it, so changing normalizeMerchant()
+// renames the group and strands the old row: inactive, unconfirmed, pointing at nothing. The
+// live DB accumulated two rows for one Cursor subscription that way, and migration 029
+// hand-deleted an earlier one. Detection now clears them itself.
+test('detection removes stranded patterns but keeps confirmed and manual ones', () => {
+  const db = setupDb();
+  _setDbForTesting(db);
+  try {
+    const recent = format(subDays(new Date(), 3), 'yyyy-MM-dd');
+    const ins = db.prepare(`
+      INSERT INTO recurring_patterns
+        (id, merchant_name, category_id, average_amount, amount_variance, frequency, last_seen,
+         next_expected, is_active, is_confirmed, transaction_count, created_at, updated_at)
+      VALUES (?, ?, NULL, ?, 0, 'monthly', ?, ?, ?, ?, ?, '2024-01-01', '2024-01-01')
+    `);
+    //         id          merchant_name                     amt   last_seen     next        active confirmed count
+    ins.run('stranded', 'cursor ai powered ide 8314259504', 2125, '2024-01-01', '2024-02-01', 0, 0, 0);
+    ins.run('confirmed', 'spotify',                          699, '2024-01-01', '2024-02-01', 0, 1, 0);
+    ins.run('active',    'trupanion',                       3902, recent,        recent,      1, 0, 5);
+
+    detectRecurring();
+
+    const surviving = (db.prepare('SELECT id FROM recurring_patterns ORDER BY id').all() as Array<{ id: string }>)
+      .map((r) => r.id);
+    assert.ok(!surviving.includes('stranded'), 'the renamed leftover is gone');
+    assert.ok(surviving.includes('confirmed'), 'a confirmed pattern is the user\'s own decision');
+    assert.ok(surviving.includes('active'), 'an active pattern stays');
+  } finally {
+    _setDbForTesting(undefined as unknown as Database.Database);
+    db.close();
+  }
+});

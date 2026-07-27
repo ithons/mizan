@@ -336,4 +336,26 @@ export function detectRecurring(): void {
       ).run(new Date().toISOString(), pattern.id);
     }
   }
+
+  // 7. Drop stranded patterns.
+  //
+  // merchant_name is UNIQUE and detection upserts against it, so any change to
+  // normalizeMerchant() renames the group and leaves the old row behind forever, inactive and
+  // pointing at nothing. The live DB accumulated two rows for the same Cursor subscription
+  // that way; migration 029 hand-deleted an earlier one. Deleting them here removes the need
+  // for the next hand-written migration.
+  //
+  // Deliberately narrow: only rows that are inactive AND unconfirmed AND have no transactions
+  // still linked to them. A confirmed pattern is the user's own decision, and a manually
+  // created one legitimately carries transaction_count = 0 (createRecurringPattern seeds it
+  // confirmed so it shows up immediately), so both are excluded.
+  const stranded = db.prepare(`
+    DELETE FROM recurring_patterns
+    WHERE is_active = 0
+      AND is_confirmed = 0
+      AND NOT EXISTS (SELECT 1 FROM transactions t WHERE t.recurring_id = recurring_patterns.id)
+  `).run();
+  if (stranded.changes > 0) {
+    console.log(`[recurring] Removed ${stranded.changes} stranded pattern(s) with no linked transactions.`);
+  }
 }

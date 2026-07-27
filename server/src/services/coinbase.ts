@@ -564,21 +564,40 @@ export async function syncCoinbaseLedger(): Promise<number> {
   const existsStmt = db.prepare('SELECT id FROM transactions WHERE coinbase_transaction_id = ?');
 
   // Page through a v2 list endpoint following pagination.next_uri (already includes the query).
-  async function fetchAll<T>(firstPath: string): Promise<T[]> {
+  //
+  // `stopWhen` bounds the walk. Without it this re-paged the ENTIRE ledger, every account and
+  // every transaction ever, on every sync, to insert the handful that were new: the one place
+  // where sync cost tracked total history instead of the size of the delta. v2 returns
+  // transactions newest-first, so a page containing nothing new means everything past it is
+  // older and already imported.
+  async function fetchAll<T>(firstPath: string, stopWhen?: (page: T[]) => boolean): Promise<T[]> {
     const out: T[] = [];
     let path: string | null = firstPath;
     while (path) {
       const page: V2Page<T> = await signedRequest<V2Page<T>>('GET', path);
-      out.push(...(page.data || []));
+      const rows = page.data || [];
+      out.push(...rows);
+      if (stopWhen && rows.length > 0 && stopWhen(rows)) break;
       path = page.pagination?.next_uri ?? null;
     }
     return out;
   }
 
+  // Only safe to short-circuit once something has been imported: on a first sync there is no
+  // watermark to stop at and the full history genuinely has to be walked.
+  const alreadyImported = (db.prepare(
+    "SELECT COUNT(*) AS n FROM transactions WHERE coinbase_transaction_id IS NOT NULL AND source_type = 'coinbase'"
+  ).get() as { n: number }).n > 0;
+
   let inserted = 0;
   const accounts = await fetchAll<V2Account>('/v2/accounts?limit=100');
   for (const cbAccount of accounts) {
-    const txns = await fetchAll<CoinbaseV2Transaction>(`/v2/accounts/${cbAccount.id}/transactions?limit=100`);
+    const txns = await fetchAll<CoinbaseV2Transaction>(
+      `/v2/accounts/${cbAccount.id}/transactions?limit=100`,
+      alreadyImported
+        ? (page) => page.every((t) => t.id && existsStmt.get(t.id))
+        : undefined
+    );
     for (const txn of txns) {
       if (!txn.id) continue;
       if (existsStmt.get(txn.id)) continue;

@@ -43,6 +43,11 @@ interface SimplefinHolding {
 // the whole position, matching how holdings.cost_basis is already interpreted elsewhere
 // (see investmentMetadata.ts, AccountDetail.tsx: institution_value - cost_basis).
 export function upsertHoldingsFromSimplefin(db: Database.Database, accountId: string, holdings: SimplefinHolding[], now: string): void {
+  // Positions the institution no longer reports have been sold. This pass used to only upsert,
+  // never remove, so a fully-sold position kept its last market value in `holdings` forever and
+  // inflated the portfolio total. coinbase.ts already zeroed its side; this brings the two
+  // providers into line. Zeroed rather than deleted so holdings_history keeps its foreign key.
+  const seenSecurityIds = new Set<string>();
   const findSecurityByTicker = db.prepare('SELECT id FROM securities WHERE ticker = ? LIMIT 1');
   const insertSecurity = db.prepare(`
     INSERT INTO securities (id, ticker, name, type, currency)
@@ -88,6 +93,18 @@ export function upsertHoldingsFromSimplefin(db: Database.Database, accountId: st
 
     // quantity + per-unit price stay REAL dollars; value + cost basis are totals -> cents.
     upsertHolding.run(uuidv4(), accountId, securityId, shares, price, toCents(marketValue), toCentsOrNull(costBasis), currency, now);
+    seenSecurityIds.add(securityId);
+  }
+
+  const held = db.prepare(
+    'SELECT id, security_id FROM holdings WHERE account_id = ? AND institution_value != 0'
+  ).all(accountId) as Array<{ id: string; security_id: string }>;
+  const zeroHolding = db.prepare(
+    'UPDATE holdings SET quantity = 0, institution_value = 0, updated_at = ? WHERE id = ?'
+  );
+  for (const row of held) {
+    if (seenSecurityIds.has(row.security_id)) continue;
+    zeroHolding.run(now, row.id);
   }
 }
 
@@ -117,6 +134,65 @@ function parseFinancialAmount(raw: unknown, label: string): number {
     throw new Error(`SimpleFIN returned a non-numeric ${label}: ${JSON.stringify(raw)}`);
   }
   return n;
+}
+
+/**
+ * Zero out SimpleFIN accounts that the provider no longer returns.
+ *
+ * An account closed at the institution stops appearing in the response entirely, so absence is
+ * the only signal we get, and leaving a stale balance would inflate net worth forever (this
+ * mirrors coinbase.ts's stale-coin handling).
+ *
+ * But absence only means "closed" when the response is COMPLETE. SimpleFIN reports a failing
+ * institution inside `errors` on an otherwise-200 response, and the affected institution's
+ * accounts can be missing from `accounts` altogether. Zeroing then reads a reauth prompt as
+ * "every account at this bank is now empty", and because runFullSync() calls takeSnapshot() in
+ * the same pass, that lands in net-worth history as a MEASURED (is_estimated = 0) fact and
+ * overwrites the day's prior value. The balances come back on the next good sync; the poisoned
+ * snapshot does not.
+ *
+ * This is not a repair for an observed incident. The path has never been caught firing here.
+ * It is a guard on a cheap mistake with a permanent consequence.
+ */
+export function zeroAccountsMissingFromResponse(
+  db: Database.Database,
+  seenAccountIds: Set<string>,
+  now: string,
+  providerErrors: string[]
+): AccountBalanceChange[] {
+  if (providerErrors.length > 0) {
+    console.warn(
+      `[simplefin] Provider reported ${providerErrors.length} error(s); skipping the stale-account pass so a partial response cannot zero real balances.`
+    );
+    return [];
+  }
+
+  const staleAccounts = db.prepare(`
+    SELECT id, simplefin_account_id, account_name, current_balance, is_liability, currency
+    FROM accounts
+    WHERE connection_type = 'simplefin' AND simplefin_account_id IS NOT NULL
+  `).all() as Array<{ id: string; simplefin_account_id: string; account_name: string; current_balance: number; is_liability: number; currency: string }>;
+
+  const changes: AccountBalanceChange[] = [];
+  for (const account of staleAccounts) {
+    if (seenAccountIds.has(account.simplefin_account_id)) continue;
+    if (balancesDiffer(account.current_balance, 0)) {
+      changes.push({
+        accountId: account.id,
+        accountName: account.account_name,
+        provider: 'simplefin',
+        previousBalance: toDollars(account.current_balance),
+        newBalance: 0,
+        isLiability: Boolean(account.is_liability),
+        currency: account.currency ?? 'USD',
+      });
+    }
+    db.prepare(`
+      UPDATE accounts SET current_balance = 0, updated_at = ? WHERE id = ?
+    `).run(now, account.id);
+  }
+
+  return changes;
 }
 
 export async function syncSimplefin(): Promise<SimplefinSyncResult> {
@@ -259,8 +335,10 @@ export async function syncSimplefin(): Promise<SimplefinSyncResult> {
     for (const txn of (acct.transactions || [])) {
       const existingTxn = db.prepare('SELECT id FROM transactions WHERE simplefin_transaction_id = ?').get(txn.id);
 
-      // Normalize the posted epoch to a UTC calendar day so it doesn't drift with the
-      // server's timezone and matches how Coinbase timestamps are handled.
+      // Normalize the posted epoch to a LOCAL calendar day: see services/dates.ts for why
+      // (every "today"/"this month" boundary in the app is local, and a late-night purchase
+      // should stay on the day it happened). This comment used to claim UTC, which was true
+      // before commit 9ac0220 reversed the rule and left the comment behind.
       const date = epochSecondsToLocalDate(txn.posted);
 
       if (isBelowBackfillFloor(date, backfillFloor)) {
@@ -317,32 +395,7 @@ export async function syncSimplefin(): Promise<SimplefinSyncResult> {
     }
   }
 
-  // Accounts closed/removed at the institution no longer appear in the response at all;
-  // zero them out (mirrors coinbase.ts's stale-account handling) instead of leaving a
-  // stale nonzero balance in net worth forever.
-  const staleAccounts = db.prepare(`
-    SELECT id, simplefin_account_id, account_name, current_balance, is_liability, currency
-    FROM accounts
-    WHERE connection_type = 'simplefin' AND simplefin_account_id IS NOT NULL
-  `).all() as Array<{ id: string; simplefin_account_id: string; account_name: string; current_balance: number; is_liability: number; currency: string }>;
-
-  for (const account of staleAccounts) {
-    if (seenAccountIds.has(account.simplefin_account_id)) continue;
-    if (balancesDiffer(account.current_balance, 0)) {
-      balanceChanges.push({
-        accountId: account.id,
-        accountName: account.account_name,
-        provider: 'simplefin',
-        previousBalance: toDollars(account.current_balance),
-        newBalance: 0,
-        isLiability: Boolean(account.is_liability),
-        currency: account.currency ?? 'USD',
-      });
-    }
-    db.prepare(`
-      UPDATE accounts SET current_balance = 0, updated_at = ? WHERE id = ?
-    `).run(now, account.id);
-  }
+  balanceChanges.push(...zeroAccountsMissingFromResponse(db, seenAccountIds, now, errors));
 
   // Update simplefin_connections last_synced_at
   db.prepare(`
