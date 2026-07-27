@@ -1,4 +1,6 @@
 @import url('https://fonts.googleapis.com/css2?family=Newsreader:opsz,wght@6..72,300;6..72,400;6..72,500&family=Instrument+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap');
+/* THROWAWAY: faces for the two Today comps (/comp/a, /comp/b). Remove with views/comps/. */
+@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@300;400;500&family=IBM+Plex+Mono:wght@300;400;500&family=Literata:opsz,wght@7..72,400;7..72,500&display=swap');
 
 @tailwind base;
 @tailwind components;
@@ -92,10 +94,6 @@
 }
 
 /* Signature motion */
-@keyframes mz-breathe {
-  0%, 100% { transform: scale(1); }
-  50% { transform: scale(1.025); }
-}
 @keyframes mz-rise {
   from { opacity: 0; transform: translateY(6px); }
   to { opacity: 1; transform: translateY(0); }
@@ -141,7 +139,6 @@
 
 @media (prefers-reduced-motion: reduce) {
   .mz-screen, .mz-rise-fast, .mz-stagger > *, .mz-draw, .mz-grow { animation: none; }
-  .mz-breathe { animation: none !important; }
 }
 
 /* scrollbar styling */
