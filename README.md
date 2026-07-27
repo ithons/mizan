@@ -1,23 +1,23 @@
 # Mizān
 
-A local-first personal finance application — a self-hosted alternative to Monarch Money.
+A personal finance application for one person, running on that person's own machine.
 
-All data stays on your machine. No telemetry. No subscriptions. No third party ever sees
-your data except the specific providers you explicitly connect (SimpleFIN, Coinbase,
-Anthropic), and only for the specific calls documented below.
+Single owner, no accounts, no multi-tenancy, no auth layer. It connects to SimpleFIN and
+Coinbase for data, and to Anthropic for the advisor. The AI is structural rather than
+bolted on: once a key is configured it categorizes transactions and writes merchant rules
+on its own, and everything it does is listed and reversible in Settings.
 
 ## Features
 
 - **Accounts & transactions** — bank/credit/investment/crypto accounts via SimpleFIN and
   Coinbase, or fully manual accounts. Transaction search, filtering, splitting, and manual
   entry.
-- **Review Inbox** — a single queue for everything that needs a decision: uncategorized
-  transactions, pending charges, suggested merchant rules, unconfirmed recurring bills,
-  duplicate/transfer candidates, and proactive AI insights. Supports single-item and
-  batch actions.
+- **Review** — a worklist for everything needing a decision: uncategorized transactions
+  grouped by merchant, suggested merchant rules, unconfirmed recurring bills, and
+  duplicate/transfer candidates. Supports bulk categorization.
 - **Budgets** — per-category monthly budgets with rollover, grouped into custom budget
   groups.
-- **Goals** — savings goals, including tax-withholding "envelopes" for freelance income.
+- **Goals** — savings and debt-payoff goals, optionally linked to a real account balance.
 - **Recurring bills & subscriptions** — automatic detection from transaction history, with
   forecasted upcoming occurrences and one-off skip/snooze/adjust overrides.
 - **Investments** — holdings (equities, funds, and crypto) with cost basis, unrealized
@@ -54,9 +54,8 @@ npm start
 `better-sqlite3` is a native module compiled against your Node version — if you switch
 Node versions, run `npm rebuild better-sqlite3`.
 
-By default, Mizān never contacts SimpleFIN, Coinbase, or Anthropic on startup or in the
-background. Every sync is either a manual click in the UI or an explicit opt-in via the
-environment variables below.
+Mizān syncs on startup and hourly by default, and the background AI review runs after each
+sync. Both are switchable via the environment variables below.
 
 ## Environment Variables
 
@@ -68,8 +67,9 @@ it ever leaves your machine except via the specific outbound calls it configures
 | `COINBASE_KEY_NAME` / `COINBASE_PRIVATE_KEY` | No | Coinbase Advanced Trade API credentials. Optional here — you can instead paste them into **Settings → Coinbase** in the UI, where they're encrypted at rest. Values from `.env` take precedence over stored ones. |
 | `ANTHROPIC_API_KEY` | No | Enables the AI Advisor chat (`/api/ai/chat`) and the background AI review worker. Without it, the app runs fully — the local heuristic advisor, command palette, and every other feature work with no key at all. |
 | `CORS_ORIGIN` | No, production only | Only needed if the client is hosted at a different origin than this server. The default single-process deployment doesn't need it. The app has no auth layer, so anything reachable at this origin can read/write your financial data — only set it to an origin you control. |
-| `MIZAN_AUTO_SYNC_ON_STARTUP` | No | Set to `true` to run a full sync automatically ~2s after the server starts. Off by default. |
-| `MIZAN_SYNC_INTERVAL_MINUTES` | No | Set to a positive integer to run a full sync automatically on that interval while the server is running, in addition to (or instead of) manual/startup sync. Off by default. |
+| `MIZAN_AUTO_SYNC_ON_STARTUP` | No | **On by default.** Runs a full sync ~2s after the server starts, skipped if the last sync was within 10 minutes (so `tsx watch` restarts don't hammer providers). Set to `false` to disable. |
+| `MIZAN_SYNC_INTERVAL_MINUTES` | No | **On by default, every 60 minutes.** Set to another positive integer to change the cadence, or `0` to disable. |
+| `MIZAN_ALLOWED_HOSTS` | No | Extra `host[:port]` values the local request guard should accept, comma-separated. Only needed for a non-standard hostname. |
 | `PORT` | No | Server port. Defaults to `3001`. |
 
 ## Architecture
@@ -182,7 +182,7 @@ cost/latency/capability tradeoffs, not different modes of the same thing:
 - **Local heuristics** (`POST /api/ai/analyze`, `services/advisorTools.ts`) — regex/DB-driven,
   no network call, sub-millisecond. Powers the Cmd+K command palette and produces the
   structured citations/one-click "drafts" (e.g. "categorize this transaction",
-  "create this budget") shown in the Advisor chat and Review Inbox. Works with **no
+  "create this budget") shown in the Advisor chat and Review. Works with **no
   Anthropic API key at all**.
 - **Cloud LLM chat** (`POST /api/ai/chat`, `routes/ai.ts`) — streams from `claude-sonnet-5`
   via SSE with adaptive extended thinking (`thinking: { type: 'adaptive', display: 'summarized' }`)
@@ -194,17 +194,40 @@ cost/latency/capability tradeoffs, not different modes of the same thing:
   `ANTHROPIC_API_KEY` is configured, the chat degrades to heuristic-only answers rather
   than erroring out. Requires `ANTHROPIC_API_KEY`.
 - **Background worker** (`services/aiWorker.ts`, runs after every sync) — calls
-  `claude-haiku-4-5` (non-streaming) to propose actionable "drafts" from the latest sync
-  delta (categorize a transaction, create a merchant rule, adjust a recurring occurrence,
-  allocate freelance income to a tax-withholding goal, etc.), stored in `advisor_drafts`
-  and surfaced in the Review Inbox. High-confidence categorization/rule drafts (≥ 90%
-  confidence, as self-reported by the model) auto-apply; everything else waits for a
-  one-click confirm or dismiss. Requires `ANTHROPIC_API_KEY`; silently skipped if unset.
+  `claude-haiku-4-5` (non-streaming) to propose "drafts" from the latest sync delta,
+  stored in `advisor_drafts` and surfaced in Review. Requires `ANTHROPIC_API_KEY`;
+  silently skipped if unset.
+
+### What the AI does on its own
+
+The boundary is drawn by **domain**, not by a confidence score. `AUTONOMOUS_DRAFT_KINDS`
+(`services/advisorDrafts.ts`) holds the two operations the AI applies with no confirmation
+step:
+
+- `categorize_transaction` and `create_merchant_rule` apply on arrival, from the background
+  worker or from a chat tool call. These are observations about data that already exists.
+- Everything else (`update_budget`, `update_goal_target`, `confirm_recurring`,
+  `set_manual_cost_basis`, …) always waits for an explicit confirm, because those change a
+  target the owner set rather than describing what is already there.
+
+Every applied action is recorded in `advisor_actions`, and every row it touched records
+`category_source`, `category_action_id`, and the category it displaced (migration 041). So
+`POST /api/ai/actions/:id/undo` reverts the whole blast radius of an action — including
+rows a merchant rule swept in — restoring each row's prior category. Rows edited by hand
+since are skipped: a manual edit clears `category_action_id` precisely so an undo cannot
+reach back through a human decision.
 
 `services/aiContext.ts`'s `buildFinancialContext()` is the single source of truth for
-"what the AI knows about your finances" — the same function feeds the chat system prompt,
-the background worker prompt, and the UI's context preview panel, so all three see a
-consistent snapshot.
+"what the AI knows about your finances", feeding both the chat system prompt and the
+background worker prompt. It renders every figure to the cent: it used to abbreviate
+anything over $1,000 (`$2,749.39` became `$2.7k`) while the system prompt told the model
+never to fabricate numbers, so the model faithfully reported the abbreviation.
+
+The advisor's aggregate tools (`services/advisorChatTools.ts`) delegate to the same
+services the UI renders from, rather than running their own SQL. They used to hand-roll it
+and drifted: on identical data the advisor reported $1,695.00 of spending where the Reports
+page reported $75.00, because it counted transfers, resolved duplicates, pending rows, and
+crypto purchases that Reports excludes. Any new aggregate belongs in the shared service.
 
 ## Testing
 
@@ -226,21 +249,29 @@ npx tsc --noEmit -p tsconfig.server.json   # server + shared
 npx tsc --noEmit -p tsconfig.json          # client + shared
 ```
 
-## Privacy & Security
+## Security
 
-No data leaves your machine except for direct API calls to:
-- **SimpleFIN** — transaction/balance/holdings syncing (only when you sync).
-- **Coinbase** — balance/holdings/trade-history syncing (only when you sync).
-- **`api.coinbase.com/v2/prices`** — public spot price endpoint, no auth, no account data sent.
-- **Anthropic** — only for explicit Advisor chat messages and the post-sync background
-  review; only if `ANTHROPIC_API_KEY` is set.
+Mizān talks to SimpleFIN, Coinbase, and Anthropic. It syncs on startup and hourly, and the
+background AI review runs after each sync, so those calls happen without a click.
 
-Credentials are AES-256-GCM encrypted at rest (`.mizan/credentials.json`), with the
-encryption key held in your OS keychain rather than on disk. The app itself has **no
-authentication layer** — it's designed to run on `localhost` or a network you already
-trust. If you expose it beyond that (e.g. set `CORS_ORIGIN` in production), anything
-reachable at that origin can read and write your financial data; put your own auth in
-front of it if you do this.
+Provider credentials are AES-256-GCM encrypted at rest in `.mizan/credentials.json`. The
+key lives in the OS keychain via `@napi-rs/keyring`; if the keychain is unavailable the app
+falls back to a `0600` key file at `.mizan/mizan.key`.
+
+The app has **no authentication layer**, by design: one owner, one machine. Two things
+guard that assumption, and they are about integrity rather than secrecy:
+
+- It binds to loopback (`MIZAN_HOST` to change), so it is not reachable from the LAN.
+- `middleware/localGuard.ts` rejects requests with an unrecognized `Host` header
+  (DNS-rebinding) and cross-origin state-changing requests (a page you happen to be
+  visiting POSTing to `localhost:3001` and mutating your ledger).
+
+If you expose it beyond loopback, anything that can reach the port can read and write your
+financial data. Put your own auth in front of it.
+
+Model-authored SQL (`run_sql_query`) executes on a separate SQLite connection opened in
+readonly mode, so a write cannot reach the data even if a guard is bypassed. The AI's write
+tools go through typed service functions, never raw SQL.
 
 ## License
 

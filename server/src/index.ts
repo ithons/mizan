@@ -166,13 +166,19 @@ async function main() {
     ? app.listen(PORT, HOST, announce)
     : ViteExpress.listen(app, PORT, announce);
 
-  // Startup sync is opt-in because it calls external providers. Gated on staleness
-  // (not just "did it ever sync") because `npm run dev` restarts this whole process on
-  // every file save (tsx watch) - without this check, every save while coding would
-  // trigger a real SimpleFIN + Coinbase + background-AI-worker sync.
-  // It intentionally runs asynchronously without awaiting so the UI can paint immediately.
+  // Sync runs on boot and on a timer, both on by default. They used to be opt-in, gated behind
+  // env vars whose comments cited "it calls external providers" as the reason. That rationale
+  // is retired: this is the owner's own machine talking to the owner's own accounts, and an
+  // app that shows stale numbers until you remember to click a button is worse at its job.
+  // Both remain switchable for the cases where it genuinely matters (offline, debugging).
+  //
+  // The staleness gate stays, for a different and still-valid reason: `npm run dev` restarts
+  // this whole process on every file save (tsx watch), and without it every save while coding
+  // would fire a real SimpleFIN + Coinbase + AI-worker pass.
+  //
+  // Runs without awaiting so the UI paints immediately.
   const STARTUP_SYNC_STALE_MINUTES = 10;
-  if (process.env.MIZAN_AUTO_SYNC_ON_STARTUP === 'true') {
+  if (process.env.MIZAN_AUTO_SYNC_ON_STARTUP !== 'false') {
     setTimeout(() => {
       if (!isSyncStale(getDb(), STARTUP_SYNC_STALE_MINUTES)) {
         console.log(`[startup] Skipping auto-sync: last sync was within ${STARTUP_SYNC_STALE_MINUTES} minutes.`);
@@ -184,13 +190,16 @@ async function main() {
     }, 2000);
   }
 
-  // Periodic sync is opt-in, same as startup sync — it calls external providers.
-  const syncIntervalMinutes = process.env.MIZAN_SYNC_INTERVAL_MINUTES
-    ? parseInt(process.env.MIZAN_SYNC_INTERVAL_MINUTES, 10)
-    : null;
-  if (syncIntervalMinutes && syncIntervalMinutes > 0) {
-    console.log(`[startup] Periodic sync enabled: every ${syncIntervalMinutes} minute(s).`);
+  // Set MIZAN_SYNC_INTERVAL_MINUTES=0 to turn the timer off.
+  const DEFAULT_SYNC_INTERVAL_MINUTES = 60;
+  const rawInterval = process.env.MIZAN_SYNC_INTERVAL_MINUTES;
+  const parsedInterval = rawInterval === undefined ? DEFAULT_SYNC_INTERVAL_MINUTES : parseInt(rawInterval, 10);
+  const syncIntervalMinutes = Number.isFinite(parsedInterval) ? parsedInterval : DEFAULT_SYNC_INTERVAL_MINUTES;
+  if (syncIntervalMinutes > 0) {
+    console.log(`[startup] Periodic sync: every ${syncIntervalMinutes} minute(s). Set MIZAN_SYNC_INTERVAL_MINUTES=0 to disable.`);
     startSyncScheduler(syncIntervalMinutes);
+  } else {
+    console.log('[startup] Periodic sync disabled (MIZAN_SYNC_INTERVAL_MINUTES=0).');
   }
 
   // Graceful shutdown. server.close() waits for every open connection, and the client holds a

@@ -85,7 +85,7 @@ export function Onboarding() {
           Welcome to Mizān.
         </h1>
         <p className="mt-2 max-w-[480px] text-[15px] leading-relaxed text-muted">
-          A few steps and your money is in one calm place — on your machine, no account, no cloud.
+          A few steps and your money is in one calm place.
         </p>
 
         <div className="mt-8 flex items-center gap-4">
