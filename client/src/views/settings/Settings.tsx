@@ -267,6 +267,7 @@ export function Settings() {
     if (section === 'connections' || section === 'simplefin') setOpenPanel('simplefin');
     else if (section === 'coinbase') setOpenPanel('coinbase');
     else if (section === 'data' || section === 'import') setOpenPanel('import');
+    else if (section === 'ai_actions') setOpenPanel('ai_actions');
   }, [searchParams]);
 
   const { data: credentials } = useQuery({ queryKey: ['credential-status'], queryFn: () => settingsApi.getCredentials() });

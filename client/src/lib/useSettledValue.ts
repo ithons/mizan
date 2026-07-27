@@ -8,8 +8,8 @@ function prefersReducedMotion(): boolean {
  * Eases toward `target` the way a balance beam finds equilibrium: it swings past, comes back,
  * and settles. An exponentially damped cosine, so the overshoot decays rather than ringing.
  *
- * Distinct from useEasedValue's cubic-out, which arrives and stops dead. That is right for a
- * number counting up and wrong for something with weight hanging off both ends.
+ * Replaces a plain cubic-out ease, which arrives and stops dead. That is right for a number
+ * counting up and wrong for something with weight hanging off both ends.
  */
 export function useSettledValue(target: number, durationMs = 1500): number {
   const [value, setValue] = useState(() => (prefersReducedMotion() ? target : 0));

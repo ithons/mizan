@@ -1,6 +1,4 @@
 @import url('https://fonts.googleapis.com/css2?family=Newsreader:opsz,wght@6..72,300;6..72,400;6..72,500&family=Instrument+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap');
-/* THROWAWAY: faces for the two Today comps (/comp/a, /comp/b). Remove with views/comps/. */
-@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@300;400;500&family=IBM+Plex+Mono:wght@300;400;500&family=Literata:opsz,wght@7..72,400;7..72,500&display=swap');
 
 @tailwind base;
 @tailwind components;
