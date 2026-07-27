@@ -52,7 +52,10 @@ function main(): void {
     }
 
     const floor = floorByName.get(accountName)?.floor ?? null;
-    const aboveFloor = rows.filter((r) => !isBelowBackfillFloor(r.date, floor));
+    // No floor means no provider owns any range of this account (manual/closed), so every
+    // row is importable. isBelowBackfillFloor() answers false for a null floor, which would
+    // otherwise read as "at/above the floor" and refuse the whole file.
+    const aboveFloor = floor ? rows.filter((r) => !isBelowBackfillFloor(r.date, floor)) : [];
     if (aboveFloor.length > 0) {
       console.error(`✗ ${file}: ${aboveFloor.length} row(s) at/above floor ${floor} — re-run normalize.ts; refusing`);
       refused = true; continue;

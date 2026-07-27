@@ -5,8 +5,9 @@
 //   tsx scripts/backfill/dedup.ts                # report duplicate groups, no writes
 //   tsx scripts/backfill/dedup.ts --commit       # delete extras (keep one per group)
 //
-// Key: account + date + exact cents + normalized merchant. For a manual account the
-// original import moved its balance per row, so deleting a duplicate reverses that.
+// Key: account + date + exact cents + normalized merchant, collapsed ACROSS import runs
+// only — never within one. For a manual account the original import moved its balance per
+// row, so deleting a duplicate reverses that.
 import type Database from 'better-sqlite3';
 import { getDb, closeDb } from '../../server/src/db/index';
 import { adjustManualAccountBalance } from '../../server/src/services/manualAccountBalance';
@@ -33,8 +34,14 @@ function groupKey(row: ImportRow): string {
   return [row.account_id, row.date, row.amount, merchant].join('|');
 }
 
-// Pure core: given import rows, return the ids to DELETE (all but one per group).
-// Keeps the earliest-created row in each group as the survivor; deterministic.
+// Pure core: given import rows, return the ids to DELETE.
+//
+// A repeated key is NOT proof of duplication — four $2.40 transit taps on one day are four
+// real charges. The only thing that duplicates a row is two source files whose statement
+// periods overlap, and those always arrive in different import runs: commitCsvImport stamps
+// one created_at across a whole call, and import.ts calls it once per file. So multiplicity
+// WITHIN a run is authoritative (the file reported N, so N is right), and only runs are
+// collapsed against each other — the survivor count is the largest any single run reported.
 export function duplicateIdsToDelete(rows: ImportRow[]): string[] {
   const groups = new Map<string, ImportRow[]>();
   for (const row of rows) {
@@ -44,8 +51,19 @@ export function duplicateIdsToDelete(rows: ImportRow[]): string[] {
   const toDelete: string[] = [];
   for (const group of groups.values()) {
     if (group.length < 2) continue;
-    group.sort((a, b) => a.created_at.localeCompare(b.created_at) || a.id.localeCompare(b.id));
-    toDelete.push(...group.slice(1).map((r) => r.id));
+
+    const byRun = new Map<string, ImportRow[]>();
+    for (const row of group) {
+      (byRun.get(row.created_at) ?? byRun.set(row.created_at, []).get(row.created_at)!).push(row);
+    }
+    if (byRun.size < 2) continue; // one run: the source file's own multiplicity, keep it all
+
+    // Survivor is the run that contributed the most rows; ties go to the earliest run.
+    const runs = [...byRun.entries()]
+      .sort((a, b) => b[1].length - a[1].length || a[0].localeCompare(b[0]));
+    for (const [, rowsInRun] of runs.slice(1)) {
+      toDelete.push(...rowsInRun.map((r) => r.id).sort());
+    }
   }
   return toDelete;
 }
@@ -99,4 +117,8 @@ function main(): void {
   console.log(`Removed ${removed} duplicate row(s). Next: tsx scripts/backfill/rebuild.ts`);
 }
 
-try { main(); } finally { closeDb(); }
+// Guarded like normalize.ts: tests import duplicateIdsToDelete for its own sake, and an
+// unguarded main() would open the real DB — and honour a stray --commit — on mere import.
+if (process.argv[1] && process.argv[1].endsWith('dedup.ts')) {
+  try { main(); } finally { closeDb(); }
+}

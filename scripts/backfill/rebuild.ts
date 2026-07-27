@@ -21,6 +21,12 @@ function main(): void {
   console.log('Recurring detection refreshed.');
 
   takeSnapshot();
+  // backfillSnapshots() skips any month that already has a snapshot, so freshly imported
+  // history would never reach the estimates computed before it existed — the whole point of
+  // the backfill. Estimates are pure reverse-replay of the ledger, so dropping them costs
+  // nothing; measured snapshots (is_estimated = 0) are real captures and must survive.
+  const cleared = db.prepare('DELETE FROM net_worth_snapshots WHERE is_estimated = 1').run().changes;
+  if (cleared) console.log(`Cleared ${cleared} stale estimated snapshot(s) for recomputation.`);
   backfillSnapshots();
   const [{ count }] = db.prepare('SELECT COUNT(*) AS count FROM net_worth_snapshots').all() as { count: number }[];
   const [{ oldest }] = db.prepare('SELECT MIN(date) AS oldest FROM net_worth_snapshots').all() as { oldest: string }[];

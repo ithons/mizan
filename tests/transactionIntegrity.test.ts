@@ -260,3 +260,26 @@ test('confirmed transfer pairs survive a re-sync and are not re-flagged for revi
     assert.equal(row.review_status, 'reviewed');
   }
 });
+
+// Migration 033 rewrote every consolidated Coinbase row's merchant to "Coinbase", so a $25
+// POL buy and a $25 SOL buy on the same day matched on account+date+amount+merchant. Only
+// the raw description separates them, so it belongs in the duplicate key.
+test('same-day, same-amount buys of different assets are not duplicates', (t) => {
+  const db = setupIntegrityDb();
+  t.after(() => db.close());
+
+  const insert = db.prepare(`
+    INSERT INTO transactions (id, account_id, date, amount, merchant_name, original_name,
+                              category_id, pending, created_at, updated_at)
+    VALUES (?, 'checking', '2026-02-01', -2500, 'Coinbase', ?, 'cat_crypto', 0, '2026-06-01', '2026-06-01')
+  `);
+  insert.run('cb-pol', 'Buy POL');
+  insert.run('cb-sol', 'Buy SOL');
+
+  refreshTransactionIntegrity(db);
+
+  const flagged = db.prepare(
+    "SELECT id FROM transactions WHERE duplicate_status = 'candidate' AND id LIKE 'cb-%'"
+  ).all();
+  assert.deepEqual(flagged, []);
+});

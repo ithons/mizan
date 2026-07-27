@@ -35,3 +35,34 @@ test('different accounts on the same charge stay separate', () => {
   ];
   assert.deepEqual(duplicateIdsToDelete(rows), []);
 });
+
+// The regression that would have deleted 68 real transactions: identical repeat charges
+// (transit taps) inside ONE source file are what that file reported, not duplication.
+test('identical repeat charges from a single import run are all kept', () => {
+  const rows = ['t1', 't2', 't3', 't4'].map((id) => ({
+    ...base, id, date: '2026-01-08', amount: -240, merchant_name: 'MBTA-550000309660',
+    created_at: '2026-07-24T02:15:00Z',
+  }));
+  assert.deepEqual(duplicateIdsToDelete(rows), []);
+});
+
+test('an overlapping second file collapses to the run that reported the most rows', () => {
+  const rows = [
+    // Statement A saw three taps that day; the overlapping statement B re-reported two.
+    { ...base, id: 'a1', date: '2026-01-08', amount: -240, merchant_name: 'MBTA', created_at: '2026-07-24T02:15:00Z' },
+    { ...base, id: 'a2', date: '2026-01-08', amount: -240, merchant_name: 'MBTA', created_at: '2026-07-24T02:15:00Z' },
+    { ...base, id: 'a3', date: '2026-01-08', amount: -240, merchant_name: 'MBTA', created_at: '2026-07-24T02:15:00Z' },
+    { ...base, id: 'b1', date: '2026-01-08', amount: -240, merchant_name: 'MBTA', created_at: '2026-07-24T02:29:00Z' },
+    { ...base, id: 'b2', date: '2026-01-08', amount: -240, merchant_name: 'MBTA', created_at: '2026-07-24T02:29:00Z' },
+  ];
+  assert.deepEqual(duplicateIdsToDelete(rows), ['b1', 'b2']);
+});
+
+test('when the later run reported more, it is the one that survives', () => {
+  const rows = [
+    { ...base, id: 'early', date: '2026-02-01', amount: -500, merchant_name: 'Cafe', created_at: '2026-07-24T02:15:00Z' },
+    { ...base, id: 'late1', date: '2026-02-01', amount: -500, merchant_name: 'Cafe', created_at: '2026-07-24T02:29:00Z' },
+    { ...base, id: 'late2', date: '2026-02-01', amount: -500, merchant_name: 'Cafe', created_at: '2026-07-24T02:29:00Z' },
+  ];
+  assert.deepEqual(duplicateIdsToDelete(rows), ['early']);
+});

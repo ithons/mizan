@@ -90,32 +90,34 @@ export function refreshDuplicateCandidates(db: Database.Database): DuplicateDete
 
   const groups = new Map<string, DuplicateRow[]>();
 
+  // Two rows are duplicates only on an exact match of account, date, amount, pending flag,
+  // normalized merchant AND normalized original name. A looser fuzzy pass used to sit
+  // alongside this one and was removed; the empty scaffolding it left behind is gone too.
+  //
+  // original_name has to be in the key because merchant_name is the coarser field and can be
+  // rewritten to something shared: migration 033 set every consolidated Coinbase row's
+  // merchant to "Coinbase", which made a $25 POL buy and a $25 SOL buy on one day look
+  // identical. The raw description still tells them apart.
   for (const row of rows) {
     const merchant = normalizeMerchant(row.merchant_name || row.original_name);
     if (!merchant) continue;
 
-    const cents = row.amount; // already integer cents
-
-    // Exact strict match key (original logic)
     const key = [
       row.account_id,
       row.date,
-      cents,
+      row.amount, // already integer cents
       row.pending,
       merchant,
+      normalizeMerchant(row.original_name),
     ].join('|');
     const group = groups.get(key) ?? [];
     group.push(row);
     groups.set(key, group);
-
-
   }
 
   let groupCount = 0;
   let transactionCount = 0;
 
-
-  // Process strict groups
   for (const [key, group] of groups) {
     if (group.length < 2) continue;
 
@@ -131,8 +133,6 @@ export function refreshDuplicateCandidates(db: Database.Database): DuplicateDete
     groupCount++;
     transactionCount += ids.length;
   }
-  
-
 
   return { groupCount, transactionCount };
 }
