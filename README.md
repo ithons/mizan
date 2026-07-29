@@ -7,27 +7,29 @@ Coinbase for data, and to Anthropic for the advisor. The AI is structural rather
 bolted on: once a key is configured it categorizes transactions and writes merchant rules
 on its own, and everything it does is listed and reversible in Settings.
 
-## Features
+## What it does
 
-- **Accounts & transactions** — bank/credit/investment/crypto accounts via SimpleFIN and
-  Coinbase, or fully manual accounts. Transaction search, filtering, splitting, and manual
-  entry.
-- **Review** — a worklist for everything needing a decision: uncategorized transactions
-  grouped by merchant, suggested merchant rules, unconfirmed recurring bills, and
-  duplicate/transfer candidates. Supports bulk categorization.
-- **Budgets** — per-category monthly budgets with rollover, grouped into custom budget
-  groups.
-- **Goals** — savings and debt-payoff goals, optionally linked to a real account balance.
-- **Recurring bills & subscriptions** — automatic detection from transaction history, with
-  forecasted upcoming occurrences and one-off skip/snooze/adjust overrides.
-- **Investments** — holdings (equities, funds, and crypto) with cost basis, unrealized
-  gain/loss, sector/asset-class allocation, and manual cost-basis overrides for providers
-  that don't return one.
-- **Net worth tracking** — historical snapshots and trend charts across liquid, investment,
-  crypto, and liability buckets.
-- **AI Advisor** — see [AI Architecture](#ai-architecture) below; a command-palette-style
-  instant heuristic layer plus a real conversational LLM chat with full financial context.
-- **CSV import** — for accounts not covered by SimpleFIN or Coinbase.
+Accounts come from SimpleFIN and Coinbase, or you add them manually, covering bank,
+credit, investment, and crypto. Transactions can be searched, filtered, split, and entered
+by hand, and anything not covered by a provider comes in by CSV.
+
+Review is a worklist for everything needing a decision: uncategorized transactions grouped
+by merchant, suggested merchant rules, unconfirmed recurring bills, and duplicate or
+transfer candidates. It supports bulk categorization, because that is what the list is for.
+
+Budgets are per-category and monthly with rollover, arranged into custom groups. Goals
+cover saving and debt payoff, and can be linked to a real account balance so progress
+tracks reality instead of a number you maintain. Recurring bills and subscriptions are
+detected from transaction history, with forecasted upcoming occurrences and one-off skip,
+snooze, and adjust overrides.
+
+Investments track holdings across equities, funds, and crypto with cost basis, unrealized
+gain and loss, and sector and asset-class allocation, including manual cost-basis
+overrides for the providers that do not return one. Net worth is snapshotted historically
+and charted across liquid, investment, crypto, and liability buckets.
+
+The AI Advisor is a command-palette-style instant heuristic layer plus a real
+conversational LLM chat with full financial context. See [AI Architecture](#ai-architecture).
 
 ## Prerequisites
 
@@ -51,22 +53,22 @@ npm start
 # -> http://localhost:3001
 ```
 
-`better-sqlite3` is a native module compiled against your Node version — if you switch
-Node versions, run `npm rebuild better-sqlite3`.
+`better-sqlite3` is a native module compiled against your Node version. If you switch Node
+versions, run `npm rebuild better-sqlite3`.
 
 Mizān syncs on startup and hourly by default, and the background AI review runs after each
 sync. Both are switchable via the environment variables below.
 
 ## Environment Variables
 
-Copy `.env.example` to `.env` and fill in what you need. `.env` is gitignored — nothing in
-it ever leaves your machine except via the specific outbound calls it configures.
+Copy `.env.example` to `.env` and fill in what you need. `.env` is gitignored, and nothing
+in it ever leaves your machine except via the specific outbound calls it configures.
 
 | Variable | Required | Purpose |
 |---|---|---|
-| `COINBASE_KEY_NAME` / `COINBASE_PRIVATE_KEY` | No | Coinbase Advanced Trade API credentials. Optional here — you can instead paste them into **Settings → Coinbase** in the UI, where they're encrypted at rest. Values from `.env` take precedence over stored ones. |
-| `ANTHROPIC_API_KEY` | No | Enables the AI Advisor chat (`/api/ai/chat`) and the background AI review worker. Without it, the app runs fully — the local heuristic advisor, command palette, and every other feature work with no key at all. |
-| `CORS_ORIGIN` | No, production only | Only needed if the client is hosted at a different origin than this server. The default single-process deployment doesn't need it. The app has no auth layer, so anything reachable at this origin can read/write your financial data — only set it to an origin you control. |
+| `COINBASE_KEY_NAME` / `COINBASE_PRIVATE_KEY` | No | Coinbase Advanced Trade API credentials. Optional here: you can instead paste them into **Settings → Coinbase** in the UI, where they're encrypted at rest. Values from `.env` take precedence over stored ones. |
+| `ANTHROPIC_API_KEY` | No | Enables the AI Advisor chat (`/api/ai/chat`) and the background AI review worker. Without it, the app still runs fully. The local heuristic advisor, command palette, and every other feature work with no key at all. |
+| `CORS_ORIGIN` | No, production only | Only needed if the client is hosted at a different origin than this server. The default single-process deployment doesn't need it. The app has no auth layer, so anything reachable at this origin can read and write your financial data. Only set it to an origin you control. |
 | `MIZAN_AUTO_SYNC_ON_STARTUP` | No | **On by default.** Runs a full sync ~2s after the server starts, skipped if the last sync was within 10 minutes (so `tsx watch` restarts don't hammer providers). Set to `false` to disable. |
 | `MIZAN_SYNC_INTERVAL_MINUTES` | No | **On by default, every 60 minutes.** Set to another positive integer to change the cadence, or `0` to disable. |
 | `MIZAN_ALLOWED_HOSTS` | No | Extra `host[:port]` values the local request guard should accept, comma-separated. Only needed for a non-standard hostname. |
@@ -74,34 +76,34 @@ it ever leaves your machine except via the specific outbound calls it configures
 
 ## Architecture
 
-**Stack:** Express + better-sqlite3 on the server, React + Vite + TanStack Query + Zustand
-on the client, shared Zod schemas and TypeScript types in `shared/`. In development,
+Express and better-sqlite3 on the server, React with Vite, TanStack Query, and Zustand on
+the client, and shared Zod schemas and TypeScript types in `shared/`. In development,
 [`vite-express`](https://github.com/szymmis/vite-express) serves both the API and the Vite
-dev middleware from one process on one port — there's no separate client dev server to
+dev middleware from one process on one port, so there is no separate client dev server to
 run.
 
-**Route → service split:** routes (`server/src/routes/*.ts`) are thin Express routers —
-they validate input (via `shared/schemas` Zod schemas and the `validate`/`validateQuery`
-middleware), call a service function, and shape the response as `{ data: ... }`. All
-business logic and SQL lives in `server/src/services/*.ts`. The client's `apiFetch` helper
-(`client/src/lib/api.ts`) unwraps that envelope automatically and throws on non-2xx.
+Routes (`server/src/routes/*.ts`) are thin Express routers. They validate input (via
+`shared/schemas` Zod schemas and the `validate`/`validateQuery` middleware), call a service
+function, and shape the response as `{ data: ... }`. All business logic and SQL lives in
+`server/src/services/*.ts`. The client's `apiFetch` helper (`client/src/lib/api.ts`)
+unwraps that envelope automatically and throws on non-2xx.
 
-**Database:** SQLite via `better-sqlite3`, with numbered migration files
+The database is SQLite via `better-sqlite3`, with numbered migration files
 (`server/src/db/migrations/NNN_description.sql`) applied in order and tracked in a
 `schema_migrations` table. Migrations run automatically on server startup, or standalone
-via `npm run db:migrate`. SQLite has no `ALTER COLUMN`/`DROP COLUMN` with constraint
-changes, so migrations that reshape a table use a create-new-table/copy-data/drop-old/
+via `npm run db:migrate`. SQLite has no `ALTER COLUMN` or `DROP COLUMN` with constraint
+changes, so migrations that reshape a table use a create-new-table, copy-data, drop-old,
 rename pattern.
 
-**Client:** routes/views are lazy-loaded (React Router + `Suspense`). Server state
-(accounts, transactions, etc.) goes through TanStack Query; Zustand is reserved for
-small UI-only global state (toasts, selected account, sync status) — server data never
-lives there.
+On the client, routes and views are lazy-loaded (React Router plus `Suspense`). Server
+state (accounts, transactions, and so on) goes through TanStack Query. Zustand is reserved
+for small UI-only global state (toasts, selected account, sync status), and server data
+never lives there.
 
 ## Data Location
 
 All data is stored in the project-local `.mizan/` directory (`process.cwd()/.mizan`, not
-your home directory) — this assumes npm scripts always run from the repo root:
+your home directory), which assumes npm scripts always run from the repo root:
 
 ```
 .mizan/
@@ -111,7 +113,7 @@ your home directory) — this assumes npm scripts always run from the repo root:
 ```
 
 The encryption key for `credentials.json` is stored in your OS keychain via
-`@napi-rs/keyring` (not in a plaintext file). Credentials are never stored or logged in
+`@napi-rs/keyring`, not in a plaintext file. Credentials are never stored or logged in
 plaintext.
 
 ## Sync Behavior
@@ -129,9 +131,9 @@ A full sync (`runFullSync()`) does, in order:
    from completing).
 
 Each external provider call is wrapped in retry-with-backoff (`services/retry.ts`) for
-transient network/5xx failures; a 4xx (bad credentials, etc.) is not retried. A failure in
-one stage (e.g. recurring detection) does not prevent the other stages from running, and
-is reported per-stage rather than failing the whole sync silently.
+transient network and 5xx failures; a 4xx (bad credentials, say) is not retried. A failure
+in one stage, for example recurring detection, does not prevent the other stages from
+running, and is reported per-stage rather than failing the whole sync silently.
 
 Progress streams to the client over Server-Sent Events (`GET /api/sync/status`,
 consumed by `useSyncStatus`), which invalidates the relevant UI caches when the sync
@@ -140,7 +142,7 @@ completes.
 ## SimpleFIN Setup
 
 SimpleFIN Bridge provides read-only access to thousands of financial institutions for a
-small monthly fee (~$1.50/mo). This is a reliable, privacy-respecting integration — no
+small monthly fee (~$1.50/mo). It is a reliable, privacy-respecting integration: no
 screen-scraping, no stored bank passwords.
 
 1. Create an account at [bridge.simplefin.org](https://bridge.simplefin.org)
@@ -151,9 +153,9 @@ screen-scraping, no stored bank passwords.
    permanent Access URL, stores it encrypted, and syncs your accounts immediately.
 
 What syncs: account balances, transactions (last 30 days on incremental syncs, up to 2
-years of backlog on the very first sync per connection — institutions may cap what they
-actually return), and investment holdings (ticker, shares, market value, cost basis when
-the institution provides one) for brokerage/IRA accounts.
+years of backlog on the very first sync per connection, though institutions may cap what
+they actually return), and investment holdings (ticker, shares, market value, cost basis
+when the institution provides one) for brokerage and IRA accounts.
 
 ## Coinbase Setup
 
@@ -165,7 +167,7 @@ the institution provides one) for brokerage/IRA accounts.
 
 What syncs: one crypto wallet account per currency you hold, its USD-valued balance (via
 Coinbase's public spot price endpoint), a corresponding holding so each coin shows up
-individually in the Investments page, and filled trade order history (buys/sells) as
+individually in the Investments page, and filled trade order history (buys and sells) as
 transactions.
 
 > **Note:** The Advanced Trade API provides balances, holdings, and trade order history.
@@ -176,44 +178,44 @@ transactions.
 
 ## AI Architecture
 
-Mizān uses three distinct AI surfaces — they're separate code paths with very different
-cost/latency/capability tradeoffs, not different modes of the same thing:
+Mizān uses three distinct AI surfaces. They are separate code paths with very different
+cost, latency, and capability tradeoffs, not different modes of the same thing.
 
-- **Local heuristics** (`POST /api/ai/analyze`, `services/advisorTools.ts`) — regex/DB-driven,
-  no network call, sub-millisecond. Powers the Cmd+K command palette and produces the
-  structured citations/one-click "drafts" (e.g. "categorize this transaction",
-  "create this budget") shown in the Advisor chat and Review. Works with **no
-  Anthropic API key at all**.
-- **Cloud LLM chat** (`POST /api/ai/chat`, `routes/ai.ts`) — streams from `claude-sonnet-5`
-  via SSE with adaptive extended thinking (`thinking: { type: 'adaptive', display: 'summarized' }`)
-  and `output_config: { effort: 'medium' }`, with the financial context snapshot injected
-  into the system prompt behind prompt-cache `cache_control`. The Advisor chat calls this
-  *and* the local heuristic in parallel on every message — the LLM produces the
-  conversational answer (with visible step-by-step reasoning shown as a collapsible
-  "Thinking…" panel while it streams), the heuristic supplies the citations/drafts. If no
-  `ANTHROPIC_API_KEY` is configured, the chat degrades to heuristic-only answers rather
-  than erroring out. Requires `ANTHROPIC_API_KEY`.
-- **Background worker** (`services/aiWorker.ts`, runs after every sync) — calls
-  `claude-haiku-4-5` (non-streaming) to propose "drafts" from the latest sync delta,
-  stored in `advisor_drafts` and surfaced in Review. Requires `ANTHROPIC_API_KEY`;
-  silently skipped if unset.
+**Local heuristics** (`POST /api/ai/analyze`, `services/advisorTools.ts`) are regex and DB
+driven, make no network call, and return in under a millisecond. They power the Cmd+K
+command palette and produce the structured citations and one-click "drafts" ("categorize
+this transaction", "create this budget") shown in the Advisor chat and Review. This layer
+works with **no Anthropic API key at all**.
+
+**Cloud LLM chat** (`POST /api/ai/chat`, `routes/ai.ts`) streams from `claude-sonnet-5`
+via SSE with adaptive extended thinking (`thinking: { type: 'adaptive', display: 'summarized' }`)
+and `output_config: { effort: 'medium' }`, with the financial context snapshot injected
+into the system prompt behind prompt-cache `cache_control`. The Advisor chat calls this
+*and* the local heuristic in parallel on every message: the LLM produces the conversational
+answer, with visible step-by-step reasoning shown as a collapsible "Thinking…" panel while
+it streams, and the heuristic supplies the citations and drafts. If no `ANTHROPIC_API_KEY`
+is configured, the chat degrades to heuristic-only answers rather than erroring out.
+
+**The background worker** (`services/aiWorker.ts`, runs after every sync) calls
+`claude-haiku-4-5` non-streaming to propose drafts from the latest sync delta, stored in
+`advisor_drafts` and surfaced in Review. It requires `ANTHROPIC_API_KEY` and is silently
+skipped if unset.
 
 ### What the AI does on its own
 
 The boundary is drawn by **domain**, not by a confidence score. `AUTONOMOUS_DRAFT_KINDS`
 (`services/advisorDrafts.ts`) holds the two operations the AI applies with no confirmation
-step:
-
-- `categorize_transaction` and `create_merchant_rule` apply on arrival, from the background
-  worker or from a chat tool call. These are observations about data that already exists.
-- Everything else (`update_budget`, `update_goal_target`, `confirm_recurring`,
-  `set_manual_cost_basis`, …) always waits for an explicit confirm, because those change a
-  target the owner set rather than describing what is already there.
+step. `categorize_transaction` and `create_merchant_rule` apply on arrival, whether from
+the background worker or from a chat tool call, because both are observations about data
+that already exists. Everything else (`update_budget`, `update_goal_target`,
+`confirm_recurring`, `set_manual_cost_basis`, and the rest) always waits for an explicit
+confirm, because those change a target the owner set rather than describing what is
+already there.
 
 Every applied action is recorded in `advisor_actions`, and every row it touched records
 `category_source`, `category_action_id`, and the category it displaced (migration 041). So
-`POST /api/ai/actions/:id/undo` reverts the whole blast radius of an action — including
-rows a merchant rule swept in — restoring each row's prior category. Rows edited by hand
+`POST /api/ai/actions/:id/undo` reverts the whole blast radius of an action, including
+rows a merchant rule swept in, restoring each row's prior category. Rows edited by hand
 since are skipped: a manual edit clears `category_action_id` precisely so an undo cannot
 reach back through a human decision.
 
@@ -237,9 +239,9 @@ node --test --import tsx tests/reporting.test.ts            # single file
 node --test --import tsx --test-name-pattern="savings" tests/budgetMath.test.ts   # single test by name
 ```
 
-Tests run directly against `.ts` source via the `tsx` loader — no build step, no test
-framework config. Most test files construct a minimal `:memory:` better-sqlite3 schema
-with only the tables/columns a given service needs, and call service functions directly
+Tests run directly against `.ts` source via the `tsx` loader, with no build step and no
+test framework config. Most test files construct a minimal `:memory:` better-sqlite3 schema
+with only the tables and columns a given service needs, and call service functions directly
 rather than going through HTTP routes.
 
 There is no lint script. Type-check manually when needed:
