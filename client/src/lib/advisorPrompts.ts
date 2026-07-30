@@ -717,11 +717,14 @@ export function buildHoldingAdvisorPrompt(
   const securityName = holding.security_name ?? holding.ticker ?? 'this holding';
   const accountName = account?.account_name ?? 'unknown account';
   const institutionName = account?.institution_name ?? 'unknown institution';
-  const unrealizedGain = holding.cost_basis != null ? holding.institution_value - holding.cost_basis : null;
-  const returnPct = unrealizedGain != null && holding.cost_basis != null && holding.cost_basis > 0
-    ? (unrealizedGain / holding.cost_basis) * 100
+  // A basis of 0 is unreported, so there is no gain to state: quoting one hands the model the
+  // position's whole market value as profit and asks it to explain a return that never happened.
+  const costBasis = holding.cost_basis != null && holding.cost_basis > 0 ? holding.cost_basis : null;
+  const unrealizedGain = costBasis != null ? holding.institution_value - costBasis : null;
+  const returnPct = unrealizedGain != null && costBasis != null
+    ? (unrealizedGain / costBasis) * 100
     : null;
-  const costBasisSource = holding.cost_basis_quality ?? (holding.cost_basis == null ? 'missing' : 'provider');
+  const costBasisSource = holding.cost_basis_quality ?? (costBasis == null ? 'missing' : 'provider');
   const sector = holding.sector ?? 'not available';
 
   return {
@@ -739,7 +742,7 @@ export function buildHoldingAdvisorPrompt(
       quantity: holding.quantity,
       price: holding.institution_price,
       value: holding.institution_value,
-      costBasis: holding.cost_basis ?? null,
+      costBasis,
       providerCostBasis: holding.provider_cost_basis ?? null,
       manualCostBasis: holding.manual_cost_basis ?? null,
       costBasisSource,
@@ -752,8 +755,8 @@ export function buildHoldingAdvisorPrompt(
       `Analyze my ${securityName} holding${holding.ticker ? ` (${holding.ticker})` : ''}.`,
       `It is held in ${accountName} at ${institutionName}.`,
       `Quantity is ${holding.quantity.toFixed(4)}, current price is ${formatMoneyValue(holding.institution_price)}, and market value is ${formatMoneyValue(holding.institution_value)}.`,
-      holding.cost_basis != null
-        ? `Effective cost basis is ${formatMoneyValue(holding.cost_basis)} from ${costBasisSource} data, provider basis is ${holding.provider_cost_basis == null ? 'not available' : formatMoneyValue(holding.provider_cost_basis)}, unrealized gain or loss is ${formatMoneyValue(unrealizedGain ?? 0)}, and return is ${returnPct == null ? 'not available' : `${returnPct.toFixed(1)}%`}.`
+      costBasis != null
+        ? `Effective cost basis is ${formatMoneyValue(costBasis)} from ${costBasisSource} data, provider basis is ${holding.provider_cost_basis == null ? 'not available' : formatMoneyValue(holding.provider_cost_basis)}, unrealized gain or loss is ${formatMoneyValue(unrealizedGain ?? 0)}, and return is ${returnPct == null ? 'not available' : `${returnPct.toFixed(1)}%`}.`
         : 'Cost basis is missing, so unrealized return quality is limited.',
       `Sector is ${sector}${holding.sector_source ? ` from ${holding.sector_source}` : ''}.`,
       'Explain concentration, cost basis quality, sector metadata quality, return quality, and what I should review before making decisions about this position.',

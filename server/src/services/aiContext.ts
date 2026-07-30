@@ -9,7 +9,7 @@ import type {
 } from '../../../shared/types';
 import { getDb } from '../db/index';
 import { toDollars, toDollarsOrNull } from './money';
-import { excludedFromTotalsSql } from './transactionFilters';
+import { excludedFromTotalsSql, expenseSideSql } from './transactionFilters';
 import { calculateGoalProgress } from './goalProgress';
 import { buildRecurringForecast } from './recurringForecast';
 import { getCashflowReport, getReportSummary } from './reporting';
@@ -371,15 +371,13 @@ export function buildFinancialContext(): string {
   const thisMonthSpending = db.prepare(`
     SELECT
       COALESCE(pc.name, c.name, 'Uncategorized') AS category,
-      SUM(ABS(t.amount)) AS total
+      SUM(-t.amount) AS total
     FROM transactions t
     LEFT JOIN categories c ON c.id = t.category_id
     LEFT JOIN categories pc ON pc.id = c.parent_id
     WHERE t.date >= ?
       AND t.pending = 0
-      AND t.amount < 0
-      AND COALESCE(c.is_income, 0) = 0
-      AND COALESCE(c.is_investment, 0) = 0
+      AND ${expenseSideSql('t', 'c')}
       AND ${excludedFromTotalsSql('t')}
     GROUP BY COALESCE(pc.id, c.id, 'uncategorized')
     ORDER BY total DESC
@@ -524,9 +522,14 @@ export function buildFinancialContext(): string {
 
   if (holdings.length > 0) {
     const totalPortfolio = holdings.reduce((s, h) => s + h.institution_value, 0);
-    const totalCostBasis = holdings.reduce((s, h) => s + (h.cost_basis ?? 0), 0);
-    const totalGain = totalCostBasis > 0 ? totalPortfolio - totalCostBasis : null;
-    const totalReturn = totalCostBasis > 0 ? ((totalPortfolio - totalCostBasis) / totalCostBasis) * 100 : null;
+    // Gain is only defined over the positions that have a basis. Charging the full portfolio
+    // value against a basis total that omits them reports their entire market value as profit:
+    // a $104.99 Fidelity cash sweep with no reported basis moved this from 1.8% to 7.1%.
+    const basisKnown = holdings.filter((h) => h.cost_basis != null && h.cost_basis > 0);
+    const totalCostBasis = basisKnown.reduce((s, h) => s + (h.cost_basis ?? 0), 0);
+    const basisKnownValue = basisKnown.reduce((s, h) => s + h.institution_value, 0);
+    const totalGain = totalCostBasis > 0 ? basisKnownValue - totalCostBasis : null;
+    const totalReturn = totalGain != null && totalCostBasis > 0 ? (totalGain / totalCostBasis) * 100 : null;
 
     // Asset type allocation
     const byType = new Map<string, number>();
@@ -536,7 +539,9 @@ export function buildFinancialContext(): string {
 
     lines.push('');
     lines.push(`### Investment Portfolio - ${fmt(totalPortfolio)}${totalReturn != null ? ` (${pct(totalReturn)} total return)` : ''}`);
-    if (totalGain != null) lines.push(`  Unrealized gain/loss: ${fmt(totalGain)}`);
+    if (totalGain != null) {
+      lines.push(`  Unrealized gain/loss: ${fmt(totalGain)} on ${fmt(totalCostBasis)} cost basis (${basisKnown.length} of ${holdings.length} holdings have a basis)`);
+    }
 
     lines.push('  Asset mix:');
     for (const [type, val] of [...byType.entries()].sort((a, b) => b[1] - a[1])) {
@@ -545,7 +550,7 @@ export function buildFinancialContext(): string {
 
     lines.push('  Top holdings:');
     for (const h of holdings.slice(0, 10)) {
-      const gain = h.cost_basis != null ? h.institution_value - h.cost_basis : null;
+      const gain = h.cost_basis != null && h.cost_basis > 0 ? h.institution_value - h.cost_basis : null;
       const ret = h.cost_basis != null && h.cost_basis > 0
         ? ((h.institution_value - h.cost_basis) / h.cost_basis) * 100
         : null;

@@ -37,6 +37,14 @@ interface SimplefinHolding {
   currency?: string | null;
 }
 
+// A provider basis of 0 means "not reported", never "acquired for nothing". Stored as 0 it reads
+// as a known basis and books the position's entire market value as unrealized gain: SPAXX, a
+// Fidelity cash sweep that is worth exactly what was put into it, was reported as pure profit and
+// carried the whole portfolio's return from 1.8% to 7.1%. Unknown has to stay NULL.
+function knownCostBasis(value: number | null): number | null {
+  return value != null && value > 0 ? value : null;
+}
+
 // Confirmed against a live SimpleFIN Bridge response (Fidelity brokerage/IRA accounts):
 // `holdings[]` is populated with {id, created, currency, cost_basis, description,
 // market_value, purchase_price, shares, symbol}. cost_basis/market_value are totals for
@@ -76,9 +84,10 @@ export function upsertHoldingsFromSimplefin(db: Database.Database, accountId: st
     // SimpleFIN frequently returns cost_basis as 0/missing even when it does provide a
     // real per-share purchase_price (confirmed against a live Fidelity payload) - fall
     // back to shares * purchase_price rather than showing a false $0 cost basis.
-    const costBasis = (!rawCostBasis) && purchasePrice != null && purchasePrice > 0 && shares !== 0
+    const derivedCostBasis = purchasePrice != null && purchasePrice > 0 && shares !== 0
       ? shares * purchasePrice
-      : rawCostBasis;
+      : null;
+    const costBasis = knownCostBasis(rawCostBasis) ?? knownCostBasis(derivedCostBasis);
     const price = shares !== 0 ? marketValue / shares : 0;
 
     let securityId: string | undefined;

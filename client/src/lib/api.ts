@@ -1,50 +1,51 @@
 import type {
   Account,
-  Transaction,
-  TransactionFilters,
-  Category,
-  Goal,
-  MerchantRule,
-  MerchantRuleSuggestion,
+  AdvisorAnalysis,
+  AdvisorConfirmResponse,
+  AdvisorContextResponse,
+  AdvisorDraftAction,
+  AdvisorSettings,
+  AdvisorSettingsUpdate,
+  AiStreamEvent,
+  AppPreference,
   Budget,
   BudgetGroup,
   BudgetRolloverLedgerEntry,
-  RecurringPattern,
+  CashflowReport,
+  Category,
+  CategoryTrendReport,
+  ChatMessage,
+  CredentialStatus,
+  CsvImportPreview,
+  DataImportRun,
+  DataQualitySummary,
+  Goal,
+  Holding,
+  HoldingHistoryPoint,
+  Insight,
+  LocalBackupRestorePreview,
+  LocalBackupRestoreResult,
+  MerchantRule,
+  MerchantRuleSuggestion,
+  NetWorthAttribution,
+  NetWorthSnapshot,
+  PaginatedResponse,
   RecurringForecast,
   RecurringOccurrenceAdjustment,
+  RecurringPattern,
+  ReportComparisonMode,
+  ReportSummary,
+  SafeToSpend,
+  Security,
+  SpendingReport,
   SubscriptionInsights,
-  NetWorthSnapshot,
-  Insight,
-  DataQualitySummary,
   SyncHealth,
   SyncRun,
   SyncRunDetail,
-  CashflowReport,
-  ReportSummary,
-  ReportComparisonMode,
-  SpendingReport,
-  CategoryTrendReport,
   TopMerchantsReport,
-  NetWorthAttribution,
-  CredentialStatus,
-  Holding,
-  HoldingHistoryPoint,
-  Security,
+  Transaction,
+  TransactionFilters,
   TransactionReviewSummary,
-  PaginatedResponse,
-  ChatMessage,
-  AiStreamEvent,
-  AdvisorAnalysis,
-  AdvisorConfirmResponse,
-  AdvisorDraftAction,
-  AdvisorContextResponse,
-  AdvisorSettings,
-  AdvisorSettingsUpdate,
-  AppPreference,
-  CsvImportPreview,
-  DataImportRun,
-  LocalBackupRestorePreview,
-  LocalBackupRestoreResult,
   TransactionUpdateResult,
 } from '@shared/types';
 
@@ -432,6 +433,7 @@ export const goalsApi = {
 
 export const insightsApi = {
   list: () => apiFetch<Insight[]>('/api/insights'),
+  safeToSpend: () => apiFetch<SafeToSpend>('/api/insights/safe-to-spend'),
   quality: () => apiFetch<DataQualitySummary>('/api/insights/quality'),
 };
 
@@ -440,7 +442,6 @@ export const insightsApi = {
 export interface ReportParams {
   startDate?: string;
   endDate?: string;
-  month?: string;
   comparison?: ReportComparisonMode;
 }
 
@@ -462,7 +463,6 @@ export const reportsApi = {
     const q = new URLSearchParams();
     if (params?.startDate) q.set('startDate', params.startDate);
     if (params?.endDate) q.set('endDate', params.endDate);
-    if (params?.month) q.set('month', params.month);
     return apiFetch<SpendingReport>(`/api/reports/spending?${q.toString()}`);
   },
   trends: (params?: ReportParams & { categoryIds?: string[] }) => {

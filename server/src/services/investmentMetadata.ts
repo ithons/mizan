@@ -51,6 +51,12 @@ function httpError(message: string, status: number): Error & { status: number } 
   return err;
 }
 
+// A stored basis of 0 is a provider that declined to report one (migration 043), so it is
+// unknown rather than known-to-be-nothing. Reading it as a number makes the whole position
+// unrealized gain and labels that 'provider' quality. Guard it here, at the one select every
+// holding read goes through, rather than at each caller.
+const PROVIDER_BASIS = 'CASE WHEN h.cost_basis > 0 THEN h.cost_basis END';
+
 const holdingSelect = `
   SELECT
     h.id,
@@ -59,15 +65,15 @@ const holdingSelect = `
     h.quantity,
     h.institution_price,
     h.institution_value,
-    h.cost_basis AS provider_cost_basis,
-    COALESCE(h.manual_cost_basis, h.cost_basis) AS cost_basis,
-    COALESCE(h.manual_cost_basis, h.cost_basis) AS effective_cost_basis,
+    ${PROVIDER_BASIS} AS provider_cost_basis,
+    COALESCE(h.manual_cost_basis, ${PROVIDER_BASIS}) AS cost_basis,
+    COALESCE(h.manual_cost_basis, ${PROVIDER_BASIS}) AS effective_cost_basis,
     h.manual_cost_basis,
     h.manual_cost_basis_note,
     h.manual_cost_basis_updated_at,
     CASE
       WHEN h.manual_cost_basis IS NOT NULL THEN 'manual'
-      WHEN h.cost_basis IS NOT NULL THEN 'provider'
+      WHEN h.cost_basis > 0 THEN 'provider'
       ELSE 'missing'
     END AS cost_basis_quality,
     h.currency,

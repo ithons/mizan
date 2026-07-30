@@ -6,9 +6,8 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeSanitize from 'rehype-sanitize';
 import type { AdvisorDraftAction } from '@shared/types';
-import { accountsApi, aiApi, budgetsApi, goalsApi, networthApi, recurringApi, reportsApi, transactionsApi } from '../lib/api';
-import { formatWholeCurrency } from '../lib/formatters';
-import { computeSafeToSpend } from '../lib/safeToSpend';
+import { accountsApi, aiApi, budgetsApi, goalsApi, insightsApi, networthApi, recurringApi, reportsApi, transactionsApi } from '../lib/api';
+import { formatCurrency, formatWholeCurrency } from '../lib/formatters';
 import { isAdvisorRouteState } from '../lib/advisorRouteState';
 import { useAiChat, type DisplayMessage } from '../hooks/useAiChat';
 import { useAppStore } from '../store';
@@ -139,6 +138,7 @@ export function Advisor() {
   const { data: budgets } = useQuery({ queryKey: ['budgets', currentMonth], queryFn: () => budgetsApi.getMonth(currentMonth) });
   const { data: goals } = useQuery({ queryKey: ['goals'], queryFn: () => goalsApi.list() });
   const { data: accounts } = useQuery({ queryKey: ['accounts'], queryFn: () => accountsApi.list() });
+  const safeToSpendQ = useQuery({ queryKey: ['insights', 'safe-to-spend'], queryFn: () => insightsApi.safeToSpend() });
 
   // Prefill from cross-view "Ask advisor" navigations.
   useEffect(() => {
@@ -175,11 +175,14 @@ export function Advisor() {
   }, [context]);
 
   const monthCF = (cashflow?.months ?? []).find((m) => m.month === currentMonth);
-  const safeToSpend = computeSafeToSpend({ snapshot, forecast, budgets, goals });
+  const safeToSpend = safeToSpendQ.data?.free ?? null;
 
   const contextRows = [
     { label: 'Net worth', value: formatWholeCurrency(snapshot?.net_worth ?? 0) },
-    { label: 'Safe to spend', value: formatWholeCurrency(safeToSpend) },
+    {
+      label: safeToSpend != null && safeToSpend < 0 ? 'Short this month' : 'Free to spend',
+      value: safeToSpend == null ? '—' : formatCurrency(safeToSpend),
+    },
     { label: 'This month spend', value: formatWholeCurrency(Math.abs(monthCF?.expenses ?? 0)) },
     { label: 'Accounts', value: String((accounts ?? []).filter((a) => !a.is_hidden).length) },
     { label: 'To review', value: String(reviewSummary?.total_open ?? 0) },

@@ -103,13 +103,15 @@ function spendingByMonth(
 
   const ids = Array.from(categoryIds);
   const placeholders = ids.map(() => '?').join(', ');
+  // Signed, not ABS-behind-a-sign-filter: a returned purchase has to release the budget it
+  // consumed. Under the old form a $955.19 Amazon purchase refunded four days later still ate
+  // the Shopping budget for the month, with no way to give it back.
   const rows = db.prepare(`
-    SELECT substr(date, 1, 7) AS month, COALESCE(SUM(ABS(amount)), 0) AS spent
+    SELECT substr(date, 1, 7) AS month, COALESCE(SUM(-amount), 0) AS spent
     FROM transactions
     WHERE category_id IN (${placeholders})
       AND date >= ?
       AND date < ?
-      AND amount < 0
       AND pending = 0
       AND ${excludedFromTotalsSql()}
     GROUP BY substr(date, 1, 7)
@@ -259,14 +261,13 @@ export function getMonthlyBudgetsWithProjection(
       c.name AS category_name,
       c.color AS category_color,
       c.icon AS category_icon,
-      COALESCE(SUM(ABS(t.amount)), 0) AS spent
+      COALESCE(SUM(-t.amount), 0) AS spent
     FROM budgets b
     JOIN categories c ON c.id = b.category_id
     LEFT JOIN budget_categories bc ON bc.root_id = b.category_id
     LEFT JOIN transactions t
       ON t.category_id = bc.category_id
      AND t.date BETWEEN ? AND ?
-     AND t.amount < 0
      AND t.pending = 0
      AND ${excludedFromTotalsSql('t')}
     WHERE b.period = 'monthly' OR b.period = ?

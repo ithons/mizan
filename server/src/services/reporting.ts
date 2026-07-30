@@ -1,5 +1,10 @@
 import type Database from 'better-sqlite3';
-import { excludedFromTotalsSql } from './transactionFilters';
+import {
+  excludedFromTotalsSql,
+  expenseSideSql,
+  incomeSideSql,
+  spendAmountSql,
+} from './transactionFilters';
 import {
   addDays,
   differenceInCalendarDays,
@@ -106,11 +111,11 @@ function reportableCategoryCondition(): string {
 }
 
 function incomeCategoryCondition(): string {
-  return `(${reportableCategoryCondition()}) AND (t.category_id IS NULL OR COALESCE(c.is_income, 0) = 1)`;
+  return `(${reportableCategoryCondition()}) AND ${incomeSideSql('t', 'c')}`;
 }
 
 function expenseCategoryCondition(): string {
-  return `(${reportableCategoryCondition()}) AND (t.category_id IS NULL OR COALESCE(c.is_income, 0) = 0) AND COALESCE(c.is_investment, 0) = 0`;
+  return `(${reportableCategoryCondition()}) AND ${expenseSideSql('t', 'c')}`;
 }
 
 function dateConditions(range: ReportDateRange): { conditions: string[]; params: unknown[] } {
@@ -219,16 +224,38 @@ function comparisonRange(
   return previousRange(range);
 }
 
-function flattenReportCategories(report: SpendingReport): ReportCategoryChange[] {
-  return report.categories.map((category) => ({
-    category_id: category.category_id,
-    category_name: category.category_name,
-    color: category.color,
-    current: category.amount,
-    previous: 0,
-    delta: category.amount,
-    delta_percent: null,
-  }));
+/**
+ * Flatten a report's categories into the comparison shape, optionally against a prior period.
+ *
+ * Without `previous` every row claimed `previous: 0` and `delta: <the whole amount>`, i.e. that
+ * every category was brand new this period. `top_spending` and `top_income` on the report summary
+ * were built that way and shipped that fiction to anything reading `.delta`. Callers that genuinely
+ * have no comparison pass nothing and get nulls, which is the honest shape for "not compared".
+ */
+function flattenReportCategories(
+  report: SpendingReport,
+  previous?: SpendingReport
+): ReportCategoryChange[] {
+  const previousById = previous
+    ? new Map(previous.categories.map((category) => [category.category_id, category.amount]))
+    : null;
+
+  return report.categories.map((category) => {
+    const priorAmount = previousById?.get(category.category_id) ?? (previousById ? 0 : null);
+    const delta = priorAmount === null ? null : category.amount - priorAmount;
+    return {
+      category_id: category.category_id,
+      category_name: category.category_name,
+      color: category.color,
+      current: category.amount,
+      previous: priorAmount ?? 0,
+      delta: delta ?? 0,
+      delta_percent:
+        priorAmount === null || priorAmount === 0 || delta === null
+          ? null
+          : (delta / Math.abs(priorAmount)) * 100,
+    };
+  });
 }
 
 function categoryChanges(
@@ -285,8 +312,8 @@ export function getCashflowReport(
     ${excludedCategoriesCte()}
     SELECT
       strftime('%Y-%m', t.date) AS month,
-      SUM(CASE WHEN t.amount > 0 AND ${incomeCategoryCondition()} THEN t.amount ELSE 0 END) AS income,
-      SUM(CASE WHEN t.amount < 0 AND ${expenseCategoryCondition()} THEN ABS(t.amount) ELSE 0 END) AS expenses
+      SUM(CASE WHEN ${incomeCategoryCondition()} THEN t.amount ELSE 0 END) AS income,
+      SUM(CASE WHEN ${expenseCategoryCondition()} THEN ${spendAmountSql('t')} ELSE 0 END) AS expenses
     FROM transactions t
     LEFT JOIN categories c ON c.id = t.category_id
     ${where}
@@ -455,7 +482,8 @@ export function getSpendingReport(
   options: SpendingReportOptions
 ): SpendingReport {
   const { conditions, params } = dateConditions(options);
-  conditions.push('t.amount < 0');
+  // No sign filter: a refund is a positive row in an expense category and must net the
+  // category's spend down rather than be dropped. See transactionFilters.expenseSideSql.
   conditions.push(expenseCategoryCondition());
   const where = `WHERE ${conditions.join(' AND ')}`;
 
@@ -465,7 +493,7 @@ export function getSpendingReport(
       c.id AS category_id,
       c.name AS category_name,
       c.color,
-      SUM(ABS(t.amount)) AS amount
+      SUM(-t.amount) AS amount
     FROM transactions t
     LEFT JOIN categories c ON c.id = t.category_id
     ${where}
@@ -481,7 +509,6 @@ export function getIncomeReport(
   range: ReportDateRange
 ): SpendingReport {
   const { conditions, params } = dateConditions(range);
-  conditions.push('t.amount > 0');
   conditions.push(incomeCategoryCondition());
   const where = `WHERE ${conditions.join(' AND ')}`;
 
@@ -555,10 +582,8 @@ export function getReportDrilldown(
   const categoryParams: unknown[] = [];
 
   if (options.kind === 'spending') {
-    conditions.push('t.amount < 0');
     conditions.push(expenseCategoryCondition());
   } else {
-    conditions.push('t.amount > 0');
     conditions.push(incomeCategoryCondition());
   }
 
@@ -609,7 +634,6 @@ export function getSpendingTrendsReport(
   range: ReportDateRange & { categoryIds?: string[] }
 ): TrendReport {
   const { conditions, params } = dateConditions(range);
-  conditions.push('t.amount < 0');
   conditions.push(expenseCategoryCondition());
 
   const selectedCategoryIds = new Set(range.categoryIds ?? []);
@@ -637,7 +661,7 @@ export function getSpendingTrendsReport(
       c.id AS category_id,
       c.name AS category_name,
       c.color,
-      SUM(ABS(t.amount)) AS amount
+      SUM(-t.amount) AS amount
     FROM transactions t
     LEFT JOIN categories c ON c.id = t.category_id
     ${where}
@@ -753,8 +777,8 @@ function getCashflowEvidence(
   const range = monthRange ?? { startDate: options.startDate, endDate: options.endDate };
   const { conditions, params } = dateConditions(range);
   conditions.push(`(
-    (t.amount > 0 AND ${incomeCategoryCondition()})
-    OR (t.amount < 0 AND ${expenseCategoryCondition()})
+    ${incomeCategoryCondition()}
+    OR ${expenseCategoryCondition()}
   )`);
 
   const rows = db.prepare(`
@@ -978,10 +1002,10 @@ export function getReportSummary(
       savingsRate(currentCashflow.income, currentCashflow.expenses),
       savingsRate(previousCashflow.income, previousCashflow.expenses)
     ),
-    top_spending: flattenReportCategories(currentSpending)
+    top_spending: flattenReportCategories(currentSpending, previousSpending)
       .sort((a, b) => b.current - a.current)
       .slice(0, 3),
-    top_income: flattenReportCategories(currentIncome)
+    top_income: flattenReportCategories(currentIncome, getIncomeReport(db, previous))
       .sort((a, b) => b.current - a.current)
       .slice(0, 3),
     spending_movers: categoryChanges(currentSpending, previousSpending, 5),
@@ -997,7 +1021,6 @@ export function getTopMerchantsReport(
   range: ReportDateRange & { limit?: number }
 ): TopMerchantsReport {
   const { conditions, params } = dateConditions(range);
-  conditions.push('t.amount < 0');
   conditions.push(expenseCategoryCondition());
 
   const limit = Math.min(Math.max(range.limit ?? 15, 1), 100);
@@ -1045,7 +1068,7 @@ export function getTopMerchantsReport(
 
   const totalRow = db.prepare(`
     ${excludedCategoriesCte()}
-    SELECT COALESCE(SUM(ABS(t.amount)), 0) AS total
+    SELECT COALESCE(SUM(-t.amount), 0) AS total
     FROM transactions t
     LEFT JOIN categories c ON c.id = t.category_id
     WHERE ${conditions.join(' AND ')}

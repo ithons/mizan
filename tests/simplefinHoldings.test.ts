@@ -61,8 +61,9 @@ test('upsertHoldingsFromSimplefin falls back to shares*purchase_price when cost_
   upsertHoldingsFromSimplefin(db, 'acct_1', [
     // Matches a real Fidelity payload: cost_basis "0.00" despite a real purchase_price.
     { symbol: 'FSKAX', description: 'Fidelity Total Market Index Fund', shares: 1.477, market_value: 305.56, cost_basis: 0, purchase_price: 204.98 },
-    // No usable purchase_price to fall back to (e.g. a stable-value money market fund) -
-    // cost_basis stays exactly what SimpleFIN reported, not fabricated from nothing.
+    // No usable purchase_price to fall back to (e.g. a stable-value money market fund). The
+    // reported 0 is the provider declining to answer, so it is stored as unknown: kept as 0 it
+    // would make the position's whole market value unrealized gain.
     { symbol: 'SPAXX', description: 'Money Market', shares: 4.61, market_value: 4.61, cost_basis: 0, purchase_price: null },
     // A real nonzero cost_basis is never overridden by purchase_price.
     { symbol: 'VTI', description: 'Vanguard Total Stock Market ETF', shares: 10, market_value: 2500, cost_basis: 2000, purchase_price: 150 },
@@ -71,7 +72,7 @@ test('upsertHoldingsFromSimplefin falls back to shares*purchase_price when cost_
   const holdings = db.prepare('SELECT quantity, cost_basis FROM holdings ORDER BY quantity').all();
   assert.deepEqual(holdings, [
     { quantity: 1.477, cost_basis: Math.round(1.477 * 204.98 * 100) },
-    { quantity: 4.61, cost_basis: 0 },
+    { quantity: 4.61, cost_basis: null },
     { quantity: 10, cost_basis: 200000 },
   ]);
 });

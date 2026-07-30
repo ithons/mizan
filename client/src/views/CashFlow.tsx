@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { format, parseISO, startOfMonth, subMonths } from 'date-fns';
+import { endOfMonth, format, parseISO, startOfMonth, subMonths } from 'date-fns';
 import { reportsApi } from '../lib/api';
 import { formatWholeCurrency } from '../lib/formatters';
 import { QueryErrorBanner } from '../components/QueryErrorBanner';
@@ -30,9 +30,14 @@ export function CashFlow() {
     queryFn: () => reportsApi.cashflow({ startDate, endDate }),
   });
   const cashflow = cashflowQ.data;
+  // An explicit window, not `{ month }`: the /spending route only ever read startDate/endDate,
+  // so the month was serialized, sent, and silently dropped, and this panel rendered the ALL-TIME
+  // rollup under a heading that named the current month ($80,798.16 where July was $2,836.46).
+  const monthStart = format(startOfMonth(new Date()), 'yyyy-MM-dd');
+  const monthEnd = format(endOfMonth(new Date()), 'yyyy-MM-dd');
   const spendingQ = useQuery({
-    queryKey: ['spending', currentMonth],
-    queryFn: () => reportsApi.spending({ month: currentMonth }),
+    queryKey: ['spending', monthStart, monthEnd],
+    queryFn: () => reportsApi.spending({ startDate: monthStart, endDate: monthEnd }),
   });
   const spending = spendingQ.data;
 

@@ -135,13 +135,34 @@ function titleCase(value: string): string {
     .replace(/\b\w/g, (char) => char.toUpperCase());
 }
 
+/**
+ * The basis a holding actually has, or null when nobody has reported one.
+ *
+ * A stored 0 is a provider declining to answer (migration 043), not a position acquired for
+ * nothing. Admitted to the known set it books the whole market value as gain: a $104.99 Fidelity
+ * cash sweep took the Investments header from a true 1.8% return to 7.1%, and no row underneath
+ * accounted for the difference, because the per-row gain already refused a non-positive basis.
+ * The header and the rows resolve the basis through here so they cannot disagree again.
+ */
+export function effectiveCostBasis(holding: Holding): number | null {
+  const basis = holding.effective_cost_basis ?? holding.cost_basis;
+  return basis != null && basis > 0 ? basis : null;
+}
+
+export function holdingGain(holding: Holding): { gain: number; pct: number } | null {
+  const basis = effectiveCostBasis(holding);
+  if (basis == null) return null;
+  const gain = holding.institution_value - basis;
+  return { gain, pct: (gain / basis) * 100 };
+}
+
 export function getCostBasisStats(holdings: Holding[]): CostBasisStats {
-  const known = holdings.filter((holding) => holding.cost_basis != null);
+  const known = holdings.filter((holding) => effectiveCostBasis(holding) != null);
   const manualCount = holdings.filter((holding) => holding.cost_basis_quality === 'manual').length;
   const providerCount = known.filter((holding) =>
     holding.cost_basis_quality === 'provider' || !holding.cost_basis_quality
   ).length;
-  const knownCostBasis = known.reduce((sum, holding) => sum + (holding.cost_basis ?? 0), 0);
+  const knownCostBasis = known.reduce((sum, holding) => sum + (effectiveCostBasis(holding) ?? 0), 0);
   const knownValue = known.reduce((sum, holding) => sum + holding.institution_value, 0);
   const missingCount = holdings.length - known.length;
   const unrealized = known.length > 0 ? knownValue - knownCostBasis : null;

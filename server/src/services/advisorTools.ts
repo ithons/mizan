@@ -133,7 +133,7 @@ export function buildAdvisorReadTools(
     SELECT COUNT(*) AS count
     FROM holdings h
     JOIN securities s ON s.id = h.security_id
-    WHERE (h.cost_basis IS NULL AND h.manual_cost_basis IS NULL)
+    WHERE (COALESCE(h.cost_basis, 0) <= 0 AND h.manual_cost_basis IS NULL)
        OR NULLIF(trim(s.sector), '') IS NULL
   `);
   const sectorKnownCount = count(db, `
@@ -632,8 +632,9 @@ function analyzeInvestments(db: Database.Database): Pick<AdvisorAnalysis, 'answe
   }
 
   const totalValue = holdings.reduce((sum, holding) => sum + holding.institution_value, 0);
-  const knownBasis = holdings.filter((holding) => holding.cost_basis != null);
-  const missingBasis = holdings.filter((holding) => holding.cost_basis == null);
+  // A basis of 0 is unreported, not zero-cost, so it belongs on the missing side of this split.
+  const knownBasis = holdings.filter((holding) => holding.cost_basis != null && holding.cost_basis > 0);
+  const missingBasis = holdings.filter((holding) => holding.cost_basis == null || holding.cost_basis <= 0);
   const manualBasisCount = holdings.filter((holding) => holding.cost_basis_quality === 'manual').length;
   const knownBasisValue = knownBasis.reduce((sum, holding) => sum + (holding.cost_basis ?? 0), 0);
   const knownMarketValue = knownBasis.reduce((sum, holding) => sum + holding.institution_value, 0);

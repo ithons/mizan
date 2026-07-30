@@ -5,7 +5,7 @@ import type { Holding } from '@shared/types';
 import { accountsApi, investmentsApi, reportsApi } from '../lib/api';
 import { formatWholeCurrency, formatPercent } from '../lib/formatters';
 import { parseDecimalInput } from '../lib/numberInput';
-import { ALLOCATION_LENSES, getAllocationSlices, getCostBasisStats, type AllocationLens } from '../lib/investmentAnalytics';
+import { ALLOCATION_LENSES, getAllocationSlices, getCostBasisStats, holdingGain, type AllocationLens } from '../lib/investmentAnalytics';
 import { useAppStore } from '../store';
 import { Modal } from '../components/Modal';
 import { QueryErrorBanner } from '../components/QueryErrorBanner';
@@ -22,13 +22,6 @@ type RangeId = (typeof RANGES)[number]['id'];
 function holdingName(h: Holding): string {
   const name = h.security_name ?? h.ticker ?? 'Unknown holding';
   return h.ticker && h.security_name ? `${h.security_name} · ${h.ticker}` : name;
-}
-
-function holdingGain(h: Holding): { gain: number; pct: number } | null {
-  const basis = h.effective_cost_basis ?? h.cost_basis;
-  if (basis == null || basis <= 0) return null;
-  const gain = h.institution_value - basis;
-  return { gain, pct: (gain / basis) * 100 };
 }
 
 function HoldingModal({ holding, accountName, onClose }: { holding: Holding | null; accountName?: string; onClose: () => void }) {

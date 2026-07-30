@@ -258,7 +258,13 @@ router.get('/investments', (req: Request, res: Response, next: NextFunction): vo
         s.ticker,
         s.name AS security_name,
         s.type AS security_type,
-        (h.institution_value - COALESCE(h.cost_basis, 0)) AS unrealized_gain
+        -- COALESCE(cost_basis, 0) would charge the whole market value against a basis of zero and
+        -- report an unknown-basis position as 100% gain. A money-market sweep has no basis to
+        -- know, so the honest answer is NULL and the caller renders nothing.
+        CASE
+          WHEN COALESCE(h.manual_cost_basis, h.cost_basis) > 0
+          THEN h.institution_value - COALESCE(h.manual_cost_basis, h.cost_basis)
+        END AS unrealized_gain
       FROM holdings h
       JOIN securities s ON s.id = h.security_id
       ORDER BY h.institution_value DESC

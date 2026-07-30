@@ -1124,3 +1124,20 @@ export interface LocalBackupRestoreResult {
   skipped_tables: string[];
   warnings: string[];
 }
+
+/**
+ * "Free to spend" and every claim subtracted to get there, in DOLLARS (the API boundary).
+ *
+ * `free` is signed on purpose: a negative value means the claims on the liquid pool exceed it, and
+ * that is the most important thing this number can say. The previous client-side version clamped it
+ * at zero, so "you are $400 short" and "you have nothing spare" rendered identically.
+ */
+export interface SafeToSpend {
+  liquid: number;
+  card_balances: number;
+  upcoming_bills: number;
+  allocated_budgets: number;
+  allocated_goals: number;
+  free: number;
+  forecast_days: number;
+}

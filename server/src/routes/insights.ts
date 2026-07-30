@@ -6,6 +6,8 @@ import { getDataQualitySummary } from '../services/dataQuality';
 import { buildRecurringForecast } from '../services/recurringForecast';
 import { suggestMerchantRules } from '../services/rules';
 import { getAnomalyInsights } from '../services/anomalyInsights';
+import { computeSafeToSpend } from '../services/safeToSpend';
+import { getMonthlyBudgetsWithProjection } from '../services/budgetProjection';
 import { toDollars } from '../services/money';
 import { excludedFromTotalsSql } from '../services/transactionFilters';
 import type { Insight, InsightSeverity } from '../../../shared/types';
@@ -94,6 +96,30 @@ function ageInDays(iso: string | null): number | null {
 
   return differenceInCalendarDays(new Date(), parsed);
 }
+
+// GET /safe-to-spend - what is left after every claim already made on the liquid pool.
+// Served from the server so the Today screen and the advisor cannot disagree about it.
+router.get('/safe-to-spend', (_req: Request, res: Response, next: NextFunction): void => {
+  try {
+    const db = getDb();
+    const now = new Date();
+    const budgets = getMonthlyBudgetsWithProjection(db, now.getFullYear(), now.getMonth() + 1);
+    const breakdown = computeSafeToSpend(db, { budgets });
+    res.json({
+      data: {
+        liquid: toDollars(breakdown.liquid),
+        card_balances: toDollars(breakdown.cardBalances),
+        upcoming_bills: toDollars(breakdown.upcomingBills),
+        allocated_budgets: toDollars(breakdown.allocatedBudgets),
+        allocated_goals: toDollars(breakdown.allocatedGoals),
+        free: toDollars(breakdown.free),
+        forecast_days: breakdown.forecastDays,
+      },
+    });
+  } catch (err) {
+    next(err);
+  }
+});
 
 router.get('/quality', (_req: Request, res: Response, next: NextFunction): void => {
   try {

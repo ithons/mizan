@@ -14,7 +14,6 @@ import {
   transactionsApi,
 } from '../lib/api';
 import { formatCurrency, formatWholeCurrency } from '../lib/formatters';
-import { computeSafeToSpend } from '../lib/safeToSpend';
 import { useAppStore } from '../store';
 import { QueryErrorBanner } from '../components/QueryErrorBanner';
 import { Screen, BalanceScale, TextButton } from '../components/balance';
@@ -89,6 +88,7 @@ export function Today() {
   const budgetsQ = useQuery({ queryKey: ['budgets', currentMonth], queryFn: () => budgetsApi.getMonth(currentMonth) });
   const goalsQ = useQuery({ queryKey: ['goals'], queryFn: () => goalsApi.list() });
   const insightsQ = useQuery({ queryKey: ['insights'], queryFn: () => insightsApi.list() });
+  const safeToSpendQ = useQuery({ queryKey: ['insights', 'safe-to-spend'], queryFn: () => insightsApi.safeToSpend() });
   const aiActionsQ = useQuery({ queryKey: ['ai-actions'], queryFn: () => aiApi.listActions(), retry: false });
   const cashflowQ = useQuery({
     queryKey: ['reports', 'cashflow', monthStart, monthEnd],
@@ -120,6 +120,7 @@ export function Today() {
     { query: budgetsQ, label: 'budgets' },
     { query: goalsQ, label: 'goals' },
     { query: cashflowQ, label: 'this month' },
+    { query: safeToSpendQ, label: 'free to spend' },
     { query: spendingQ, label: 'spending by category' },
     { query: trendsQ, label: 'category trends' },
     { query: transactionsQ, label: 'recent transactions' },
@@ -152,7 +153,10 @@ export function Today() {
   // Split from the overdue one, so a bill that was due last week is not labelled as still ahead.
   const nextBill = bills.find((o) => o.status !== 'overdue') ?? null;
   const topGoal = (goalsQ.data ?? []).find((g) => !g.is_archived && g.target_amount > 0 && g.remaining_amount > 0);
-  const safeToSpend = computeSafeToSpend({ snapshot, forecast, budgets: budgetsQ.data, goals: goalsQ.data });
+  // Server-computed, so this and the advisor cannot disagree. `free` is signed: negative means
+  // the claims on the liquid pool (cards, dated bills, budgeted allocations, goal earmarks)
+  // exceed it, which is exactly what the old clamped-at-zero version could never say.
+  const safeToSpend = safeToSpendQ.data?.free ?? null;
   const recentAiCount = (aiActionsQ.data ?? []).filter(
     (a) => differenceInCalendarDays(new Date(), parseISO(a.created_at)) <= 1
   ).length;
@@ -247,7 +251,12 @@ export function Today() {
           {/* Stacked in the rail rather than run along the foot: one fewer horizontal band, and
               the rail would otherwise run out well before the tables beside it do. */}
           <div className="mt-6 grid gap-[11px] border-t border-line-2 pt-5">
-            <RailRow to="/budget" label="Free to spend" value={formatWholeCurrency(safeToSpend)} />
+            <RailRow
+              to="/budget"
+              label={safeToSpend != null && safeToSpend < 0 ? 'Short this month' : 'Free to spend'}
+              value={safeToSpend == null ? '—' : formatCurrency(safeToSpend)}
+              tone={safeToSpend != null && safeToSpend < 0 ? 'text-clay' : undefined}
+            />
             {topGoal && (
               <RailRow
                 to="/goals"

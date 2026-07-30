@@ -22,7 +22,8 @@ function setupDb(): Database.Database {
       amount REAL NOT NULL,
       category_id TEXT,
       pending INTEGER NOT NULL DEFAULT 0,
-      transfer_status TEXT NOT NULL DEFAULT 'none'
+      transfer_status TEXT NOT NULL DEFAULT 'none',
+      duplicate_status TEXT NOT NULL DEFAULT 'none'
     );
 
     INSERT INTO categories (id, name, parent_id, is_income, is_investment)

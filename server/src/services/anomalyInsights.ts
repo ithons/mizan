@@ -1,6 +1,7 @@
 import type Database from 'better-sqlite3';
 import { format, subDays } from 'date-fns';
 import { toDollars } from './money';
+import { excludedFromTotalsSql, expenseSideSql, incomeSideSql } from './transactionFilters';
 import type { Insight } from '../../../shared/types';
 
 export interface RankedInsight extends Insight {
@@ -51,18 +52,16 @@ export function getAnomalyInsights(db: Database.Database, now = new Date()): Ran
     expense_rows AS (
       SELECT
         COALESCE(parent.name, c.name, 'Uncategorized') AS category_name,
-        CASE WHEN t.date BETWEEN ? AND ? THEN ABS(t.amount) ELSE 0 END AS current_amount,
-        CASE WHEN t.date BETWEEN ? AND ? THEN ABS(t.amount) ELSE 0 END AS previous_amount
+        CASE WHEN t.date BETWEEN ? AND ? THEN -t.amount ELSE 0 END AS current_amount,
+        CASE WHEN t.date BETWEEN ? AND ? THEN -t.amount ELSE 0 END AS previous_amount
       FROM transactions t
       LEFT JOIN categories c ON c.id = t.category_id
       LEFT JOIN categories parent ON parent.id = c.parent_id
       WHERE t.pending = 0
-        AND t.amount < 0
         AND t.date BETWEEN ? AND ?
         AND (t.category_id IS NULL OR t.category_id NOT IN (SELECT id FROM excluded_report_categories))
-        AND COALESCE(t.transfer_status, 'none') NOT IN ('candidate', 'confirmed')
-        AND (t.category_id IS NULL OR COALESCE(c.is_income, 0) = 0)
-        AND COALESCE(c.is_investment, 0) = 0
+        AND ${excludedFromTotalsSql('t')}
+        AND ${expenseSideSql('t', 'c')}
     )
     SELECT
       category_name,
@@ -99,12 +98,10 @@ export function getAnomalyInsights(db: Database.Database, now = new Date()): Ran
     FROM transactions t
     LEFT JOIN categories c ON c.id = t.category_id
     WHERE t.pending = 0
-      AND t.amount > 0
       AND t.date BETWEEN ? AND ?
       AND (t.category_id IS NULL OR t.category_id NOT IN (SELECT id FROM excluded_report_categories))
-      AND COALESCE(t.transfer_status, 'none') NOT IN ('candidate', 'confirmed')
-      AND (t.category_id IS NULL OR COALESCE(c.is_income, 0) = 1)
-      AND COALESCE(c.is_investment, 0) = 0
+      AND ${excludedFromTotalsSql('t')}
+      AND ${incomeSideSql('t', 'c')}
   `).get(
     ...EXCLUDED_REPORT_ROOT_CATEGORY_IDS,
     currentStart,

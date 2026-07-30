@@ -298,11 +298,14 @@ function listGoalsTool(db: Database.Database): unknown {
 // named so the model can separate brokerage from wallet itself. The context snapshot's
 // portfolio block deliberately excludes crypto (it is already counted under Net Worth there);
 // this tool is the unfiltered view, and its description says so.
+//
+// A provider basis of 0 reads as unknown (migration 043); reported as a number it would tell the
+// model a cash sweep is 100% profit and invite it to say so.
 function listHoldingsTool(db: Database.Database): unknown {
   const rows = db.prepare(`
     SELECT s.ticker, s.name, s.type, h.quantity,
       h.institution_value AS value_cents,
-      COALESCE(h.manual_cost_basis, h.cost_basis) AS basis_cents,
+      COALESCE(h.manual_cost_basis, CASE WHEN h.cost_basis > 0 THEN h.cost_basis END) AS basis_cents,
       a.account_name, a.type AS account_type, a.is_hidden
     FROM holdings h
     JOIN securities s ON s.id = h.security_id

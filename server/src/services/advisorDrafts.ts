@@ -183,14 +183,16 @@ function nextBudgetGroupSort(db: Database.Database): number {
 }
 
 function holdingRows(db: Database.Database): HoldingDraftRow[] {
+  // A stored basis of 0 is unreported (migration 043), so it must surface as NULL here too, or a
+  // draft's citation reads "Effective $0.00" for a position whose basis nobody actually knows.
   return db.prepare(`
     SELECT
       h.id,
       h.security_id,
       h.institution_value,
-      h.cost_basis AS provider_cost_basis,
+      CASE WHEN h.cost_basis > 0 THEN h.cost_basis END AS provider_cost_basis,
       h.manual_cost_basis,
-      COALESCE(h.manual_cost_basis, h.cost_basis) AS effective_cost_basis,
+      COALESCE(h.manual_cost_basis, CASE WHEN h.cost_basis > 0 THEN h.cost_basis END) AS effective_cost_basis,
       s.ticker,
       s.name AS security_name,
       s.sector
