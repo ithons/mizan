@@ -51,10 +51,27 @@ export class CoinbaseApiError extends Error {
   }
 }
 
+// Resolves the securities row for a Coinbase ticker, creating it if this is the first time the
+// ticker has been seen. Shared by the holdings upsert and both transaction write paths, so a
+// trade and the position it produces always point at the same security id.
+export function resolveCryptoSecurityId(db: Database.Database, ticker: string): string {
+  const existing = db.prepare(
+    "SELECT id FROM securities WHERE ticker = ? AND type = 'crypto' LIMIT 1"
+  ).get(ticker) as { id: string } | undefined;
+  if (existing) return existing.id;
+
+  const securityId = uuidv4();
+  db.prepare(`
+    INSERT INTO securities (id, ticker, name, type, currency)
+    VALUES (?, ?, ?, 'crypto', 'USD')
+  `).run(securityId, ticker, ticker);
+  return securityId;
+}
+
 // Mirrors upsertHoldingsFromSimplefin (simplefin.ts): each crypto_wallet account holds exactly
 // one coin, so unlike SimpleFIN there's no array of positions, just one security per account.
-// cost_basis is left null for v1 - the Coinbase brokerage accounts API doesn't return it, and
-// mining it from trade history is a separate feature, not part of this fix.
+// cost_basis stays NULL: Coinbase's brokerage API reports none, and nothing in this app derives
+// one. See upsertCoinbaseTransaction for why this ledger cannot honestly produce it either.
 export function upsertCoinbaseHolding(
   db: Database.Database,
   accountId: string,
@@ -64,17 +81,7 @@ export function upsertCoinbaseHolding(
   value: number,
   now: string
 ): void {
-  const existing = db.prepare(
-    "SELECT id FROM securities WHERE ticker = ? AND type = 'crypto' LIMIT 1"
-  ).get(currency) as { id: string } | undefined;
-
-  const securityId = existing?.id ?? uuidv4();
-  if (!existing) {
-    db.prepare(`
-      INSERT INTO securities (id, ticker, name, type, currency)
-      VALUES (?, ?, ?, 'crypto', 'USD')
-    `).run(securityId, currency, currency);
-  }
+  const securityId = resolveCryptoSecurityId(db, currency);
 
   // quantity + per-unit price stay REAL dollars; institution_value is a total -> cents.
   db.prepare(`
@@ -88,7 +95,7 @@ export function upsertCoinbaseHolding(
   `).run(uuidv4(), accountId, securityId, quantity, price, toCents(value), now);
 }
 
-// A Coinbase v2 (App API) transaction. amount/native_amount are SIGNED decimal strings —
+// A Coinbase v2 (App API) transaction. amount/native_amount are SIGNED decimal strings:
 // negative = debit (out), positive = credit (in). native_amount is the USD value.
 export interface CoinbaseV2Transaction {
   id: string;
@@ -106,7 +113,7 @@ export interface ClassifiedLedgerTx {
 }
 
 // Maps a v2 transaction to a ledger entry, or null to skip it. buy/sell/advanced_trade_fill are
-// intentionally skipped here — they're imported from the v3 brokerage-orders endpoint
+// intentionally skipped here, they're imported from the v3 brokerage-orders endpoint
 // (syncTradeHistory) and would double-count. Only completed transactions are imported.
 //
 // Sign convention matches syncTradeHistory: a SELL/receive/deposit is money IN (positive); a
@@ -145,9 +152,142 @@ export function classifyCoinbaseLedgerTx(txn: CoinbaseV2Transaction): Classified
       return { categoryId: 'cat_xfer_out', signedCents: toCents(nativeUsd), merchant: 'Coinbase withdrawal' };
     default:
       // buy / sell / advanced_trade_fill (v3 covers these) and everything else (staking moves,
-      // rewards, internal transfers) are skipped for now.
+      // rewards, interest, incentives, internal transfers) are skipped. Coinbase pays rewards
+      // automatically, so those units reach holdings.quantity with no ledger row behind them:
+      // this is the gap that makes any lot replay over these rows wrong, not just incomplete.
       return null;
   }
+}
+
+export interface LedgerUnits {
+  ticker: string;
+  quantity: number; // signed units of `ticker`: positive arrived, negative left
+}
+
+// A FILLED v3 brokerage order. Hoisted out of syncTradeHistory so coinbaseOrderUnits can be
+// exercised against the real shape instead of a restatement of it.
+export interface CoinbaseFilledOrder {
+  order_id: string;
+  product_id: string;
+  side: string;
+  status: string;
+  filled_size: string;
+  average_filled_price: string;
+  created_time: string;
+  total_fees: string;
+  total_value_after_fees: string;
+}
+
+/**
+ * Why both capture sites below record units that nothing currently reads.
+ *
+ * The only use for a unit count is cost basis, and this ledger cannot produce an honest one.
+ * Coinbase's API gives us trades, converts, sends, receives and fiat moves; it does not give us
+ * the disposal history a lot replay needs. Rewards, interest and incentives arrive as types
+ * classifyCoinbaseLedgerTx skips, so those units reach a holding with no row behind them. Worse, a
+ * coin sent to self-custody and received back is indistinguishable from an acquisition at the
+ * receive-day price, and the owner's own history is full of exactly that. A replay over these rows
+ * lands on a number that is wrong rather than missing, and a wrong basis renders as unrealized
+ * gain with nothing on screen to say it was invented. Absent is the safe state; NULL reads as
+ * "unknown" everywhere.
+ *
+ * The complete history exists only in the owner's data/coinbase/*.csv exports, and no importer
+ * reads them. Until one does and writes units of its own, any basis computed from this ledger is a
+ * fabrication, so nothing derives one.
+ *
+ * The units are still captured, because Coinbase hands them over on every row and they are
+ * unrecoverable once a row is written without them. That is the whole reason this runs ahead of
+ * any consumer.
+ */
+
+// The unit half of a v2 ledger entry, which classifyCoinbaseLedgerTx deliberately leaves alone so
+// its money-only contract stays testable in isolation. `amount` is the coin leg and is already
+// signed by unit direction for every type we import (a convert's coin-out leg, a send, a receive,
+// and a fiat move all report units the way the account saw them), so no per-type branching.
+// Returns null when Coinbase reported no usable units, which stores the row with NULL units:
+// unknown, never zero.
+export function coinbaseLedgerUnits(txn: CoinbaseV2Transaction): LedgerUnits | null {
+  const ticker = txn.amount?.currency?.trim() ?? '';
+  if (!ticker) return null;
+  const quantity = Number.parseFloat(txn.amount?.amount ?? '');
+  if (!Number.isFinite(quantity)) return null;
+  return { ticker, quantity };
+}
+
+// filled_size is the coin count and is unsigned, so the side supplies the direction: a buy adds
+// units, a sell removes them, which is the opposite of the money sign. Units degrade to null
+// rather than throwing, because the money amount is load-bearing (there is no row without it)
+// while the units are allowed to be unknown.
+export function coinbaseOrderUnits(order: CoinbaseFilledOrder, side: 'BUY' | 'SELL'): LedgerUnits | null {
+  const ticker = order.product_id?.split('-')[0]?.trim() ?? '';
+  if (!ticker) return null;
+  const filledSize = Number.parseFloat(order.filled_size ?? '');
+  if (!Number.isFinite(filledSize)) return null;
+  return { ticker, quantity: side === 'BUY' ? filledSize : -filledSize };
+}
+
+export interface CoinbaseTransactionWrite {
+  coinbaseTransactionId: string;
+  accountId: string;
+  date: string;
+  amountCents: number;
+  originalName: string;
+  categoryId: string;
+  units: LedgerUnits | null;
+  now: string;
+}
+
+export type CoinbaseTransactionWriteResult = 'inserted' | 'units_backfilled' | 'unchanged';
+
+// The single write path for a Coinbase-sourced transaction, shared by the v3 order import and the
+// v2 ledger import so units can never be recorded by one and dropped by the other.
+//
+// The backfill branch exists because dedup is on coinbase_transaction_id: every row written before
+// migration 046 carries NULL units, and a plain "already imported, skip" would mean those rows
+// never acquire them, no matter how many syncs run. Units are only ever written into a gap, never
+// over a stored value, so this cannot fight a later correction (the CSV import described above,
+// when it exists).
+export function upsertCoinbaseTransaction(
+  db: Database.Database,
+  write: CoinbaseTransactionWrite
+): CoinbaseTransactionWriteResult {
+  const existing = db.prepare(
+    'SELECT id, quantity FROM transactions WHERE coinbase_transaction_id = ?'
+  ).get(write.coinbaseTransactionId) as { id: string; quantity: number | null } | undefined;
+
+  if (existing) {
+    if (existing.quantity !== null || !write.units) return 'unchanged';
+    db.prepare(
+      'UPDATE transactions SET quantity = ?, security_id = ?, updated_at = ? WHERE id = ?'
+    ).run(
+      write.units.quantity,
+      resolveCryptoSecurityId(db, write.units.ticker),
+      write.now,
+      existing.id
+    );
+    return 'units_backfilled';
+  }
+
+  db.prepare(`
+    INSERT INTO transactions
+      (id, coinbase_transaction_id, account_id, date, amount, merchant_name,
+       original_name, category_id, quantity, security_id, pending, is_manual, source_type,
+       created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, 'Coinbase', ?, ?, ?, ?, 0, 0, 'coinbase', ?, ?)
+  `).run(
+    uuidv4(),
+    write.coinbaseTransactionId,
+    write.accountId,
+    write.date,
+    write.amountCents,
+    write.originalName,
+    write.categoryId,
+    write.units ? write.units.quantity : null,
+    write.units ? resolveCryptoSecurityId(db, write.units.ticker) : null,
+    write.now,
+    write.now
+  );
+  return 'inserted';
 }
 
 function parseCoinbaseNumber(value: string | undefined, label: string): number {
@@ -396,7 +536,7 @@ export async function syncCoinbase(): Promise<CoinbaseSyncResult> {
 
   // Import the full crypto ledger for the active connection: v3 brokerage orders (buy/sell) plus
   // the v2 ledger (converts/sends/receives/fiat). Both dedup on coinbase_transaction_id and honor
-  // the backfill floor, so running every sync is idempotent — and doing it unconditionally fixes a
+  // the backfill floor, so running every sync is idempotent, and doing it unconditionally fixes a
   // prior bug where the .env connection only imported history from the *second* sync onward
   // (the gate keyed off "pre-existing active connection", which is order-dependent).
   let transactionCount = await syncTradeHistory(activeConnectionId);
@@ -425,20 +565,8 @@ export async function syncTradeHistory(connectionId: string): Promise<number> {
   const db = getDb();
   const now = new Date().toISOString();
 
-  interface FilledOrder {
-    order_id: string;
-    product_id: string;
-    side: string;
-    status: string;
-    filled_size: string;
-    average_filled_price: string;
-    created_time: string;
-    total_fees: string;
-    total_value_after_fees: string;
-  }
-
   interface OrdersResponse {
-    orders: FilledOrder[];
+    orders: CoinbaseFilledOrder[];
     has_next: boolean;
     cursor: string;
   }
@@ -446,6 +574,7 @@ export async function syncTradeHistory(connectionId: string): Promise<number> {
   let cursor: string | undefined;
   let hasNext = true;
   let insertedCount = 0;
+  let backfilledCount = 0;
 
   const connection = db.prepare(
     'SELECT id FROM coinbase_connections WHERE id = ?'
@@ -479,12 +608,6 @@ export async function syncTradeHistory(connectionId: string): Promise<number> {
     );
 
     for (const order of data.orders || []) {
-      const existing = db.prepare(
-        'SELECT id FROM transactions WHERE coinbase_transaction_id = ?'
-      ).get(order.order_id) as { id: string } | undefined;
-
-      if (existing) continue;
-
       const currency = order.product_id.split('-')[0];
 
       const side = order.side.toUpperCase();
@@ -506,30 +629,27 @@ export async function syncTradeHistory(connectionId: string): Promise<number> {
       // pull re-insert a crypto trade the imported backfill already covers.
       if (isBelowBackfillFloor(date, acct.backfill_floor_date)) continue;
 
-      const categoryId = side === 'BUY' ? 'cat_crypto_buy' : 'cat_crypto_sell';
-
-      db.prepare(`
-        INSERT INTO transactions
-          (id, coinbase_transaction_id, account_id, date, amount, merchant_name,
-           original_name, category_id, pending, is_manual, source_type, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, 'Coinbase', ?, ?, 0, 0, 'coinbase', ?, ?)
-      `).run(
-        uuidv4(),
-        order.order_id,
-        acct.id,
+      const result = upsertCoinbaseTransaction(db, {
+        coinbaseTransactionId: order.order_id,
+        accountId: acct.id,
         date,
-        toCents(signedAmount),
-        `${side === 'BUY' ? 'Buy' : 'Sell'} ${currency}`,
-        categoryId,
+        amountCents: toCents(signedAmount),
+        originalName: `${side === 'BUY' ? 'Buy' : 'Sell'} ${currency}`,
+        categoryId: side === 'BUY' ? 'cat_crypto_buy' : 'cat_crypto_sell',
+        units: coinbaseOrderUnits(order, side),
         now,
-        now
-      );
-      insertedCount++;
+      });
+      if (result === 'inserted') insertedCount++;
+      if (result === 'units_backfilled') backfilledCount++;
     }
 
     hasNext = data.has_next || false;
     cursor = data.cursor;
     if (!hasNext) break;
+  }
+
+  if (backfilledCount > 0) {
+    console.log(`[coinbase] Filled units on ${backfilledCount} previously unit-less trade${backfilledCount === 1 ? '' : 's'}`);
   }
 
   return insertedCount;
@@ -539,7 +659,7 @@ export async function syncTradeHistory(connectionId: string): Promise<number> {
 // converts, sends, receives, and fiat deposits/withdrawals, from the v2 App API. Everything routes
 // to the single consolidated Coinbase account. Deduped on coinbase_transaction_id, floor-guarded,
 // completed-only. Independent of syncTradeHistory (different id space, disjoint types), so it's
-// called guarded — a v2 failure must not fail the whole sync.
+// called guarded, a v2 failure must not fail the whole sync.
 export async function syncCoinbaseLedger(): Promise<number> {
   const db = getDb();
   const now = new Date().toISOString();
@@ -555,13 +675,17 @@ export async function syncCoinbaseLedger(): Promise<number> {
   interface V2Account { id: string }
   interface V2Page<T> { data: T[]; pagination?: { next_uri: string | null } }
 
-  const insert = db.prepare(`
-    INSERT INTO transactions
-      (id, coinbase_transaction_id, account_id, date, amount, merchant_name,
-       original_name, category_id, pending, is_manual, source_type, created_at, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, 0, 'coinbase', ?, ?)
-  `);
-  const existsStmt = db.prepare('SELECT id FROM transactions WHERE coinbase_transaction_id = ?');
+  // "Nothing left to learn from this row" is stronger than "this row exists": a row imported
+  // before migration 046 exists but carries no units, and stopping on it would strand those rows
+  // unit-less forever. Once the units are filled the walk goes back to stopping at the first
+  // fully-known page, so this costs one deep pass, not one per sync.
+  const settledStmt = db.prepare(
+    'SELECT quantity FROM transactions WHERE coinbase_transaction_id = ?'
+  );
+  const isSettled = (id: string): boolean => {
+    const row = settledStmt.get(id) as { quantity: number | null } | undefined;
+    return row !== undefined && row.quantity !== null;
+  };
 
   // Page through a v2 list endpoint following pagination.next_uri (already includes the query).
   //
@@ -590,17 +714,17 @@ export async function syncCoinbaseLedger(): Promise<number> {
   ).get() as { n: number }).n > 0;
 
   let inserted = 0;
+  let backfilled = 0;
   const accounts = await fetchAll<V2Account>('/v2/accounts?limit=100');
   for (const cbAccount of accounts) {
     const txns = await fetchAll<CoinbaseV2Transaction>(
       `/v2/accounts/${cbAccount.id}/transactions?limit=100`,
       alreadyImported
-        ? (page) => page.every((t) => t.id && existsStmt.get(t.id))
+        ? (page) => page.every((t) => Boolean(t.id) && isSettled(t.id))
         : undefined
     );
     for (const txn of txns) {
       if (!txn.id) continue;
-      if (existsStmt.get(txn.id)) continue;
 
       const classified = classifyCoinbaseLedgerTx(txn);
       if (!classified) continue;
@@ -609,12 +733,23 @@ export async function syncCoinbaseLedger(): Promise<number> {
       // Imported backfill owns dates below the floor; never let a deep pull re-insert them.
       if (isBelowBackfillFloor(date, acct.backfill_floor_date)) continue;
 
-      insert.run(
-        uuidv4(), txn.id, acct.id, date, classified.signedCents,
-        'Coinbase', classified.merchant, classified.categoryId, now, now
-      );
-      inserted++;
+      const result = upsertCoinbaseTransaction(db, {
+        coinbaseTransactionId: txn.id,
+        accountId: acct.id,
+        date,
+        amountCents: classified.signedCents,
+        originalName: classified.merchant,
+        categoryId: classified.categoryId,
+        units: coinbaseLedgerUnits(txn),
+        now,
+      });
+      if (result === 'inserted') inserted++;
+      if (result === 'units_backfilled') backfilled++;
     }
+  }
+
+  if (backfilled > 0) {
+    console.log(`[coinbase] Filled units on ${backfilled} previously unit-less ledger row${backfilled === 1 ? '' : 's'}`);
   }
 
   return inserted;
