@@ -761,7 +761,7 @@ function analyzeReports(
   const report = getReportSummary(db, { startDate, endDate });
   const lines = [
     `For ${format(now, 'MMMM yyyy')}, Mizān sees ${fmt(toDollars(report.income.current))} income, ${fmt(toDollars(report.expenses.current))} spending, and ${fmt(toDollars(report.net.current))} net cash flow.`,
-    `Savings rate is ${report.savings_rate.current.toFixed(1)}%. Spending changed by ${fmt(toDollars(report.expenses.delta))} versus the prior comparable period.`,
+    `Savings rate is ${report.savings_rate.current === null ? 'not defined for this period (no income yet)' : `${report.savings_rate.current.toFixed(1)}%`}. Spending changed by ${fmt(toDollars(report.expenses.delta))} versus the prior comparable period.`,
   ];
 
   if (report.top_spending.length > 0) {

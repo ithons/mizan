@@ -941,6 +941,13 @@ export interface ReportExcludedFlowSummary {
   net: number;
 }
 
+export interface NullableMetricSummary {
+  current: number | null;
+  previous: number | null;
+  delta: number | null;
+  delta_percent: number | null;
+}
+
 export interface ReportSummary {
   start_date?: string;
   end_date?: string;
@@ -953,7 +960,11 @@ export interface ReportSummary {
   income: ReportMetricSummary;
   expenses: ReportMetricSummary;
   net: ReportMetricSummary;
-  savings_rate: ReportMetricSummary;
+  /**
+   * Null when the window has no income: a rate of "saved out of nothing" has no value, and
+   * reporting 0 for it said "you saved nothing" about a month whose pay had not arrived yet.
+   */
+  savings_rate: NullableMetricSummary;
   top_spending: ReportCategoryChange[];
   top_income: ReportCategoryChange[];
   spending_movers: ReportCategoryChange[];

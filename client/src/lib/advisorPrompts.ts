@@ -84,9 +84,22 @@ function formatSignedPercentPoints(value: number): string {
   return `${sign}${value.toFixed(1)} percentage points`;
 }
 
-function reportMetricLine(label: string, metric: ReportMetricSummary, isRate = false): string {
+function reportMetricLine(
+  label: string,
+  // Nullable: a savings rate is undefined for a window with no income, and a prompt that states it
+  // as 0% is asking the model to reason about a number nobody measured.
+  metric: { current: number | null; delta: number | null },
+  isRate = false
+): string {
+  if (metric.current === null) {
+    return `${label} is not defined for this period.`;
+  }
   const current = isRate ? `${metric.current.toFixed(1)}%` : formatMoneyValue(metric.current);
-  const delta = isRate ? formatSignedPercentPoints(metric.delta) : formatSignedMoneyValue(metric.delta);
+  const delta = metric.delta === null
+    ? 'no comparison available'
+    : isRate
+      ? formatSignedPercentPoints(metric.delta)
+      : formatSignedMoneyValue(metric.delta);
   return `${label} is ${current}, ${delta} versus comparison.`;
 }
 

@@ -25,6 +25,7 @@ import type {
   ReportEvidenceKind,
   ReportExcludedFlowSummary,
   ReportMetricSummary,
+  NullableMetricSummary,
   ReportNetWorthEvidence,
   ReportSummary,
   SpendingReport,
@@ -159,8 +160,27 @@ function totalsFromCashflow(report: CashflowReport): { income: number; expenses:
   );
 }
 
-function savingsRate(income: number, expenses: number): number {
-  return income > 0 ? ((income - expenses) / income) * 100 : 0;
+/**
+ * Null when there is no income in the window.
+ *
+ * This returned 0, which reads as "you saved nothing" rather than "there is nothing to compute a
+ * rate from". Every month reported a 0% savings rate for as long as it took the first paycheck to
+ * land, and the advisor's "improve your savings rate" prompt fired on it.
+ */
+function savingsRate(income: number, expenses: number): number | null {
+  return income > 0 ? ((income - expenses) / income) * 100 : null;
+}
+
+function nullableMetric(current: number | null, previous: number | null): NullableMetricSummary {
+  const delta = current !== null && previous !== null ? current - previous : null;
+  return {
+    current,
+    previous,
+    delta,
+    delta_percent: delta !== null && previous !== null && previous !== 0
+      ? (delta / Math.abs(previous)) * 100
+      : null,
+  };
 }
 
 function previousRange(range: ReportDateRange): ReportDateRange {
@@ -998,7 +1018,7 @@ export function getReportSummary(
     income: metric(currentCashflow.income, previousCashflow.income),
     expenses: metric(currentCashflow.expenses, previousCashflow.expenses),
     net: metric(currentCashflow.net, previousCashflow.net),
-    savings_rate: metric(
+    savings_rate: nullableMetric(
       savingsRate(currentCashflow.income, currentCashflow.expenses),
       savingsRate(previousCashflow.income, previousCashflow.expenses)
     ),

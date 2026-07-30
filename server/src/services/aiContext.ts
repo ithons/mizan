@@ -150,13 +150,13 @@ export function buildAdvisorActions({
     ));
   }
 
-  if (reportSummary.savings_rate.current < 10 && reportSummary.income.current > 0) {
+  if (reportSummary.savings_rate.current !== null && reportSummary.savings_rate.current < 10 && reportSummary.income.current > 0) {
     actions.push(action(
       'improve-savings-rate',
       'Improve savings rate',
       '/reports',
       'What practical changes would improve my savings rate based on this period?',
-      `Savings rate is ${reportSummary.savings_rate.current.toFixed(1)}% for the selected period.`,
+      `Savings rate is ${reportSummary.savings_rate.current!.toFixed(1)}% for the selected period.`,
       'warning'
     ));
   }
@@ -347,7 +347,16 @@ export function buildFinancialContext(): string {
   lines.push(`  Income: ${fmt(toDollars(reportSummary.income.current))} (${fmt(toDollars(reportSummary.income.delta))} vs prior period)`);
   lines.push(`  Spending: ${fmt(toDollars(reportSummary.expenses.current))} (${fmt(toDollars(reportSummary.expenses.delta))} vs prior period)`);
   lines.push(`  Net cash flow: ${fmt(toDollars(reportSummary.net.current))} (${fmt(toDollars(reportSummary.net.delta))} vs prior period)`);
-  lines.push(`  Savings rate: ${reportSummary.savings_rate.current.toFixed(1)}% (${reportSummary.savings_rate.delta >= 0 ? '+' : ''}${reportSummary.savings_rate.delta.toFixed(1)} pp)`);
+  // Stated as undefined rather than as 0%: "you saved nothing" and "there is no income to compute
+  // a rate from" are different facts, and the model has no way to tell them apart from a bare 0.
+  const savingsRateLine = reportSummary.savings_rate.current === null
+    ? 'not defined (no income recorded in this window yet)'
+    : `${reportSummary.savings_rate.current.toFixed(1)}%${
+        reportSummary.savings_rate.delta === null
+          ? ''
+          : ` (${reportSummary.savings_rate.delta >= 0 ? '+' : ''}${reportSummary.savings_rate.delta.toFixed(1)} pp)`
+      }`;
+  lines.push(`  Savings rate: ${savingsRateLine}`);
   if (reportSummary.excluded_flows.length > 0) {
     lines.push('  Excluded from income and spending reports:');
     for (const flow of reportSummary.excluded_flows) {

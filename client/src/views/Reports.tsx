@@ -95,15 +95,29 @@ function Distribution({ b, scaleMax }: { b: Buckets; scaleMax: number }) {
   );
 }
 
-function Metric({ label, m, invertColor, isPercent }: { label: string; m: ReportMetricSummary; invertColor?: boolean; isPercent?: boolean }) {
-  const up = m.delta > 0;
+function Metric({
+  label,
+  m,
+  invertColor,
+  isPercent,
+}: {
+  label: string;
+  // Accepts a nullable metric: a savings rate is undefined for a window with no income, and an
+  // undefined value has to render as undefined rather than as a measured zero.
+  m: { current: number | null; delta: number | null };
+  invertColor?: boolean;
+  isPercent?: boolean;
+}) {
+  const up = (m.delta ?? 0) > 0;
   const good = invertColor ? !up : up; // for expenses, up is bad
   const fmt = (v: number) => (isPercent ? `${Math.round(v)}%` : formatWholeCurrency(v));
   return (
     <div>
       <div className="text-note uppercase tracking-[0.12em] text-muted-2">{label}</div>
-      <div className="mt-1 font-serif text-figure text-ink tabular-nums">{fmt(m.current)}</div>
-      {m.delta !== 0 && (
+      <div className="mt-1 font-serif text-figure text-ink tabular-nums">
+        {m.current === null ? <span className="text-muted">not yet</span> : fmt(m.current)}
+      </div>
+      {m.delta !== null && m.delta !== 0 && (
         <div className={`mt-0.5 text-note tabular-nums ${good ? 'text-sage-deep' : 'text-clay'}`}>
           {up ? '▲' : '▼'} {fmt(Math.abs(m.delta))}
         </div>
