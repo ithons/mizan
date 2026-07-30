@@ -28,7 +28,7 @@ function ToastItem({ toast, onRemove }: ToastItemProps) {
 
   return (
     <div
-      className={`flex items-start gap-3 bg-surface border border-border border-l-2 ${borderColors[toast.type]} rounded px-4 py-3 min-w-[280px] max-w-[380px]`}
+      className={`flex items-start gap-3 bg-surface border border-border border-l-2 ${borderColors[toast.type]} rounded-lg px-4 py-3 min-w-[280px] max-w-[380px] shadow-e2`}
       style={{ animation: 'slideInRight 0.2s ease-out' }}
     >
       <style>{`
@@ -38,7 +38,7 @@ function ToastItem({ toast, onRemove }: ToastItemProps) {
         }
       `}</style>
       {icons[toast.type]}
-      <p className="text-sm text-text flex-1">{toast.message}</p>
+      <p className="text-body-lg text-text flex-1">{toast.message}</p>
       <button
         onClick={() => onRemove(toast.id)}
         className="text-muted hover:text-text transition-colors flex-shrink-0 mt-0.5"

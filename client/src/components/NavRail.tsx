@@ -36,7 +36,7 @@ function RailItem({ to, label }: { to: string; label: string }) {
             }`}
           />
           <span
-            className={`hidden text-sm transition-colors xl:block ${
+            className={`hidden text-body-lg transition-colors xl:block ${
               isActive ? 'font-medium text-ink' : 'text-muted group-hover:text-ink'
             }`}
           >
@@ -91,10 +91,10 @@ export function NavRail() {
         title="Search or ask (⌘K)"
         className="flex items-center justify-center gap-[9px] px-2 pb-[22px] xl:justify-start xl:px-[22px]"
       >
-        <span className="flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-md bg-ink text-sm font-semibold text-paper">
+        <span className="flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-md bg-ink text-body-lg font-semibold text-paper">
           م
         </span>
-        <span className="hidden font-serif text-[17px] text-ink xl:block">mizān</span>
+        <span className="hidden font-serif text-sub text-ink xl:block">mizān</span>
       </button>
 
       <div className="flex flex-1 flex-col gap-0.5 overflow-y-auto py-2">
@@ -117,7 +117,7 @@ export function NavRail() {
                 }`}
               />
               <span
-                className={`hidden text-sm transition-colors xl:block ${
+                className={`hidden text-body-lg transition-colors xl:block ${
                   isActive ? 'font-medium text-ink' : 'text-muted group-hover:text-ink'
                 }`}
               >
@@ -126,7 +126,7 @@ export function NavRail() {
             </>
           )}
         </NavLink>
-        <div className="flex items-center justify-center gap-2 text-xs text-muted-2 xl:justify-start" title={syncTitle}>
+        <div className="flex items-center justify-center gap-2 text-note text-muted-2 xl:justify-start" title={syncTitle}>
           <span
             className={`h-[7px] w-[7px] flex-shrink-0 rounded-full ${
               syncStatus === 'error' ? 'bg-clay' : 'bg-sage-soft'

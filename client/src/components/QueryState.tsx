@@ -33,13 +33,13 @@ export function QueryState({
     const detail = error instanceof Error && error.message ? error.message : null;
     return (
       <div className="py-4">
-        <div className="text-[13.5px] text-clay">Couldn&apos;t load {label}.</div>
-        {detail && <div className="mt-0.5 text-xs text-muted-2">{detail}</div>}
+        <div className="text-body text-clay">Couldn&apos;t load {label}.</div>
+        {detail && <div className="mt-0.5 text-note text-muted-2">{detail}</div>}
         {onRetry && (
           <button
             type="button"
             onClick={onRetry}
-            className="mt-2 rounded-md border border-line-2 px-2.5 py-1 text-xs text-ink transition-colors hover:bg-rail"
+            className="mt-2 rounded-md border border-line-2 px-2.5 py-1 text-note text-ink transition-colors hover:bg-well"
           >
             Retry
           </button>

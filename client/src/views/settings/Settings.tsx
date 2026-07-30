@@ -30,20 +30,20 @@ function SettingsRow({
     <div
       onClick={onClick}
       className={`flex items-center justify-between rounded-lg px-3 py-3.5 transition-colors ${
-        onClick ? 'cursor-pointer hover:bg-rail' : ''
+        onClick ? 'cursor-pointer hover:bg-well' : ''
       } ${last ? '' : 'border-b border-line'}`}
     >
       <div>
-        <div className="text-[15.5px] text-ink">{title}</div>
-        {sub && <div className="mt-0.5 text-xs text-muted-2">{sub}</div>}
+        <div className="text-body-lg text-ink">{title}</div>
+        {sub && <div className="mt-0.5 text-note text-muted-2">{sub}</div>}
       </div>
-      <div className="flex-shrink-0 pl-4 text-[13px]">{trailing}</div>
+      <div className="flex-shrink-0 pl-4 text-body">{trailing}</div>
     </div>
   );
 }
 
 function ExpandedPanel({ children }: { children: ReactNode }) {
-  return <div className="mb-2 mt-1 rounded-xl border border-line-2 bg-card p-5">{children}</div>;
+  return <div className="mb-2 mt-1 rounded-xl border border-line-2 bg-card shadow-e1 p-5">{children}</div>;
 }
 
 const UNDOABLE_AI_KINDS = new Set(['categorize_transaction', 'create_merchant_rule']);
@@ -90,17 +90,17 @@ function AiActionsPanel({ open, onToggle }: { open: boolean; onToggle: () => voi
       {open && (
         <ExpandedPanel>
           {(!actions || actions.length === 0) ? (
-            <p className="text-[13.5px] text-muted-2">No AI actions yet.</p>
+            <p className="text-body text-muted-2">No AI actions yet.</p>
           ) : (
             <div className="space-y-2.5">
               {actions.map((a) => (
                 <div key={a.id} className="flex items-start justify-between gap-3 border-b border-line pb-2.5 last:border-0">
                   <div className="min-w-0">
-                    <div className="text-[14px] text-ink">{a.label}</div>
-                    <div className="mt-0.5 text-xs text-muted-2">{a.summary}</div>
+                    <div className="text-body-lg text-ink">{a.label}</div>
+                    <div className="mt-0.5 text-note text-muted-2">{a.summary}</div>
                   </div>
                   <div className="flex flex-shrink-0 items-start gap-3">
-                    <div className="text-right text-[11px] text-muted-2">
+                    <div className="text-right text-micro text-muted-2">
                       <div className={a.source === 'worker_auto' ? 'text-warning' : 'text-sage-deep'}>
                         {a.source === 'worker_auto' ? 'auto-applied' : 'you confirmed'}
                       </div>
@@ -111,7 +111,7 @@ function AiActionsPanel({ open, onToggle }: { open: boolean; onToggle: () => voi
                         type="button"
                         disabled={undo.isPending}
                         onClick={() => undo.mutate(a.id)}
-                        className="mt-0.5 whitespace-nowrap border-b border-line-3 pb-0.5 text-[12px] text-muted transition-colors hover:text-ink disabled:opacity-40"
+                        className="mt-0.5 whitespace-nowrap border-b border-line-3 pb-0.5 text-note text-muted transition-colors hover:text-ink disabled:opacity-40"
                       >
                         Undo
                       </button>
@@ -155,7 +155,7 @@ function AdvisorContextEditor({ open, onToggle }: { open: boolean; onToggle: () 
       {open && (
         <ExpandedPanel>
           <div className="space-y-3">
-            <p className="text-[13.5px] leading-relaxed text-muted">
+            <p className="text-body leading-relaxed text-muted">
               Injected into every AI prompt (chat and the background worker) so the advisor reasons from your
               real situation instead of guessing.
             </p>
@@ -165,15 +165,15 @@ function AdvisorContextEditor({ open, onToggle }: { open: boolean; onToggle: () 
               rows={8}
               maxLength={4000}
               placeholder="e.g. I autopay my cards in full each month; I'm a student with seasonal income; I prefer a taxable brokerage over a Roth IRA."
-              className="w-full resize-y rounded-lg border border-line-2 bg-rail p-3 font-mono text-[12.5px] leading-relaxed text-ink outline-none focus:border-sage"
+              className="w-full resize-y rounded-lg border border-line-2 bg-rail p-3 font-mono text-note leading-relaxed text-ink outline-none focus:border-sage"
             />
             <div className="flex items-center justify-between">
-              <span className="text-xs text-muted-2">{value.length}/4000</span>
+              <span className="text-note text-muted-2">{value.length}/4000</span>
               <button
                 type="button"
                 disabled={!dirty || save.isPending}
                 onClick={() => save.mutate(value)}
-                className="rounded-lg bg-sage px-4 py-2 text-[13px] text-card transition-opacity disabled:opacity-50"
+                className="rounded-lg bg-sage px-4 py-2 text-body text-card transition-opacity disabled:opacity-50"
               >
                 {save.isPending ? 'Saving…' : 'Save'}
               </button>
@@ -213,7 +213,7 @@ function AdvisorModelPanel({ open, onToggle }: { open: boolean; onToggle: () => 
         <ExpandedPanel>
           <div className="space-y-5">
             <div>
-              <div className="mb-1.5 text-[13px] font-medium text-ink">Model</div>
+              <div className="mb-1.5 text-body font-medium text-ink">Model</div>
               <div className="flex flex-wrap gap-2">
                 {settings.available.models.map((m) => (
                   <button
@@ -221,8 +221,8 @@ function AdvisorModelPanel({ open, onToggle }: { open: boolean; onToggle: () => 
                     type="button"
                     disabled={save.isPending}
                     onClick={() => save.mutate({ model: m.id })}
-                    className={`rounded-lg border px-3 py-2 text-[13px] transition-colors disabled:opacity-50 ${
-                      settings.model === m.id ? 'border-sage bg-sage/10 text-ink' : 'border-line-2 text-muted hover:bg-rail'
+                    className={`rounded-lg border px-3 py-2 text-body transition-colors disabled:opacity-50 ${
+                      settings.model === m.id ? 'border-sage bg-sage/10 text-ink' : 'border-line-2 text-muted hover:bg-well'
                     }`}
                   >
                     {m.label}
@@ -232,7 +232,7 @@ function AdvisorModelPanel({ open, onToggle }: { open: boolean; onToggle: () => 
             </div>
 
             <div>
-              <div className="mb-1.5 text-[13px] font-medium text-ink">Reasoning effort</div>
+              <div className="mb-1.5 text-body font-medium text-ink">Reasoning effort</div>
               <div className="flex gap-2">
                 {settings.available.efforts.map((e) => (
                   <button
@@ -240,15 +240,15 @@ function AdvisorModelPanel({ open, onToggle }: { open: boolean; onToggle: () => 
                     type="button"
                     disabled={save.isPending}
                     onClick={() => save.mutate({ effort: e })}
-                    className={`rounded-lg border px-3 py-2 text-[13px] capitalize transition-colors disabled:opacity-50 ${
-                      settings.effort === e ? 'border-sage bg-sage/10 text-ink' : 'border-line-2 text-muted hover:bg-rail'
+                    className={`rounded-lg border px-3 py-2 text-body capitalize transition-colors disabled:opacity-50 ${
+                      settings.effort === e ? 'border-sage bg-sage/10 text-ink' : 'border-line-2 text-muted hover:bg-well'
                     }`}
                   >
                     {e}
                   </button>
                 ))}
               </div>
-              <p className="mt-1.5 text-xs text-muted-2">Higher effort reasons more before answering, at more tokens and latency.</p>
+              <p className="mt-1.5 text-note text-muted-2">Higher effort reasons more before answering, at more tokens and latency.</p>
             </div>
           </div>
         </ExpandedPanel>
@@ -299,8 +299,8 @@ export function Settings() {
   return (
     <Screen size="editorial">
       <div className="mb-8 flex-shrink-0">
-        <h1 className="font-serif text-[27px] font-normal leading-tight text-ink">Settings</h1>
-        <div className="mt-1 text-[13.5px] text-muted">Connections, the advisor, and your data</div>
+        <h1 className="font-serif text-display font-normal leading-tight text-ink">Settings</h1>
+        <div className="mt-1 text-body text-muted">Connections, the advisor, and your data</div>
       </div>
 
       <div className="flex-1 pb-8">
@@ -428,8 +428,8 @@ export function Settings() {
           />
         </div>
 
-        <div className="mt-8 text-xs leading-relaxed text-muted-2">
-          Mizān v1.0 · data stored in <span className="font-mono text-xs">.mizan/</span> · MIT licensed
+        <div className="mt-8 text-note leading-relaxed text-muted-2">
+          Mizān v1.0 · data stored in <span className="font-mono text-note">.mizan/</span> · MIT licensed
         </div>
       </div>
     </Screen>

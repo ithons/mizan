@@ -82,13 +82,13 @@ export function SimplefinSection() {
 
   return (
     <div className="space-y-4">
-      <p className="text-[13px] text-muted">Primary bank connection, powered by MX. Read-only.</p>
+      <p className="text-body text-muted">Primary bank connection, powered by MX. Read-only.</p>
 
-      {error && <div className="text-sm text-clay">{error}</div>}
+      {error && <div className="text-body-lg text-clay">{error}</div>}
 
       {status ? (
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <div className="text-sm">
+          <div className="text-body-lg">
             <span className="mr-2 text-sage-deep">● Connected</span>
             <span className="text-muted">
               {status.last_synced_at ? `Last synced ${formatRelativeTime(status.last_synced_at)}` : 'SimpleFIN active'}

@@ -39,7 +39,7 @@ function accountMeta(a: Account): string {
 // The badge reflects the shared connection's health, so every account on a connection shows the same state.
 function SyncBadge({ conn }: { conn?: SyncHealthConnection }) {
   if (!conn) return null;
-  const base = 'flex-shrink-0 rounded border border-pill-border bg-pill-bg px-1.5 py-px text-[10.5px]';
+  const base = 'flex-shrink-0 rounded border border-pill-border bg-pill-bg px-1.5 py-px text-rule';
   if (conn.freshness === 'attention') {
     return <span className={`${base} text-clay`} title={conn.status_detail}>Reconnect</span>;
   }
@@ -153,18 +153,18 @@ export function Accounts() {
       }`}
     >
       <div className="flex min-w-0 items-center gap-3.5">
-        <span className="flex h-[34px] w-[34px] flex-shrink-0 items-center justify-center rounded-lg bg-rail font-serif text-[15px] text-muted">
+        <span className="flex h-[34px] w-[34px] flex-shrink-0 items-center justify-center rounded-lg bg-rail font-serif text-body-lg text-muted">
           {(a.institution_name || a.account_name).charAt(0).toUpperCase()}
         </span>
         <div className="min-w-0">
-          <div className="truncate text-[15.5px] text-ink">{a.account_name}</div>
-          <div className="mt-0.5 flex items-center gap-1.5 text-xs text-muted-2">
+          <div className="truncate text-body-lg text-ink">{a.account_name}</div>
+          <div className="mt-0.5 flex items-center gap-1.5 text-note text-muted-2">
             <span className="truncate">{accountMeta(a)}</span>
             {a.connection_id && <SyncBadge conn={healthByConnection.get(a.connection_id)} />}
           </div>
         </div>
       </div>
-      <span className={`font-serif text-[18px] tabular-nums ${signedBalance(a) < 0 ? 'text-clay' : 'text-ink'}`}>
+      <span className={`font-serif text-sub tabular-nums ${signedBalance(a) < 0 ? 'text-clay' : 'text-ink'}`}>
         {formatWholeCurrency(signedBalance(a))}
       </span>
     </Row>
@@ -188,7 +188,7 @@ export function Accounts() {
             <button
               type="button"
               onClick={() => setShowAddModal(true)}
-              className="text-[13.5px] text-ink transition-opacity hover:opacity-75"
+              className="text-body text-ink transition-opacity hover:opacity-75"
             >
               + Add account
             </button>
@@ -204,9 +204,9 @@ export function Accounts() {
           { label: 'Liabilities', value: liabilities, tone: liabilities < 0 ? 'text-clay' : 'text-ink' },
           { label: 'Net worth', value: netWorth, tone: 'text-ink' },
         ].map((s) => (
-          <div key={s.label} className="rounded-xl border border-line-2 bg-card p-4">
-            <div className="text-xs text-muted">{s.label}</div>
-            <div className={`mt-1.5 font-serif text-[22px] leading-tight tabular-nums ${s.tone}`}>
+          <div key={s.label} className="rounded-xl border border-line-2 bg-card shadow-e1 p-4">
+            <div className="text-note text-muted">{s.label}</div>
+            <div className={`mt-1.5 font-serif text-figure leading-tight tabular-nums ${s.tone}`}>
               {formatWholeCurrency(s.value)}
             </div>
           </div>
@@ -225,7 +225,7 @@ export function Accounts() {
         <div className="min-w-0 flex-1">
           {isLoading && <SkeletonRows rows={5} />}
           {!isLoading && liveVisible.length === 0 && closed.length === 0 && (
-            <div className="py-10 text-[14px] text-muted">
+            <div className="py-10 text-body-lg text-muted">
               No accounts yet.{' '}
               <button
                 type="button"
@@ -250,7 +250,7 @@ export function Accounts() {
               <button
                 type="button"
                 onClick={() => setShowClosed((v) => !v)}
-                className="mb-1.5 text-xs text-muted-2 transition-colors hover:text-ink"
+                className="mb-1.5 text-note text-muted-2 transition-colors hover:text-ink"
               >
                 {closed.length} closed account{closed.length === 1 ? '' : 's'} · {showClosed ? 'collapse' : 'show'}
               </button>
@@ -262,7 +262,7 @@ export function Accounts() {
               <button
                 type="button"
                 onClick={() => setShowHidden((v) => !v)}
-                className="mb-1.5 text-xs text-muted-2 transition-colors hover:text-ink"
+                className="mb-1.5 text-note text-muted-2 transition-colors hover:text-ink"
               >
                 {hidden.length} hidden account{hidden.length === 1 ? '' : 's'} · {showHidden ? 'collapse' : 'show'}
               </button>
@@ -275,9 +275,9 @@ export function Accounts() {
         {selected && (
           <div className="w-full flex-shrink-0 self-start border-t border-line-2 pt-6 lg:sticky lg:top-6 lg:w-[300px] lg:border-t-0 lg:pt-0">
             <div className="mb-4 flex items-baseline justify-between">
-              <span className="font-serif text-xl text-ink">{selected.account_name}</span>
+              <span className="font-serif text-title text-ink">{selected.account_name}</span>
             </div>
-            <div className={`font-serif text-[28px] tabular-nums ${signedBalance(selected) < 0 ? 'text-clay' : 'text-ink'}`}>
+            <div className={`font-serif text-display tabular-nums ${signedBalance(selected) < 0 ? 'text-clay' : 'text-ink'}`}>
               {formatWholeCurrency(signedBalance(selected))}
             </div>
             <div className="mt-6">
@@ -291,8 +291,8 @@ export function Accounts() {
                   key={row.label}
                   className={`flex items-baseline justify-between py-2 ${i < arr.length - 1 ? 'border-b border-line' : ''}`}
                 >
-                  <span className="text-[13px] text-muted">{row.label}</span>
-                  <span className="text-[13.5px] text-ink">{row.value}</span>
+                  <span className="text-body text-muted">{row.label}</span>
+                  <span className="text-body text-ink">{row.value}</span>
                 </div>
               ))}
             </div>

@@ -59,19 +59,19 @@ export function CoinbaseSection() {
   return (
     <div className="space-y-4 max-w-md">
       {credStatus?.coinbaseFromEnv ? (
-        <p className="text-[13px] text-muted">
+        <p className="text-body text-muted">
           <span className="mr-2 text-sage-deep">● Connected</span>
-          Credentials loaded from <span className="font-mono text-xs text-ink">.env</span>. To change them, edit that file and
+          Credentials loaded from <span className="font-mono text-note text-ink">.env</span>. To change them, edit that file and
           restart the server.
         </p>
       ) : connected ? (
-        <p className="text-[13px] text-muted">
+        <p className="text-body text-muted">
           <span className="mr-2 text-sage-deep">● Connected</span>
           API key encrypted in local credentials.
         </p>
       ) : (
         <>
-          <p className="text-[13px] text-muted">
+          <p className="text-body text-muted">
             Create an API key at{' '}
             <a
               href="https://portal.cdp.coinbase.com"
@@ -86,7 +86,7 @@ export function CoinbaseSection() {
           <div>
             <label className="mz-label">Key name</label>
             <input
-              className="mz-field font-mono !text-[13px]"
+              className="mz-field font-mono !text-body"
               value={form.keyName}
               onChange={(e) => setForm({ ...form, keyName: e.target.value })}
               placeholder="organizations/xxx/apiKeys/yyy"
@@ -96,7 +96,7 @@ export function CoinbaseSection() {
             <label className="mz-label">Private key</label>
             <div className="relative">
               <textarea
-                className="mz-field resize-none font-mono !text-[13px]"
+                className="mz-field resize-none font-mono !text-body"
                 rows={4}
                 value={form.privateKey}
                 onChange={(e) => setForm({ ...form, privateKey: e.target.value })}

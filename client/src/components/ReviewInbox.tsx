@@ -143,13 +143,13 @@ function SectionRow({
         <div className="flex min-w-0 items-start gap-3">
           {lead}
           <div className="min-w-0">
-            <div className="truncate text-[14.5px] text-ink">{title}</div>
-            <div className="mt-0.5 text-xs text-muted-2">{sub}</div>
+            <div className="truncate text-body-lg text-ink">{title}</div>
+            <div className="mt-0.5 text-note text-muted-2">{sub}</div>
           </div>
         </div>
-        {right && <div className="flex-shrink-0 tabular-nums text-[14px] text-ink">{right}</div>}
+        {right && <div className="flex-shrink-0 tabular-nums text-body-lg text-ink">{right}</div>}
       </div>
-      {children && <div className="mt-2.5 flex flex-wrap items-center gap-4 text-[13.5px]">{children}</div>}
+      {children && <div className="mt-2.5 flex flex-wrap items-center gap-4 text-body">{children}</div>}
     </div>
   );
 }
@@ -446,7 +446,7 @@ export function ReviewInbox() {
             key={t.id}
             type="button"
             onClick={() => setTab(t.id)}
-            className={`rounded-md px-2.5 py-1 text-[13px] transition-colors ${
+            className={`rounded-md px-2.5 py-1 text-body transition-colors ${
               tab === t.id ? 'bg-review-active text-review-text' : 'text-muted hover:text-ink'
             }`}
           >
@@ -477,7 +477,7 @@ export function ReviewInbox() {
                     type="button"
                     disabled={suggestCategories.isPending || pending.length === 0}
                     onClick={() => suggestCategories.mutate(pending)}
-                    className="rounded-md border border-line-2 px-2.5 py-1 text-[13px] text-ink transition-colors hover:bg-rail disabled:opacity-50"
+                    className="rounded-md border border-line-2 px-2.5 py-1 text-body text-ink transition-colors hover:bg-well disabled:opacity-50"
                   >
                     {suggestProgress
                       ? `Suggesting… ${suggestProgress.done}/${suggestProgress.total}`
@@ -485,7 +485,7 @@ export function ReviewInbox() {
                         ? 'All merchants have a suggestion'
                         : `Suggest categories with AI · ${pending.length}`}
                   </button>
-                  <span className="text-xs text-muted-2">
+                  <span className="text-note text-muted-2">
                     Proposals only — nothing is applied until you click one.
                   </span>
                 </div>
@@ -494,7 +494,7 @@ export function ReviewInbox() {
 
             {selectedIds.size > 0 && (
               <div className="mb-3 flex flex-wrap items-center gap-3 rounded-lg border border-line-2 bg-rail px-3 py-2">
-                <span className="text-[13px] text-ink">{selectedIds.size} selected</span>
+                <span className="text-body text-ink">{selectedIds.size} selected</span>
                 <CategoryPicker
                   value={bulkCategory}
                   onChange={setBulkCategory}
@@ -511,7 +511,7 @@ export function ReviewInbox() {
             )}
 
             {groups.length === 0 ? (
-              <p className="py-6 text-[13.5px] text-muted-2">Nothing needs a category. </p>
+              <p className="py-6 text-body text-muted-2">Nothing needs a category. </p>
             ) : (
               orderedGroups.map((group) => {
                 const selected = group.ids.every((id) => selectedIds.has(id));
@@ -540,15 +540,15 @@ export function ReviewInbox() {
                           }`}
                         />
                         <span className="min-w-0">
-                          <span className="block truncate text-[14.5px] text-ink">{group.label}</span>
-                          <span className="mt-0.5 block text-xs text-muted-2">
+                          <span className="block truncate text-body-lg text-ink">{group.label}</span>
+                          <span className="mt-0.5 block text-note text-muted-2">
                             {repeated
                               ? `${group.ids.length} transactions · latest ${shortDate(group.latestDate)}`
                               : `${shortDate(group.latestDate)}${group.accountName ? ` · ${group.accountName}` : ''}`}
                           </span>
                         </span>
                       </button>
-                      <span className="flex-shrink-0 tabular-nums text-[14px] text-ink">
+                      <span className="flex-shrink-0 tabular-nums text-body-lg text-ink">
                         {formatCurrency(group.total)}
                       </span>
                     </div>
@@ -558,7 +558,7 @@ export function ReviewInbox() {
                         <button
                           type="button"
                           onClick={() => applyCategory(suggestion.id)}
-                          className="rounded-md border border-sage-tint-border bg-sage-tint px-2.5 py-1 text-[13px] text-sage-text transition-opacity hover:opacity-80"
+                          className="rounded-md border border-sage-tint-border bg-sage-tint px-2.5 py-1 text-body text-sage-text transition-opacity hover:opacity-80"
                         >
                           AI: {suggestion.name} · apply{repeated ? ` to ${group.ids.length}` : ''}
                         </button>
@@ -586,7 +586,7 @@ export function ReviewInbox() {
                               return next;
                             })
                           }
-                          className="text-[13px] text-muted transition-colors hover:text-ink"
+                          className="text-body text-muted transition-colors hover:text-ink"
                         >
                           {isOpen ? 'Hide transactions' : `Show ${group.ids.length} transactions`}
                         </button>
@@ -598,10 +598,10 @@ export function ReviewInbox() {
                     {isOpen && (
                       <div className="mt-2 border-l border-line-2 pl-3">
                         {group.items.map((t) => (
-                          <div key={t.id} className="flex items-baseline justify-between gap-3 py-1.5 text-[13px]">
+                          <div key={t.id} className="flex items-baseline justify-between gap-3 py-1.5 text-body">
                             <div className="min-w-0">
                               <div className="truncate text-ink-soft">{t.original_name || merchantLabel(t)}</div>
-                              <div className="text-xs text-muted-2">
+                              <div className="text-note text-muted-2">
                                 {shortDate(t.date)}
                                 {t.account_name ? ` · ${t.account_name}` : ''}
                               </div>
@@ -621,7 +621,7 @@ export function ReviewInbox() {
                 type="button"
                 onClick={() => void backlogQ.fetchNextPage()}
                 disabled={backlogQ.isFetchingNextPage}
-                className="mt-3 text-[13px] text-muted transition-colors hover:text-ink disabled:opacity-50"
+                className="mt-3 text-body text-muted transition-colors hover:text-ink disabled:opacity-50"
               >
                 {backlogQ.isFetchingNextPage
                   ? 'Loading…'
@@ -633,7 +633,7 @@ export function ReviewInbox() {
 
         {tab === 'ai' &&
           (counts.ai === 0 ? (
-            <p className="py-6 text-[13.5px] text-muted-2">No AI suggestions right now.</p>
+            <p className="py-6 text-body text-muted-2">No AI suggestions right now.</p>
           ) : (
             <>
               {/* Confirming a worker pass one card at a time is the bottleneck the batch endpoint
@@ -646,13 +646,13 @@ export function ReviewInbox() {
                     const all = (summary?.ai_drafts ?? []).map((d) => d.id);
                     setSelectedDrafts((prev) => (prev.size === all.length ? new Set() : new Set(all)));
                   }}
-                  className="text-[13px] text-muted transition-colors hover:text-ink"
+                  className="text-body text-muted transition-colors hover:text-ink"
                 >
                   {selectedDrafts.size === (summary?.ai_drafts ?? []).length ? 'Clear selection' : 'Select all'}
                 </button>
                 {selectedDrafts.size > 0 && (
                   <>
-                    <span className="text-[13px] text-ink">{selectedDrafts.size} selected</span>
+                    <span className="text-body text-ink">{selectedDrafts.size} selected</span>
                     <ActionButton
                       label={confirmDrafts.isPending ? 'Applying…' : `Confirm ${selectedDrafts.size} as proposed`}
                       disabled={confirmDrafts.isPending}
@@ -724,7 +724,7 @@ export function ReviewInbox() {
 
         {tab === 'transfers' &&
           (counts.transfers === 0 ? (
-            <p className="py-6 text-[13.5px] text-muted-2">No transfer pairs to confirm.</p>
+            <p className="py-6 text-body text-muted-2">No transfer pairs to confirm.</p>
           ) : (
             (summary?.transfer_candidates ?? []).map((p) => (
               <SectionRow
@@ -741,7 +741,7 @@ export function ReviewInbox() {
 
         {tab === 'duplicates' &&
           (counts.duplicates === 0 ? (
-            <p className="py-6 text-[13.5px] text-muted-2">No possible duplicates.</p>
+            <p className="py-6 text-body text-muted-2">No possible duplicates.</p>
           ) : (
             (summary?.duplicate_candidates ?? []).map((g) => (
               <SectionRow
@@ -759,7 +759,7 @@ export function ReviewInbox() {
                     confirmDuplicate.mutate({ groupId: g.group_id, keepId: g.transaction_ids[0] })
                   }
                 />
-                <span className="text-xs text-muted-2">
+                <span className="text-note text-muted-2">
                   Excluded copies stay in Transactions but stop counting toward spending.
                 </span>
               </SectionRow>
@@ -768,7 +768,7 @@ export function ReviewInbox() {
 
         {tab === 'recurring' &&
           (counts.recurring === 0 ? (
-            <p className="py-6 text-[13.5px] text-muted-2">No recurring patterns to confirm.</p>
+            <p className="py-6 text-body text-muted-2">No recurring patterns to confirm.</p>
           ) : (
             (summary?.recurring_candidates ?? []).map((p) => (
               <SectionRow
@@ -785,7 +785,7 @@ export function ReviewInbox() {
 
         {tab === 'rules' &&
           (counts.rules === 0 ? (
-            <p className="py-6 text-[13.5px] text-muted-2">No rule suggestions.</p>
+            <p className="py-6 text-body text-muted-2">No rule suggestions.</p>
           ) : (
             <>
               {/* Approving one at a time is the bottleneck when the backlog is dozens of merchants
@@ -797,13 +797,13 @@ export function ReviewInbox() {
                     const all = (summary?.rule_suggestions ?? []).map((s) => s.pattern);
                     setSelectedPatterns((prev) => (prev.size === all.length ? new Set() : new Set(all)));
                   }}
-                  className="text-[13px] text-muted transition-colors hover:text-ink"
+                  className="text-body text-muted transition-colors hover:text-ink"
                 >
                   {selectedPatterns.size === (summary?.rule_suggestions ?? []).length ? 'Clear selection' : 'Select all'}
                 </button>
                 {selectedPatterns.size > 0 && (
                   <>
-                    <span className="text-[13px] text-ink">{selectedPatterns.size} selected</span>
+                    <span className="text-body text-ink">{selectedPatterns.size} selected</span>
                     <ActionButton
                       label={approveSuggestions.isPending ? 'Approving…' : `Approve ${selectedPatterns.size} as suggested`}
                       disabled={approveSuggestions.isPending}
@@ -865,7 +865,7 @@ export function ReviewInbox() {
         <button
           type="button"
           onClick={() => [...selectedIds].forEach((id) => dismissTransaction.mutate(id))}
-          className="mt-4 text-xs text-muted-2 transition-colors hover:text-ink"
+          className="mt-4 text-note text-muted-2 transition-colors hover:text-ink"
         >
           Or dismiss {selectedIds.size} selected (hide without categorizing)
         </button>

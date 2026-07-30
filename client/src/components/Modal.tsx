@@ -38,22 +38,23 @@ export function Modal({ open, onClose, title, children, maxWidth = '480px' }: Mo
       />
       {/* Modal */}
       <div
-        className="relative w-full rounded-xl border border-line-2 bg-card"
+        className="relative flex max-h-[calc(100vh-2rem)] w-full flex-col rounded-xl border border-line-2 bg-card shadow-e3"
         style={{ maxWidth }}
       >
         {/* Header */}
-        <div className="flex items-center justify-between border-b border-line px-6 py-4">
-          <h2 className="font-serif text-[19px] text-ink">{title}</h2>
+        <div className="flex flex-shrink-0 items-center justify-between border-b border-line px-6 py-4">
+          <h2 className="font-serif text-title text-ink">{title}</h2>
           <button
             onClick={onClose}
             aria-label="Close"
-            className="rounded p-1 text-muted transition-colors hover:bg-rail hover:text-ink"
+            className="rounded p-1 text-muted transition-colors hover:bg-well hover:text-ink active:translate-y-px"
           >
             <X size={18} />
           </button>
         </div>
-        {/* Content */}
-        <div className="px-6 py-5">{children}</div>
+        {/* Content scrolls; the panel is capped to the viewport. Without this a tall form was
+            clipped off both edges of the screen with no way to reach the submit button. */}
+        <div className="min-h-0 flex-1 overflow-y-auto px-6 py-5">{children}</div>
       </div>
     </div>,
     document.body

@@ -62,10 +62,10 @@ export function QueryErrorBanner({
       role="alert"
       className={`rounded-lg border border-clay/30 bg-clay/5 px-3.5 py-2.5 ${className}`}
     >
-      <div className="text-[13.5px] text-clay">
+      <div className="text-body text-clay">
         Couldn&apos;t load {joinLabels(summary.labels)}. What you see below may be incomplete.
       </div>
-      {summary.detail && <div className="mt-0.5 text-xs text-muted-2">{summary.detail}</div>}
+      {summary.detail && <div className="mt-0.5 text-note text-muted-2">{summary.detail}</div>}
       <button
         type="button"
         onClick={() => {
@@ -73,7 +73,7 @@ export function QueryErrorBanner({
             if (item.query.isError) item.query.refetch();
           }
         }}
-        className="mt-2 rounded-md border border-line-2 px-2.5 py-1 text-xs text-ink transition-colors hover:bg-rail"
+        className="mt-2 rounded-md border border-line-2 px-2.5 py-1 text-note text-ink transition-colors hover:bg-well"
       >
         Retry
       </button>

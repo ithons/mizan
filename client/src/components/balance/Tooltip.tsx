@@ -21,7 +21,7 @@ export function Tooltip({ label, children, className = '' }: TooltipProps) {
       {show && (
         <span
           role="tooltip"
-          className="pointer-events-none absolute bottom-full left-1/2 z-40 mb-1.5 -translate-x-1/2 whitespace-nowrap rounded-md border border-line-2 bg-card px-2.5 py-1 text-xs text-ink-soft"
+          className="pointer-events-none absolute bottom-full left-1/2 z-40 mb-1.5 -translate-x-1/2 whitespace-nowrap rounded-md border border-line-2 bg-card px-2.5 py-1 text-note text-ink-soft"
         >
           {label}
         </span>

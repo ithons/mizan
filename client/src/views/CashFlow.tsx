@@ -78,7 +78,7 @@ export function CashFlow() {
             key={r.id}
             type="button"
             onClick={() => setRange(r.id)}
-            className={`text-[13.5px] transition-colors ${r.id === range ? 'text-ink' : 'text-muted hover:text-ink'}`}
+            className={`text-body transition-colors ${r.id === range ? 'text-ink' : 'text-muted hover:text-ink'}`}
           >
             {r.label}
           </button>
@@ -94,9 +94,9 @@ export function CashFlow() {
           { label: 'Expenses', value: formatWholeCurrency(-expenses), tone: 'text-clay' },
           { label: 'Net saved', value: formatWholeCurrency(net, { showSign: net > 0 }), tone: net >= 0 ? 'text-ink' : 'text-clay' },
         ].map((s) => (
-          <div key={s.label} className="rounded-xl border border-line-2 bg-card p-4">
-            <div className="text-xs text-muted">{s.label}</div>
-            <div className={`mt-1.5 font-serif text-[22px] leading-tight tabular-nums ${s.tone}`}>{s.value}</div>
+          <div key={s.label} className="rounded-xl border border-line-2 bg-card shadow-e1 p-4">
+            <div className="text-note text-muted">{s.label}</div>
+            <div className={`mt-1.5 font-serif text-figure leading-tight tabular-nums ${s.tone}`}>{s.value}</div>
           </div>
         ))}
       </div>
@@ -115,7 +115,7 @@ export function CashFlow() {
                 onMouseLeave={() => setHovered(null)}
               >
                 {hovered === m.month && (
-                  <div className="pointer-events-none absolute bottom-full left-1/2 z-20 mb-1 -translate-x-1/2 whitespace-nowrap rounded-lg border border-line-2 bg-card px-3 py-2 text-xs">
+                  <div className="pointer-events-none absolute bottom-full left-1/2 z-20 mb-1 -translate-x-1/2 whitespace-nowrap rounded-lg border border-line-2 bg-card px-3 py-2 text-note">
                     <div className="mb-0.5 font-medium text-ink">{format(parseISO(`${m.month}-01`), 'MMMM yyyy')}</div>
                     <div className="tabular-nums text-muted">
                       <span className="text-sage-deep">{formatWholeCurrency(m.income)}</span> in ·{' '}
@@ -133,13 +133,13 @@ export function CashFlow() {
                     style={{ height: `${Math.max(2, (Math.abs(m.expenses) / maxBar) * 120)}px` }}
                   />
                 </div>
-                <span className="text-[11.5px] text-muted-2">{format(parseISO(`${m.month}-01`), 'MMM')}</span>
+                <span className="text-micro text-muted-2">{format(parseISO(`${m.month}-01`), 'MMM')}</span>
               </div>
             );
           })}
-          {series.length === 0 && <div className="pb-10 text-[13.5px] text-muted-2">No cash flow recorded for this period.</div>}
+          {series.length === 0 && <div className="pb-10 text-body text-muted-2">No cash flow recorded for this period.</div>}
         </div>
-        <div className="mt-3.5 flex gap-5 text-xs text-muted">
+        <div className="mt-3.5 flex gap-5 text-note text-muted">
           <span className="flex items-center gap-1.5">
             <span className="h-[9px] w-[9px] rounded-[2px] bg-sage" />
             Income
@@ -156,12 +156,12 @@ export function CashFlow() {
         <SectionLabel className="mb-2.5">Top spending · {format(new Date(), 'MMMM')}</SectionLabel>
         {topCategories.map((c) => (
           <div key={c.category_id} className="flex items-center gap-5 border-b border-line px-1 py-3">
-            <span className="w-[130px] truncate text-[14.5px] text-ink">{c.category_name}</span>
+            <span className="w-[130px] truncate text-body-lg text-ink">{c.category_name}</span>
             <ProgressBar fraction={c.amount / maxCategory} className="flex-1" />
-            <span className="w-[80px] text-right text-[14.5px] tabular-nums text-ink">{formatWholeCurrency(c.amount)}</span>
+            <span className="w-[80px] text-right text-body-lg tabular-nums text-ink">{formatWholeCurrency(c.amount)}</span>
           </div>
         ))}
-        {topCategories.length === 0 && <div className="py-3 text-[13.5px] text-muted-2">No categorized spending yet this month.</div>}
+        {topCategories.length === 0 && <div className="py-3 text-body text-muted-2">No categorized spending yet this month.</div>}
       </div>
     </Screen>
   );

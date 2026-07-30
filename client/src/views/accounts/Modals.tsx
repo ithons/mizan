@@ -62,7 +62,7 @@ function AccountFields({ form, setForm, showBalance }: {
             onChange={(e) => setForm({ ...form, is_liability: e.target.checked })}
             className="rounded border-line-3 text-sage focus:ring-0"
           />
-          <span className="text-sm text-ink">Liability</span>
+          <span className="text-body-lg text-ink">Liability</span>
         </label>
       </div>
       {showBalance && (
@@ -180,14 +180,14 @@ export function MergeAccountModal({ open, source, accounts, onClose, onMerged }:
           </select>
         </div>
         {target && (
-          <p className="text-[13px] leading-relaxed text-muted">
+          <p className="text-body leading-relaxed text-muted">
             <span className="text-ink">{source.account_name}</span> will be merged into{' '}
             <span className="text-ink">{target.account_name}</span> and removed. Its transactions and connection move to{' '}
             <span className="text-ink">{target.account_name}</span>.
           </p>
         )}
         {currencyMismatch && (
-          <p className="text-[13px] leading-relaxed text-clay">
+          <p className="text-body leading-relaxed text-clay">
             These accounts use different currencies ({source.currency} and {target?.currency}). Merging anyway may mix values.
           </p>
         )}

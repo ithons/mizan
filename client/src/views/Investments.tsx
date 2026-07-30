@@ -87,14 +87,14 @@ function HoldingModal({ holding, accountName, onClose }: { holding: Holding | nu
     <Modal open onClose={onClose} title={holdingName(holding)}>
       <div className="space-y-4">
         <div className="flex items-baseline justify-between">
-          <span className="text-[13px] text-muted">
+          <span className="text-body text-muted">
             {accountName ?? 'Investment account'} · {holding.quantity.toLocaleString('en-US', { maximumFractionDigits: 4 })} share
             {holding.quantity === 1 ? '' : 's'} @ {formatWholeCurrency(holding.institution_price)}
           </span>
-          <span className="font-serif text-[22px] tabular-nums text-ink">{formatWholeCurrency(holding.institution_value)}</span>
+          <span className="font-serif text-figure tabular-nums text-ink">{formatWholeCurrency(holding.institution_value)}</span>
         </div>
         {gain && (
-          <div className={`text-[13px] tabular-nums ${gain.gain >= 0 ? 'text-sage-deep' : 'text-clay'}`}>
+          <div className={`text-body tabular-nums ${gain.gain >= 0 ? 'text-sage-deep' : 'text-clay'}`}>
             {formatWholeCurrency(gain.gain, { showSign: gain.gain > 0 })} · {formatPercent(Math.abs(gain.pct))} against{' '}
             {holding.cost_basis_quality === 'manual' ? 'your manual basis' : 'provider basis'}
           </div>
@@ -119,7 +119,7 @@ function HoldingModal({ holding, accountName, onClose }: { holding: Holding | nu
           <label className="mz-label">Basis note</label>
           <input className="mz-field" placeholder="e.g. average of two lots" value={note} onChange={(e) => setNote(e.target.value)} />
         </div>
-        <div className="text-xs leading-relaxed text-muted-2">
+        <div className="text-note leading-relaxed text-muted-2">
           Manual basis overrides the provider's number everywhere gains are shown. Clear the field to fall back
           {holding.provider_cost_basis != null ? ' to the provider basis.' : '.'}
         </div>
@@ -190,8 +190,8 @@ export function Investments() {
       <QueryErrorBanner items={failableQueries} className="mb-5" />
       <div className="mb-3 flex flex-shrink-0 items-end justify-between">
         <div>
-          <h1 className="font-serif text-[27px] font-normal leading-tight text-ink">Investments</h1>
-          <div className="mt-1 text-[13.5px] text-muted">
+          <h1 className="font-serif text-display font-normal leading-tight text-ink">Investments</h1>
+          <div className="mt-1 text-body text-muted">
             {stats.unrealized != null ? (
               <>
                 Cost basis <span className="tabular-nums">{formatWholeCurrency(stats.knownCostBasis)}</span> ·{' '}
@@ -207,9 +207,9 @@ export function Investments() {
           </div>
         </div>
         <div className="text-right">
-          <div className="font-serif text-[44px] font-light leading-none tabular-nums text-ink">{formatWholeCurrency(marketValue)}</div>
+          <div className="font-serif text-hero-lg font-light leading-none tabular-nums text-ink">{formatWholeCurrency(marketValue)}</div>
           {dayChange != null && (
-            <div className={`mt-1.5 text-[13.5px] tabular-nums ${dayChange >= 0 ? 'text-sage' : 'text-clay'}`}>
+            <div className={`mt-1.5 text-body tabular-nums ${dayChange >= 0 ? 'text-sage' : 'text-clay'}`}>
               {dayChange >= 0 ? '▲' : '▼'} {formatWholeCurrency(Math.abs(dayChange))} since last snapshot
             </div>
           )}
@@ -224,7 +224,7 @@ export function Investments() {
               key={r.id}
               type="button"
               onClick={() => setRange(r.id)}
-              className={`px-2 py-1 text-xs transition-colors ${r.id === range ? 'text-ink' : 'text-muted hover:text-ink'}`}
+              className={`px-2 py-1 text-note transition-colors ${r.id === range ? 'text-ink' : 'text-muted hover:text-ink'}`}
             >
               {r.id}
             </button>
@@ -233,7 +233,7 @@ export function Investments() {
         {history.length >= 2 ? (
           <TrendChart history={history} />
         ) : (
-          <div className="flex h-[120px] items-center text-[13.5px] text-muted-2">
+          <div className="flex h-[120px] items-center text-body text-muted-2">
             Portfolio history builds up from daily net worth snapshots as syncs run.
           </div>
         )}
@@ -244,7 +244,7 @@ export function Investments() {
         <div className="min-w-0 flex-1">
           <SectionLabel className="mb-2">Holdings</SectionLabel>
           {Math.abs(reconciliationGap) >= 1 && (
-            <div className="mb-2 text-xs leading-relaxed text-muted-2">
+            <div className="mb-2 text-note leading-relaxed text-muted-2">
               Holdings sum to <span className="tabular-nums">{formatWholeCurrency(holdingsValue)}</span>,{' '}
               <span className="tabular-nums">{formatWholeCurrency(Math.abs(reconciliationGap))}</span>{' '}
               {reconciliationGap > 0 ? 'above' : 'below'} the account balance your institution reports. The
@@ -260,19 +260,19 @@ export function Investments() {
                 <div
                   key={h.id}
                   onClick={() => setSelectedHolding(h)}
-                  className="flex cursor-pointer items-center rounded-lg border-b border-line px-1 py-3 transition-colors hover:bg-rail"
+                  className="flex cursor-pointer items-center rounded-lg border-b border-line px-1 py-3 transition-colors hover:bg-well"
                 >
                   <div className="min-w-0 flex-1 pr-3">
-                    <div className="truncate text-[15px] text-ink">{holdingName(h)}</div>
-                    <div className="mt-0.5 text-xs text-muted-2">
+                    <div className="truncate text-body-lg text-ink">{holdingName(h)}</div>
+                    <div className="mt-0.5 text-note text-muted-2">
                       {accountNameById.get(h.account_id) ?? 'Investment account'} ·{' '}
                       {h.quantity.toLocaleString('en-US', { maximumFractionDigits: 4 })} share{h.quantity === 1 ? '' : 's'}
                     </div>
                   </div>
                   <div className="text-right">
-                    <div className="font-serif text-[18px] tabular-nums text-ink">{formatWholeCurrency(h.institution_value)}</div>
+                    <div className="font-serif text-sub tabular-nums text-ink">{formatWholeCurrency(h.institution_value)}</div>
                     {gain && (
-                      <div className={`mt-0.5 text-xs tabular-nums ${gain.gain >= 0 ? 'text-sage-deep' : 'text-clay'}`}>
+                      <div className={`mt-0.5 text-note tabular-nums ${gain.gain >= 0 ? 'text-sage-deep' : 'text-clay'}`}>
                         {formatWholeCurrency(gain.gain, { showSign: gain.gain > 0 })} · {formatPercent(Math.abs(gain.pct))}
                       </div>
                     )}
@@ -281,7 +281,7 @@ export function Investments() {
               );
             })}
           {allHoldings.length === 0 && (
-            <div className="py-6 text-[14px] text-muted">No holdings yet. They appear after a SimpleFIN or Coinbase sync.</div>
+            <div className="py-6 text-body-lg text-muted">No holdings yet. They appear after a SimpleFIN or Coinbase sync.</div>
           )}
         </div>
 
@@ -295,7 +295,7 @@ export function Investments() {
                   key={l.id}
                   type="button"
                   onClick={() => setLens(l.id)}
-                  className={`px-1.5 py-0.5 text-[11px] transition-colors ${
+                  className={`px-1.5 py-0.5 text-micro transition-colors ${
                     l.id === lens ? 'text-ink' : 'text-muted-2 hover:text-muted'
                   }`}
                 >
@@ -314,7 +314,7 @@ export function Investments() {
               {slices.map((s, i) => (
                 <div
                   key={s.key}
-                  className={`flex justify-between py-[7px] text-sm ${i < slices.length - 1 ? 'border-b border-line' : ''}`}
+                  className={`flex justify-between py-[7px] text-body-lg ${i < slices.length - 1 ? 'border-b border-line' : ''}`}
                 >
                   <span className="flex items-center gap-2.5">
                     <span className="h-[9px] w-[9px] rounded-[2px]" style={{ background: s.color }} />
@@ -325,7 +325,7 @@ export function Investments() {
               ))}
             </>
           ) : (
-            <div className="text-[13px] text-muted-2">Allocation appears once holdings are synced.</div>
+            <div className="text-body text-muted-2">Allocation appears once holdings are synced.</div>
           )}
         </div>
       </div>

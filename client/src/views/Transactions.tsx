@@ -214,10 +214,10 @@ function EditTransactionModal({ transaction, onClose }: { transaction: Transacti
     <Modal open onClose={onClose} title={merchantLabel(transaction)}>
       <div className="space-y-4">
         <div className="flex items-baseline justify-between">
-          <span className="text-[13px] text-muted">
+          <span className="text-body text-muted">
             {format(parseISO(transaction.date), 'MMM d, yyyy')} · {transaction.account_name}
           </span>
-          <span className={`font-serif text-[22px] tabular-nums ${transaction.amount > 0 ? 'text-sage-deep' : 'text-ink'}`}>
+          <span className={`font-serif text-figure tabular-nums ${transaction.amount > 0 ? 'text-sage-deep' : 'text-ink'}`}>
             {formatCurrency(transaction.amount, { showSign: transaction.amount > 0 })}
           </span>
         </div>
@@ -376,7 +376,7 @@ export function Transactions() {
           </>
         }
         actions={
-          <button type="button" onClick={() => setShowAddModal(true)} className="text-[13.5px] text-ink transition-opacity hover:opacity-75">
+          <button type="button" onClick={() => setShowAddModal(true)} className="text-body text-ink transition-opacity hover:opacity-75">
             + Add transaction
           </button>
         }
@@ -387,9 +387,9 @@ export function Transactions() {
       {/* Controls row */}
       <div className="mb-6 flex flex-shrink-0 flex-wrap items-center gap-5">
         <div className="flex max-w-[420px] flex-1 items-center gap-2.5 border-b border-line-3 px-0.5 py-2">
-          <span className="text-sm text-muted-2">⌕</span>
+          <span className="text-body-lg text-muted-2">⌕</span>
           <input
-            className="w-full border-none bg-transparent p-0 text-sm text-ink placeholder:text-muted-2 focus:outline-none focus:ring-0"
+            className="w-full border-none bg-transparent p-0 text-body-lg text-ink placeholder:text-muted-2 focus:outline-none focus:ring-0"
             placeholder="Search merchant, note, or amount"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
@@ -426,7 +426,7 @@ export function Transactions() {
             // range showed "Needs review · 426" above "0 transactions · this month".
             if (turningOn) setRange('all');
           }}
-          className={`text-[13.5px] text-review-text transition-colors ${
+          className={`text-body text-review-text transition-colors ${
             reviewOnly ? 'rounded-md bg-review-active px-2.5 py-1' : 'hover:opacity-75'
           }`}
         >
@@ -439,7 +439,7 @@ export function Transactions() {
           {/* Column header, swapped for a bulk action bar while rows are selected */}
           {selectedIds.size > 0 ? (
             <div className="mz-rise-fast flex flex-wrap items-center gap-4 rounded-lg bg-rail px-3 py-2">
-              <span className="text-[13px] text-ink">
+              <span className="text-body text-ink">
                 {selectedIds.size} selected
               </span>
               <CategoryPicker
@@ -453,7 +453,7 @@ export function Transactions() {
                 type="button"
                 disabled={!bulkCategory || bulkCategorize.isPending}
                 onClick={() => bulkCategorize.mutate({ ids: [...selectedIds], categoryId: bulkCategory })}
-                className="border-b border-ink pb-0.5 text-[13.5px] text-ink transition-opacity disabled:opacity-40"
+                className="border-b border-ink pb-0.5 text-body text-ink transition-opacity disabled:opacity-40"
               >
                 {bulkCategorize.isPending ? 'Applying…' : 'Apply'}
               </button>
@@ -462,7 +462,7 @@ export function Transactions() {
               </TextButton>
             </div>
           ) : (
-            <div className="flex items-center px-3 pb-2 text-[11px] uppercase tracking-[0.1em] text-muted-2">
+            <div className="flex items-center px-3 pb-2 text-micro uppercase tracking-[0.1em] text-muted-2">
               <span className="w-[26px]" />
               <span className="flex-1">Merchant</span>
               <span className="w-[130px]">Account</span>
@@ -473,7 +473,7 @@ export function Transactions() {
           {isLoading && <SkeletonRows rows={6} />}
 
           {!isLoading && dayGroups.length === 0 && (
-            <div className="px-3 py-10 text-[14px] text-muted">
+            <div className="px-3 py-10 text-body-lg text-muted">
               {debouncedSearch || accountFilter || categoryFilter || reviewOnly
                 ? 'Nothing matches these filters.'
                 : 'No transactions in this period.'}
@@ -482,12 +482,12 @@ export function Transactions() {
 
           {dayGroups.map(([date, rows]) => (
             <div key={date}>
-              <div className="px-1 pb-1 pt-5 text-[11px] uppercase tracking-[0.18em] text-muted-2 first:pt-0">{dayLabel(date)}</div>
+              <div className="px-1 pb-1 pt-5 text-micro uppercase tracking-[0.18em] text-muted-2 first:pt-0">{dayLabel(date)}</div>
               {rows.map((t) => (
                 <div
                   key={t.id}
                   onClick={() => setEditing(t)}
-                  className="group flex cursor-pointer items-center rounded-lg border-b border-line px-3 py-3 transition-colors hover:bg-rail"
+                  className="group flex cursor-pointer items-center rounded-lg border-b border-line px-3 py-3 transition-colors hover:bg-well"
                 >
                   <button
                     type="button"
@@ -504,13 +504,13 @@ export function Transactions() {
                     }`}
                   />
                   <div className="min-w-0 flex-1 pr-3">
-                    <div className="truncate text-[15px] text-ink">{merchantLabel(t)}</div>
+                    <div className="truncate text-body-lg text-ink">{merchantLabel(t)}</div>
                     <div className="mt-1">
                       <CategoryPill name={t.category_name} />
                     </div>
                   </div>
-                  <span className="w-[130px] truncate text-[13px] text-muted">{t.account_name}</span>
-                  <span className={`w-[110px] text-right font-serif text-[18px] tabular-nums ${t.amount > 0 ? 'text-sage-deep' : 'text-ink'}`}>
+                  <span className="w-[130px] truncate text-body text-muted">{t.account_name}</span>
+                  <span className={`w-[110px] text-right font-serif text-sub tabular-nums ${t.amount > 0 ? 'text-sage-deep' : 'text-ink'}`}>
                     {formatCurrency(t.amount, { showSign: t.amount > 0 })}
                   </span>
                 </div>

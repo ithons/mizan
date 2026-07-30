@@ -54,7 +54,7 @@ export function AccountDetail() {
   if (!account) {
     return (
       <Screen>
-        <div className="py-10 text-[14px] text-muted">
+        <div className="py-10 text-body-lg text-muted">
           Account not found.{' '}
           <button type="button" onClick={() => navigate('/accounts')} className="text-ink underline underline-offset-2">
             Back to accounts
@@ -69,20 +69,20 @@ export function AccountDetail() {
       <button
         type="button"
         onClick={() => navigate('/accounts')}
-        className="mb-4 text-xs text-muted-2 transition-colors hover:text-ink"
+        className="mb-4 text-note text-muted-2 transition-colors hover:text-ink"
       >
         ← Accounts
       </button>
 
       <div className="mb-6 flex flex-wrap items-baseline justify-between gap-2">
         <div>
-          <h1 className="font-serif text-[27px] font-normal leading-tight text-ink">{account.account_name}</h1>
-          <div className="mt-1 text-[13.5px] text-muted">
+          <h1 className="font-serif text-display font-normal leading-tight text-ink">{account.account_name}</h1>
+          <div className="mt-1 text-body text-muted">
             {account.institution_name || 'Manual'} · {ACCOUNT_TYPE_LABELS[account.type] ?? account.type} · updated{' '}
             {formatCompactRelative(account.updated_at)}
           </div>
         </div>
-        <div className={`font-serif text-[30px] tabular-nums ${signedBalance < 0 ? 'text-clay' : 'text-ink'}`}>
+        <div className={`font-serif text-display tabular-nums ${signedBalance < 0 ? 'text-clay' : 'text-ink'}`}>
           {formatWholeCurrency(signedBalance)}
         </div>
       </div>
@@ -102,10 +102,10 @@ export function AccountDetail() {
           {holdings.map((h) => (
             <div key={h.id} className="flex items-baseline justify-between border-b border-line py-2 last:border-0">
               <div className="min-w-0">
-                <div className="truncate text-[14px] text-ink">{h.ticker ?? h.security_name ?? 'Holding'}</div>
-                <div className="text-xs text-muted-2">{h.quantity} units</div>
+                <div className="truncate text-body-lg text-ink">{h.ticker ?? h.security_name ?? 'Holding'}</div>
+                <div className="text-note text-muted-2">{h.quantity} units</div>
               </div>
-              <div className="tabular-nums text-[14px] text-ink">{formatWholeCurrency(h.institution_value)}</div>
+              <div className="tabular-nums text-body-lg text-ink">{formatWholeCurrency(h.institution_value)}</div>
             </div>
           ))}
         </div>
@@ -119,17 +119,17 @@ export function AccountDetail() {
           <TextButton onClick={() => navigate('/transactions')}>View all →</TextButton>
         </div>
         {transactions.length === 0 ? (
-          <div className="py-6 text-[13.5px] text-muted">No transactions for this account yet.</div>
+          <div className="py-6 text-body text-muted">No transactions for this account yet.</div>
         ) : (
           transactions.map((t) => {
             const amount = formatCurrencyColored(t.amount);
             return (
               <div key={t.id} className="flex items-baseline justify-between border-b border-line py-2 last:border-0">
                 <div className="min-w-0">
-                  <div className="truncate text-[14px] text-ink">{t.merchant_name || t.original_name || 'Transaction'}</div>
-                  <div className="text-xs text-muted-2">{formatDate(t.date)}</div>
+                  <div className="truncate text-body-lg text-ink">{t.merchant_name || t.original_name || 'Transaction'}</div>
+                  <div className="text-note text-muted-2">{formatDate(t.date)}</div>
                 </div>
-                <div className={`tabular-nums text-[14px] ${amount.className}`}>{amount.text}</div>
+                <div className={`tabular-nums text-body-lg ${amount.className}`}>{amount.text}</div>
               </div>
             );
           })

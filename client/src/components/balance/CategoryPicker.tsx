@@ -103,7 +103,7 @@ export function CategoryPicker({
         onClick={() => !disabled && setOpen((o) => !o)}
         className={variant === 'field'
           ? `mz-field flex w-full items-center justify-between gap-1.5 text-left ${value ? 'text-ink' : 'text-muted'}`
-          : `flex items-center gap-1.5 text-[13.5px] transition-colors ${value ? 'text-ink' : 'text-muted hover:text-ink'}`}
+          : `flex items-center gap-1.5 text-body transition-colors ${value ? 'text-ink' : 'text-muted hover:text-ink'}`}
       >
         <span className="flex min-w-0 items-center gap-1.5">
           {selected && <span className="h-1.5 w-1.5 flex-shrink-0 rounded-full" style={{ background: selected.color ?? 'var(--mz-muted-2)' }} />}
@@ -115,29 +115,29 @@ export function CategoryPicker({
       </button>
 
       {open && (
-        <div className={`absolute z-30 mt-2 w-[240px] rounded-lg border border-line-2 bg-card py-1 ${align === 'right' ? 'right-0' : 'left-0'}`}>
+        <div className={`absolute z-30 mt-2 w-[240px] rounded-lg border border-line-2 bg-card py-1 shadow-e2 ${align === 'right' ? 'right-0' : 'left-0'}`}>
           <input
             ref={inputRef} value={query} onChange={(e) => { setQuery(e.target.value); setActiveIndex(0); }} onKeyDown={onKeyDown}
             placeholder="Search categories…"
-            className="mx-2 mb-1 w-[calc(100%-1rem)] rounded-md bg-rail px-2.5 py-1.5 text-[13px] text-ink placeholder:text-muted focus:outline-none"
+            className="mx-2 mb-1 w-[calc(100%-1rem)] rounded-md bg-rail px-2.5 py-1.5 text-body text-ink placeholder:text-muted focus:outline-none"
           />
           <div ref={listRef} role="listbox" className="max-h-64 overflow-y-auto">
             {clearable && !query && (
               <div
                 role="option" aria-selected={value === ''} data-index={-1}
                 onMouseDown={(e) => { e.preventDefault(); commit({ id: '', name: placeholder, depth: 0, isParent: false }); }}
-                className="cursor-pointer px-3 py-1.5 text-[13px] text-muted hover:text-ink"
+                className="cursor-pointer px-3 py-1.5 text-body text-muted hover:text-ink"
               >
                 {placeholder}
               </div>
             )}
-            {rows.length === 0 && <div className="px-3 py-2 text-[13px] text-muted">No matches</div>}
+            {rows.length === 0 && <div className="px-3 py-2 text-body text-muted">No matches</div>}
             {rows.map((r, i) => (
               <div
                 key={r.id} role="option" aria-selected={r.id === value} data-index={i}
                 onMouseEnter={() => setActiveIndex(i)}
                 onMouseDown={(e) => { e.preventDefault(); commit(r); }}
-                className={`flex cursor-pointer items-center gap-2 py-1.5 pr-3 text-[13px] ${
+                className={`flex cursor-pointer items-center gap-2 py-1.5 pr-3 text-body ${
                   i === activeIndex ? 'bg-rail text-ink' : 'text-ink-soft'
                 } ${r.depth === 0 && r.isParent && !query ? 'font-medium text-ink' : ''}`}
                 style={{ paddingLeft: `${12 + r.depth * 14}px` }}

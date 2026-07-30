@@ -74,7 +74,7 @@ function Distribution({ b, scaleMax }: { b: Buckets; scaleMax: number }) {
   return (
     <div className="space-y-3">
       <div>
-        <div className="mb-1 flex items-baseline justify-between text-[13px] text-muted">
+        <div className="mb-1 flex items-baseline justify-between text-body text-muted">
           <span>Assets</span><span className="tabular-nums text-ink">{formatWholeCurrency(assetTotal)}</span>
         </div>
         <div className="flex h-7 w-full overflow-hidden rounded-md bg-rail">
@@ -84,7 +84,7 @@ function Distribution({ b, scaleMax }: { b: Buckets; scaleMax: number }) {
         </div>
       </div>
       <div>
-        <div className="mb-1 flex items-baseline justify-between text-[13px] text-muted">
+        <div className="mb-1 flex items-baseline justify-between text-body text-muted">
           <span>Liabilities</span><span className="tabular-nums text-ink">{formatWholeCurrency(b.liabilities)}</span>
         </div>
         <div className="flex h-7 w-full overflow-hidden rounded-md bg-rail">
@@ -101,10 +101,10 @@ function Metric({ label, m, invertColor, isPercent }: { label: string; m: Report
   const fmt = (v: number) => (isPercent ? `${Math.round(v)}%` : formatWholeCurrency(v));
   return (
     <div>
-      <div className="text-[12px] uppercase tracking-[0.12em] text-muted-2">{label}</div>
-      <div className="mt-1 font-serif text-2xl text-ink tabular-nums">{fmt(m.current)}</div>
+      <div className="text-note uppercase tracking-[0.12em] text-muted-2">{label}</div>
+      <div className="mt-1 font-serif text-figure text-ink tabular-nums">{fmt(m.current)}</div>
       {m.delta !== 0 && (
-        <div className={`mt-0.5 text-[12.5px] tabular-nums ${good ? 'text-sage-deep' : 'text-clay'}`}>
+        <div className={`mt-0.5 text-note tabular-nums ${good ? 'text-sage-deep' : 'text-clay'}`}>
           {up ? '▲' : '▼'} {fmt(Math.abs(m.delta))}
         </div>
       )}
@@ -122,7 +122,7 @@ function CategorySparkline({ values, color }: { values: number[]; color: string 
         <div
           key={i}
           className="flex-1 rounded-[2px]"
-          style={{ height: `${Math.max(v > 0 ? 8 : 2, (v / max) * 100)}%`, background: v > 0 ? color : 'var(--rail, #e6e1d8)' }}
+          style={{ height: `${Math.max(v > 0 ? 8 : 2, (v / max) * 100)}%`, background: v > 0 ? color : 'var(--mz-track)' }}
           title={formatWholeCurrency(v)}
         />
       ))}
@@ -206,11 +206,11 @@ export function Reports() {
             label="net worth"
           >
             {snapshot && (
-              <div className="mb-3 font-serif text-3xl text-ink tabular-nums">{formatWholeCurrency(snapshot.net_worth)}</div>
+              <div className="mb-3 font-serif text-display text-ink tabular-nums">{formatWholeCurrency(snapshot.net_worth)}</div>
             )}
             {trendPoints.length >= 2
               ? <TrendChart history={trendPoints} height={140} />
-              : <p className="text-[13.5px] text-muted-2">Not enough snapshots yet for a trend — they accrue as you sync.</p>}
+              : <p className="text-body text-muted-2">Not enough snapshots yet for a trend — they accrue as you sync.</p>}
           </QueryState>
         </section>
 
@@ -242,7 +242,7 @@ export function Reports() {
                   <Metric label="Savings rate" m={summary.savings_rate} isPercent />
                 </div>
                 {/* Name the baseline: a delta with an unstated comparison window is unreadable. */}
-                <p className="mt-3 text-[12.5px] text-muted-2">
+                <p className="mt-3 text-note text-muted-2">
                   Compared with {summary.comparison_label.toLowerCase()}
                   {summary.comparison_start_date && summary.comparison_end_date
                     ? ` · ${summary.comparison_start_date} to ${summary.comparison_end_date}`
@@ -265,7 +265,7 @@ export function Reports() {
           >
             {attribution ? (
               <>
-                <p className="mb-3 text-[13.5px] leading-relaxed text-muted">
+                <p className="mb-3 text-body leading-relaxed text-muted">
                   Net worth {attribution.delta >= 0 ? 'rose' : 'fell'}{' '}
                   <span className={attribution.delta >= 0 ? 'text-sage-deep' : 'text-clay'}>
                     {formatWholeCurrency(Math.abs(attribution.delta))}
@@ -278,7 +278,7 @@ export function Reports() {
                     const up = a.delta >= 0;
                     return (
                       <div key={a.account_id}>
-                        <div className="mb-1 flex items-baseline justify-between gap-3 text-[13px]">
+                        <div className="mb-1 flex items-baseline justify-between gap-3 text-body">
                           <span className="truncate text-ink">
                             {a.account_name ?? 'Unknown account'}
                             {a.institution_name && <span className="text-muted-2"> · {a.institution_name}</span>}
@@ -296,7 +296,7 @@ export function Reports() {
                 </div>
               </>
             ) : (
-              <p className="text-[13.5px] text-muted-2">
+              <p className="text-body text-muted-2">
                 Needs at least two snapshots in this window — they accrue as you sync.
               </p>
             )}
@@ -316,7 +316,7 @@ export function Reports() {
           <div className="space-y-3">
             {(cashflow?.months ?? []).map((m) => (
               <div key={m.month}>
-                <div className="mb-1 flex items-baseline justify-between text-[13px]">
+                <div className="mb-1 flex items-baseline justify-between text-body">
                   <span className="text-muted">{m.month}</span>
                   <span className={`tabular-nums ${m.net >= 0 ? 'text-sage-deep' : 'text-clay'}`}>
                     {m.net >= 0 ? '+' : ''}{formatWholeCurrency(m.net)}
@@ -333,7 +333,7 @@ export function Reports() {
               </div>
             ))}
           </div>
-          <div className="mt-2 flex gap-4 text-[11.5px] text-muted-2">
+          <div className="mt-2 flex gap-4 text-micro text-muted-2">
             <span className="flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-sm" style={{ background: INCOME_COLOR }} />Income</span>
             <span className="flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-sm" style={{ background: LIABILITY_COLOR }} />Expenses</span>
           </div>
@@ -355,7 +355,7 @@ export function Reports() {
                 <div className="space-y-2.5">
                   {topSpending.map((c) => (
                     <div key={c.category_id}>
-                      <div className="mb-1 flex items-baseline justify-between text-[13px]">
+                      <div className="mb-1 flex items-baseline justify-between text-body">
                         <span className="text-ink">{c.category_name}</span>
                         <span className="tabular-nums text-muted">{formatWholeCurrency(c.amount)}</span>
                       </div>
@@ -369,13 +369,13 @@ export function Reports() {
                   <button
                     type="button"
                     onClick={() => setShowAllSpending((v) => !v)}
-                    className="mt-3 text-[13px] text-muted transition-colors hover:text-ink"
+                    className="mt-3 text-body text-muted transition-colors hover:text-ink"
                   >
                     {showAllSpending ? 'Show top 8' : `Show all ${allSpending.length} categories`}
                   </button>
                 )}
               </>
-            ) : <p className="text-[13.5px] text-muted-2">No spending in this period.</p>}
+            ) : <p className="text-body text-muted-2">No spending in this period.</p>}
           </QueryState>
         </section>
 
@@ -398,13 +398,13 @@ export function Reports() {
                     const delta = latest - prior;
                     return (
                       <div key={s.category_id}>
-                        <div className="mb-1.5 flex items-baseline justify-between gap-2 text-[13px]">
+                        <div className="mb-1.5 flex items-baseline justify-between gap-2 text-body">
                           <span className="truncate text-ink">{s.category_name}</span>
                           <span className="shrink-0 tabular-nums text-muted">{formatWholeCurrency(latest)}</span>
                         </div>
                         <CategorySparkline values={s.values} color={s.color ?? LIQUID_COLOR} />
                         {delta !== 0 && (
-                          <div className={`mt-1 text-[12px] tabular-nums ${delta > 0 ? 'text-clay' : 'text-sage-deep'}`}>
+                          <div className={`mt-1 text-note tabular-nums ${delta > 0 ? 'text-clay' : 'text-sage-deep'}`}>
                             {delta > 0 ? '▲' : '▼'} {formatWholeCurrency(Math.abs(delta))} vs prior month
                           </div>
                         )}
@@ -412,11 +412,11 @@ export function Reports() {
                     );
                   })}
                 </div>
-                <p className="mt-3 text-[11.5px] text-muted-2">
+                <p className="mt-3 text-micro text-muted-2">
                   {trends?.months[0]} → {trends?.months[trends.months.length - 1]}
                 </p>
               </>
-            ) : <p className="text-[13.5px] text-muted-2">No categorized spending in the last {TREND_MONTHS} months.</p>}
+            ) : <p className="text-body text-muted-2">No categorized spending in the last {TREND_MONTHS} months.</p>}
           </QueryState>
         </section>
 
@@ -436,7 +436,7 @@ export function Reports() {
                   const share = merchants.total > 0 ? (m.total / merchants.total) * 100 : 0;
                   return (
                     <div key={m.merchant}>
-                      <div className="mb-1 flex items-baseline justify-between gap-3 text-[13px]">
+                      <div className="mb-1 flex items-baseline justify-between gap-3 text-body">
                         <span className="truncate text-ink">
                           {m.merchant}
                           <span className="text-muted-2">
@@ -455,7 +455,7 @@ export function Reports() {
                   );
                 })}
               </div>
-            ) : <p className="text-[13.5px] text-muted-2">No merchant spending in this period.</p>}
+            ) : <p className="text-body text-muted-2">No merchant spending in this period.</p>}
           </QueryState>
         </section>
 
@@ -468,7 +468,7 @@ export function Reports() {
             <section>
               <SectionLabel className="mb-1">Net worth if you paid off debt</SectionLabel>
               {b.liabilities > 0 && (
-                <p className="mb-4 text-[13.5px] leading-relaxed text-muted">
+                <p className="mb-4 text-body leading-relaxed text-muted">
                   Paying off {formatWholeCurrency(b.liabilities)} from cash leaves net worth unchanged at{' '}
                   <span className="text-ink">{formatWholeCurrency(a.netWorth)}</span> — it reshuffles, not grows.
                 </p>
@@ -477,7 +477,7 @@ export function Reports() {
                 <div><SectionLabel className="mb-3">Now</SectionLabel><Distribution b={b} scaleMax={scaleMax} /></div>
                 <div><SectionLabel className="mb-3">After payoff</SectionLabel><Distribution b={a} scaleMax={scaleMax} /></div>
               </div>
-              <div className="mt-4 flex flex-wrap gap-x-6 gap-y-2 text-[12.5px] text-muted">
+              <div className="mt-4 flex flex-wrap gap-x-6 gap-y-2 text-note text-muted">
                 {SEGMENTS.map((seg) => (
                   <span key={seg.key} className="flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-sm" style={{ background: seg.color }} />{seg.label}</span>
                 ))}

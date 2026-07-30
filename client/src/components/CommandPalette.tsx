@@ -183,13 +183,13 @@ export function CommandPalette() {
   return (
     <>
       <div className="fixed inset-0 z-50 bg-ink/20 backdrop-blur-sm transition-opacity" onClick={() => setOpen(false)} />
-      <div className="fixed left-1/2 top-[18%] z-50 flex max-h-[62vh] w-full max-w-2xl -translate-x-1/2 flex-col overflow-hidden rounded-xl border border-line-2 bg-card">
+      <div className="fixed left-1/2 top-[18%] z-50 flex max-h-[62vh] w-full max-w-2xl -translate-x-1/2 flex-col overflow-hidden rounded-xl border border-line-2 bg-card shadow-e3">
         <div className="flex items-center border-b border-line px-4 py-3">
           <Search size={18} className="mr-3 flex-shrink-0 text-muted" />
           <input
             ref={inputRef}
             type="text"
-            className="flex-1 border-none bg-transparent p-0 text-lg text-ink placeholder:text-faint focus:outline-none focus:ring-0"
+            className="flex-1 border-none bg-transparent p-0 text-sub text-ink placeholder:text-faint focus:outline-none focus:ring-0"
             placeholder="Search, jump, or ask Mizān…"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
@@ -207,12 +207,14 @@ export function CommandPalette() {
                   type="button"
                   onClick={c.run}
                   onMouseEnter={() => setActiveIdx(i)}
-                  className={`flex w-full items-center justify-between rounded-lg px-3 py-2 text-left text-sm transition-colors ${
-                    i === activeIdx ? 'bg-rail text-ink' : 'text-ink-soft'
+                  className={`relative flex w-full items-center justify-between rounded-lg px-3 py-2 text-left text-body-lg transition-colors before:absolute before:inset-y-1.5 before:left-0 before:w-[2px] before:rounded-full ${
+                    i === activeIdx
+                      ? 'bg-well font-medium text-ink before:bg-sage'
+                      : 'text-ink-soft before:bg-transparent'
                   }`}
                 >
                   <span>{c.label}</span>
-                  <span className="flex items-center gap-2 text-[11px] text-faint">
+                  <span className="flex items-center gap-2 text-micro text-faint">
                     {c.hint}
                     {i === activeIdx && <CornerDownLeft size={12} />}
                   </span>
@@ -223,23 +225,23 @@ export function CommandPalette() {
 
           {drafts.length > 0 && (
             <div className="space-y-1">
-              <div className="px-3 py-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-2">Suggested actions</div>
+              <div className="px-3 py-1.5 text-rule font-semibold uppercase tracking-wider text-muted-2">Suggested actions</div>
               {drafts.map((draft: AdvisorDraftAction) => {
                 const isApplying = confirmMutation.isPending && confirmMutation.variables?.id === draft.id;
                 return (
-                  <div key={draft.id} className="group flex cursor-default flex-col gap-2 rounded-lg border border-transparent p-3 transition-colors hover:bg-rail/60">
+                  <div key={draft.id} className="group flex cursor-default flex-col gap-2 rounded-lg border border-transparent p-3 transition-colors hover:bg-well/60">
                     <div className="flex items-start justify-between gap-3">
                       <div className="flex min-w-0 items-start gap-2">
                         <Sparkles size={14} className="mt-0.5 flex-shrink-0 text-sage" />
                         <div className="min-w-0">
-                          <p className="truncate text-sm font-medium text-ink">{draft.label}</p>
-                          <p className="mt-0.5 text-xs leading-relaxed text-muted">{draft.summary}</p>
+                          <p className="truncate text-body-lg font-medium text-ink">{draft.label}</p>
+                          <p className="mt-0.5 text-note leading-relaxed text-muted">{draft.summary}</p>
                         </div>
                       </div>
                       <button
                         onClick={() => confirmMutation.mutate(draft)}
                         disabled={isApplying}
-                        className="flex flex-shrink-0 items-center gap-1.5 rounded-lg bg-ink px-3 py-1.5 text-xs font-medium text-paper transition-opacity hover:opacity-90 disabled:opacity-50"
+                        className="flex flex-shrink-0 items-center gap-1.5 rounded-lg bg-ink px-3 py-1.5 text-note font-medium text-paper transition-opacity hover:opacity-90 disabled:opacity-50"
                       >
                         {isApplying ? <Loader2 size={12} className="animate-spin" /> : 'Confirm'}
                       </button>
@@ -247,7 +249,7 @@ export function CommandPalette() {
                     {draft.changes.length > 0 && (
                       <div className="ml-6 grid grid-cols-1 gap-1">
                         {draft.changes.map((change) => (
-                          <div key={`${draft.id}:${change.field}`} className="flex items-center justify-between gap-3 text-[11px]">
+                          <div key={`${draft.id}:${change.field}`} className="flex items-center justify-between gap-3 text-micro">
                             <span className="text-muted">{change.field}</span>
                             <span className="truncate text-right text-ink-soft">
                               {change.before !== null ? String(change.before) : 'None'}{' '}
@@ -267,14 +269,14 @@ export function CommandPalette() {
           {showAiEmpty && (
             <div className="flex flex-col items-center justify-center px-4 py-8 text-center">
               <BrainCircuit size={24} className="mb-2 text-muted" />
-              <p className="text-sm font-medium text-ink">No matches</p>
-              <p className="mt-1 text-xs text-muted">Try rephrasing, or take it to the Advisor for a real answer.</p>
+              <p className="text-body-lg font-medium text-ink">No matches</p>
+              <p className="mt-1 text-note text-muted">Try rephrasing, or take it to the Advisor for a real answer.</p>
               <button
                 onClick={() => {
                   setOpen(false);
                   navigate('/advisor', { state: { advisorPrompt: { source: 'dashboard', prompt: query, recordKind: 'palette' } } });
                 }}
-                className="mt-4 flex items-center gap-1 text-xs text-sage-deep hover:underline"
+                className="mt-4 flex items-center gap-1 text-note text-sage-deep hover:underline"
               >
                 Ask Advisor <ArrowRight size={12} />
               </button>
@@ -282,7 +284,7 @@ export function CommandPalette() {
           )}
         </div>
 
-        <div className="flex items-center justify-between border-t border-line bg-card-alt px-4 py-2 text-[10px] text-muted">
+        <div className="flex items-center justify-between border-t border-line bg-card-alt px-4 py-2 text-rule text-muted">
           <span>
             <kbd className="mr-1 rounded bg-line px-1.5 py-0.5 font-mono">↑↓</kbd>
             <kbd className="mr-1 rounded bg-line px-1.5 py-0.5 font-mono">↵</kbd> to jump ·{' '}

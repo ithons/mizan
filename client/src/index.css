@@ -4,70 +4,146 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Balance palette — paper / warm-neutral + sage accent.
+ *
+ * Every token is declared TWICE on purpose:
+ *   --mz-x-c   space-separated RGB channels, consumed by tailwind.config.js as
+ *              `rgb(var(--mz-x-c) / <alpha-value>)`.
+ *   --mz-x     the composed color, for the ~32 raw `var(--mz-x)` references that live in
+ *              inline `style` props and SVG attributes (TrendChart, BalanceScale,
+ *              CategoryPicker, Today, Reports).
+ *
+ * The channel form is not cosmetic. Tailwind 3's `withAlphaValue` runs `parseColor()` on the
+ * configured value; given a bare `var(--mz-x)` string it returns null and DROPS THE UTILITY
+ * ENTIRELY, with no warning. That silently deleted all 16 `/alpha` call sites in this app —
+ * every skeleton (`bg-line/70`), both dialog scrims (`bg-ink/25`, `bg-ink/20`), the error
+ * banner tint (`bg-clay/5`), the destructive-confirm tint, and two selected states.
+ * Do not collapse these back into single hex declarations.
+ */
 :root {
-  /* Balance palette — paper / warm-neutral + sage accent */
-  --mz-paper: #f3ede1;
-  --mz-rail: #efe8da;
-  --mz-card: #faf5ea;
-  --mz-card-alt: #fbf7ef;
-  --mz-card-white: #ffffff;
+  --mz-paper-c: 243 237 225;
+  --mz-rail-c: 239 232 218;
+  --mz-card-c: 250 245 234;
+  --mz-card-alt-c: 251 247 239;
+  --mz-card-white-c: 255 255 255;
 
-  --mz-ink: #2a241c;
-  --mz-ink-soft: #4a4234;
-  --mz-muted: #8c8272;
-  --mz-muted-2: #a89a84;
-  --mz-faint: #b3a894;
+  --mz-ink-c: 42 36 28;
+  --mz-ink-soft-c: 74 66 52;
+  /* Secondary text ramp, darkened to clear WCAG AA on paper. Was #8c8272 / #a89a84 / #b3a894,
+     which measured 3.24:1 / 2.36:1 / 2.01:1 — i.e. every muted string in the app failed. */
+  --mz-muted-c: 107 97 81; /* #6b6151 — 5.21:1 on paper */
+  --mz-muted-2-c: 125 115 98; /* #7d7362 — 4.00:1, uppercase labels */
+  --mz-faint-c: 143 133 116; /* #8f8574 — 3.11:1, non-text only */
 
-  --mz-line: #ece3d3;
-  --mz-line-2: #e4d9c7;
-  --mz-line-3: #ddd2bf;
-  --mz-dot: #c4b8a2;
+  --mz-line-c: 236 227 211;
+  --mz-line-2-c: 228 217 199;
+  --mz-line-3-c: 221 210 191;
+  /* Fills that must read as extent, not decoration: skeleton bodies, progress tracks, and the
+     hover/selected wash. `line` at 1.17:1 on card was below the perceptual floor. */
+  --mz-track-c: 214 202 179; /* #d6cab3 — 1.39:1 on paper */
+  --mz-well-c: 230 221 201; /* #e6ddc9 — 1.14:1, row hover */
+  --mz-dot-c: 196 184 162;
 
-  --mz-sage: #7c8b6f;
-  --mz-sage-deep: #5c7050;
-  --mz-sage-soft: #8a9a76;
-  --mz-sage-tint: #eef1e8;
-  --mz-sage-tint-border: #dbe1d0;
-  --mz-sage-panel: #f0f2eb;
-  --mz-sage-panel-border: #d7ddc9;
-  --mz-pill-text: #5c6a52;
+  --mz-sage-c: 124 139 111;
+  --mz-sage-deep-c: 92 112 80;
+  --mz-sage-soft-c: 138 154 118;
+  --mz-sage-tint-c: 238 241 232;
+  --mz-sage-tint-border-c: 219 225 208;
+  --mz-sage-panel-c: 240 242 235;
+  --mz-sage-panel-border-c: 215 221 201;
+  --mz-pill-text-c: 92 106 82;
 
-  --mz-clay: #8a4a38;
-  --mz-clay-scale: #b5654a;
-  --mz-gold: #c9963a;
-  --mz-tan: #cbb08a;
-  --mz-beam: #c9bda6;
+  --mz-clay-c: 138 74 56;
+  --mz-clay-scale-c: 181 101 74;
+  --mz-gold-c: 201 150 58;
+  --mz-tan-c: 203 176 138;
+  --mz-beam-c: 201 189 166;
 
-  --mz-pill-muted-bg: #efe8da;
-  --mz-pill-muted-border: #e0d5c1;
+  --mz-pill-muted-bg-c: 239 232 218;
+  --mz-pill-muted-border-c: 224 213 193;
 
-  --mz-review-bg: #f6edd8;
-  --mz-review-border: #e2cfa9;
-  --mz-review-text: #8a6a3a;
-  --mz-review-active: #f2e6cf;
+  --mz-review-bg-c: 246 237 216;
+  --mz-review-border-c: 226 207 169;
+  --mz-review-text-c: 138 106 58;
+  --mz-review-active-c: 242 230 207;
 
-  /* Legacy aliases so not-yet-converted components inherit the Balance look */
-  --color-bg: var(--mz-paper);
-  --color-surface: var(--mz-card);
-  --color-border: var(--mz-line-2);
-  --color-text: var(--mz-ink);
-  --color-muted: var(--mz-muted);
+  /* Composed aliases — keep every raw var(--mz-*) reference working unchanged. */
+  --mz-paper: rgb(var(--mz-paper-c));
+  --mz-rail: rgb(var(--mz-rail-c));
+  --mz-card: rgb(var(--mz-card-c));
+  --mz-card-alt: rgb(var(--mz-card-alt-c));
+  --mz-card-white: rgb(var(--mz-card-white-c));
 
-  --color-positive: var(--mz-sage-deep);
-  --color-positive-5: rgba(92, 112, 80, 0.05);
-  --color-positive-10: rgba(92, 112, 80, 0.1);
+  --mz-ink: rgb(var(--mz-ink-c));
+  --mz-ink-soft: rgb(var(--mz-ink-soft-c));
+  --mz-muted: rgb(var(--mz-muted-c));
+  --mz-muted-2: rgb(var(--mz-muted-2-c));
+  --mz-faint: rgb(var(--mz-faint-c));
 
-  --color-negative: var(--mz-clay);
-  --color-negative-5: rgba(138, 74, 56, 0.05);
-  --color-negative-10: rgba(138, 74, 56, 0.1);
+  --mz-line: rgb(var(--mz-line-c));
+  --mz-line-2: rgb(var(--mz-line-2-c));
+  --mz-line-3: rgb(var(--mz-line-3-c));
+  --mz-track: rgb(var(--mz-track-c));
+  --mz-well: rgb(var(--mz-well-c));
+  --mz-dot: rgb(var(--mz-dot-c));
 
-  --color-warning: var(--mz-gold);
-  --color-warning-5: rgba(201, 150, 58, 0.05);
-  --color-warning-10: rgba(201, 150, 58, 0.1);
+  --mz-sage: rgb(var(--mz-sage-c));
+  --mz-sage-deep: rgb(var(--mz-sage-deep-c));
+  --mz-sage-soft: rgb(var(--mz-sage-soft-c));
+  --mz-sage-tint: rgb(var(--mz-sage-tint-c));
+  --mz-sage-tint-border: rgb(var(--mz-sage-tint-border-c));
+  --mz-sage-panel: rgb(var(--mz-sage-panel-c));
+  --mz-sage-panel-border: rgb(var(--mz-sage-panel-border-c));
+  --mz-pill-text: rgb(var(--mz-pill-text-c));
 
-  --color-info: #7c8b99;
-  --color-info-5: rgba(124, 139, 153, 0.05);
-  --color-info-10: rgba(124, 139, 153, 0.1);
+  --mz-clay: rgb(var(--mz-clay-c));
+  --mz-clay-scale: rgb(var(--mz-clay-scale-c));
+  --mz-gold: rgb(var(--mz-gold-c));
+  --mz-tan: rgb(var(--mz-tan-c));
+  --mz-beam: rgb(var(--mz-beam-c));
+
+  --mz-pill-muted-bg: rgb(var(--mz-pill-muted-bg-c));
+  --mz-pill-muted-border: rgb(var(--mz-pill-muted-border-c));
+
+  --mz-review-bg: rgb(var(--mz-review-bg-c));
+  --mz-review-border: rgb(var(--mz-review-border-c));
+  --mz-review-text: rgb(var(--mz-review-text-c));
+  --mz-review-active: rgb(var(--mz-review-active-c));
+
+  /* Legacy aliases so not-yet-converted components inherit the Balance look. These carry channel
+     forms too — ConfirmRemoveModal uses `bg-negative/10 border-negative/30`, which was one of the
+     dead alpha sites. */
+  --color-bg-c: var(--mz-paper-c);
+  --color-surface-c: var(--mz-card-c);
+  --color-border-c: var(--mz-line-2-c);
+  --color-text-c: var(--mz-ink-c);
+  --color-muted-c: var(--mz-muted-c);
+  --color-positive-c: var(--mz-sage-deep-c);
+  --color-negative-c: var(--mz-clay-c);
+  --color-warning-c: var(--mz-gold-c);
+  --color-info-c: 124 139 153;
+
+  --color-bg: rgb(var(--color-bg-c));
+  --color-surface: rgb(var(--color-surface-c));
+  --color-border: rgb(var(--color-border-c));
+  --color-text: rgb(var(--color-text-c));
+  --color-muted: rgb(var(--color-muted-c));
+
+  --color-positive: rgb(var(--color-positive-c));
+  --color-positive-5: rgb(var(--color-positive-c) / 0.05);
+  --color-positive-10: rgb(var(--color-positive-c) / 0.1);
+
+  --color-negative: rgb(var(--color-negative-c));
+  --color-negative-5: rgb(var(--color-negative-c) / 0.05);
+  --color-negative-10: rgb(var(--color-negative-c) / 0.1);
+
+  --color-warning: rgb(var(--color-warning-c));
+  --color-warning-5: rgb(var(--color-warning-c) / 0.05);
+  --color-warning-10: rgb(var(--color-warning-c) / 0.1);
+
+  --color-info: rgb(var(--color-info-c));
+  --color-info-5: rgb(var(--color-info-c) / 0.05);
+  --color-info-10: rgb(var(--color-info-c) / 0.1);
 }
 
 @layer base {
@@ -83,11 +159,13 @@
 }
 
 @layer components {
+  /* No `focus:outline-none` here. It used to override the global :focus-visible rule above and
+     leave a 1.07:1 border change as the only focus affordance on all 31 inputs in the app. */
   .mz-field {
-    @apply w-full rounded-lg border border-line-2 bg-card-alt px-3 py-2 text-sm text-ink placeholder:text-faint focus:border-line-3 focus:outline-none focus:ring-0;
+    @apply w-full rounded-lg border border-line-2 bg-card-alt px-3 py-2 text-body text-ink placeholder:text-muted-2 focus:border-line-3 focus:ring-0;
   }
   .mz-label {
-    @apply mb-1 block text-xs text-muted;
+    @apply mb-1 block text-micro text-muted;
   }
 }
 

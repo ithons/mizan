@@ -112,7 +112,7 @@ export function Select({ value, options, onChange, placeholder, clearable = true
         aria-haspopup="listbox"
         onClick={() => setOpen((o) => !o)}
         onKeyDown={onKeyDown}
-        className={`flex items-center gap-1.5 text-[13.5px] transition-colors ${
+        className={`flex items-center gap-1.5 text-body transition-colors ${
           value ? 'text-ink' : 'text-muted hover:text-ink'
         }`}
       >
@@ -126,7 +126,7 @@ export function Select({ value, options, onChange, placeholder, clearable = true
         <div
           ref={listRef}
           role="listbox"
-          className={`absolute z-30 mt-2 max-h-72 min-w-[200px] overflow-y-auto rounded-lg border border-line-2 bg-card py-1 ${
+          className={`absolute z-30 mt-2 max-h-72 min-w-[200px] overflow-y-auto rounded-lg border border-line-2 bg-card py-1 shadow-e2 ${
             align === 'right' ? 'right-0' : 'left-0'
           }`}
         >
@@ -141,7 +141,7 @@ export function Select({ value, options, onChange, placeholder, clearable = true
                 e.preventDefault();
                 commit(i);
               }}
-              className={`flex cursor-pointer items-center gap-2 px-3 py-1.5 text-[13px] ${
+              className={`flex cursor-pointer items-center gap-2 px-3 py-1.5 text-body ${
                 i === activeIndex ? 'bg-rail text-ink' : 'text-ink-soft'
               }`}
             >

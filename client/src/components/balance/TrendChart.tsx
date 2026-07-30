@@ -114,12 +114,12 @@ export function TrendChart({ history, height = 120, className = '' }: TrendChart
             style={{ left: `${hoverXPct}%`, top: `${(hoverYPct * height) / VIEW_H}%` }}
           />
           <div
-            className={`pointer-events-none absolute -top-2 whitespace-nowrap rounded-lg border border-line-2 bg-card px-3 py-1.5 text-xs ${
+            className={`pointer-events-none absolute -top-2 whitespace-nowrap rounded-lg border border-line-2 bg-card px-3 py-1.5 text-note ${
               hoverXPct > 55 ? '-translate-x-full' : ''
             }`}
             style={{ left: `${hoverXPct}%` }}
           >
-            <span className="font-serif text-[13px] tabular-nums text-ink">{formatWholeCurrency(hoverPoint.value)}</span>
+            <span className="font-serif text-body tabular-nums text-ink">{formatWholeCurrency(hoverPoint.value)}</span>
             <span className="ml-2 text-muted-2">{format(parseISO(hoverPoint.date), 'MMM d, yyyy')}</span>
             {hoverPoint.estimated && <span className="ml-2 text-muted-2">· estimated</span>}
           </div>

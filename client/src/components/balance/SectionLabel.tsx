@@ -15,8 +15,8 @@ export function SectionLabel({ children, summary, underline = false, className =
         underline ? 'border-b border-line-3 pb-1.5' : ''
       } ${className}`}
     >
-      <span className="text-[11px] uppercase tracking-[0.18em] text-muted-2">{children}</span>
-      {summary != null && <span className="text-[13px] tabular-nums text-muted">{summary}</span>}
+      <span className="text-micro uppercase tracking-[0.18em] text-muted-2">{children}</span>
+      {summary != null && <span className="text-body tabular-nums text-muted">{summary}</span>}
     </div>
   );
 }

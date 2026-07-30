@@ -93,7 +93,7 @@ function BillModal({ open, onClose, categories }: { open: boolean; onClose: () =
             />
           </div>
         </div>
-        <p className="text-[12px] text-muted-2">
+        <p className="text-note text-muted-2">
           {isIncome ? 'Tracked as income' : 'Tracked as a bill'} · category determines whether this counts as income or an expense.
         </p>
         <div className="flex items-center gap-5 pt-1">
@@ -215,7 +215,7 @@ export function Bills() {
             <button
               type="button"
               onClick={() => setShowIncome((v) => !v)}
-              className={`text-[12.5px] transition-colors ${showIncome ? 'text-sage-deep' : 'text-muted-2 hover:text-muted'}`}
+              className={`text-note transition-colors ${showIncome ? 'text-sage-deep' : 'text-muted-2 hover:text-muted'}`}
             >
               {showIncome ? 'Income shown' : 'Show income'}
             </button>
@@ -226,19 +226,19 @@ export function Bills() {
             return (
               <div
                 key={o.id}
-                className={`group flex items-center gap-5 rounded-lg border-b border-line px-3 py-3 transition-colors hover:bg-rail ${
+                className={`group flex items-center gap-5 rounded-lg border-b border-line px-3 py-3 transition-colors hover:bg-well ${
                   skipped ? 'opacity-50' : ''
                 }`}
               >
                 <div className="w-[38px] flex-shrink-0 text-center">
-                  <div className="text-[10.5px] uppercase tracking-[0.1em] text-muted-2">{format(d, 'MMM')}</div>
-                  <div className="font-serif text-[19px] leading-none text-ink">{format(d, 'd')}</div>
+                  <div className="text-rule uppercase tracking-[0.1em] text-muted-2">{format(d, 'MMM')}</div>
+                  <div className="font-serif text-title leading-none text-ink">{format(d, 'd')}</div>
                 </div>
                 <div className="min-w-0 flex-1">
-                  <div className={`truncate text-[15px] text-ink ${skipped ? 'line-through' : ''}`}>{o.merchant_name}</div>
-                  <div className="mt-0.5 text-xs text-muted-2">{skipped ? 'Skipped this occurrence' : occurrenceMeta(o)}</div>
+                  <div className={`truncate text-body-lg text-ink ${skipped ? 'line-through' : ''}`}>{o.merchant_name}</div>
+                  <div className="mt-0.5 text-note text-muted-2">{skipped ? 'Skipped this occurrence' : occurrenceMeta(o)}</div>
                 </div>
-                <span className={`font-serif text-[18px] tabular-nums ${o.is_income ? 'text-sage-deep' : 'text-ink'}`}>
+                <span className={`font-serif text-sub tabular-nums ${o.is_income ? 'text-sage-deep' : 'text-ink'}`}>
                   {/* A variable-amount pattern (paycheck, utility bill) stores a median, not a bill.
                       The tilde keeps it from reading as a figure the provider actually quoted. */}
                   {o.amount_varies ? '~' : ''}
@@ -249,7 +249,7 @@ export function Bills() {
                     type="button"
                     onClick={() => undoSkip.mutate(o)}
                     disabled={undoSkip.isPending || !o.adjustment_id}
-                    className="rounded-md border border-pill-border bg-pill-bg px-2.5 py-1 text-[12px] text-muted transition-colors hover:text-ink disabled:opacity-50"
+                    className="rounded-md border border-pill-border bg-pill-bg px-2.5 py-1 text-note text-muted transition-colors hover:text-ink disabled:opacity-50"
                   >
                     Undo
                   </button>
@@ -258,7 +258,7 @@ export function Bills() {
                     type="button"
                     onClick={() => skipOccurrence.mutate(o)}
                     disabled={skipOccurrence.isPending}
-                    className="rounded-md border border-pill-border bg-pill-bg px-2.5 py-1 text-[12px] text-muted opacity-0 transition-opacity hover:text-ink group-hover:opacity-100"
+                    className="rounded-md border border-pill-border bg-pill-bg px-2.5 py-1 text-note text-muted opacity-0 transition-opacity hover:text-ink group-hover:opacity-100"
                   >
                     Skip
                   </button>
@@ -267,7 +267,7 @@ export function Bills() {
             );
           })}
           {upcoming.length === 0 && (
-            <div className="py-6 text-[14px] text-muted">
+            <div className="py-6 text-body-lg text-muted">
               Nothing due in the next 30 days. New recurring charges appear here once they are detected and confirmed.
             </div>
           )}
@@ -275,9 +275,9 @@ export function Bills() {
 
         {/* Monthly total card */}
         <div className="min-w-0 self-start lg:sticky lg:top-6 lg:flex-1">
-          <div className="rounded-xl border border-line-2 bg-card p-[22px]">
+          <div className="rounded-xl border border-line-2 bg-card shadow-e1 p-[22px]">
             <SectionLabel className="mb-3">Monthly total</SectionLabel>
-            <div className="font-serif text-[34px] font-light leading-tight tabular-nums text-ink">
+            <div className="font-serif text-display-lg font-light leading-tight tabular-nums text-ink">
               {formatWholeCurrency(monthlyTotal)}
             </div>
             <div className="mt-5">
@@ -286,17 +286,17 @@ export function Bills() {
                   key={name}
                   className={`flex items-baseline justify-between py-2.5 ${i < breakdown.length - 1 ? 'border-b border-line' : ''}`}
                 >
-                  <span className="text-[13.5px] text-muted">{name}</span>
-                  <span className="text-[14px] tabular-nums text-ink">{formatWholeCurrency(amount)}</span>
+                  <span className="text-body text-muted">{name}</span>
+                  <span className="text-body-lg tabular-nums text-ink">{formatWholeCurrency(amount)}</span>
                 </div>
               ))}
-              {breakdown.length === 0 && <div className="py-2 text-[13px] text-muted-2">No recurring charges yet.</div>}
+              {breakdown.length === 0 && <div className="py-2 text-body text-muted-2">No recurring charges yet.</div>}
             </div>
           </div>
           {forecast && forecast.review_count > 0 && (
-            <div className="mt-4 text-[13px] text-muted">
+            <div className="mt-4 text-body text-muted">
               {forecast.review_count} recurring suggestion{forecast.review_count === 1 ? '' : 's'} waiting in{' '}
-              <TextButton className="!text-[13px] underline underline-offset-2" onClick={() => navigate('/transactions')}>
+              <TextButton className="!text-body underline underline-offset-2" onClick={() => navigate('/transactions')}>
                 review
               </TextButton>
               .

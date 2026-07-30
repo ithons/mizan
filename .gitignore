@@ -7,6 +7,7 @@ dist/
 .DS_Store
 CLAUDE.md
 AGENT.md
+.claude/STATE.md
 
 # Historical-backfill data payloads contain real financial history / account names.
 # Keep the machinery (scripts + README + example config) in git, but never the data.

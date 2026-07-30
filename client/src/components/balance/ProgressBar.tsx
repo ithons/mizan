@@ -26,15 +26,20 @@ interface ProgressBarProps {
 export function ProgressBar({ fraction, tone = 'sage', height = 6, className = '' }: ProgressBarProps) {
   const pct = Math.min(100, Math.max(0, fraction * 100));
   return (
+    /* Track is `bg-track`, not `bg-line` — line measured 1.04:1 against paper, so the unfilled
+       portion was invisible and the bar read as a floating dash of unknown extent. */
     <div
-      className={`overflow-hidden rounded-full bg-line ${className}`}
+      className={`overflow-hidden rounded-full bg-track ${className}`}
       style={{ height }}
       role="progressbar"
       aria-valuenow={Math.round(pct)}
       aria-valuemin={0}
       aria-valuemax={100}
     >
-      <div className={`h-full rounded-full ${tones[tone]}`} style={{ width: `${pct}%` }} />
+      <div
+        className={`h-full rounded-full transition-[width] duration-300 ease-out ${tones[tone]}`}
+        style={{ width: `${pct}%` }}
+      />
     </div>
   );
 }

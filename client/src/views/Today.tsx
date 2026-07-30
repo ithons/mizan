@@ -45,7 +45,7 @@ function SectionRule({ to, children }: { to: string; children: React.ReactNode }
   return (
     <Link
       to={to}
-      className="mb-3.5 block border-b border-line-2 pb-2.5 text-[10.5px] uppercase tracking-[0.16em] text-muted transition-colors hover:text-ink"
+      className="mb-3.5 block border-b border-line-2 pb-2.5 text-rule uppercase tracking-[0.16em] text-muted transition-colors hover:text-ink"
     >
       {children}
     </Link>
@@ -54,7 +54,7 @@ function SectionRule({ to, children }: { to: string; children: React.ReactNode }
 
 function RailRow({ to, label, value, tone }: { to: string; label: string; value: string; tone?: string }) {
   return (
-    <Link to={to} className="group flex items-baseline justify-between gap-4 text-[13px]">
+    <Link to={to} className="group flex items-baseline justify-between gap-4 text-body">
       <span className={`truncate transition-colors group-hover:text-ink ${tone ?? 'text-muted'}`}>{label}</span>
       <span className={`whitespace-nowrap font-mono tabular-nums ${tone ?? 'text-ink'}`}>{value}</span>
     </Link>
@@ -184,11 +184,11 @@ export function Today() {
   return (
     <Screen size="wide">
       <header className="flex flex-shrink-0 items-baseline justify-between gap-4 border-b border-line-2 pb-5">
-        <span className="font-mono text-[14px] font-medium tracking-[0.16em] text-ink">MIZĀN</span>
+        <span className="font-mono text-body-lg font-medium tracking-[0.16em] text-ink">MIZĀN</span>
         <button
           type="button"
           onClick={() => window.dispatchEvent(new Event('mizan:open-palette'))}
-          className="text-[12px] uppercase tracking-[0.09em] text-muted transition-colors hover:text-ink"
+          className="text-note uppercase tracking-[0.09em] text-muted transition-colors hover:text-ink"
         >
           {format(now, 'EEEE d MMMM')} · <span className="font-mono">⌘K</span>
         </button>
@@ -209,33 +209,33 @@ export function Today() {
           />
           <Link to="/accounts" className="group mt-0.5 flex items-start justify-between gap-4">
             <div>
-              <div className="text-[10.5px] uppercase tracking-[0.16em] text-muted transition-colors group-hover:text-ink">
+              <div className="text-rule uppercase tracking-[0.16em] text-muted transition-colors group-hover:text-ink">
                 Assets
               </div>
-              <div className="font-mono text-[15px] leading-[1.4] tabular-nums text-ink">
+              <div className="font-mono text-body-lg leading-[1.4] tabular-nums text-ink">
                 {formatCurrency(snapshot?.total_assets ?? 0)}
               </div>
             </div>
             <div className="text-right">
-              <div className="text-[10.5px] uppercase tracking-[0.16em] text-muted transition-colors group-hover:text-ink">
+              <div className="text-rule uppercase tracking-[0.16em] text-muted transition-colors group-hover:text-ink">
                 Owed
               </div>
-              <div className="font-mono text-[15px] leading-[1.4] tabular-nums text-clay">
+              <div className="font-mono text-body-lg leading-[1.4] tabular-nums text-clay">
                 {formatCurrency(snapshot?.total_liabilities ?? 0)}
               </div>
             </div>
           </Link>
 
           <div className="mt-6 border-t border-line-2 pt-5">
-            <div className="mb-2.5 text-[10.5px] uppercase tracking-[0.16em] text-muted">Net worth</div>
+            <div className="mb-2.5 text-rule uppercase tracking-[0.16em] text-muted">Net worth</div>
             {sheetLoading ? (
               <div className="h-[38px] w-3/4 rounded bg-line" aria-hidden />
             ) : (
               <>
-                <div className="font-mono text-[38px] font-light leading-none tracking-[-0.02em] tabular-nums text-ink">
+                <div className="font-mono text-hero font-light leading-none tracking-[-0.02em] tabular-nums text-ink">
                   {formatCurrency(snapshot?.net_worth ?? 0)}
                 </div>
-                <div className={`mt-2.5 font-mono text-[13px] ${weekDelta != null && weekDelta < 0 ? 'text-clay' : 'text-sage-deep'}`}>
+                <div className={`mt-2.5 font-mono text-body ${weekDelta != null && weekDelta < 0 ? 'text-clay' : 'text-sage-deep'}`}>
                   {weekDelta == null
                     ? '—'
                     : `${weekDelta < 0 ? '−' : '+'}${formatWholeCurrency(Math.abs(weekDelta))} this week`}
@@ -278,11 +278,11 @@ export function Today() {
               column that holds what needs you rather than inside the tables. */}
           {(draft || insight) && (
             <div className="mt-6 border-t border-line-2 pt-5">
-              <div className="mb-2.5 text-[10.5px] uppercase tracking-[0.16em] text-muted">Advisor</div>
-              <p className="text-[13.5px] leading-relaxed text-ink-soft">
+              <div className="mb-2.5 text-rule uppercase tracking-[0.16em] text-muted">Advisor</div>
+              <p className="text-body leading-relaxed text-ink-soft">
                 {draft ? draft.summary : `${insight!.title}. ${insight!.message}`}
               </p>
-              <div className="mt-3 flex flex-wrap items-center gap-x-5 gap-y-2 text-[13px]">
+              <div className="mt-3 flex flex-wrap items-center gap-x-5 gap-y-2 text-body">
                 {draft ? (
                   <>
                     <TextButton variant="primary" onClick={() => confirmDraft.mutate(draft)} disabled={confirmDraft.isPending}>
@@ -315,7 +315,7 @@ export function Today() {
           {spendingQ.isLoading ? (
             <Skeleton rows={5} />
           ) : topSpending.length === 0 ? (
-            <p className="text-[13.5px] text-muted">No spending recorded this month yet.</p>
+            <p className="text-body text-muted">No spending recorded this month yet.</p>
           ) : (
             /* Capped: full-bleed, the name and its figure sat at opposite edges of the column
                and read as two unrelated lists. */
@@ -326,10 +326,10 @@ export function Today() {
                   to="/reports"
                   className="group grid grid-cols-[1fr_auto_62px] items-center gap-x-[22px] py-[7px]"
                 >
-                  <span className="truncate text-[13.5px] text-ink-soft transition-colors group-hover:text-ink">
+                  <span className="truncate text-body text-ink-soft transition-colors group-hover:text-ink">
                     {category.category_name}
                   </span>
-                  <span className="whitespace-nowrap text-right font-mono text-[13.5px] tabular-nums text-ink">
+                  <span className="whitespace-nowrap text-right font-mono text-body tabular-nums text-ink">
                     {formatWholeCurrency(category.amount)}
                   </span>
                   <Sparkline values={trendById.get(category.category_id) ?? []} />
@@ -348,7 +348,7 @@ export function Today() {
             {transactionsQ.isLoading ? (
               <Skeleton rows={6} />
             ) : recent.length === 0 ? (
-              <p className="text-[13.5px] text-muted">No transactions yet. Connect an account to see them here.</p>
+              <p className="text-body text-muted">No transactions yet. Connect an account to see them here.</p>
             ) : (
               recent.map((t) => (
                 <Link
@@ -356,17 +356,17 @@ export function Today() {
                   to="/transactions"
                   className="group grid grid-cols-[58px_minmax(0,1fr)_auto_100px] items-baseline gap-x-3 py-[7px]"
                 >
-                  <span className="whitespace-nowrap font-mono text-[12px] text-faint">
+                  <span className="whitespace-nowrap font-mono text-note text-faint">
                     {format(parseISO(t.date), 'dd MMM')}
                   </span>
-                  <span className="truncate text-[13.5px] text-ink-soft transition-colors group-hover:text-ink">
+                  <span className="truncate text-body text-ink-soft transition-colors group-hover:text-ink">
                     {t.merchant_name || t.original_name}
                   </span>
-                  <span className={`truncate text-right text-[11.5px] ${t.category_name ? 'text-faint' : 'text-clay'}`}>
+                  <span className={`truncate text-right text-micro ${t.category_name ? 'text-faint' : 'text-clay'}`}>
                     {t.category_name ?? 'uncategorized'}
                   </span>
                   <span
-                    className={`whitespace-nowrap text-right font-mono text-[13px] tabular-nums ${
+                    className={`whitespace-nowrap text-right font-mono text-body tabular-nums ${
                       t.amount < 0 ? 'text-ink' : 'text-sage-deep'
                     }`}
                   >

@@ -92,7 +92,7 @@ function BudgetModal({
             onChange={(e) => setRollover(e.target.checked)}
             className="rounded border-line-3 text-sage focus:ring-0"
           />
-          <span className="text-sm text-ink">Roll unspent money into next month</span>
+          <span className="text-body-lg text-ink">Roll unspent money into next month</span>
         </label>
         <div className="flex items-center gap-5 pt-1">
           <InkButton onClick={() => save.mutate()} disabled={save.isPending}>
@@ -189,13 +189,13 @@ function GroupModal({
         <div>
           <label className="mz-label">Categories</label>
           <div className="max-h-[280px] overflow-y-auto rounded-lg border border-line-2">
-            {spendable.length === 0 && <div className="px-3 py-3 text-[13px] text-muted-2">No spending categories yet.</div>}
+            {spendable.length === 0 && <div className="px-3 py-3 text-body text-muted-2">No spending categories yet.</div>}
             {spendable.map((c, i) => {
               const other = otherGroupOf.get(c.id);
               return (
                 <label
                   key={c.id}
-                  className={`flex cursor-pointer items-center gap-2.5 px-3 py-2 transition-colors hover:bg-rail ${
+                  className={`flex cursor-pointer items-center gap-2.5 px-3 py-2 transition-colors hover:bg-well ${
                     i < spendable.length - 1 ? 'border-b border-line' : ''
                   }`}
                 >
@@ -205,15 +205,15 @@ function GroupModal({
                     onChange={() => toggle(c.id)}
                     className="rounded border-line-3 text-sage focus:ring-0"
                   />
-                  <span className="flex-1 text-[14px] text-ink">
+                  <span className="flex-1 text-body-lg text-ink">
                     {c.parent_id ? `· ${c.name}` : c.name}
                   </span>
-                  {other && !selected.has(c.id) && <span className="text-[12px] text-muted-2">in {other}</span>}
+                  {other && !selected.has(c.id) && <span className="text-note text-muted-2">in {other}</span>}
                 </label>
               );
             })}
           </div>
-          <p className="mt-1.5 text-[12px] text-muted-2">A category can belong to one group. Adding it here moves it out of its current group.</p>
+          <p className="mt-1.5 text-note text-muted-2">A category can belong to one group. Adding it here moves it out of its current group.</p>
         </div>
         <div className="flex items-center gap-5 pt-1">
           <InkButton onClick={() => save.mutate()} disabled={save.isPending}>
@@ -303,7 +303,7 @@ export function Budget() {
         }
         actions={
           <>
-            <div className="flex items-baseline gap-4 text-sm">
+            <div className="flex items-baseline gap-4 text-body-lg">
               <button type="button" onClick={() => stepMonth(-1)} className="text-muted transition-colors hover:text-ink">
                 ‹
               </button>
@@ -318,7 +318,7 @@ export function Budget() {
                 setEditingGroup(null);
                 setGroupModalOpen(true);
               }}
-              className="text-[13.5px] text-muted transition-colors hover:text-ink"
+              className="text-body text-muted transition-colors hover:text-ink"
             >
               + New group
             </button>
@@ -328,7 +328,7 @@ export function Budget() {
                 setEditing(null);
                 setShowModal(true);
               }}
-              className="text-[13.5px] text-ink transition-opacity hover:opacity-75"
+              className="text-body text-ink transition-opacity hover:opacity-75"
             >
               + Category
             </button>
@@ -351,7 +351,7 @@ export function Budget() {
                       setEditingGroup(section.group);
                       setGroupModalOpen(true);
                     }}
-                    className="text-[10px] normal-case tracking-normal text-muted-2 opacity-0 transition-opacity hover:text-ink group-hover:opacity-100"
+                    className="text-rule normal-case tracking-normal text-muted-2 opacity-0 transition-opacity hover:text-ink group-hover:opacity-100"
                   >
                     edit
                   </button>
@@ -359,7 +359,7 @@ export function Budget() {
               </span>
             </SectionLabel>
             {section.rows.length === 0 && (
-              <div className="px-1 py-2 text-[13px] text-muted-2">No budgeted categories in this group yet.</div>
+              <div className="px-1 py-2 text-body text-muted-2">No budgeted categories in this group yet.</div>
             )}
             {section.rows.map((b) => {
               const available = availableBudgetAmount(b);
@@ -368,21 +368,21 @@ export function Budget() {
               return (
                 <div
                   key={b.id}
-                  className="cursor-pointer rounded-lg px-1 py-3 transition-colors hover:bg-rail"
+                  className="cursor-pointer rounded-lg px-1 py-3 transition-colors hover:bg-well"
                   onClick={() => {
                     setEditing(b);
                     setShowModal(true);
                   }}
                 >
                   <div className="mb-2 flex justify-between">
-                    <span className="text-[15px] text-ink">{b.category_name}</span>
-                    <span className="text-[13.5px] tabular-nums text-muted">
+                    <span className="text-body-lg text-ink">{b.category_name}</span>
+                    <span className="text-body tabular-nums text-muted">
                       {formatWholeCurrency(spent)} <span className="text-dot">/ {formatWholeCurrency(available)}</span>
                     </span>
                   </div>
                   <ProgressBar fraction={available > 0 ? spent / available : spent > 0 ? 1 : 0} tone={healthTone(spent, available)} />
                   {(meta.carriedOver !== null || meta.projection) && (
-                    <div className="mt-1.5 flex flex-wrap items-baseline gap-x-3 gap-y-0.5 text-[12px] text-muted-2">
+                    <div className="mt-1.5 flex flex-wrap items-baseline gap-x-3 gap-y-0.5 text-note text-muted-2">
                       {meta.carriedOver !== null && (
                         <span>
                           {meta.carriedOver > 0 ? 'incl. ' : 'after '}
@@ -406,7 +406,7 @@ export function Budget() {
           </div>
         ))}
         {allBudgets.length === 0 && (
-          <div className="py-8 text-[14px] text-muted">
+          <div className="py-8 text-body-lg text-muted">
             Budgets track spending against a monthly amount per category.{' '}
             <button
               type="button"

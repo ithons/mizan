@@ -23,7 +23,7 @@ export function invalidateCategoryData(queryClient: ReturnType<typeof useQueryCl
 function Badge({ tone, children }: { tone: 'sage' | 'clay' | 'muted'; children: string }) {
   const color = tone === 'sage' ? 'text-sage-deep' : tone === 'clay' ? 'text-clay' : 'text-muted';
   return (
-    <span className={`flex-shrink-0 rounded border border-pill-border bg-pill-bg px-1.5 py-0.5 text-[11px] ${color}`}>
+    <span className={`flex-shrink-0 rounded border border-pill-border bg-pill-bg px-1.5 py-0.5 text-micro ${color}`}>
       {children}
     </span>
   );
@@ -55,16 +55,16 @@ export function CategoryRow({
   };
 
   const smallField =
-    'rounded-md border border-line-3 bg-card px-2 py-1 text-xs text-ink placeholder:text-muted-2 focus:outline-none focus:border-sage';
+    'rounded-md border border-line-3 bg-card px-2 py-1 text-note text-ink placeholder:text-muted-2 focus:outline-none focus:border-sage';
 
   return (
     <div>
       <div
-        className="group flex items-center gap-2 rounded-lg px-2 py-1.5 transition-colors hover:bg-rail"
+        className="group flex items-center gap-2 rounded-lg px-2 py-1.5 transition-colors hover:bg-well"
         style={{ paddingLeft: `${8 + depth * 20}px` }}
       >
         <span className="h-3 w-3 flex-shrink-0 rounded-full" style={{ backgroundColor: category.color || '#7a6c5d' }} />
-        {category.icon && !editing && <span className="text-sm">{category.icon}</span>}
+        {category.icon && !editing && <span className="text-body-lg">{category.icon}</span>}
         {editing ? (
           <div className="flex flex-1 flex-col gap-2 py-1">
             <div className="flex items-center gap-1.5">
@@ -112,7 +112,7 @@ export function CategoryRow({
           </div>
         ) : (
           <>
-            <span className="flex-1 text-sm text-ink">{category.name}</span>
+            <span className="flex-1 text-body-lg text-ink">{category.name}</span>
             {Boolean(category.is_income) && <Badge tone="sage">income</Badge>}
             {Boolean(category.is_system) && <Badge tone="muted">system</Badge>}
           </>
@@ -249,7 +249,7 @@ export function CategoriesSection() {
             depth={0}
           />
         ))}
-        {categories.length === 0 && <p className="py-4 text-xs text-muted-2">No categories yet.</p>}
+        {categories.length === 0 && <p className="py-4 text-note text-muted-2">No categories yet.</p>}
       </div>
 
       <Modal

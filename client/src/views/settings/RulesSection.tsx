@@ -145,7 +145,7 @@ export function RulesSection() {
         </InkButton>
       </div>
 
-      <label className="flex cursor-pointer items-center gap-2 text-xs text-muted">
+      <label className="flex cursor-pointer items-center gap-2 text-note text-muted">
         <input
           type="checkbox"
           checked={applyToAll}
@@ -156,14 +156,14 @@ export function RulesSection() {
       </label>
 
       {selectedCategory && (
-        <p className="text-xs text-muted">
+        <p className="text-note text-muted">
           New matches will be categorized as <span className="text-ink">{selectedCategory.name}</span>.
         </p>
       )}
 
       {suggestions.length > 0 && (
         <div className="rounded-xl border border-sage-tint-border bg-sage-tint">
-          <div className="border-b border-sage-tint-border px-4 py-2.5 text-xs font-medium text-ink">Suggested rules</div>
+          <div className="border-b border-sage-tint-border px-4 py-2.5 text-note font-medium text-ink">Suggested rules</div>
           {suggestions.map((suggestion, i) => (
             <div
               key={`${suggestion.pattern}:${suggestion.category_id}`}
@@ -174,18 +174,18 @@ export function RulesSection() {
                 style={{ backgroundColor: suggestion.category_color ?? '#7a6c5d' }}
               />
               <div className="min-w-0 flex-1">
-                <p className="truncate text-sm text-ink">{suggestion.pattern}</p>
-                <p className="text-xs text-muted">
+                <p className="truncate text-body-lg text-ink">{suggestion.pattern}</p>
+                <p className="text-note text-muted">
                   {suggestion.categorized_count} categorized as {suggestion.category_name} · {suggestion.uncategorized_count}{' '}
                   uncategorized · {Math.round(suggestion.confidence * 100)}% confidence
                 </p>
-                <p className="mt-1 text-xs text-muted-2">{suggestion.reason}</p>
+                <p className="mt-1 text-note text-muted-2">{suggestion.reason}</p>
                 {suggestion.preview_transactions.length > 0 && (
                   <div className="mt-2 flex flex-wrap gap-1.5">
                     {suggestion.preview_transactions.slice(0, 4).map((transaction) => (
                       <span
                         key={transaction.id}
-                        className="rounded border border-line-2 bg-card px-1.5 py-0.5 text-[11px] text-muted"
+                        className="rounded border border-line-2 bg-card px-1.5 py-0.5 text-micro text-muted"
                       >
                         {transaction.will_apply ? 'Will update' : transaction.category_name ?? 'Evidence'}{' '}
                         {formatDate(transaction.date)} {formatCurrency(transaction.amount)}
@@ -207,7 +207,7 @@ export function RulesSection() {
       )}
 
       <div className="flex items-center justify-between">
-        <p className="text-xs text-muted">
+        <p className="text-note text-muted">
           {rules.length} rule{rules.length === 1 ? '' : 's'}
         </p>
         <div className="flex items-center gap-4">
@@ -231,8 +231,8 @@ export function RulesSection() {
               style={{ backgroundColor: rule.category_color ?? '#7a6c5d' }}
             />
             <div className="min-w-0 flex-1">
-              <p className="truncate text-sm text-ink">{rule.pattern}</p>
-              <p className="text-xs text-muted">
+              <p className="truncate text-body-lg text-ink">{rule.pattern}</p>
+              <p className="text-note text-muted">
                 {rule.category_name ?? 'Unknown category'}
                 {rule.match_count !== undefined && ` · ${rule.match_count} matches`}
               </p>
@@ -242,7 +242,7 @@ export function RulesSection() {
             </TextButton>
           </div>
         ))}
-        {rules.length === 0 && <p className="py-4 text-xs text-muted-2">No rules yet.</p>}
+        {rules.length === 0 && <p className="py-4 text-note text-muted-2">No rules yet.</p>}
       </div>
     </div>
   );

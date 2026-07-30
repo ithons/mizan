@@ -1,5 +1,5 @@
 export function SkeletonCell({ width = '60%' }: { width?: string }) {
-  return <div className="h-3 animate-pulse rounded bg-line/70" style={{ width }} />;
+  return <div className="h-3 animate-pulse rounded bg-track" style={{ width }} />;
 }
 
 export function SkeletonRow({ cols = 5 }: { cols?: number }) {
@@ -33,10 +33,10 @@ export function SkeletonRows({ rows = 5 }: { rows?: number }) {
       {Array.from({ length: rows }).map((_, i) => (
         <div key={i} className="flex items-center justify-between border-b border-line px-3 py-4">
           <div className="w-1/2 space-y-2">
-            <div className="h-3.5 animate-pulse rounded bg-line/70" style={{ width: widths[i % widths.length] }} />
-            <div className="h-2.5 w-1/3 animate-pulse rounded bg-line/50" />
+            <div className="h-3.5 animate-pulse rounded bg-track" style={{ width: widths[i % widths.length] }} />
+            <div className="h-2.5 w-1/3 animate-pulse rounded bg-track/60" />
           </div>
-          <div className="h-4 w-16 animate-pulse rounded bg-line/70" />
+          <div className="h-4 w-16 animate-pulse rounded bg-track" />
         </div>
       ))}
     </div>
@@ -45,10 +45,10 @@ export function SkeletonRows({ rows = 5 }: { rows?: number }) {
 
 export function SkeletonCard() {
   return (
-    <div className="space-y-3 rounded-xl border border-line-2 bg-card p-[18px]">
-      <div className="h-3 w-1/3 animate-pulse rounded bg-line/70" />
-      <div className="h-6 w-2/3 animate-pulse rounded bg-line/70" />
-      <div className="h-3 w-1/2 animate-pulse rounded bg-line/50" />
+    <div className="space-y-3 rounded-xl border border-line-2 bg-card shadow-e1 p-[18px]">
+      <div className="h-3 w-1/3 animate-pulse rounded bg-track" />
+      <div className="h-6 w-2/3 animate-pulse rounded bg-track" />
+      <div className="h-3 w-1/2 animate-pulse rounded bg-track/60" />
     </div>
   );
 }

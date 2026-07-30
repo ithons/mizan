@@ -36,22 +36,22 @@ function AssistantMessage({ message, onConfirmDraft, confirming }: {
       />
       <div className="min-w-0 flex-1">
         {message.thinkingActive && (
-          <div className="mb-1.5 animate-pulse text-[13px] italic text-muted">Thinking…</div>
+          <div className="mb-1.5 animate-pulse text-body italic text-muted">Thinking…</div>
         )}
         {message.toolActivity && (
-          <div className="mb-1.5 animate-pulse text-[13px] italic text-muted">{message.toolActivity}</div>
+          <div className="mb-1.5 animate-pulse text-body italic text-muted">{message.toolActivity}</div>
         )}
         {message.thinking && !message.thinkingActive && (
           <details className="mb-1.5">
-            <summary className="cursor-pointer list-none text-[12.5px] text-muted-2 transition-colors hover:text-muted">
+            <summary className="cursor-pointer list-none text-note text-muted-2 transition-colors hover:text-muted">
               Thought for a moment ›
             </summary>
-            <div className="mt-1.5 whitespace-pre-wrap border-l border-line-2 pl-3 text-[13px] leading-relaxed text-muted">
+            <div className="mt-1.5 whitespace-pre-wrap border-l border-line-2 pl-3 text-body leading-relaxed text-muted">
               {message.thinking}
             </div>
           </details>
         )}
-        <div className="text-[15.5px] leading-[1.65] text-ink [&_a]:text-sage-deep [&_a]:underline [&_code]:rounded [&_code]:bg-rail [&_code]:px-1 [&_code]:py-0.5 [&_code]:font-mono [&_code]:text-[13px] [&_h1]:mt-4 [&_h1]:text-lg [&_h1]:font-semibold [&_h2]:mt-4 [&_h2]:text-base [&_h2]:font-semibold [&_h3]:mt-3 [&_h3]:font-semibold [&_hr]:my-3 [&_hr]:border-line [&_li]:mb-1 [&_ol]:my-2 [&_ol]:list-decimal [&_ol]:pl-5 [&_p]:mb-3 [&_p:last-child]:mb-0 [&_strong]:font-semibold [&_table]:my-2 [&_table]:w-full [&_td]:border-b [&_td]:border-line-2 [&_td]:py-1 [&_th]:border-b [&_th]:border-line [&_th]:py-1 [&_th]:text-left [&_ul]:my-2 [&_ul]:list-disc [&_ul]:pl-5">
+        <div className="text-body-lg leading-[1.65] text-ink [&_a]:text-sage-deep [&_a]:underline [&_code]:rounded [&_code]:bg-rail [&_code]:px-1 [&_code]:py-0.5 [&_code]:font-mono [&_code]:text-body [&_h1]:mt-4 [&_h1]:text-sub [&_h1]:font-semibold [&_h2]:mt-4 [&_h2]:text-body-lg [&_h2]:font-semibold [&_h3]:mt-3 [&_h3]:font-semibold [&_hr]:my-3 [&_hr]:border-line [&_li]:mb-1 [&_ol]:my-2 [&_ol]:list-decimal [&_ol]:pl-5 [&_p]:mb-3 [&_p:last-child]:mb-0 [&_strong]:font-semibold [&_table]:my-2 [&_table]:w-full [&_td]:border-b [&_td]:border-line-2 [&_td]:py-1 [&_th]:border-b [&_th]:border-line [&_th]:py-1 [&_th]:text-left [&_ul]:my-2 [&_ul]:list-disc [&_ul]:pl-5">
           <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeSanitize]}>
             {message.content}
           </ReactMarkdown>
@@ -60,7 +60,7 @@ function AssistantMessage({ message, onConfirmDraft, confirming }: {
           )}
         </div>
         {drafts.length > 0 && !message.streaming && (
-          <div className="mt-3.5 flex flex-wrap items-center gap-x-6 gap-y-2 text-sm">
+          <div className="mt-3.5 flex flex-wrap items-center gap-x-6 gap-y-2 text-body-lg">
             {drafts.map((draft) => (
               <button
                 key={draft.id}
@@ -75,7 +75,7 @@ function AssistantMessage({ message, onConfirmDraft, confirming }: {
           </div>
         )}
         {citations.length > 0 && !message.streaming && (
-          <div className="mt-3.5 text-xs text-muted-2">
+          <div className="mt-3.5 text-note text-muted-2">
             Based on {citations.slice(0, 3).map((c) => c.label.toLowerCase()).join(', ')}
             {citations.length > 3 ? ` and ${citations.length - 3} more` : ''}.
           </div>
@@ -98,16 +98,16 @@ function ConversationHistory({ activeId, onSelect }: { activeId: string | null; 
       {open && (
         <>
           <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} />
-          <div className="absolute right-0 z-20 mt-2 max-h-80 w-72 overflow-auto rounded-xl border border-line-2 bg-card p-1 shadow-lg">
+          <div className="absolute right-0 z-20 mt-2 max-h-80 w-72 overflow-auto rounded-xl border border-line-2 bg-card shadow-e1 p-1 shadow-e2">
             {(!conversations || conversations.length === 0) && (
-              <div className="px-3 py-3 text-[13px] text-muted-2">No past conversations.</div>
+              <div className="px-3 py-3 text-body text-muted-2">No past conversations.</div>
             )}
             {conversations?.map((c) => (
               <button
                 key={c.id}
                 type="button"
                 onClick={() => { onSelect(c.id); setOpen(false); }}
-                className={`block w-full truncate rounded-lg px-3 py-2 text-left text-[13.5px] transition-colors hover:bg-rail ${c.id === activeId ? 'text-ink' : 'text-muted'}`}
+                className={`block w-full truncate rounded-lg px-3 py-2 text-left text-body transition-colors hover:bg-well ${c.id === activeId ? 'text-ink' : 'text-muted'}`}
               >
                 {c.title || 'Untitled chat'}
               </button>
@@ -208,7 +208,7 @@ export function Advisor() {
         <div className="flex min-h-[50vh] min-w-0 max-w-[760px] flex-1 flex-col">
           <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto pr-2">
             {messages.length === 0 && (
-              <div className="pt-4 font-serif text-[19px] font-light leading-relaxed text-muted">
+              <div className="pt-4 font-serif text-title font-light leading-relaxed text-muted">
                 Ask anything about your money. Answers come from your own data,
                 on your own machine.
               </div>
@@ -216,7 +216,7 @@ export function Advisor() {
             {messages.map((m) =>
               m.role === 'user' ? (
                 <div key={m.id} className="mb-6 flex justify-end">
-                  <div className="max-w-[72%] rounded-[14px] rounded-br-[4px] bg-rail px-4 py-3 text-[14.5px] text-ink">{m.content}</div>
+                  <div className="max-w-[72%] rounded-[14px] rounded-br-[4px] bg-rail px-4 py-3 text-body-lg text-ink">{m.content}</div>
                 </div>
               ) : (
                 <AssistantMessage key={m.id} message={m} onConfirmDraft={(d) => confirmDraft.mutate(d)} confirming={confirmDraft.isPending} />
@@ -227,7 +227,7 @@ export function Advisor() {
           {/* Suggestions + input */}
           <div className="mt-4 flex-shrink-0">
             {messages.length === 0 && (
-              <div className="mb-4 flex flex-wrap gap-x-5 gap-y-2 text-[13px] text-muted">
+              <div className="mb-4 flex flex-wrap gap-x-5 gap-y-2 text-body text-muted">
                 {suggestions.map((p) => (
                   <button key={p} type="button" onClick={() => send(p)} className="transition-colors hover:text-ink">
                     {p}
@@ -244,7 +244,7 @@ export function Advisor() {
             >
               <span className="h-[7px] w-[7px] flex-shrink-0 rounded-full bg-sage" />
               <input
-                className="w-full border-none bg-transparent p-0 text-[15.5px] text-ink placeholder:text-muted-2 focus:outline-none focus:ring-0"
+                className="w-full border-none bg-transparent p-0 text-body-lg text-ink placeholder:text-muted-2 focus:outline-none focus:ring-0"
                 placeholder="Ask about your money"
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
@@ -254,7 +254,7 @@ export function Advisor() {
                   Stop
                 </TextButton>
               ) : input ? (
-                <button type="submit" className="flex-shrink-0 text-[13.5px] text-ink transition-opacity hover:opacity-75">
+                <button type="submit" className="flex-shrink-0 text-body text-ink transition-opacity hover:opacity-75">
                   Ask
                 </button>
               ) : (
@@ -272,11 +272,11 @@ export function Advisor() {
               key={row.label}
               className={`flex justify-between py-[9px] ${i < contextRows.length - 1 ? 'border-b border-line' : ''}`}
             >
-              <span className="text-[13.5px] text-muted">{row.label}</span>
-              <span className="text-sm tabular-nums text-ink">{row.value}</span>
+              <span className="text-body text-muted">{row.label}</span>
+              <span className="text-body-lg tabular-nums text-ink">{row.value}</span>
             </div>
           ))}
-          <div className="mt-4 text-xs leading-[1.55] text-muted-2">
+          <div className="mt-4 text-note leading-[1.55] text-muted-2">
             Anything it changes is listed under Settings → What the AI has done, and can be undone there.
           </div>
         </div>

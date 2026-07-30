@@ -221,7 +221,7 @@ export function Goals() {
               setEditing(null);
               setShowModal(true);
             }}
-            className="text-[13.5px] text-ink transition-opacity hover:opacity-75"
+            className="text-body text-ink transition-opacity hover:opacity-75"
           >
             + New goal
           </button>
@@ -246,21 +246,21 @@ export function Goals() {
             >
               <div className="mb-3.5 flex items-baseline justify-between">
                 <div>
-                  <div className="text-[16.5px] text-ink">{g.name}</div>
-                  <div className="mt-1 text-xs text-muted-2">{goalNote(g, insight)}</div>
+                  <div className="text-sub text-ink">{g.name}</div>
+                  <div className="mt-1 text-note text-muted-2">{goalNote(g, insight)}</div>
                 </div>
-                <span className="text-[13px] text-sage">{pct}%</span>
+                <span className="text-body text-sage">{pct}%</span>
               </div>
               <ProgressBar fraction={fraction} tone="sage" height={8} className="mb-3" />
               <div className="flex items-baseline justify-between">
-                <span className="font-serif text-[21px] tabular-nums text-ink">{formatWholeCurrency(g.progress_amount)}</span>
-                <span className="text-[13px] tabular-nums text-muted">of {formatWholeCurrency(g.target_amount)}</span>
+                <span className="font-serif text-figure tabular-nums text-ink">{formatWholeCurrency(g.progress_amount)}</span>
+                <span className="text-body tabular-nums text-muted">of {formatWholeCurrency(g.target_amount)}</span>
               </div>
             </div>
           );
         })}
         {active.length === 0 && (
-          <div className="py-8 text-[14px] text-muted">
+          <div className="py-8 text-body-lg text-muted">
             No goals yet.{' '}
             <button
               type="button"
@@ -281,7 +281,7 @@ export function Goals() {
           <button
             type="button"
             onClick={() => setShowArchived((v) => !v)}
-            className="text-[12.5px] text-muted-2 transition-colors hover:text-muted"
+            className="text-note text-muted-2 transition-colors hover:text-muted"
           >
             {showArchived ? 'Hide archived' : `Archived · ${archived.length}`}
           </button>
@@ -292,15 +292,15 @@ export function Goals() {
                   key={g.id}
                   className={`flex items-baseline justify-between gap-4 py-2.5 ${i < archived.length - 1 ? 'border-b border-line' : ''}`}
                 >
-                  <span className="min-w-0 truncate text-[14px] text-muted">{g.name}</span>
-                  <span className="ml-auto flex-shrink-0 text-[13px] tabular-nums text-muted-2">
+                  <span className="min-w-0 truncate text-body-lg text-muted">{g.name}</span>
+                  <span className="ml-auto flex-shrink-0 text-body tabular-nums text-muted-2">
                     {formatWholeCurrency(g.progress_amount)} of {formatWholeCurrency(g.target_amount)}
                   </span>
                   <button
                     type="button"
                     onClick={() => restore.mutate(g)}
                     disabled={restore.isPending}
-                    className="flex-shrink-0 text-[13px] text-ink transition-opacity hover:opacity-75 disabled:opacity-40"
+                    className="flex-shrink-0 text-body text-ink transition-opacity hover:opacity-75 disabled:opacity-40"
                   >
                     Restore
                   </button>

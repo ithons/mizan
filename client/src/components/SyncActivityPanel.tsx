@@ -45,7 +45,7 @@ function RunSummary({ run, selected, onSelect }: {
 
   return (
     <button
-      className={`w-full flex items-center gap-3 px-3 py-2.5 text-left hover:bg-rail transition-colors ${
+      className={`w-full flex items-center gap-3 px-3 py-2.5 text-left hover:bg-well transition-colors ${
         selected ? 'bg-rail' : ''
       }`}
       onClick={onSelect}
@@ -58,12 +58,12 @@ function RunSummary({ run, selected, onSelect }: {
       </div>
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-2">
-          <p className="text-sm text-ink truncate">{scopeLabel[run.scope]}</p>
-          <span className="text-[11px] font-mono" style={{ color: tone.color }}>
+          <p className="text-body-lg text-ink truncate">{scopeLabel[run.scope]}</p>
+          <span className="text-micro font-mono" style={{ color: tone.color }}>
             {tone.label}
           </span>
         </div>
-        <p className="text-xs text-muted truncate">
+        <p className="text-note text-muted truncate">
           {formatRelativeTime(run.started_at)}
           {changes > 0 ? `, ${changes} tx change${changes === 1 ? '' : 's'}` : ', no tx changes'}
           {run.transactions_skipped > 0 ? `, ${run.transactions_skipped} skipped` : ''}
@@ -108,11 +108,11 @@ export function SyncActivityPanel({
   };
 
   return (
-    <div className="rounded-xl border border-line-2 bg-card-alt">
+    <div className="rounded-xl border border-line-2 bg-card shadow-e1-alt">
       <div className="px-4 py-3 border-b border-line-2 flex items-center justify-between">
         <div className="flex items-center gap-2">
           <Clock3 size={14} className="text-muted" />
-          <h2 className="text-sm font-medium text-ink">{title}</h2>
+          <h2 className="text-body-lg font-medium text-ink">{title}</h2>
         </div>
         <div className="flex items-center gap-2">
           {selectedRun && (
@@ -120,12 +120,12 @@ export function SyncActivityPanel({
               <button
                 type="button"
                 onClick={askAdvisorAboutSync}
-                className="flex items-center gap-1 rounded-md border border-pill-border bg-pill-bg px-2.5 py-1 text-xs text-muted transition-colors hover:text-ink"
+                className="flex items-center gap-1 rounded-md border border-pill-border bg-pill-bg px-2.5 py-1 text-note text-muted transition-colors hover:text-ink"
               >
                 <Sparkles size={12} />
                 Ask advisor
               </button>
-              <span className="text-xs text-muted font-mono">
+              <span className="text-note text-muted font-mono">
                 {formatRelativeTime(selectedRun.started_at)}
               </span>
             </>
@@ -134,7 +134,7 @@ export function SyncActivityPanel({
       </div>
 
       {visibleRuns.length === 0 ? (
-        <div className="px-4 py-8 text-center text-sm text-muted">
+        <div className="px-4 py-8 text-center text-body-lg text-muted">
           No sync runs recorded
         </div>
       ) : (
@@ -154,7 +154,7 @@ export function SyncActivityPanel({
             <div className="border-l border-line-2 p-4 min-w-0">
               {detail ? (
                 <div className="space-y-4">
-                  <div className="grid grid-cols-4 gap-3 text-xs">
+                  <div className="grid grid-cols-4 gap-3 text-note">
                     <div>
                       <p className="text-muted mb-0.5">Accounts</p>
                       <p className="font-mono text-ink">{detail.accounts_seen}</p>
@@ -174,7 +174,7 @@ export function SyncActivityPanel({
                   </div>
 
                   {(detail.duplicate_candidates > 0 || detail.transfer_candidates > 0) && (
-                    <div className="grid grid-cols-2 gap-3 text-xs">
+                    <div className="grid grid-cols-2 gap-3 text-note">
                       <div className="rounded-lg border border-line-2 bg-card p-3">
                         <p className="text-muted mb-1">Duplicate groups</p>
                         <p className="font-mono text-gold">{detail.duplicate_candidates}</p>
@@ -188,16 +188,16 @@ export function SyncActivityPanel({
 
                   {detail.error_message && (
                     <div className="rounded-lg border border-pill-border bg-rail p-3">
-                      <p className="text-xs text-clay font-medium mb-1">Issue</p>
-                      <p className="text-xs text-muted leading-relaxed">{detail.error_message}</p>
+                      <p className="text-note text-clay font-medium mb-1">Issue</p>
+                      <p className="text-note text-muted leading-relaxed">{detail.error_message}</p>
                       {detail.recovery_action && (
-                        <p className="text-xs text-muted leading-relaxed mt-1">{detail.recovery_action}</p>
+                        <p className="text-note text-muted leading-relaxed mt-1">{detail.recovery_action}</p>
                       )}
                     </div>
                   )}
 
                   <div className="space-y-2">
-                    <p className="text-xs font-medium text-ink">Providers</p>
+                    <p className="text-note font-medium text-ink">Providers</p>
                     {detail.items.map((item) => {
                       const tone = item.status === 'succeeded'
                         ? '#c9963a'
@@ -209,12 +209,12 @@ export function SyncActivityPanel({
                       return (
                         <div key={item.id} className="rounded-lg border border-line-2 bg-card p-3">
                           <div className="flex items-center justify-between gap-3">
-                            <p className="text-sm text-ink truncate">{item.institution_name}</p>
-                            <span className="text-xs font-mono flex-shrink-0" style={{ color: tone }}>
+                            <p className="text-body-lg text-ink truncate">{item.institution_name}</p>
+                            <span className="text-note font-mono flex-shrink-0" style={{ color: tone }}>
                               {item.status.replace(/_/g, ' ')}
                             </span>
                           </div>
-                          <p className="text-xs text-muted mt-1">
+                          <p className="text-note text-muted mt-1">
                             {item.accounts_seen} account{item.accounts_seen === 1 ? '' : 's'}
                             {', '}
                             {item.transactions_added} added
@@ -225,10 +225,10 @@ export function SyncActivityPanel({
                             {item.transactions_skipped > 0 ? `, ${item.transactions_skipped} skipped` : ''}
                           </p>
                           {item.error_message && (
-                            <p className="text-xs text-muted mt-1">{item.error_message}</p>
+                            <p className="text-note text-muted mt-1">{item.error_message}</p>
                           )}
                           {item.recovery_action && (
-                            <p className="text-xs text-muted mt-1">{item.recovery_action}</p>
+                            <p className="text-note text-muted mt-1">{item.recovery_action}</p>
                           )}
                         </div>
                       );
@@ -237,9 +237,9 @@ export function SyncActivityPanel({
 
                   {detail.changes.length > 0 && (
                     <div className="space-y-2">
-                      <p className="text-xs font-medium text-ink">Detected changes</p>
+                      <p className="text-note font-medium text-ink">Detected changes</p>
                       {detail.changes.map((change) => (
-                        <div key={change.id} className="text-xs text-muted flex items-start gap-2">
+                        <div key={change.id} className="text-note text-muted flex items-start gap-2">
                           <span className="w-1.5 h-1.5 rounded-full bg-sage mt-1.5 flex-shrink-0" />
                           <span>{change.description}</span>
                         </div>
@@ -248,7 +248,7 @@ export function SyncActivityPanel({
                   )}
                 </div>
               ) : (
-                <div className="h-32 flex items-center justify-center text-sm text-muted">
+                <div className="h-32 flex items-center justify-center text-body-lg text-muted">
                   Loading sync detail…
                 </div>
               )}

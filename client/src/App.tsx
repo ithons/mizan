@@ -25,9 +25,9 @@ function ViewFallback() {
     <div className="space-y-4 px-12 py-9">
       <div className="h-8 w-48 animate-pulse rounded bg-line" />
       <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
-        <div className="h-28 animate-pulse rounded-xl border border-line-2 bg-card" />
-        <div className="h-28 animate-pulse rounded-xl border border-line-2 bg-card" />
-        <div className="h-28 animate-pulse rounded-xl border border-line-2 bg-card" />
+        <div className="h-28 animate-pulse rounded-xl border border-line-2 bg-card shadow-e1" />
+        <div className="h-28 animate-pulse rounded-xl border border-line-2 bg-card shadow-e1" />
+        <div className="h-28 animate-pulse rounded-xl border border-line-2 bg-card shadow-e1" />
       </div>
     </div>
   );
