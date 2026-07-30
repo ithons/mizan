@@ -199,14 +199,14 @@ inverted: `sage` C=0.045 against `tan` C=0.060 and `gold` C=0.123, so the colour
 assets is less saturated than a decorative fill. 422 of 466 type-step usages (90.5%) sit in an
 11.5–15px band; 0 `font-bold`.
 
-- [ ] **Themeable token architecture.** Keep the channel-triplet mechanism exactly (`--mz-x-c` space-separated RGB consumed as `rgb(var(--mz-x-c) / <alpha-value>)`, `--mz-x` composed for the ~32 raw `var()` references in inline styles and SVG). Swap only the triplets under `:root[data-theme="dark"]` and a `prefers-color-scheme` default; the composed aliases follow for free. Never collapse a token to a bare `var()` or a single hex.
-- [ ] **Dark ground** at ~L\* 13 keeping paper's hue (OKLCh h≈80) so it reads as ink and oiled brass. 83 points of runway above it for panel / card / hover / selected / live / estimate.
-- [ ] **Light ground** rebuilt: drop paper to ~L\* 88 so there is genuine elevation above it rather than six points of runway.
-- [ ] **Fix inverted chroma in both**: the semantic accent must out-saturate the furniture, and gold must leave the background's hue family.
-- [ ] **Estimate ink** as a first-class token in both themes, achromatic and cooler, so an estimate is structurally distinguishable from a measurement rather than distinguished by a hover tooltip.
-- [ ] **Theme toggle** in Settings, replacing the inert `Appearance: Light` row. Persisted in `app_preferences`, applied before first paint to avoid a flash.
-- [ ] **Contrast verification for both themes**, on money numerals specifically, with the results recorded in the file the way the current `index.css` records the last ramp fix.
-- [ ] **Self-host the fonts.** `index.css:1` is a bare `@import` from `fonts.googleapis.com`: a loopback-bound local-first finance app calling Google on every cold load, and typographically naked offline. Zero `@font-face`, no `client/public`, no `.woff2` in the repo. Also: the import fetches JetBrains Mono 400;500 while `Today.tsx:235` sets `font-light` (300) on the net-worth hero, so the most important number in the app asks for a face that was never downloaded. Subset and self-host; this lands as its own commit.
+- [x] **Themeable token architecture.** Keep the channel-triplet mechanism exactly (`--mz-x-c` space-separated RGB consumed as `rgb(var(--mz-x-c) / <alpha-value>)`, `--mz-x` composed for the ~32 raw `var()` references in inline styles and SVG). Swap only the triplets under `:root[data-theme="dark"]` and a `prefers-color-scheme` default; the composed aliases follow for free. Never collapse a token to a bare `var()` or a single hex.
+- [x] **Dark ground** at ~L\* 13 keeping paper's hue (OKLCh h≈80) so it reads as ink and oiled brass. 83 points of runway above it for panel / card / hover / selected / live / estimate.
+- [x] **Light ground** rebuilt: drop paper to ~L\* 88 so there is genuine elevation above it rather than six points of runway.
+- [x] **Fix inverted chroma in both**: the semantic accent must out-saturate the furniture, and gold must leave the background's hue family.
+- [x] **Estimate ink** as a first-class token in both themes, achromatic and cooler, so an estimate is structurally distinguishable from a measurement rather than distinguished by a hover tooltip.
+- [x] **Theme toggle** in Settings, replacing the inert `Appearance: Light` row. Persisted in `app_preferences`, applied before first paint to avoid a flash.
+- [x] **Contrast verification for both themes**, on money numerals specifically, with the results recorded in the file the way the current `index.css` records the last ramp fix.
+- [x] **Self-host the fonts.** `index.css:1` is a bare `@import` from `fonts.googleapis.com`: a loopback-bound local-first finance app calling Google on every cold load, and typographically naked offline. Zero `@font-face`, no `client/public`, no `.woff2` in the repo. Also: the import fetches JetBrains Mono 400;500 while `Today.tsx:235` sets `font-light` (300) on the net-worth hero, so the most important number in the app asks for a face that was never downloaded. Subset and self-host; this lands as its own commit.
 - [ ] **Type**: open the range. The scale exists and is well built; it is simply unused above 17px and unused in weight.
 - [ ] **Elevation** that works on a dark ground (shadow stops being the mechanism; value separation takes over).
 - [ ] **Charts**: `TrendChart` autoscales to its own min/max, so a $40 wobble and the real $1,518 July fall draw the identical picture, and its x-axis is an array index, so a 5-month gap and a 1-day gap have the same width. Calibrated scale with a printed zero; time-proportional x. Load the `dataviz` skill before touching chart colour.
@@ -307,3 +307,35 @@ flooring them back into looking tidy.
 | Estimated net-worth points | 5, oldest 2026-02-01 | **16, oldest 2024-07-01**, each with coverage |
 | Ten flat months of $380.00 | drawn as history | **not emitted at all** |
 | Ledger-to-balance reconciliation | did not exist | 6 of 14 accounts unreconciled, largest residual **-$1,126.52** on Discover |
+
+
+---
+
+## Carried into Phase 8 from the token work
+
+The palette now themes correctly, but the SCREENS are not theme-clean yet. Whoever consolidates them
+must handle:
+
+- **~27 hardcoded hexes in views** (category and chart colours: `#c9963a`, `#7c8b99`, `#a7bb92`, ...)
+  do not follow the theme and will look wrong on the dark ground. Route them through tokens.
+- **`shadow-e1-alt` is used 5 times and is not defined in `tailwind.config.js`.** A pre-existing dead
+  utility emitting no CSS. Left alone because fixing it changes rendering in views the token
+  workstream was not allowed to touch.
+- **`Today.tsx` uses `text-faint` on two strings.** `faint` is documented non-text (3.26:1 light,
+  4.10:1 dark) and is the one token deliberately below AA.
+- **U+2192 (the arrow, used in 8 files)** is in neither font subset and falls back to the system
+  stack. Unchanged behaviour, but now visible against a deliberate type system.
+- Instrument Sans italic is not shipped; the two italic strings in Advisor synthesize oblique.
+
+### Measured result of the palette rebuild
+
+| | before | after (light / dark) |
+|---|---|---|
+| ground `paper` L\* | 93.9, six points of runway above it | **87.8 / 13.0** |
+| `card` on `paper` | 1.072:1 | **1.240:1 / 1.190:1** |
+| loudest furniture vs quietest accent | tan C=0.060 beat sage C=0.045 | **tan 0.041, sage 0.096** (un-inverted) |
+| `gold` hue vs neutral family | 78.8 against paper 84.6, read as ambient | **57.7**, ~23 degrees clear |
+| `text-gold` contrast | 2.18:1 | **4.57:1 / 7.40:1** |
+| money numerals | muted ramp had failed AA before the last fix | every one clears AA on both grounds, both themes |
+| fonts | 3 families from Google on every cold load, mono 300 never downloaded | **6 self-hosted variable woff2, 308 KB**, mono 300 real |
+| `/alpha` utilities | the class that silently died once before | **9 of 9 emit**, verified in the built CSS per theme |
