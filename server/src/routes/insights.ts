@@ -8,6 +8,7 @@ import { suggestMerchantRules } from '../services/rules';
 import { getAnomalyInsights } from '../services/anomalyInsights';
 import { computeSafeToSpend } from '../services/safeToSpend';
 import { reconcileAccounts } from '../services/reconciliation';
+import { findFlowConservationViolations } from '../services/flowConservation';
 import { getMonthlyBudgetsWithProjection } from '../services/budgetProjection';
 import { toDollars } from '../services/money';
 import { excludedFromTotalsSql } from '../services/transactionFilters';
@@ -103,20 +104,29 @@ function ageInDays(iso: string | null): number | null {
 // relationship before, and the app's silence about it read as a claim of completeness.
 router.get('/reconciliation', (_req: Request, res: Response, next: NextFunction): void => {
   try {
-    const report = reconcileAccounts(getDb());
+    const db = getDb();
+    const report = reconcileAccounts(db);
     const toDollarFields = (account: (typeof report.accounts)[number]) => ({
       ...account,
       observed_delta: toDollars(account.observed_delta),
       explained_delta: toDollars(account.explained_delta),
       residual: toDollars(account.residual),
+      boundary_amount: toDollars(account.boundary_amount),
+      adjusted_residual: toDollars(account.adjusted_residual),
       largest_window_residual: toDollars(account.largest_window_residual),
     });
+    // The other half of "does the ledger hold up": a residual asks whether an account's own rows
+    // explain its balance, this asks whether two accounts' rows explain each other.
+    const flowConservation = findFlowConservationViolations(db).map(
+      ({ movement_cents, ...finding }) => ({ ...finding, movement: toDollars(movement_cents) })
+    );
     res.json({
       data: {
         accounts: report.accounts.map(toDollarFields),
         unreconciled: report.unreconciled.map(toDollarFields),
         total_residual: toDollars(report.total_residual),
         measured_snapshot_count: report.measured_snapshot_count,
+        flow_conservation: flowConservation,
       },
     });
   } catch (err) {

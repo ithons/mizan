@@ -124,6 +124,113 @@ test('an account absent from a snapshot is skipped, not reconciled to zero', () 
   db.close();
 });
 
+test('a row dated on the horizon\'s first date is a boundary artifact, not a ledger gap', () => {
+  const db = migratedTestDb();
+  const account = insertAccount(db, { type: 'checking' });
+  snapshot(db, 's1', '2026-06-30', { [account]: 100000 });
+  snapshot(db, 's2', '2026-07-15', { [account]: 154418 });
+  // Chase Checking's exact shape: one payroll dated on the first snapshot's own date. The window
+  // query is `date > first`, so it can never be explained, while its balance effect sits inside
+  // the horizon. The ledger has 20 payroll rows with no gap over 8 days; nothing is missing.
+  insertTransaction(db, { account_id: account, date: '2026-06-30', amount: 54418 });
+
+  const report = reconcileAccounts(db);
+  const row = report.accounts.find((a) => a.account_id === account);
+  assert.equal(row?.residual, 54418, 'the raw residual stays visible');
+  assert.equal(row?.boundary_amount, 54418);
+  assert.equal(row?.adjusted_residual, 0);
+  assert.equal(report.unreconciled.length, 0);
+  db.close();
+});
+
+test('the same row one day inside the horizon is still an unexplained residual', () => {
+  const db = migratedTestDb();
+  const account = insertAccount(db, { type: 'checking' });
+  snapshot(db, 's1', '2026-06-30', { [account]: 100000 });
+  // The balance moved $1,088.36 and the ledger explains $544.18 of it. The boundary allowance is
+  // one calendar day of activity at each end, so it must not absorb the other half.
+  snapshot(db, 's2', '2026-07-15', { [account]: 208836 });
+  insertTransaction(db, { account_id: account, date: '2026-07-01', amount: 54418 });
+
+  const report = reconcileAccounts(db);
+  const row = report.accounts.find((a) => a.account_id === account);
+  assert.equal(row?.boundary_amount, 0);
+  assert.equal(row?.adjusted_residual, 54418);
+  assert.equal(report.unreconciled.length, 1);
+  db.close();
+});
+
+test('a deposit during a down month does not make a brokerage look broken', () => {
+  const db = migratedTestDb();
+  const brokerage = insertAccount(db, { type: 'brokerage' });
+  // $10,000 to $9,400 with one honest $600 deposit: observed -60000, explained +60000. The signs
+  // disagree because observed_delta is transfers PLUS profit and loss, and this is the most
+  // ordinary brokerage event there is. Alarming on it is exactly the alarm the exemption exists
+  // to prevent.
+  snapshot(db, 's1', '2026-07-01', { [brokerage]: 1000000 });
+  snapshot(db, 's2', '2026-07-15', { [brokerage]: 940000 });
+  insertTransaction(db, { account_id: brokerage, date: '2026-07-05', amount: 60000 });
+
+  const report = reconcileAccounts(db);
+  const row = report.accounts.find((a) => a.account_id === brokerage);
+  assert.equal(row?.observed_delta, -60000);
+  assert.equal(row?.explained_delta, 60000);
+  assert.equal(row?.direction_conflict, false, 'the comparison is not sound on a market-driven balance');
+  assert.equal(report.unreconciled.length, 0);
+  db.close();
+});
+
+test('direction_conflict still holds where the balance only moves when a transaction moves it', () => {
+  const db = migratedTestDb();
+  const checking = insertAccount(db, { type: 'checking' });
+  snapshot(db, 's1', '2026-07-01', { [checking]: 100000 });
+  snapshot(db, 's2', '2026-07-15', { [checking]: 40000 });
+  // The ledger says $600 came in and the balance fell $600. Nothing but a wrong sign does that on
+  // an account with no market exposure.
+  insertTransaction(db, { account_id: checking, date: '2026-07-05', amount: 60000 });
+
+  const report = reconcileAccounts(db);
+  assert.equal(report.accounts.find((a) => a.account_id === checking)?.direction_conflict, true);
+  db.close();
+});
+
+test('a horizon opening on a payday is not a direction conflict', () => {
+  const db = migratedTestDb();
+  const checking = insertAccount(db, { type: 'checking' });
+  snapshot(db, 's1', '2026-06-30', { [checking]: 100000 });
+  snapshot(db, 's2', '2026-07-15', { [checking]: 130000 });
+  // The payroll is dated on the horizon's own first date, so `date > first` excludes it from
+  // explained while its $500 sits inside the balance movement. That alone points the two sides in
+  // opposite directions on an ordinary month with nothing missing from the ledger.
+  insertTransaction(db, { account_id: checking, date: '2026-06-30', amount: 50000 });
+  insertTransaction(db, { account_id: checking, date: '2026-07-05', amount: -20000 });
+
+  const report = reconcileAccounts(db);
+  const row = report.accounts.find((a) => a.account_id === checking);
+  assert.equal(row?.observed_delta, 30000);
+  assert.equal(row?.explained_delta, -20000);
+  assert.equal(row?.boundary_amount, 50000);
+  assert.equal(row?.adjusted_residual, 0);
+  assert.equal(row?.direction_conflict, false, 'the conflict is judged on the same adjusted figures');
+  assert.equal(report.unreconciled.length, 0);
+  db.close();
+});
+
+test('a flat balance is not a direction conflict, because Math.sign(0) is 0', () => {
+  const db = migratedTestDb();
+  const checking = insertAccount(db, { type: 'checking' });
+  snapshot(db, 's1', '2026-07-01', { [checking]: 100000 });
+  snapshot(db, 's2', '2026-07-15', { [checking]: 100000 });
+  // Equal and opposite rows inside the window: the balance did not move and neither did net flow.
+  insertTransaction(db, { account_id: checking, date: '2026-07-05', amount: -60000 });
+
+  const report = reconcileAccounts(db);
+  const row = report.accounts.find((a) => a.account_id === checking);
+  assert.equal(row?.observed_delta, 0);
+  assert.equal(row?.direction_conflict, false, 'a zero delta disagrees with nothing');
+  db.close();
+});
+
 test('fewer than two measured snapshots produces no report rather than a false clean bill', () => {
   const db = migratedTestDb();
   const account = insertAccount(db, { type: 'checking' });

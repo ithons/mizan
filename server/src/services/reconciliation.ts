@@ -47,9 +47,46 @@ export interface AccountReconciliation {
   explained_delta: number;
   /** observed minus explained. Non-zero means the ledger does not fully account for the balance. */
   residual: number;
+  /**
+   * The part of `residual` that is an artifact of where the horizon was cut.
+   *
+   * The window query is `date > previous AND date <= current`, so a row dated on the FIRST
+   * snapshot's own date is excluded from `explained` forever while its balance effect can still sit
+   * inside the horizon, and a row dated on the LAST snapshot's date is included even when the
+   * balance has not caught up with it. Chase Checking's +$544.18 was exactly one payroll dated
+   * 2026-06-30, the horizon's first date: no transaction is missing, the ledger has 20 payroll rows
+   * with no gap over 8 days.
+   *
+   * Bounded by one calendar day of activity at each end, so it cannot mask a mid-horizon gap.
+   */
+  boundary_amount: number;
+  /** residual minus boundary_amount. This is the figure judged, and both parts stay visible. */
+  adjusted_residual: number;
+  /**
+   * The ledger's own transaction direction disagrees with how the balance moved.
+   *
+   * Reported for non-market-driven accounts ONLY, and that restriction is the whole soundness
+   * argument. `observed_delta` is transfers plus market profit and loss, so on a brokerage the two
+   * sides are not comparable: $10,000 to $9,400 with one honest $600 deposit gives observed -60000
+   * against explained +60000, and a deposit during a down month is the most ordinary brokerage
+   * event there is. On an account whose balance moves only when a transaction moves it, a ledger
+   * saying money came IN while the balance went DOWN is describing the opposite of what happened.
+   *
+   * That restriction is also why the wrong-signed-transfer shape this app actually has cannot
+   * appear here: Fidelity Individual carries 12 `Electronic Funds Transfer Received` rows stored
+   * negative against an owner export showing them positive, $900.00 pointing the wrong way, and
+   * Fidelity Individual is a brokerage. flowConservation.ts carries that case, by comparing two
+   * ledger rows to each other instead of to a balance.
+   *
+   * Judged on the BOUNDARY-ADJUSTED ledger, `explained_delta + boundary_amount`, for the reason
+   * `boundary_amount` exists. An ordinary checking month whose horizon opens on a payday has that
+   * payroll outside `explained` and inside the balance movement, which is enough on its own to
+   * point the two sides in opposite directions with nothing at all missing from the ledger.
+   */
+  direction_conflict: boolean;
   /** The largest single-window residual, which is roughly the size of the posting lag. */
   largest_window_residual: number;
-  /** Residual as a share of the transaction volume that moved through the account. */
+  /** `adjusted_residual` as a share of the transaction volume that moved through the account. */
   residual_ratio: number | null;
 }
 
@@ -111,6 +148,13 @@ export function reconcileAccounts(
     WHERE account_id = ? AND pending = 0 AND date > ? AND date <= ?
   `);
 
+  // Same `pending = 0` filter as sumBetween, so the two sides are drawn from the same ledger.
+  const sumOnDate = db.prepare(`
+    SELECT COALESCE(SUM(amount), 0) AS total
+    FROM transactions
+    WHERE account_id = ? AND pending = 0 AND date = ?
+  `);
+
   const results: AccountReconciliation[] = [];
 
   for (const account of accounts) {
@@ -160,6 +204,17 @@ export function reconcileAccounts(
     if (windows === 0) continue;
 
     const residual = observedDelta - explainedDelta;
+    const firstDayTotal = firstDate
+      ? (sumOnDate.get(account.id, firstDate) as { total: number }).total
+      : 0;
+    const lastDayTotal = lastDate
+      ? (sumOnDate.get(account.id, lastDate) as { total: number }).total
+      : 0;
+    const boundaryAmount = firstDayTotal - lastDayTotal;
+    const adjustedResidual = residual - boundaryAmount;
+    // The ledger side of the same adjustment `adjusted_residual` makes, so the conflict is judged
+    // against the movement the horizon can actually see.
+    const adjustedExplained = explainedDelta + boundaryAmount;
     results.push({
       account_id: account.id,
       account_name: account.account_name,
@@ -171,18 +226,32 @@ export function reconcileAccounts(
       observed_delta: observedDelta,
       explained_delta: explainedDelta,
       residual,
+      boundary_amount: boundaryAmount,
+      adjusted_residual: adjustedResidual,
+      // Both sides must be non-zero: Math.sign(0) is 0, so a flat balance would otherwise read as
+      // disagreeing with every non-zero ledger.
+      direction_conflict:
+        !isMarketDriven &&
+        observedDelta !== 0 &&
+        adjustedExplained !== 0 &&
+        Math.sign(observedDelta) !== Math.sign(adjustedExplained) &&
+        Math.abs(adjustedExplained) > RESIDUAL_TOLERANCE_CENTS,
       largest_window_residual: largestWindowResidual,
-      residual_ratio: volume > 0 ? residual / volume : null,
+      residual_ratio: volume > 0 ? adjustedResidual / volume : null,
     });
   }
 
-  results.sort((a, b) => Math.abs(b.residual) - Math.abs(a.residual));
+  results.sort((a, b) => Math.abs(b.adjusted_residual) - Math.abs(a.adjusted_residual));
 
   const unreconciled = results.filter((account) => {
     // A market-driven account's residual IS the market move. Reporting it as unexplained would
-    // mean telling the owner their brokerage does not add up every time a price changes.
+    // mean telling the owner their brokerage does not add up every time a price changes. The
+    // exemption is unconditional because `observed_delta` on such an account is transfers plus
+    // profit and loss, so no comparison against it can separate a mis-signed transfer from a down
+    // month. Mis-signed transfers are caught instead by flowConservation.ts, which compares two
+    // ledger rows to each other and never to a balance.
     if (account.is_market_driven) return false;
-    if (Math.abs(account.residual) <= RESIDUAL_TOLERANCE_CENTS) return false;
+    if (Math.abs(account.adjusted_residual) <= RESIDUAL_TOLERANCE_CENTS) return false;
     if (account.residual_ratio === null) return true;
     return Math.abs(account.residual_ratio) > RESIDUAL_TOLERANCE_RATIO;
   });
