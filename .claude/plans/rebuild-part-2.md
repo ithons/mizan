@@ -226,7 +226,7 @@ settled history is invisible to it.
 
 ## Phase 5c — The rest of Phase 5
 
-- [ ] **Rollover ledger stops writing on read.** `getBudgetRolloverLedger` (`budgetProjection.ts:316`,
+- [x] **Rollover ledger stops writing on read.** `getBudgetRolloverLedger` (`budgetProjection.ts:316`,
       upsert at `:374`) is the only writer of `budget_rollover_ledger`, and it runs on
       `GET /api/budgets/rollover-ledger` (`routes/budgets.ts:275`) and from the Cmd+K heuristic path
       (`advisorTools.ts:270`). `localGuard.ts:65` exempts GET from the origin check precisely because
@@ -237,7 +237,7 @@ settled history is invisible to it.
       raised; a GET today rewrites it to 50000 with `actual_spend −120363`, swinging
       `ending_rollover` by $1,812.79. Replace `tests/budgetProjection.test.ts:238-243`, which
       currently asserts the write-on-read.
-- [ ] **Ledger-derived daily balance history.** New `services/balanceHistory.ts`. Reverse-replay
+- [x] **Ledger-derived daily balance history.** New `services/balanceHistory.ts`. Reverse-replay
       `accounts.current_balance` through `transactions` to one point per calendar day, each tagged
       `source: 'ledger' | 'measured'`, with measured snapshots carried through as anchors. Route by
       account type at `routes/accounts.ts:46`; market-driven types keep the documented reverse-replay.
@@ -246,11 +246,11 @@ settled history is invisible to it.
       this kills, from the live breakdowns: Wealthfront Cash reads $1,517.30 → $0.00 → $1.70 →
       $1,001.70, drawn as measured history, on an account whose 12 real transactions reconcile
       exactly to zero residual.
-- [ ] **Surface the data-quality layer.** `getDataQualitySummary` is composed, served at
+- [x] **Surface the data-quality layer.** `getDataQualitySummary` is composed, served at
       `routes/insights.ts:98`, has a client fetcher, and renders nowhere. Render the issue list with
       each issue's `route` as its link target. Drop `score` entirely — a number out of 100 is the
       derived-as-fact failure this whole rebuild is about.
-- [ ] **Crypto units before crypto basis.** Migration: `transactions` gains `quantity REAL` and
+- [x] **Crypto units before crypto basis.** Migration: `transactions` gains `quantity REAL` and
       `security_id TEXT` (nullable, non-money, outside `money.ts`'s remit). Populate at the write
       path in `coinbase.ts:511-523` from `order.filled_size` / `order.product_id` and in
       `classifyCoinbaseLedgerTx` (`coinbase.ts:116`), both already parsed and discarded. Only then is
@@ -259,7 +259,7 @@ settled history is invisible to it.
       data it will refuse BTC, ETH and POL, because the disposals that zero the pre-2026 lots
       (24 Convert, 7 Send, 6 Receive, 1 Dust) exist only in `data/coinbase/*.csv` and were never
       imported. A dollars-only basis would report $739.45 where the truth is $501.40; do not ship it.
-- [ ] **Transfer detection gets one chance per row, not one chance ever.** The eligibility predicate
+- [x] **Transfer detection gets one chance per row, not one chance ever.** The eligibility predicate
       at `transactionIntegrity.ts:186-195` requires the category to be NULL or a transfer category,
       so categorization makes a row permanently unpairable. Change it to "never human-categorized and
       not dismissed as a transfer". Two prerequisites the first pass at this missed: the pairing
@@ -535,3 +535,61 @@ this phase now has healthy-case tests proving silence, not just defect-case test
   reason, is the visible version of the same decision. The matcher's looseness is a real defect and
   belongs with the Phase 6 AI write work: confirming such a rule would relabel 13 ride charges as
   food delivery.
+
+---
+
+## Phase 5c, landed 2026-07-30
+
+Five commits: `2bc18e9`, `7f1f87b`, `8fc41f6`, `a141d75`, `ec818d0`. **625 tests pass**, both
+typechecks clean, `vite build` succeeds.
+
+| | before | after |
+|---|---|---|
+| Rollover ledger | a GET rewrote the stored July row, swinging `ending_rollover` by $1,812.79 | the read is pure; two calls leave `COUNT(*)` and `MAX(calculated_at)` untouched |
+| A closed month's budget amount | restated from the live amount on every call | frozen at what was in force; spend is still re-derived, so a late transaction still reaches the month it belongs to |
+| Account balance chart | 19 points over 179 days for every account | **1,049** for BofA Cash Rewards, 475 Discover, 226 Wealthfront Cash, with measured balance sheets marked as dots |
+| Wealthfront's invented cliff | $1,517.30 → $0.00 → $1.70 drawn as measured history | gone; the line is the account's own ledger |
+| Data-quality panel | rendered nowhere | renders the issue list; **2 open conditions** on the real ledger, both actionable |
+| `GET /api/insights/quality` | returned `score: 86` and `"Reliable enough"` | returns `{ issues }` and nothing else |
+| Coinbase units | parsed at `coinbase.ts:428` and discarded at the insert | captured on both the v3 order path and the v2 ledger path |
+| Transfer pairing eligibility | one chance ever, lost the moment categorization ran | one chance per sync, and both pairing writes now go through `categoryWrites` |
+
+### Two features were cut back to what the data supports
+
+**Crypto cost basis is not derived, and `investmentAnalytics.ts` was deleted.** The derivation was
+built, and verification established it could not produce a number on this ledger and added three
+failure modes to get there: it priced a self-custody `receive` at market value and called the
+difference unrealized gain; a single manual transaction anywhere in the Coinbase account wiped every
+basis permanently with no owner remedy; and staking rewards arrive in `holdings.quantity` with no
+ledger row, so those holdings refuse forever. All 8 holdings refused, $0.00 was derived, and nothing
+in the repo could change that, because the disposal history exists only in `data/coinbase/*.csv` and
+`csvImport.ts` writes no units. **The migration and the write-path capture stayed**, because Coinbase
+supplies the units on every row and they are unrecoverable once a row is written without them. The
+reason is recorded at the capture site, not in a review thread.
+
+**The balance chart makes no agreement claim.** The first version said "Reproduces all 14 measured
+balance sheets that cover it, to the cent" when what it had checked was that each measurement landed
+inside a two-day band, and that band absorbed up to $3,439.04 on Chase Checking. It also raised
+"Differs from the measured balance sheet by up to $715.00" on an ordinary day with an inflow followed
+by an outflow, and would have left three accounts carrying a permanent finding the owner could not
+act on, because `takeSnapshot` only ever rewrites today's row so the wrong-signed snapshots from
+2026-07-23 to 07-29 are permanent. All of it was deleted. The chart is now one ledger line with the
+recorded balance sheets marked as dots: Discover's $1,126.52 divergence is visible rather than
+asserted, and nothing accuses the ledger of anything.
+
+Two latent `TrendChart` defects surfaced and were fixed in passing, both of them false claims: an
+all-estimated series was drawn as the solid measured line, and the crosshair dot floated about 21% of
+the plot off its own line.
+
+### The verification pattern, now four rounds deep
+
+Of five Phase 5c tracks, **one passed verification on the first attempt**. The other four each
+shipped something that fired on an ordinary healthy event or made a claim the code had not checked:
+a panel that read "N open conditions" on a clean ledger because every month contains a transfer; a
+freeze that landed in one of two carryover walkers, so the Budget screen and the ledger disagreed by
+$100 after an ordinary budget raise; a cost basis priced from an inflow; a chart that accused three
+accounts permanently.
+
+None of these were caught by tests, because each implementer's tests asserted that the defect case
+was detected. **What catches them is constructing the healthy case and proving silence.** That is now
+required of every detector and every piece of user-facing copy in this codebase.
