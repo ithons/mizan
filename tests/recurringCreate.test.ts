@@ -31,7 +31,8 @@ function setupDb(): Database.Database {
       UNIQUE(merchant_name)
     );
     CREATE TABLE transactions (
-      manually_categorized INTEGER NOT NULL DEFAULT 0,id TEXT PRIMARY KEY, recurring_id TEXT, amount REAL NOT NULL);
+      manually_categorized INTEGER NOT NULL DEFAULT 0,id TEXT PRIMARY KEY, recurring_id TEXT,
+      date TEXT NOT NULL DEFAULT '2026-01-01', amount REAL NOT NULL, pending INTEGER NOT NULL DEFAULT 0);
     CREATE TABLE recurring_occurrence_adjustments (
       id TEXT PRIMARY KEY,
       recurring_id TEXT NOT NULL,

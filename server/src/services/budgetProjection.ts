@@ -1,6 +1,7 @@
 import type Database from 'better-sqlite3';
 import { excludedFromTotalsSql } from './transactionFilters';
-import { addDays, addMonths, format, isBefore, parseISO, subMonths } from 'date-fns';
+import { addMonths, format, isBefore, parseISO, subMonths } from 'date-fns';
+import { occurrenceDate, recentSignedAmounts } from './recurring';
 import type { Budget, BudgetRolloverLedgerEntry, RecurringPattern } from '../../../shared/types';
 
 type Frequency = RecurringPattern['frequency'];
@@ -29,7 +30,8 @@ interface RecurringRow {
   next_expected: string;
   is_confirmed: number;
   transaction_count: number;
-  average_signed_amount: number;
+  average_amount: number;
+  is_income: number | null;
 }
 
 interface Occurrence {
@@ -38,20 +40,8 @@ interface Occurrence {
   confidence: ForecastConfidence;
 }
 
-function nextOccurrenceDate(date: Date, frequency: Frequency): Date {
-  switch (frequency) {
-    case 'weekly':
-      return addDays(date, 7);
-    case 'biweekly':
-      return addDays(date, 14);
-    case 'monthly':
-      return addMonths(date, 1);
-    case 'quarterly':
-      return addMonths(date, 3);
-    case 'annual':
-      return addMonths(date, 12);
-  }
-}
+/** How many occurrences one pattern may contribute to a single month before the walk is cut off. */
+const OCCURRENCE_LIMIT = 500;
 
 function confidenceForPattern(pattern: RecurringRow): ForecastConfidence {
   if (pattern.is_confirmed) return 'confirmed';
@@ -174,14 +164,8 @@ function recurringRows(db: Database.Database, endDate: string): RecurringRow[] {
       rp.next_expected,
       rp.is_confirmed,
       rp.transaction_count,
-      COALESCE(
-        (
-          SELECT AVG(t.amount)
-          FROM transactions t
-          WHERE t.recurring_id = rp.id
-        ),
-        CASE WHEN COALESCE(c.is_income, 0) = 1 THEN rp.average_amount ELSE -rp.average_amount END
-      ) AS average_signed_amount
+      rp.average_amount,
+      c.is_income
     FROM recurring_patterns rp
     LEFT JOIN categories c ON c.id = rp.category_id
     WHERE rp.is_active = 1
@@ -208,27 +192,33 @@ function recurringOccurrencesForMonth(
 
   const occurrences: Occurrence[] = [];
   const patterns = recurringRows(db, endDate);
+  // The forecast and the Bills list quote this same estimate, so a budget cannot project a
+  // different figure for the bill it is projecting.
+  const signedAmounts = recentSignedAmounts(db, patterns.map((pattern) => pattern.id));
 
   for (const pattern of patterns) {
-    if (!pattern.category_id || pattern.average_signed_amount >= 0) continue;
+    const signedAmount = signedAmounts.get(pattern.id)
+      ?? (pattern.is_income === 1 ? pattern.average_amount : -pattern.average_amount);
+    if (!pattern.category_id || signedAmount >= 0) continue;
 
-    let expected = parseISO(pattern.next_expected);
+    const anchor = parseISO(pattern.next_expected);
     const confidence = confidenceForPattern(pattern);
-    let guard = 0;
+    let step = 0;
+    let expected = anchor;
 
-    while (format(expected, 'yyyy-MM-dd') < forecastStart && guard < 500) {
-      expected = nextOccurrenceDate(expected, pattern.frequency);
-      guard++;
+    while (format(expected, 'yyyy-MM-dd') < forecastStart && step < OCCURRENCE_LIMIT) {
+      step++;
+      expected = occurrenceDate(anchor, pattern.frequency, step);
     }
 
-    while (!isBefore(parseISO(endDate), expected) && guard < 500) {
+    while (!isBefore(parseISO(endDate), expected) && step < OCCURRENCE_LIMIT) {
       occurrences.push({
         category_id: pattern.category_id,
-        amount: Math.abs(pattern.average_signed_amount),
+        amount: Math.abs(signedAmount),
         confidence,
       });
-      expected = nextOccurrenceDate(expected, pattern.frequency);
-      guard++;
+      step++;
+      expected = occurrenceDate(anchor, pattern.frequency, step);
     }
   }
 

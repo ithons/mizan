@@ -1,6 +1,7 @@
 import type Database from 'better-sqlite3';
 import { addDays, format } from 'date-fns';
 import { buildRecurringForecast } from './recurringForecast';
+import { recentSignedAmounts } from './recurring';
 import type {
   RecurringForecastOccurrence,
   RecurringPattern,
@@ -20,7 +21,8 @@ interface SubscriptionPatternRow {
   next_expected: string;
   is_confirmed: number;
   transaction_count: number;
-  average_signed_amount: number;
+  average_amount: number;
+  is_income: number | null;
 }
 
 interface TransactionAmountRow {
@@ -127,16 +129,10 @@ export function buildSubscriptionInsights(
       rp.next_expected,
       rp.is_confirmed,
       rp.transaction_count,
+      rp.average_amount,
       c.name AS category_name,
       c.color AS category_color,
-      COALESCE(
-        (
-          SELECT AVG(t.amount)
-          FROM transactions t
-          WHERE t.recurring_id = rp.id
-        ),
-        CASE WHEN COALESCE(c.is_income, 0) = 1 THEN rp.average_amount ELSE -rp.average_amount END
-      ) AS average_signed_amount
+      c.is_income
     FROM recurring_patterns rp
     LEFT JOIN categories c ON c.id = rp.category_id
     WHERE rp.is_active = 1
@@ -144,10 +140,16 @@ export function buildSubscriptionInsights(
     ORDER BY rp.next_expected ASC
   `).all() as SubscriptionPatternRow[];
 
+  // Same estimate the forecast and the stored column use, so a subscription's monthly cost and its
+  // upcoming charges cannot quote two different numbers on the same screen.
+  const signedAmounts = recentSignedAmounts(db, rows.map((row) => row.id));
+  const signedAmountFor = (row: SubscriptionPatternRow): number => signedAmounts.get(row.id)
+    ?? (row.is_income === 1 ? row.average_amount : -row.average_amount);
+
   const subscriptions = rows
-    .filter((row) => row.average_signed_amount < 0)
+    .filter((row) => signedAmountFor(row) < 0)
     .map((row): SubscriptionInsightItem => {
-      const averageAmount = Math.abs(row.average_signed_amount);
+      const averageAmount = Math.abs(signedAmountFor(row));
       const confidence = confidenceForPattern(row);
       const increase = priceIncreaseForPattern(db, row.id);
       const nextOccurrence = nextOccurrenceByPattern.get(row.id);

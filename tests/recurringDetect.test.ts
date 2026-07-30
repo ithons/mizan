@@ -1,72 +1,89 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import Database from 'better-sqlite3';
-import { format, subDays } from 'date-fns';
+import { addMonths, format, subDays, subMonths } from 'date-fns';
 import { _setDbForTesting } from '../server/src/db/index';
 import { detectRecurring } from '../server/src/services/recurring';
+import { insertAccount, insertTransaction, migratedTestDb } from './helpers/schema';
 
 // detectRecurring() runs on the module singleton and had no direct test — it's one of the
 // riskiest untested services (heuristic grouping + frequency classification + variance gates).
 // These lock its current behavior so a future semi-monthly/cadence improvement has a net.
+//
+// It runs against the migrated schema rather than a hand-written one because three of the bugs
+// below were invisible to a hand-written table: the FOREIGN KEY on recurring_patterns.category_id,
+// the INTEGER-cents average_amount, and the seeded category taxonomy the majority vote reads.
 
 function setupDb(): Database.Database {
-  const db = new Database(':memory:');
-  db.exec(`
-    CREATE TABLE transactions (
-      manually_categorized INTEGER NOT NULL DEFAULT 0,
-      id TEXT PRIMARY KEY,
-      date TEXT NOT NULL,
-      amount INTEGER NOT NULL,
-      merchant_name TEXT,
-      original_name TEXT NOT NULL DEFAULT '',
-      pending INTEGER NOT NULL DEFAULT 0,
-      recurring_id TEXT,
-      category_id TEXT,
-      -- Detection skips transfers and confirmed duplicates: they are not spending, and card
-      -- payments have a rigid cadence with a wild amount, which the relaxed amount gate would admit.
-      transfer_status TEXT NOT NULL DEFAULT 'none',
-      duplicate_status TEXT NOT NULL DEFAULT 'none'
-    );
-    CREATE TABLE recurring_patterns (
-      id TEXT PRIMARY KEY,
-      merchant_name TEXT NOT NULL UNIQUE,
-      category_id TEXT,
-      average_amount INTEGER NOT NULL,
-      amount_variance REAL NOT NULL DEFAULT 0,
-      frequency TEXT NOT NULL,
-      last_seen TEXT NOT NULL,
-      next_expected TEXT NOT NULL,
-      is_active INTEGER NOT NULL DEFAULT 1,
-      is_confirmed INTEGER NOT NULL DEFAULT 0,
-      transaction_count INTEGER NOT NULL DEFAULT 0,
-      created_at TEXT NOT NULL,
-      updated_at TEXT NOT NULL
-    );
-  `);
+  const db = migratedTestDb();
+  _setDbForTesting(db);
   return db;
 }
 
-// Insert `count` transactions for `merchant`, `gapDays` apart, ending `endDaysAgo` before today.
+function teardown(db: Database.Database): void {
+  _setDbForTesting(undefined as unknown as Database.Database);
+  db.close();
+}
+
+/** Insert `count` transactions for `merchant`, `gapDays` apart, ending `endDaysAgo` before today. */
 function seedSeries(
   db: Database.Database,
   merchant: string,
   amountCents: number,
   gapDays: number,
   count: number,
-  endDaysAgo = 0
+  options: { endDaysAgo?: number; categoryId?: string | null } = {}
 ): void {
-  const ins = db.prepare(
-    'INSERT INTO transactions (id, date, amount, merchant_name, original_name, pending) VALUES (?,?,?,?,?,0)'
-  );
+  const accountId = insertAccount(db);
   for (let i = 0; i < count; i++) {
-    const daysAgo = endDaysAgo + gapDays * (count - 1 - i);
-    ins.run(`${merchant}_${i}`, format(subDays(new Date(), daysAgo), 'yyyy-MM-dd'), amountCents, merchant, merchant.toUpperCase());
+    const daysAgo = (options.endDaysAgo ?? 0) + gapDays * (count - 1 - i);
+    insertTransaction(db, {
+      id: `${merchant}_${i}`,
+      account_id: accountId,
+      date: format(subDays(new Date(), daysAgo), 'yyyy-MM-dd'),
+      amount: amountCents,
+      merchant_name: merchant,
+      original_name: merchant.toUpperCase(),
+      category_id: options.categoryId ?? null,
+    });
   }
+}
+
+/** Insert one transaction per element of `dates`, pairing each with the matching `amounts` entry. */
+function seedDates(
+  db: Database.Database,
+  merchant: string,
+  rows: Array<{ date: string; amount: number; categoryId?: string | null }>
+): void {
+  const accountId = insertAccount(db);
+  rows.forEach((row, i) => {
+    insertTransaction(db, {
+      id: `${merchant}_${i}`,
+      account_id: accountId,
+      date: row.date,
+      amount: row.amount,
+      merchant_name: merchant,
+      original_name: merchant.toUpperCase(),
+      category_id: row.categoryId ?? null,
+    });
+  });
+}
+
+function patternFor(db: Database.Database, merchant: string): Record<string, unknown> | undefined {
+  return db.prepare('SELECT * FROM recurring_patterns WHERE merchant_name = ?').get(merchant) as
+    | Record<string, unknown>
+    | undefined;
+}
+
+/** The most recent occurrence of `dayOfMonth` that has already happened, as YYYY-MM-DD. */
+function lastAnchorOn(dayOfMonth: number): Date {
+  const today = new Date();
+  const thisMonth = new Date(today.getFullYear(), today.getMonth(), dayOfMonth);
+  return thisMonth > today ? subMonths(thisMonth, 1) : thisMonth;
 }
 
 test('detects a monthly pattern and links its transactions', () => {
   const db = setupDb();
-  _setDbForTesting(db);
   try {
     seedSeries(db, 'Netflix', -1599, 30, 4);
     detectRecurring();
@@ -84,72 +101,62 @@ test('detects a monthly pattern and links its transactions', () => {
     const linked = db.prepare('SELECT COUNT(*) AS n FROM transactions WHERE recurring_id = ?').get(p.id) as { n: number };
     assert.equal(linked.n, 4);
   } finally {
-    db.close();
+    teardown(db);
   }
 });
 
 test('detects a biweekly pattern (~14-day gaps)', () => {
   const db = setupDb();
-  _setDbForTesting(db);
   try {
     seedSeries(db, 'Gym', -4000, 14, 4);
     detectRecurring();
-    const p = db.prepare("SELECT frequency FROM recurring_patterns WHERE merchant_name = 'gym'").get() as { frequency: string } | undefined;
-    assert.equal(p?.frequency, 'biweekly');
+    assert.equal(patternFor(db, 'gym')?.frequency, 'biweekly');
   } finally {
-    db.close();
+    teardown(db);
   }
 });
 
 test('a weekly pattern with one forgotten occurrence still detects as weekly', () => {
   const db = setupDb();
-  _setDbForTesting(db);
   try {
     // Occurrences at 28, 21, 14, 0 days ago: the day-7 entry is missing, leaving a single
     // 14-day gap among 7-day gaps. Without skip-tolerance the gap variance rejects this.
-    const ins = db.prepare(
-      'INSERT INTO transactions (id, date, amount, merchant_name, original_name, pending) VALUES (?,?,?,?,?,0)'
-    );
-    [28, 21, 14, 0].forEach((d, i) =>
-      ins.run(`coffee_${i}`, format(subDays(new Date(), d), 'yyyy-MM-dd'), -650, 'Blue Bottle', 'BLUE BOTTLE')
-    );
+    seedDates(db, 'blue bottle', [28, 21, 14, 0].map((d) => ({
+      date: format(subDays(new Date(), d), 'yyyy-MM-dd'),
+      amount: -650,
+    })));
     detectRecurring();
-    const p = db.prepare("SELECT frequency, transaction_count FROM recurring_patterns WHERE merchant_name = 'blue bottle'").get() as { frequency: string; transaction_count: number } | undefined;
+    const p = patternFor(db, 'blue bottle');
     assert.equal(p?.frequency, 'weekly');
     assert.equal(p?.transaction_count, 4);
   } finally {
-    db.close();
+    teardown(db);
   }
 });
 
 test('requires at least 3 transactions', () => {
   const db = setupDb();
-  _setDbForTesting(db);
   try {
     seedSeries(db, 'Rare', -2000, 30, 2);
     detectRecurring();
     assert.equal((db.prepare('SELECT COUNT(*) AS n FROM recurring_patterns').get() as { n: number }).n, 0);
   } finally {
-    db.close();
+    teardown(db);
   }
 });
 
 test('rejects irregular gaps (high gap variance)', () => {
   const db = setupDb();
-  _setDbForTesting(db);
   try {
     // Same merchant, deliberately erratic spacing: gaps 4, 45, 10 days.
-    const ins = db.prepare(
-      'INSERT INTO transactions (id, date, amount, merchant_name, original_name, pending) VALUES (?,?,?,?,?,0)'
-    );
-    const daysAgo = [59, 55, 10, 0];
-    daysAgo.forEach((d, i) =>
-      ins.run(`erratic_${i}`, format(subDays(new Date(), d), 'yyyy-MM-dd'), -2500, 'Erratic', 'ERRATIC')
-    );
+    seedDates(db, 'erratic', [59, 55, 10, 0].map((d) => ({
+      date: format(subDays(new Date(), d), 'yyyy-MM-dd'),
+      amount: -2500,
+    })));
     detectRecurring();
     assert.equal((db.prepare('SELECT COUNT(*) AS n FROM recurring_patterns').get() as { n: number }).n, 0);
   } finally {
-    db.close();
+    teardown(db);
   }
 });
 
@@ -159,69 +166,64 @@ test('rejects irregular gaps (high gap variance)', () => {
 // disqualifying only when the cadence is also loose.
 test('admits a varying amount when the cadence is rigid, and records the variance', () => {
   const db = setupDb();
-  _setDbForTesting(db);
   try {
-    const ins = db.prepare(
-      'INSERT INTO transactions (id, date, amount, merchant_name, original_name, pending) VALUES (?,?,?,?,?,0)'
-    );
     // Exactly-monthly cadence (gap CV 0), amounts all over the place — the paycheck shape.
     const amts = [-1000, -9000, -2000, -8000];
-    amts.forEach((a, i) =>
-      ins.run(`varamt_${i}`, format(subDays(new Date(), 30 * (amts.length - 1 - i)), 'yyyy-MM-dd'), a, 'VarAmt', 'VARAMT')
-    );
+    seedDates(db, 'varamt', amts.map((amount, i) => ({
+      date: format(subDays(new Date(), 30 * (amts.length - 1 - i)), 'yyyy-MM-dd'),
+      amount,
+    })));
     detectRecurring();
 
-    const row = db.prepare(
-      'SELECT frequency, amount_variance FROM recurring_patterns WHERE merchant_name = ?'
-    ).get('varamt') as { frequency: string; amount_variance: number } | undefined;
-    assert.equal(row?.frequency, 'monthly');
+    const p = patternFor(db, 'varamt');
+    assert.equal(p?.frequency, 'monthly');
     // Recorded, not discarded: the forecast renders this as "~$X · varies" rather than a firm bill.
-    assert.ok((row?.amount_variance ?? 0) >= 0.25);
+    assert.ok((p?.amount_variance as number) >= 0.25);
   } finally {
-    db.close();
+    teardown(db);
   }
 });
 
 test('still rejects a varying amount when the cadence is only loosely regular', () => {
   const db = setupDb();
-  _setDbForTesting(db);
   try {
-    const ins = db.prepare(
-      'INSERT INTO transactions (id, date, amount, merchant_name, original_name, pending) VALUES (?,?,?,?,?,0)'
-    );
     // Gaps 30/22/38/30 -> gap CV ~0.19: regular enough to pass the base gate, too loose to earn the
     // variable-amount exception. Amount CV ~0.71.
     const offsets = [120, 90, 68, 30, 0];
     const amts = [-1000, -9000, -2000, -8000, -1500];
-    offsets.forEach((off, i) =>
-      ins.run(`loose_${i}`, format(subDays(new Date(), off), 'yyyy-MM-dd'), amts[i], 'Loose', 'LOOSE')
-    );
+    seedDates(db, 'loose', offsets.map((off, i) => ({
+      date: format(subDays(new Date(), off), 'yyyy-MM-dd'),
+      amount: amts[i],
+    })));
     detectRecurring();
     assert.equal((db.prepare('SELECT COUNT(*) AS n FROM recurring_patterns').get() as { n: number }).n, 0);
   } finally {
-    db.close();
+    teardown(db);
   }
 });
 
 test('detection ignores transfers and confirmed duplicates', () => {
   const db = setupDb();
-  _setDbForTesting(db);
   try {
-    const ins = db.prepare(
-      `INSERT INTO transactions (id, date, amount, merchant_name, original_name, pending, transfer_status, duplicate_status, category_id)
-       VALUES (?,?,?,?,?,0,?,?,?)`
-    );
     // A card payment: rigid monthly cadence, wild amount. Without the exclusion the relaxed gate
     // would book it as a recurring bill and double-count the spending it settles.
+    const accountId = insertAccount(db);
     const amts = [-69300, -146500, -55200, -109600];
-    amts.forEach((a, i) =>
-      ins.run(`pay_${i}`, format(subDays(new Date(), 30 * (amts.length - 1 - i)), 'yyyy-MM-dd'), a,
-        'Payment Thank You', 'PAYMENT THANK YOU', 'confirmed', 'none', null)
-    );
+    amts.forEach((amount, i) => {
+      const id = insertTransaction(db, {
+        id: `pay_${i}`,
+        account_id: accountId,
+        date: format(subDays(new Date(), 30 * (amts.length - 1 - i)), 'yyyy-MM-dd'),
+        amount,
+        merchant_name: 'Payment Thank You',
+        original_name: 'PAYMENT THANK YOU',
+      });
+      db.prepare("UPDATE transactions SET transfer_status = 'confirmed' WHERE id = ?").run(id);
+    });
     detectRecurring();
     assert.equal((db.prepare('SELECT COUNT(*) AS n FROM recurring_patterns').get() as { n: number }).n, 0);
   } finally {
-    db.close();
+    teardown(db);
   }
 });
 
@@ -231,7 +233,6 @@ test('detection ignores transfers and confirmed duplicates', () => {
 // hand-deleted an earlier one. Detection now clears them itself.
 test('detection removes stranded patterns but keeps confirmed and manual ones', () => {
   const db = setupDb();
-  _setDbForTesting(db);
   try {
     const recent = format(subDays(new Date(), 3), 'yyyy-MM-dd');
     const ins = db.prepare(`
@@ -253,7 +254,163 @@ test('detection removes stranded patterns but keeps confirmed and manual ones', 
     assert.ok(surviving.includes('confirmed'), 'a confirmed pattern is the user\'s own decision');
     assert.ok(surviving.includes('active'), 'an active pattern stays');
   } finally {
-    _setDbForTesting(undefined as unknown as Database.Database);
-    db.close();
+    teardown(db);
+  }
+});
+
+// Detection never wrote category_id, so all 11 patterns on the live database carried NULL and
+// budgetProjection's `rp.category_id IS NOT NULL` filter dropped every one of them: expected_recurring
+// was 0 and forecast_confidence 'none' for every budget in every month.
+test('a detected pattern takes the majority category of its own transactions', () => {
+  const db = setupDb();
+  try {
+    seedSeries(db, 'Backblaze', -1803, 30, 4, { categoryId: 'cat_sub_software' });
+    detectRecurring();
+    assert.equal(patternFor(db, 'backblaze')?.category_id, 'cat_sub_software');
+  } finally {
+    teardown(db);
+  }
+});
+
+test('a clear majority wins over a minority, and uncategorized rows abstain', () => {
+  const db = setupDb();
+  try {
+    seedDates(db, 'mixed', [120, 90, 60, 30, 0].map((d, i) => ({
+      date: format(subDays(new Date(), d), 'yyyy-MM-dd'),
+      amount: -1500,
+      // 3 software, 1 streaming, 1 uncategorized: 3 of the 4 votes cast is a majority.
+      categoryId: i < 3 ? 'cat_sub_software' : i === 3 ? 'cat_ent_streaming' : null,
+    })));
+    detectRecurring();
+    assert.equal(patternFor(db, 'mixed')?.category_id, 'cat_sub_software');
+  } finally {
+    teardown(db);
+  }
+});
+
+test('a tie records no category rather than picking one', () => {
+  const db = setupDb();
+  try {
+    seedDates(db, 'split', [90, 60, 30, 0].map((d, i) => ({
+      date: format(subDays(new Date(), d), 'yyyy-MM-dd'),
+      amount: -1500,
+      categoryId: i % 2 === 0 ? 'cat_sub_software' : 'cat_ent_streaming',
+    })));
+    detectRecurring();
+    assert.equal(patternFor(db, 'split')?.category_id, null);
+  } finally {
+    teardown(db);
+  }
+});
+
+test('a plurality short of half records no category either', () => {
+  const db = setupDb();
+  try {
+    const categories = ['cat_sub_software', 'cat_sub_software', 'cat_ent_streaming', 'cat_ent_streaming', 'cat_pets'];
+    seedDates(db, 'threeway', [120, 90, 60, 30, 0].map((d, i) => ({
+      date: format(subDays(new Date(), d), 'yyyy-MM-dd'),
+      amount: -1500,
+      categoryId: categories[i],
+    })));
+    detectRecurring();
+    assert.equal(patternFor(db, 'threeway')?.category_id, null);
+  } finally {
+    teardown(db);
+  }
+});
+
+// A category the owner picked on the Bills screen (PATCH /api/recurring/:id) is not derived from
+// the rows, so it appears on none of them. Detection runs every sync; re-deriving over it would
+// revert the choice on the hour.
+test('detection does not overwrite a category set by hand', () => {
+  const db = setupDb();
+  try {
+    seedSeries(db, 'Backblaze', -1803, 30, 4, { categoryId: 'cat_sub_software' });
+    detectRecurring();
+    db.prepare("UPDATE recurring_patterns SET category_id = 'cat_shop' WHERE merchant_name = 'backblaze'").run();
+
+    detectRecurring();
+    assert.equal(patternFor(db, 'backblaze')?.category_id, 'cat_shop');
+  } finally {
+    teardown(db);
+  }
+});
+
+// category_id is a FOREIGN KEY. Writing an id a later migration deleted raises "FOREIGN KEY
+// constraint failed" and takes the whole detection pass down, the failure knownCategoryIds guards
+// against in rules.ts.
+test('a category a migration deleted is dropped, not rewritten', () => {
+  const db = setupDb();
+  try {
+    seedSeries(db, 'Backblaze', -1803, 30, 4, { categoryId: 'cat_sub_software' });
+    detectRecurring();
+    assert.equal(patternFor(db, 'backblaze')?.category_id, 'cat_sub_software');
+
+    db.pragma('foreign_keys = OFF');
+    db.prepare("DELETE FROM categories WHERE id = 'cat_sub_software'").run();
+    db.pragma('foreign_keys = ON');
+
+    assert.doesNotThrow(() => detectRecurring());
+    assert.equal(patternFor(db, 'backblaze')?.category_id, null);
+  } finally {
+    teardown(db);
+  }
+});
+
+// Backblaze charges on the 17th of every month. Its gaps [28,31,30,31,30] have a median of 30, so
+// anchoring on the day-gap put the next charge on the 16th: the Bills screen called it due a day
+// early, and on the 17th, its real due date, the forecast called the same charge overdue.
+test('a monthly bill is anchored by day-of-month, not by the median day-gap', () => {
+  const db = setupDb();
+  try {
+    const anchor = lastAnchorOn(17);
+    seedDates(db, 'backblaze', [5, 4, 3, 2, 1, 0].map((back) => ({
+      date: format(subMonths(anchor, back), 'yyyy-MM-dd'),
+      amount: -1803,
+    })));
+    detectRecurring();
+
+    const p = patternFor(db, 'backblaze');
+    assert.equal(p?.frequency, 'monthly');
+    assert.equal(p?.next_expected, format(addMonths(anchor, 1), 'yyyy-MM-dd'));
+    assert.equal(String(p?.next_expected).slice(8), '17');
+  } finally {
+    teardown(db);
+  }
+});
+
+test('a weekly bill still steps by the median day-gap', () => {
+  const db = setupDb();
+  try {
+    seedSeries(db, 'Coffee Club', -650, 7, 5);
+    detectRecurring();
+
+    const p = patternFor(db, 'coffee club');
+    assert.equal(p?.frequency, 'weekly');
+    assert.equal(p?.next_expected, format(subDays(new Date(), -7), 'yyyy-MM-dd'));
+  } finally {
+    teardown(db);
+  }
+});
+
+// The live payroll pattern stored $398.93 (a median over its whole history, still outvoted by a
+// year of smaller stipend checks) while the forecast recomputed $476.91 (a mean over that same
+// history, dragged up by one $1,048.77 bonus) — and the last four checks were all $544.18.
+test('the stored amount is a median of recent occurrences, not of the whole history', () => {
+  const db = setupDb();
+  try {
+    const amounts = [30000, 30000, 30000, 30000, 30000, 30000, 100000, 54418, 54418, 54418, 54418];
+    seedDates(db, 'mass inst payroll', amounts.map((amount, i) => ({
+      date: format(subDays(new Date(), 7 * (amounts.length - 1 - i)), 'yyyy-MM-dd'),
+      amount,
+      categoryId: 'cat_income_paycheck',
+    })));
+    detectRecurring();
+
+    const p = patternFor(db, 'mass inst payroll');
+    assert.equal(p?.average_amount, 54418);
+    assert.equal(p?.category_id, 'cat_income_paycheck');
+  } finally {
+    teardown(db);
   }
 });

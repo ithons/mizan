@@ -1,10 +1,14 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import Database from 'better-sqlite3';
+import { addMonths, format, parseISO, subMonths } from 'date-fns';
 import {
   getBudgetRolloverLedger,
   getMonthlyBudgetsWithProjection,
 } from '../server/src/services/budgetProjection';
+import { _setDbForTesting } from '../server/src/db/index';
+import { detectRecurring } from '../server/src/services/recurring';
+import { insertAccount, insertTransaction, migratedTestDb } from './helpers/schema';
 
 function setupBudgetDb(): Database.Database {
   const db = new Database(':memory:');
@@ -269,4 +273,78 @@ test('budget spend excludes confirmed duplicates and transfers', (t) => {
   const withReal = getMonthlyBudgetsWithProjection(db, 2026, 6, new Date('2026-06-15T12:00:00.000Z'))
     .find((budget) => budget.category_id === 'cat_food');
   assert.equal(withReal?.spent, 160);
+});
+
+// The projection walked occurrences by chaining addMonths from each previous value, so a bill
+// anchored on the 31st drifted to the 28th after the first short month and then fell behind
+// "today" three days early, contributing nothing to the month it is actually due in.
+test('a month-end bill still counts toward the month it falls in', (t) => {
+  const db = setupBudgetDb();
+  t.after(() => db.close());
+
+  db.prepare(`
+    INSERT INTO recurring_patterns (
+      id, merchant_name, category_id, average_amount, frequency, last_seen, next_expected,
+      is_active, is_confirmed, transaction_count, created_at, updated_at
+    )
+    VALUES ('month_end', 'Month End Bill', 'cat_food', 300, 'monthly', '2026-01-31', '2026-01-31',
+            1, 1, 4, '2026-01-01', '2026-01-01')
+  `).run();
+
+  // Due 2026-03-31. The chained walk put it on 03-28, already behind this "today".
+  const food = getMonthlyBudgetsWithProjection(db, 2026, 3, new Date('2026-03-29T12:00:00.000Z'))
+    .find((budget) => budget.category_id === 'cat_food');
+
+  assert.equal(food?.expected_recurring, 300);
+  assert.equal(food?.forecast_confidence, 'confirmed');
+});
+
+// End to end over the real migrations: detection never wrote recurring_patterns.category_id, so
+// every detected pattern carried NULL, recurringRows' `rp.category_id IS NOT NULL` filter dropped
+// all of them, and expected_recurring was 0 with forecast_confidence 'none' for every budget in
+// every month on real data.
+test('a budget whose category has a detected pattern projects that pattern', (t) => {
+  const db = migratedTestDb();
+  _setDbForTesting(db);
+  t.after(() => {
+    _setDbForTesting(undefined as unknown as Database.Database);
+    db.close();
+  });
+
+  const today = new Date();
+  const thisMonthSeventeenth = new Date(today.getFullYear(), today.getMonth(), 17);
+  const anchor = thisMonthSeventeenth > today ? subMonths(thisMonthSeventeenth, 1) : thisMonthSeventeenth;
+  const accountId = insertAccount(db);
+  for (let back = 5; back >= 0; back--) {
+    insertTransaction(db, {
+      account_id: accountId,
+      date: format(subMonths(anchor, back), 'yyyy-MM-dd'),
+      amount: -1803,
+      merchant_name: 'Backblaze',
+      original_name: 'BACKBLAZE',
+      category_id: 'cat_sub_software',
+    });
+  }
+
+  db.prepare(`
+    INSERT INTO budgets (id, category_id, amount, period, rollover, rollover_balance, created_at, updated_at)
+    VALUES ('budget_subs', 'cat_subscriptions', 50000, 'monthly', 0, 0, '2026-01-01', '2026-01-01')
+  `).run();
+
+  detectRecurring();
+
+  const pattern = db.prepare(
+    "SELECT category_id, next_expected FROM recurring_patterns WHERE merchant_name = 'backblaze'"
+  ).get() as { category_id: string | null; next_expected: string };
+  assert.equal(pattern.category_id, 'cat_sub_software');
+  assert.equal(pattern.next_expected, format(addMonths(anchor, 1), 'yyyy-MM-dd'));
+
+  const due = parseISO(pattern.next_expected);
+  const budget = getMonthlyBudgetsWithProjection(db, due.getFullYear(), due.getMonth() + 1, today)
+    .find((row) => row.category_id === 'cat_subscriptions');
+
+  // The budget is on the parent category; the pattern sits on a child, so this also covers the
+  // descendant expansion the projection does.
+  assert.equal(budget?.expected_recurring, 1803);
+  assert.equal(budget?.forecast_confidence, 'likely');
 });

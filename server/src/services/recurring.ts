@@ -3,6 +3,9 @@ import type Database from 'better-sqlite3';
 import {
   differenceInDays,
   addDays,
+  addMonths,
+  addQuarters,
+  addYears,
   format,
   parseISO,
   subMonths,
@@ -111,6 +114,153 @@ function median(values: number[]): number {
     : (sorted[mid - 1] + sorted[mid]) / 2;
 }
 
+/**
+ * How many recent occurrences the expected amount is estimated from.
+ *
+ * A median over the pattern's whole history said $398.93 for a payroll that had paid $544.18 four
+ * times running: a year of smaller stipend checks still outvoted the raise. The mean the forecast
+ * computed over that same history said $476.91, dragged up by one $1,048.77 bonus. A median over a
+ * short recent window survives both the stale history and the outlier.
+ */
+export const RECENT_AMOUNT_WINDOW = 6;
+
+/**
+ * The expected amount per occurrence, signed, keyed by pattern id.
+ *
+ * detectRecurring writes this same statistic over this same window into `average_amount`, so the
+ * Bills list (which renders the stored column) and the forecast (which recomputes here) quote one
+ * number. They used to disagree by $78 on the live payroll pattern, both on screen at once.
+ *
+ * Only `pending` is filtered: detection already applied excludedFromTotalsSql before linking these
+ * rows, so a transfer or a confirmed duplicate never carries a recurring_id to begin with.
+ */
+export function recentSignedAmounts(
+  db: Database.Database,
+  patternIds: string[]
+): Map<string, number> {
+  if (patternIds.length === 0) return new Map();
+
+  const placeholders = patternIds.map(() => '?').join(',');
+  const rows = db.prepare(`
+    SELECT recurring_id, amount
+    FROM transactions
+    WHERE recurring_id IN (${placeholders})
+      AND pending = 0
+    ORDER BY recurring_id ASC, date DESC, id DESC
+  `).all(...patternIds) as Array<{ recurring_id: string; amount: number }>;
+
+  const windows = new Map<string, number[]>();
+  for (const row of rows) {
+    const window = windows.get(row.recurring_id);
+    if (!window) windows.set(row.recurring_id, [row.amount]);
+    else if (window.length < RECENT_AMOUNT_WINDOW) window.push(row.amount);
+  }
+
+  return new Map(
+    Array.from(windows, ([id, amounts]): [string, number] => [id, Math.round(median(amounts))])
+  );
+}
+
+/**
+ * The k-th occurrence after `anchor`, always measured from the anchor itself.
+ *
+ * Chaining addMonths one step at a time walks a month-end bill backwards and never lets it
+ * recover: from 01-31 it yields 02-28, then 03-28 where the answer is 03-31, and it stays on the
+ * 28th forever. Rent anchored on the 31st was shown due, flagged overdue, and dropped out of the
+ * month's budget projection three days early, every month.
+ */
+export function occurrenceDate(anchor: Date, frequency: RecurringFrequency, step: number): Date {
+  switch (frequency) {
+    case 'weekly':
+      return addDays(anchor, 7 * step);
+    case 'biweekly':
+      return addDays(anchor, 14 * step);
+    case 'monthly':
+      return addMonths(anchor, step);
+    case 'quarterly':
+      return addQuarters(anchor, step);
+    case 'annual':
+      return addYears(anchor, step);
+  }
+}
+
+/**
+ * Where the next occurrence lands after `lastDate`.
+ *
+ * Monthly and longer cadences are anchored by day-of-month rather than by the median day-gap.
+ * Backblaze charges on the 17th; its gaps [28,31,30,31,30] have a median of 30, so adding days put
+ * the next charge on 08-16. The Bills screen called it due on the 16th, and then on the 17th, its
+ * real due date, the forecast called the same charge overdue. addMonths clamps short months itself.
+ */
+function nextExpectedAfter(
+  lastDate: string,
+  frequency: RecurringFrequency,
+  medianGap: number
+): string {
+  const last = parseISO(lastDate);
+  const next = frequency === 'weekly' || frequency === 'biweekly'
+    ? addDays(last, Math.round(medianGap))
+    : occurrenceDate(last, frequency, 1);
+  return format(next, 'yyyy-MM-dd');
+}
+
+// Writing a category_id that no longer resolves raises "FOREIGN KEY constraint failed" and takes
+// the whole detection pass down with it, the failure knownCategoryIds guards against in rules.ts.
+function knownCategoryIds(db: Database.Database): Set<string> {
+  return new Set(
+    (db.prepare('SELECT id FROM categories').all() as Array<{ id: string }>).map((row) => row.id)
+  );
+}
+
+/**
+ * The category a clear majority of a pattern's own transactions already carry.
+ *
+ * NULL on a tie is deliberate. budgetProjection turns this category into a budget's
+ * expected_recurring, so a merchant whose charges genuinely straddle two categories has to feed
+ * neither rather than an arbitrary winner. Uncategorized rows abstain instead of voting against:
+ * they say nothing about which category is right.
+ */
+function majorityCategoryId(categoryIds: Array<string | null>, known: Set<string>): string | null {
+  const counts = new Map<string, number>();
+  for (const id of categoryIds) {
+    if (!id || !known.has(id)) continue;
+    counts.set(id, (counts.get(id) ?? 0) + 1);
+  }
+
+  let winner: string | null = null;
+  let best = 0;
+  let total = 0;
+  for (const [id, count] of counts) {
+    total += count;
+    if (count > best) {
+      best = count;
+      winner = id;
+    }
+  }
+
+  return best * 2 > total ? winner : null;
+}
+
+/**
+ * Which category the pattern row should end up carrying.
+ *
+ * A stored category that appears on none of the pattern's own transactions was set by hand on the
+ * Bills screen (PATCH /api/recurring/:id). Detection re-runs on every sync, so re-deriving over it
+ * would revert the owner's choice on the hour. A stored id that no longer resolves is dropped
+ * rather than rewritten, so a category a later migration deleted cannot dangle here.
+ */
+function resolvePatternCategory(
+  stored: string | null,
+  majority: string | null,
+  observed: Set<string>,
+  known: Set<string>
+): string | null {
+  const storedIsKnown = Boolean(stored && known.has(stored));
+  if (stored && storedIsKnown && !observed.has(stored)) return stored;
+  if (majority) return majority;
+  return storedIsKnown ? stored : null;
+}
+
 const GAP_VARIANCE_MAX = 0.2;
 const AMOUNT_VARIANCE_MAX = 0.25;
 /** Cadence bar a pattern must clear to be admitted on timing alone, with a variable amount. */
@@ -149,6 +299,7 @@ export function detectRecurring(): void {
     amount: number;
     merchant_name: string | null;
     original_name: string;
+    category_id: string | null;
   }
 
   // 1. Load all non-pending transactions from last 13 months.
@@ -159,7 +310,7 @@ export function detectRecurring(): void {
   // amount, so they would otherwise be admitted as recurring bills and double-count against the
   // spending they are paying off.
   const transactions = db.prepare(`
-    SELECT id, date, amount, merchant_name, original_name
+    SELECT id, date, amount, merchant_name, original_name, category_id
     FROM transactions
     WHERE pending = 0
       AND date >= ?
@@ -169,7 +320,10 @@ export function detectRecurring(): void {
   `).all(cutoff) as TxnRow[];
 
   // 2. Group by normalized merchant name
-  const groups = new Map<string, Array<{ id: string; date: string; amount: number }>>();
+  const groups = new Map<
+    string,
+    Array<{ id: string; date: string; amount: number; category_id: string | null }>
+  >();
   const groupNames: string[] = [];
 
 
@@ -196,15 +350,24 @@ export function detectRecurring(): void {
 
       groups.set(normalized, []);
     }
-    groups.get(normalized)!.push({ id: txn.id, date: txn.date, amount: txn.amount });
+    groups.get(normalized)!.push({
+      id: txn.id,
+      date: txn.date,
+      amount: txn.amount,
+      category_id: txn.category_id,
+    });
   }
+
+  const known = knownCategoryIds(db);
 
   // 3. For each group with >= 3 transactions
   for (const [normalizedName, txns] of groups) {
     if (txns.length < 3) continue;
 
-    // Sort by date ascending
-    txns.sort((a, b) => a.date.localeCompare(b.date));
+    // Sort by date ascending. The id tie-break is not cosmetic: the recent-amount window below has
+    // to select the same rows recentSignedAmounts() selects in SQL, or the stored amount and the
+    // recomputed one disagree again for two rows sharing a date.
+    txns.sort((a, b) => a.date.localeCompare(b.date) || a.id.localeCompare(b.id));
 
     // Compute day-gaps between consecutive dates
     const gaps: number[] = [];
@@ -242,18 +405,36 @@ export function detectRecurring(): void {
     if (amountVariance >= AMOUNT_VARIANCE_MAX && gapVariance >= STRICT_GAP_VARIANCE_MAX) continue;
 
     const lastTxn = txns[txns.length - 1];
-    const nextExpected = format(
-      addDays(parseISO(lastTxn.date), Math.round(medianGap)),
-      'yyyy-MM-dd'
+    const nextExpected = nextExpectedAfter(lastTxn.date, frequency, medianGap);
+    // The stored amount is a short-window median, not the full-history one the variance gate above
+    // needs: see RECENT_AMOUNT_WINDOW. Rounded because average_amount is integer cents.
+    const expectedAmount = Math.round(
+      median(txns.slice(-RECENT_AMOUNT_WINDOW).map((t) => Math.abs(t.amount)))
     );
+    const observed = new Set(
+      txns.map((t) => t.category_id).filter((id): id is string => Boolean(id))
+    );
+    const majority = majorityCategoryId(txns.map((t) => t.category_id), known);
     const now = new Date().toISOString();
 
     // Upsert recurring_pattern matching on merchant_name
     const existing = db.prepare(
-      'SELECT id, is_active, is_confirmed FROM recurring_patterns WHERE merchant_name = ?'
-    ).get(normalizedName) as { id: string; is_active: number; is_confirmed: number } | undefined;
+      'SELECT id, is_active, is_confirmed, category_id FROM recurring_patterns WHERE merchant_name = ?'
+    ).get(normalizedName) as
+      | { id: string; is_active: number; is_confirmed: number; category_id: string | null }
+      | undefined;
 
     let patternId: string;
+
+    // Detection never wrote a category, so every detected pattern carried NULL and
+    // budgetProjection's `rp.category_id IS NOT NULL` filter dropped all of them: every budget
+    // reported expected_recurring 0 and forecast_confidence 'none' on real data.
+    const categoryId = resolvePatternCategory(
+      existing?.category_id ?? null,
+      majority,
+      observed,
+      known
+    );
 
     if (existing) {
       if (!existing.is_active && !existing.is_confirmed) continue;
@@ -261,12 +442,13 @@ export function detectRecurring(): void {
       patternId = existing.id;
       db.prepare(`
         UPDATE recurring_patterns
-        SET frequency = ?, average_amount = ?, amount_variance = ?, last_seen = ?, next_expected = ?,
-            transaction_count = ?, is_active = 1, updated_at = ?
+        SET frequency = ?, category_id = ?, average_amount = ?, amount_variance = ?, last_seen = ?,
+            next_expected = ?, transaction_count = ?, is_active = 1, updated_at = ?
         WHERE id = ?
       `).run(
         frequency,
-        medianAmount,
+        categoryId,
+        expectedAmount,
         amountVariance,
         lastTxn.date,
         nextExpected,
@@ -278,14 +460,15 @@ export function detectRecurring(): void {
       patternId = uuidv4();
       db.prepare(`
         INSERT INTO recurring_patterns
-          (id, merchant_name, frequency, average_amount, amount_variance, last_seen, next_expected,
-           is_active, is_confirmed, transaction_count, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, 1, 0, ?, ?, ?)
+          (id, merchant_name, category_id, frequency, average_amount, amount_variance, last_seen,
+           next_expected, is_active, is_confirmed, transaction_count, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, 0, ?, ?, ?)
       `).run(
         patternId,
         normalizedName,
+        categoryId,
         frequency,
-        medianAmount,
+        expectedAmount,
         amountVariance,
         lastTxn.date,
         nextExpected,

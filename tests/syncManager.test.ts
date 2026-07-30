@@ -1,8 +1,17 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import Database from 'better-sqlite3';
-import { isSyncStale, runPostSyncStages } from '../server/src/services/syncManager';
+import type { Response } from 'express';
+import {
+  addSseClient,
+  emitSyncEvent,
+  isSyncStale,
+  removeSseClient,
+  runPostSyncStages,
+  terminalSyncEvent,
+} from '../server/src/services/syncManager';
 import type { TransactionIntegrityResult } from '../server/src/services/transactionIntegrity';
+import type { SyncEvent } from '../shared/types';
 
 function setupSyncDb(): Database.Database {
   const db = new Database(':memory:');
@@ -153,6 +162,54 @@ test('runPostSyncStages: integrity failure still lets snapshot run and reports i
   assert.deepEqual(items.map((i) => i.connection_id), ['auto-categorization', 'transaction-integrity']);
   const integrityItem = items.find((i) => i.connection_id === 'transaction-integrity');
   assert.equal(integrityItem?.status, 'failed');
+});
+
+// ── Terminal event ───────────────────────────────────────────────────────────
+// A partial run has already committed provider writes by the time a later stage fails. It used to
+// throw before emitting anything, so the client saw only sync_error, did not invalidate its caches,
+// and kept rendering pre-sync figures under a header still claiming the previous sync time.
+
+test('a partial run ends in a terminal completion event that carries the failure', () => {
+  const event = terminalSyncEvent(new Error('FOREIGN KEY constraint failed'), '2026-07-30T12:00:00.000Z');
+
+  assert.equal(event.type, 'sync_complete', 'the client acts on completions, not on errors');
+  assert.equal(event.status, 'partial');
+  assert.equal(event.completedAt, '2026-07-30T12:00:00.000Z');
+  assert.match(event.message, /FOREIGN KEY constraint failed/);
+  assert.equal(event.progress, 100);
+});
+
+test('a clean run ends in the same event marked succeeded', () => {
+  const event = terminalSyncEvent(null, '2026-07-30T12:00:00.000Z');
+
+  assert.equal(event.type, 'sync_complete');
+  assert.equal(event.status, 'succeeded');
+  assert.equal(event.message, 'Sync complete');
+});
+
+function fakeSseClient(): { res: Response; frames: string[] } {
+  const frames: string[] = [];
+  const res = {
+    write(chunk: string): boolean {
+      frames.push(chunk);
+      return true;
+    },
+  };
+  return { res: res as unknown as Response, frames };
+}
+
+test('the partial terminal event actually reaches a connected SSE client', (t) => {
+  const client = fakeSseClient();
+  addSseClient(client.res);
+  t.after(() => removeSseClient(client.res));
+
+  emitSyncEvent(terminalSyncEvent(new Error('auto-categorization failed'), '2026-07-30T12:00:00.000Z'));
+
+  assert.equal(client.frames.length, 1);
+  const parsed = JSON.parse(client.frames[0].replace(/^data: /, '').trim()) as SyncEvent;
+  assert.equal(parsed.type, 'sync_complete');
+  assert.equal(parsed.status, 'partial');
+  assert.match(parsed.message, /auto-categorization failed/);
 });
 
 function setupConnectionsDb(): Database.Database {

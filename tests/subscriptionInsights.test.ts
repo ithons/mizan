@@ -222,7 +222,10 @@ test('subscription insights summarize recurring bills without income or weak pat
   assert.equal(insights.subscriptions.some((item) => item.merchant_name === 'Weak Pattern'), false);
   assert.equal(insights.unconfirmed[0].merchant_name, 'App Trial');
   assert.ok(insights.upcoming.some((item) => item.merchant_name === 'Cloud Storage'));
-  closeTo(insights.total_monthly_amount, 100000 + (4900 / 3) + 1000 + (1000 * 52 / 12) + 800);
+  // Streaming's three charges are 1500, 1500, 1900. The expected amount is now a median over the
+  // recent window (1500), not a mean over every linked row (4900/3), so one changed charge no
+  // longer moves the projection off a price two thirds of the history still agrees on.
+  closeTo(insights.total_monthly_amount, 100000 + 1500 + 1000 + (1000 * 52 / 12) + 800);
   assert.ok(insights.total_upcoming_amount > insights.total_monthly_amount);
 });
 

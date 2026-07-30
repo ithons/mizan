@@ -1,5 +1,5 @@
 import type Database from 'better-sqlite3';
-import { addDays, addMonths, format, parseISO } from 'date-fns';
+import { addDays, differenceInCalendarDays, format, parseISO } from 'date-fns';
 import type {
   RecurringForecast,
   RecurringForecastOccurrence,
@@ -7,6 +7,7 @@ import type {
   RecurringPattern,
 } from '../../../shared/types';
 import { getRecurringAdjustmentMap } from './recurringAdjustments';
+import { occurrenceDate, recentSignedAmounts } from './recurring';
 
 type Frequency = RecurringPattern['frequency'];
 
@@ -20,27 +21,16 @@ interface RecurringForecastRow {
   next_expected: string;
   is_confirmed: number;
   transaction_count: number;
-  average_signed_amount: number;
+  average_amount: number;
+  is_income: number | null;
   amount_variance: number | null;
 }
 
 /** Matches detection's AMOUNT_VARIANCE_MAX: above it, the stored amount is a median, not a bill. */
 const AMOUNT_VARIES_THRESHOLD = 0.25;
 
-function nextOccurrenceDate(date: Date, frequency: Frequency): Date {
-  switch (frequency) {
-    case 'weekly':
-      return addDays(date, 7);
-    case 'biweekly':
-      return addDays(date, 14);
-    case 'monthly':
-      return addMonths(date, 1);
-    case 'quarterly':
-      return addMonths(date, 3);
-    case 'annual':
-      return addMonths(date, 12);
-  }
-}
+/** How many occurrences one pattern may contribute before the walk is cut off. */
+const OCCURRENCE_LIMIT = 500;
 
 function confidenceForPattern(pattern: RecurringForecastRow): number {
   if (pattern.is_confirmed) return 1;
@@ -58,9 +48,12 @@ function forecastBucket(occurrence: RecurringForecastOccurrence): 'confirmed' | 
   return occurrence.confidence_label === 'likely' ? 'likely' : 'uncertain';
 }
 
+// Calendar days, not a wall-clock delta. `status` is decided by comparing date strings, so the old
+// millisecond subtraction contradicted it from local noon onward: an occurrence dated today came
+// back days_until -1 while status stayed 'upcoming', and Today's rail said "in 3d" for a bill four
+// calendar days out. No floor on the negative side either, so an overdue row reports its true age.
 function daysUntil(date: Date, now: Date): number {
-  const diff = Math.round((date.getTime() - now.getTime()) / 86_400_000);
-  return diff < 0 ? -1 * Math.max(1, Math.abs(diff)) : Math.max(0, diff);
+  return differenceInCalendarDays(date, now);
 }
 
 function buildOccurrence(
@@ -144,16 +137,10 @@ export function buildRecurringForecast(
       rp.is_confirmed,
       rp.transaction_count,
       rp.amount_variance,
+      rp.average_amount,
       c.name AS category_name,
       c.color AS category_color,
-      COALESCE(
-        (
-          SELECT AVG(t.amount)
-          FROM transactions t
-          WHERE t.recurring_id = rp.id
-        ),
-        CASE WHEN COALESCE(c.is_income, 0) = 1 THEN rp.average_amount ELSE -rp.average_amount END
-      ) AS average_signed_amount
+      c.is_income
     FROM recurring_patterns rp
     LEFT JOIN categories c ON c.id = rp.category_id
     WHERE rp.is_active = 1
@@ -162,25 +149,32 @@ export function buildRecurringForecast(
     ORDER BY rp.next_expected ASC
   `).all(endDate) as RecurringForecastRow[];
 
-  const adjustmentMap = getRecurringAdjustmentMap(db, patterns.map((pattern) => pattern.id));
+  const patternIds = patterns.map((pattern) => pattern.id);
+  const adjustmentMap = getRecurringAdjustmentMap(db, patternIds);
+  // One definition of the expected amount, shared with the stored column detection writes. A
+  // manual pattern has no linked rows, so it falls back to what its owner typed, signed by
+  // the category (an unset category is an expense, as it was before).
+  const signedAmounts = recentSignedAmounts(db, patternIds);
   const occurrences: RecurringForecastOccurrence[] = [];
 
   for (const pattern of patterns) {
-    let expected = parseISO(pattern.next_expected);
-    let guard = 0;
+    const anchor = parseISO(pattern.next_expected);
+    let step = 0;
+    let expected = anchor;
     const confidence = confidenceForPattern(pattern);
     const confidence_label = confidenceLabel(confidence);
+    const amount = signedAmounts.get(pattern.id)
+      ?? (pattern.is_income === 1 ? pattern.average_amount : -pattern.average_amount);
     let overdueExpectedDate: Date | null = null;
 
-    while (format(expected, 'yyyy-MM-dd') < today && guard < 500) {
+    while (format(expected, 'yyyy-MM-dd') < today && step < OCCURRENCE_LIMIT) {
       overdueExpectedDate = expected;
-      expected = nextOccurrenceDate(expected, pattern.frequency);
-      guard++;
+      step++;
+      expected = occurrenceDate(anchor, pattern.frequency, step);
     }
 
     if (overdueExpectedDate) {
       const expectedDate = format(overdueExpectedDate, 'yyyy-MM-dd');
-      const amount = pattern.average_signed_amount;
       const occurrence = buildOccurrence(
         pattern,
         expectedDate,
@@ -195,9 +189,8 @@ export function buildRecurringForecast(
       if (occurrence) occurrences.push(occurrence);
     }
 
-    while (format(expected, 'yyyy-MM-dd') <= endDate && guard < 500) {
+    while (format(expected, 'yyyy-MM-dd') <= endDate && step < OCCURRENCE_LIMIT) {
       const expectedDate = format(expected, 'yyyy-MM-dd');
-      const amount = pattern.average_signed_amount;
       const occurrence = buildOccurrence(
         pattern,
         expectedDate,
@@ -211,8 +204,8 @@ export function buildRecurringForecast(
       );
       if (occurrence) occurrences.push(occurrence);
 
-      expected = nextOccurrenceDate(expected, pattern.frequency);
-      guard++;
+      step++;
+      expected = occurrenceDate(anchor, pattern.frequency, step);
     }
   }
 

@@ -1,52 +1,45 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import Database from 'better-sqlite3';
+import { format, lastDayOfMonth, parseISO, subMonths } from 'date-fns';
 import {
   deleteRecurringAdjustment,
   listRecurringAdjustments,
   upsertRecurringAdjustment,
 } from '../server/src/services/recurringAdjustments';
+import { buildRecurringForecast } from '../server/src/services/recurringForecast';
+import { migratedTestDb } from './helpers/schema';
 
-function setupDb(): Database.Database {
-  const db = new Database(':memory:');
+// The migrated schema, not a hand-written one: adjustments are keyed by (recurring_id,
+// original_date) with a UNIQUE constraint and a foreign key, and the last test here depends on the
+// forecast producing exactly the date the adjustment was filed under.
 
-  db.exec(`
-    CREATE TABLE recurring_patterns (
-      id TEXT PRIMARY KEY,
-      merchant_name TEXT NOT NULL,
-      category_id TEXT,
-      average_amount REAL NOT NULL,
-      amount_variance REAL NOT NULL DEFAULT 0,
-      frequency TEXT NOT NULL,
-      last_seen TEXT NOT NULL,
-      next_expected TEXT NOT NULL,
-      is_active INTEGER NOT NULL DEFAULT 1,
-      is_confirmed INTEGER NOT NULL DEFAULT 0,
-      transaction_count INTEGER NOT NULL DEFAULT 0
-    );
-
-    CREATE TABLE recurring_occurrence_adjustments (
-      id TEXT PRIMARY KEY,
-      recurring_id TEXT NOT NULL,
-      original_date TEXT NOT NULL,
-      action TEXT NOT NULL,
-      adjusted_date TEXT,
-      adjusted_amount REAL,
-      note TEXT,
-      created_at TEXT NOT NULL,
-      updated_at TEXT NOT NULL,
-      UNIQUE(recurring_id, original_date)
-    );
-  `);
-
+function insertPattern(
+  db: Database.Database,
+  overrides: Partial<{ id: string; next_expected: string; frequency: string; average_amount: number }> = {}
+): string {
+  const id = overrides.id ?? 'rent';
+  const nextExpected = overrides.next_expected ?? '2026-07-01';
   db.prepare(`
     INSERT INTO recurring_patterns (
       id, merchant_name, category_id, average_amount, frequency, last_seen, next_expected,
-      is_active, is_confirmed, transaction_count
+      is_active, is_confirmed, transaction_count, created_at, updated_at
     )
-    VALUES ('rent', 'Rent', NULL, 1000, 'monthly', '2026-06-01', '2026-07-01', 1, 1, 4)
-  `).run();
+    VALUES (?, ?, 'cat_home_rent', ?, ?, ?, ?, 1, 1, 4, '2026-01-01', '2026-01-01')
+  `).run(
+    id,
+    id,
+    overrides.average_amount ?? 1000,
+    overrides.frequency ?? 'monthly',
+    nextExpected,
+    nextExpected
+  );
+  return id;
+}
 
+function setupDb(): Database.Database {
+  const db = migratedTestDb();
+  insertPattern(db);
   return db;
 }
 
@@ -98,4 +91,44 @@ test('recurring adjustments validate action-specific fields', (t) => {
     original_date: '2026-07-01',
     action: 'skip',
   }), /Recurring pattern not found/);
+});
+
+// An adjustment is looked up as `${pattern.id}:${originalDate}`, so it only lands if the forecast
+// generates exactly that date. While the walk chained addMonths, a month-end pattern drifted onto
+// the 28th after the first short month, and every skip or snooze the owner filed against the real
+// month-end silently did nothing.
+test('an adjustment filed on a month-end occurrence is applied', (t) => {
+  const db = migratedTestDb();
+  t.after(() => db.close());
+
+  const anchor = (() => {
+    for (let back = 0; back < 14; back++) {
+      const end = lastDayOfMonth(subMonths(new Date(), back));
+      if (end.getDate() === 31 && end <= new Date()) return end;
+    }
+    throw new Error('no month end found');
+  })();
+
+  insertPattern(db, {
+    id: 'month_end_rent',
+    next_expected: format(anchor, 'yyyy-MM-dd'),
+    average_amount: 150000,
+  });
+
+  const upcoming = buildRecurringForecast(db, 130).occurrences
+    .filter((occurrence) => occurrence.pattern_id === 'month_end_rent' && occurrence.status === 'upcoming');
+  assert.ok(upcoming.length >= 2);
+
+  // The third month out: far enough past the anchor that the old chained walk had already clamped.
+  const target = upcoming[upcoming.length - 1];
+  assert.equal(target.expected_date, format(lastDayOfMonth(parseISO(target.expected_date)), 'yyyy-MM-dd'));
+
+  upsertRecurringAdjustment(db, 'month_end_rent', {
+    original_date: target.expected_date,
+    action: 'skip',
+  });
+
+  const applied = buildRecurringForecast(db, 130).occurrences
+    .find((occurrence) => occurrence.id === target.id);
+  assert.equal(applied?.adjustment_action, 'skip');
 });
