@@ -11,11 +11,16 @@ import { dollarizeFields } from '../services/money';
 import {
   createManualAccount,
   deleteAccount,
-  getAccountBalanceHistory,
   listAccounts,
   mergeAccounts,
   updateAccount,
 } from '../services/accounts';
+import {
+  MARKET_DRIVEN_TYPES,
+  getLedgerBalanceHistory,
+  getSnapshotBalanceHistory,
+} from '../services/balanceHistory';
+import type { AccountBalanceHistory } from '../../../shared/types';
 
 const router = Router();
 
@@ -32,6 +37,14 @@ function routeId(value: string | string[] | undefined): string {
   return Array.isArray(value) ? value[0] : value ?? '';
 }
 
+function historyToDollars(history: AccountBalanceHistory): AccountBalanceHistory {
+  return {
+    ...history,
+    points: history.points.map((point) => dollarizeFields({ ...point }, ['balance'])),
+    measurements: history.measurements.map((m) => dollarizeFields({ ...m }, ['balance'])),
+  };
+}
+
 // GET / - all accounts with current_balance, sorted by sort_order
 router.get('/', (_req: Request, res: Response, next: NextFunction): void => {
   try {
@@ -42,12 +55,26 @@ router.get('/', (_req: Request, res: Response, next: NextFunction): void => {
   }
 });
 
-// GET /:id/history - this account's balance over time (from net-worth snapshot breakdowns)
+// GET /:id/history - this account's balance over time
+//
+// Routed by account type, and the split is the point. An account whose balance moves only when a
+// transaction moves it can be replayed from its own ledger, one point per day, all the way back to
+// its first transaction. A market-driven one cannot: reversing individual buys and sells off a
+// brokerage balance cannot reconstruct a price move, so it keeps the measured snapshot series.
 router.get('/:id/history', (req: Request, res: Response, next: NextFunction): void => {
   try {
     const db = getDb();
-    const history = getAccountBalanceHistory(db, routeId(req.params.id));
-    res.json({ data: history.map((point) => dollarizeFields({ ...point }, ['balance'])) });
+    const id = routeId(req.params.id);
+    const account = db.prepare('SELECT type FROM accounts WHERE id = ?').get(id) as
+      | { type: string }
+      | undefined;
+
+    const history =
+      account && MARKET_DRIVEN_TYPES.has(account.type)
+        ? getSnapshotBalanceHistory(db, id)
+        : getLedgerBalanceHistory(db, id);
+
+    res.json({ data: historyToDollars(history) });
   } catch (err) {
     next(err);
   }

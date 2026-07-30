@@ -1,7 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import Database from 'better-sqlite3';
-import { createManualAccount, getAccountBalanceHistory } from '../server/src/services/accounts';
+import { createManualAccount } from '../server/src/services/accounts';
+import { getSnapshotBalanceHistory } from '../server/src/services/balanceHistory';
 
 // Minimal accounts schema covering the columns createManualAccount writes/reads.
 // institution_name is NOT NULL DEFAULT '' (as in the real schema) so the test proves
@@ -61,9 +62,11 @@ test('createManualAccount derives liability for credit type', (t) => {
   assert.equal(row.institution_name, 'SomeBank');
 });
 
-test('getAccountBalanceHistory extracts one account\'s series from snapshot breakdowns', (t) => {
+test('the snapshot series extracts one account\'s points, skipping what it cannot read', (t) => {
   const db = new Database(':memory:');
   t.after(() => db.close());
+  db.exec(`CREATE TABLE accounts (id TEXT PRIMARY KEY, is_liability INTEGER NOT NULL DEFAULT 0)`);
+  db.prepare('INSERT INTO accounts (id) VALUES (?)').run('acct');
   db.exec(`CREATE TABLE net_worth_snapshots (id TEXT PRIMARY KEY, date TEXT NOT NULL, breakdown TEXT NOT NULL, is_estimated INTEGER NOT NULL DEFAULT 0)`);
   const ins = db.prepare('INSERT INTO net_worth_snapshots (id, date, breakdown) VALUES (?,?,?)');
   ins.run('s1', '2026-01-01', JSON.stringify({ acct: 10000, other: 5000 }));
@@ -71,9 +74,10 @@ test('getAccountBalanceHistory extracts one account\'s series from snapshot brea
   ins.run('s3', '2026-03-01', JSON.stringify({ other: 5000 })); // acct not present yet/anymore
   ins.run('s4', '2026-04-01', 'not json');                      // malformed — skipped
 
-  const hist = getAccountBalanceHistory(db, 'acct');
-  assert.deepEqual(hist, [
-    { date: '2026-01-01', balance: 10000, estimated: false },
-    { date: '2026-02-01', balance: 12000, estimated: false },
+  const hist = getSnapshotBalanceHistory(db, 'acct');
+  assert.equal(hist.basis, 'snapshot');
+  assert.deepEqual(hist.points, [
+    { date: '2026-01-01', balance: 10000, source: 'measured' },
+    { date: '2026-02-01', balance: 12000, source: 'measured' },
   ]);
 });

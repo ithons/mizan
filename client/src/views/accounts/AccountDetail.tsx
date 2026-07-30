@@ -1,14 +1,66 @@
 import { useMemo } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
+import type { AccountBalanceHistory } from '@shared/types';
 import { accountsApi, investmentsApi, transactionsApi } from '../../lib/api';
 import { ACCOUNT_TYPE_LABELS } from '../../lib/constants';
-import { formatCompactRelative, formatCurrencyColored, formatDate, formatWholeCurrency } from '../../lib/formatters';
+import {
+  formatCompactRelative,
+  formatCurrencyColored,
+  formatDate,
+  formatWholeCurrency,
+} from '../../lib/formatters';
 import { creditNote, isInCredit, signedAccountBalance } from '../../lib/accountBalance';
 import { Screen, SectionLabel, TextButton, TrendChart } from '../../components/balance';
 import { SkeletonRows } from '../../components/SkeletonLoader';
 
 const INVESTMENT_TYPES = new Set(['brokerage', 'ira_traditional', 'ira_roth', 'crypto_wallet']);
+
+function plural(count: number, noun: string): string {
+  return `${count.toLocaleString()} ${noun}${count === 1 ? '' : 's'}`;
+}
+
+/**
+ * Where the line starts, and why it stops there instead of running back to zero.
+ *
+ * A chart that begins mid-air is making a claim about everything to the left of it. The ledger can
+ * only reach the account's first transaction, or the point where its imported history begins, and
+ * saying which is the difference between "nothing happened before this" and "nothing was recorded".
+ */
+export function seriesOrigin(history: AccountBalanceHistory): string | null {
+  const from = history.start_date ? formatDate(history.start_date) : '';
+  const count = plural(history.transaction_count, 'transaction');
+  switch (history.start_reason) {
+    case 'first_transaction':
+      return `Reconstructed from this account's ${count}, back to ${from}, the first one recorded.`;
+    case 'backfill_floor':
+      return `Reconstructed from this account's ${count}. The ledger begins ${from}; nothing earlier was ever imported, so the line does not go there.`;
+    case 'requested_window':
+      return `Reconstructed from this account's ledger over the window shown, from ${from}.`;
+    case 'snapshot_series':
+      return 'Drawn from recorded balance sheets rather than this account’s ledger: reversing individual buys and sells cannot reconstruct a price move.';
+    case 'no_ledger':
+      return 'No transactions on this account yet, so there is no balance history to draw.';
+    case 'account_not_found':
+      return null;
+  }
+}
+
+/**
+ * What the dots on the line are.
+ *
+ * The line is the ledger's reconstruction and the dots are balances the Net worth screen recorded,
+ * drawn at the value they recorded. Where the two land apart the reader sees it. Nothing here
+ * measures the distance between them or calls it anything: every previous version of this line
+ * computed a difference off day boundaries, and a snapshot taken partway through an ordinary day of
+ * inflows and outflows sits away from every one of those boundaries without anything being wrong.
+ */
+export function seriesMeasurements(history: AccountBalanceHistory): string | null {
+  if (history.basis !== 'ledger' || history.measurements.length === 0) return null;
+  return history.measurements.length === 1
+    ? 'The dot is the one balance recorded for this account on a day net worth was captured.'
+    : `Dots mark the ${history.measurements.length} balances recorded for this account on days net worth was captured.`;
+}
 
 export function AccountDetail() {
   const { id = '' } = useParams();
@@ -36,14 +88,19 @@ export function AccountDetail() {
     enabled: Boolean(id),
   });
 
+  // One line, one style. A ledger series is a reconstruction end to end and says so in `origin`;
+  // only the snapshot basis carries reverse-replayed points, and those stay dashed.
   const chart = useMemo(
-    // `estimated` was never carried, so this chart drew reverse-replay reconstructions as one
-    // solid measured line: Wealthfront Cash appeared to hold $1,517 and collapse to $0.00 at the
-    // end of June, an event that never happened for an account that was not yet connected.
-    () => (history ?? []).map((p) => ({ date: p.date, value: p.balance, estimated: p.estimated })),
+    () => (history?.points ?? []).map((p) => ({ date: p.date, value: p.balance, estimated: p.source === 'estimated' })),
+    [history]
+  );
+  const marks = useMemo(
+    () => (history?.measurements ?? []).map((m) => ({ date: m.date, value: m.balance })),
     [history]
   );
 
+  const origin = history ? seriesOrigin(history) : null;
+  const measurements = history ? seriesMeasurements(history) : null;
   const signedBalance = account ? signedAccountBalance(account) : 0;
   const inCredit = account ? isInCredit(account) : false;
   const transactions = txPage?.data ?? [];
@@ -99,10 +156,12 @@ export function AccountDetail() {
         </div>
       </div>
 
-      {chart.length >= 2 && (
+      {history && (
         <div className="mb-8">
           <SectionLabel className="mb-2">Balance over time</SectionLabel>
-          <TrendChart history={chart} height={110} />
+          {chart.length >= 2 && <TrendChart history={chart} marks={marks} height={110} />}
+          {origin && <div className="mt-2 text-note text-muted-2">{origin}</div>}
+          {measurements && <div className="mt-1 text-note text-muted-2">{measurements}</div>}
         </div>
       )}
 
