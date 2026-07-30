@@ -106,7 +106,7 @@ un-undoable and "previous" points at the AI's own prior guess rather than the pr
 - [ ] **Rounded money that does not add up.** MOVED TO PHASE 7: this is a typographic decision about which figures are checkable against each other, and it belongs with the type system rather than ahead of it.
 - [ ] ~~(original entry)~~ **Rounded money that does not add up.** 81 `formatWholeCurrency` call sites vs 15 `formatCurrency`. Today's month rule renders out/in/net as three independent whole-dollar roundings, so the first minus the second need not equal the third. Establish the rule: exact everywhere a figure can be checked against another figure.
 - [x] **`flattenReportCategories`** returns `previous: 0, delta: <full amount>` for every category, so `top_spending[i].delta` claims every category is brand new.
-- [ ] **Savings rate** (MOVED TO PHASE 5, with the rest of the unknown-versus-zero class) returns 0 for a no-income window, so the first fortnight of every month reports 0%.
+- [x] **Savings rate** (MOVED TO PHASE 5, with the rest of the unknown-versus-zero class) returns 0 for a no-income window, so the first fortnight of every month reports 0%.
 - [x] Tests for each, asserting against the real ledger's shape
 
 **Consequence of the refunds fix, discovered on real data (2026-07-30):** a category can now legitimately
@@ -134,12 +134,15 @@ cashflow expenses ($782.22) exactly, so the two surfaces reconcile for the first
 
 ## Phase 4 — History that stops decaying
 
-- [ ] **Snapshot buckets are frozen classification.** `snapshot.ts:74` computes liquid/investment/crypto from `accounts.type` at write time and never recomputes. Your two Fidelity accounts were auto-typed `checking` then retyped, so 2026-06-30 and 07-01 record `investment_assets = 0` for a portfolio holding $1,661.66, and the Investments chart plots $2,441.93 → $0.00 → $0.00 → $1,665.86. Derive buckets at query time from each snapshot's `breakdown` JSON joined to current account types.
-- [ ] **Net-worth attribution** reads today's `is_liability` against balances frozen months ago, so retyping re-signs history while the headline does not move, and a deleted account is silently an asset. That is the condition migration 039 repaired by hand.
+**Status 2026-07-30:** snapshot buckets, net-worth attribution, merge/delete and the backup closure
+are done and committed. Per-account estimation floors and the sync-integrity set are in flight.
+
+- [x] **Snapshot buckets are frozen classification.** `snapshot.ts:74` computes liquid/investment/crypto from `accounts.type` at write time and never recomputes. Your two Fidelity accounts were auto-typed `checking` then retyped, so 2026-06-30 and 07-01 record `investment_assets = 0` for a portfolio holding $1,661.66, and the Investments chart plots $2,441.93 → $0.00 → $0.00 → $1,665.86. Derive buckets at query time from each snapshot's `breakdown` JSON joined to current account types.
+- [x] **Net-worth attribution** reads today's `is_liability` against balances frozen months ago, so retyping re-signs history while the headline does not move, and a deleted account is silently an asset. That is the condition migration 039 repaired by hand.
 - [ ] **One new card truncates 2.5 years.** `estimateFloorMonth` takes the *maximum* first-transaction date across value-holding accounts, so Chase Freedom Flex (opened 2026-03-10) caps the whole walk. 2,198 imported transactions reaching 2023-09-16 produce five estimated points. Move to per-account floors with the partial-coverage band stated explicitly rather than drawn as one continuous line.
 - [ ] Purge estimated snapshots that fall below a later, higher floor (one already exists at 2026-02-01)
-- [ ] **`mergeAccounts` / `deleteAccount` learn the 033 and 039 lessons**: reassign `holdings_history` (currently `ON DELETE CASCADE`, so deletion destroys exactly what 033 rebuilt by hand), and fold the removed account id out of every historical `breakdown`. Also fix the `simplefin_account_id` UNIQUE collision in `mergeAccounts` (writes the source id onto the target before deleting the source).
-- [ ] **Backup is not a backup.** `LOCAL_BACKUP_TABLES` covers 17 of 26 while the preview reports "Ready, 17/18, zero warnings". Missing 9 tables / 587 rows: `holdings_history`, `advisor_actions`, `advisor_drafts`, `conversations`, `messages`, `budget_groups`, `budget_group_members`, `budget_rollover_ledger`, `recurring_occurrence_adjustments`. After restore the 86 rows carrying `category_action_id` point at nothing and undo 404s. Make the set FK-closed, in parent-before-child order, and tolerate a missing table key as empty-plus-warning rather than a fatal 400.
+- [x] **`mergeAccounts` / `deleteAccount` learn the 033 and 039 lessons**: reassign `holdings_history` (currently `ON DELETE CASCADE`, so deletion destroys exactly what 033 rebuilt by hand), and fold the removed account id out of every historical `breakdown`. Also fix the `simplefin_account_id` UNIQUE collision in `mergeAccounts` (writes the source id onto the target before deleting the source).
+- [x] **Backup is not a backup.** `LOCAL_BACKUP_TABLES` covers 17 of 26 while the preview reports "Ready, 17/18, zero warnings". Missing 9 tables / 587 rows: `holdings_history`, `advisor_actions`, `advisor_drafts`, `conversations`, `messages`, `budget_groups`, `budget_group_members`, `budget_rollover_ledger`, `recurring_occurrence_adjustments`. After restore the 86 rows carrying `category_action_id` point at nothing and undo 404s. Make the set FK-closed, in parent-before-child order, and tolerate a missing table key as empty-plus-warning rather than a fatal 400.
 - [ ] **Sync integrity**: a 200 with no `accounts` key zeroes all nine balances and reports success (bail when `seenAccountIds.size === 0`); a partial sync throws before `sync_complete` so the client never invalidates; `simplefin.ts:362` unconditionally overwrites hand-edited `date`/`amount`/`merchant_name` that `UpdateTransactionSchema` explicitly permits editing; 123 unchanged rows count as "modified" every hour; benign SimpleFIN `errors` strings (including the date-range-capped notice our own 730-day resync guarantees) trigger the destructive reconnect prompt.
 - [ ] `GET /api/budgets/rollover-ledger` writes on every read and re-derives past months from the budget's *current* amount. Split read from write; the guard exempts GET from the origin check precisely because GETs were assumed not to mutate.
 - [ ] Regression test per repaired invariant, not just per data fix
@@ -244,3 +247,27 @@ assets is less saturated than a decorative fill. 422 of 466 type-step usages (90
 - Multi-user, auth, or anything that widens the bind
 - Re-adding Plaid/Teller (removed in 014), the freelance tax feature (019), or the General catch-all (036)
 - A score-out-of-100 anywhere in the UI: that is the derived-as-fact failure this whole plan is about
+
+
+---
+
+## Progress log
+
+| When | Landed | Verified against real data |
+|---|---|---|
+| 2026-07-30 | Phase 0 baseline | 374 tests, both typechecks green |
+| 2026-07-30 | Phase 1: revision logs, write guards, rule provenance | 15 open drafts to 0 surfaced as work; `total_open` 19 to 4; migration 042 applied to the live DB after a backup |
+| 2026-07-30 | Phase 2: refunds, cost basis, cards | July net -$665.24 to **+$1,389.00**, savings rate -31% to **+64.0%**; portfolio gain $141.82 to **$36.83** (7.1% to 1.8%); free-to-spend $2,523.56 to **-$1,926.52**; spending total now equals cashflow expenses exactly |
+| 2026-07-30 | Phase 3: AI numbers | 3-month average income $2,862.93/mo to **$2,139.19/mo**; 5 of 19 trend points now marked as reconstructions; portfolio totals no longer computed from a `LIMIT 15` slice |
+| 2026-07-30 | Phase 4a: write-path invariants | derived investment buckets fix two snapshots reading $0.00 for a $1,661.66 portfolio; backup closure 17 to 28 tables, **673 rows** that would have been silently dropped now round-trip exactly |
+| 2026-07-30 | Phase 5 (partial): savings rate | undefined rather than 0% for a no-income window |
+
+### Recurring lesson, worth keeping
+
+Six separate times, a test failed only because its hand-written schema lacked a column, a CHECK, or a
+table that the real migrations produce (`manually_categorized`, `duplicate_status`, `is_estimated`,
+the migration-042 provenance tables, `securities` timestamps that do not exist, a positional
+`INSERT` broken by a new column). Each failure was the audit's structural blind spot surfacing:
+a test that builds its own schema cannot catch a divergence from the migrated one. `migratedTestDb()`
+in `tests/helpers/schema.ts` now exists and every new test uses it. Converting the remaining
+hand-written schemas is a Phase 9 item.
