@@ -137,89 +137,89 @@ settled history is invisible to it.
 
 **5b.1 Make a credit position representable.** Readers first, or the app disagrees with itself.
 
-- [ ] `safeToSpend.ts:72` — drop `Math.abs`; a negative card balance reduces what is owed. Rewrite
+- [x] `safeToSpend.ts:72` — drop `Math.abs`; a negative card balance reduces what is owed. Rewrite
       the comment on `:71`, which currently asserts the thing being removed.
-- [ ] `aiContext.ts:266` — drop `Math.abs`, and branch the label so a negative renders as
+- [x] `aiContext.ts:266` — drop `Math.abs`, and branch the label so a negative renders as
       "$X.XX credit balance" and never as "owed".
-- [ ] `netWorthHistory.ts:184` — `deriveAssetBuckets` must not abs a liability into the liabilities
+- [x] `netWorthHistory.ts:184` — `deriveAssetBuckets` must not abs a liability into the liabilities
       bucket.
-- [ ] `snapshot.ts:415` — the clamp that says "neither a market-driven account nor a liability can
+- [x] `snapshot.ts:415` — the clamp that says "neither a market-driven account nor a liability can
       sensibly go negative" is wrong for liabilities and must stop applying to them.
-- [ ] Test: one liability fixture at −$563.26 must produce `netWorth = assets + 56326`,
+- [x] Test: one liability fixture at −$563.26 must produce `netWorth = assets + 56326`,
       `cardBalances = -56326`, and an `aiContext` line containing "credit", in all four services.
 
 **5b.2 Put the sign invariant in the write path.** Exact-magnitude only.
 
-- [ ] A new sync stage that runs **after** transactions are written and **before** the snapshot, so
+- [x] A new sync stage that runs **after** transactions are written and **before** the snapshot, so
       net worth is written from a corrected balance rather than corrected afterwards. Per liability
       account: `expected_owed = owed_at_newest_measured_snapshot − SUM(amount since that date)`.
       Adopt `expected` **only** when `expected < 0`, `stored > 0`, and `|expected| === |stored|`
       exactly, to the cent. No tolerance.
-- [ ] Exactness is the safety property, and it is why this is not a heuristic: the rule can only
+- [x] Exactness is the safety property, and it is why this is not a heuristic: the rule can only
       fire when the provider's own transactions agree with the provider's own magnitude and disagree
       only about direction. An incomplete feed (Discover's backfill floor is 2026-06-16, Coinbase's
       is 2025-09-04) cannot trigger it, because then the magnitudes will not match to the cent.
-- [ ] Every adoption writes a `sync_changes` row naming both values, so a corrected balance is never
+- [x] Every adoption writes a `sync_changes` row naming both values, so a corrected balance is never
       silently different from what the provider said.
-- [ ] Widen the `liabilityAdjustedCents` guard so it is not one-sided: it should fire whenever the
+- [x] Widen the `liabilityAdjustedCents` guard so it is not one-sided: it should fire whenever the
       provider's sign disagrees with the ledger's, not only when the magnitude is positive.
-- [ ] Tests, driven through a real payload: BofA's exact shape (previous 0, one +$5.82 row, provider
+- [x] Tests, driven through a real payload: BofA's exact shape (previous 0, one +$5.82 row, provider
       −$5.82) must store −582 and emit an advisory. Capital One's shape (previous 0, one −$8.88 row,
       provider −$8.88) must store +888 untouched. A deliberately mismatched magnitude must store the
       provider's value untouched.
 
 **5b.3 Stop reconciliation reporting a boundary artifact as a ledger gap.**
 
-- [ ] `AccountReconciliation` gains `boundary_amount` = `SUM(amount on first_date) − SUM(amount on
+- [x] `AccountReconciliation` gains `boundary_amount` = `SUM(amount on first_date) − SUM(amount on
       last_date)` and `adjusted_residual` = `residual − boundary_amount`, using the same
       `pending = 0` filter as `sumBetween`.
-- [ ] `unreconciled` filters on `adjusted_residual`; the row keeps reporting `residual` and
+- [x] `unreconciled` filters on `adjusted_residual`; the row keeps reporting `residual` and
       `boundary_amount` separately, so the uncertainty is surfaced rather than hidden. Bounded by one
       calendar day of activity at each end, so it cannot mask a mid-horizon gap.
-- [ ] Test: one +$544.18 row dated exactly on `first_date` must give residual 54418,
+- [x] Test: one +$544.18 row dated exactly on `first_date` must give residual 54418,
       boundary_amount 54418, adjusted_residual 0, and must not appear in `unreconciled`; the same row
       dated one day inside the horizon must still appear.
-- [ ] Expected result after 5b.1–5b.3: `unreconciled` is empty and `total_residual` is $40.13
+- [x] Expected result after 5b.1–5b.3: `unreconciled` is empty and `total_residual` is $40.13
       (Coinbase $41.06 + Roth IRA −$0.93, both market-driven price drift).
 
 **5b.4 Brokerage sign: detect and surface, never rewrite.**
 
-- [ ] `reconciliation.ts` gains `direction_conflict`, set when `sign(observed_delta) !==
+- [x] `reconciliation.ts` gains `direction_conflict`, set when `sign(observed_delta) !==
       sign(explained_delta)` and `|explained_delta| > RESIDUAL_TOLERANCE_CENTS`. The market-driven
       early-return at `:184` becomes `if (is_market_driven && !direction_conflict) return false`.
       A price move can change the magnitude of a brokerage's residual; it cannot make the ledger's
       own external-flow direction disagree with the balance.
-- [ ] An ingest-time advisory in the existing `errors[]` channel (the one `triageSimplefinErrors`
+- [x] An ingest-time advisory in the existing `errors[]` channel (the one `triageSimplefinErrors`
       already classifies as advisory rather than reauth), gated to the whole-pass case — every row in
       the pass same-signed, balance moved the other way — so posting lag on a busy checking account
       cannot re-noise the sync panel.
-- [ ] `simplefin.ts:556` stays exactly as it is. The passthrough is the invariant being protected.
-- [ ] Test: `tests/reconciliation.test.ts`'s existing market-driven case must still pass (that
+- [x] `simplefin.ts:556` stays exactly as it is. The passthrough is the invariant being protected.
+- [x] Test: `tests/reconciliation.test.ts`'s existing market-driven case must still pass (that
       brokerage has no transactions, so `explained_delta = 0` and the guard cannot fire).
 
 **5b.5 Merchant rule precedence.**
 
-- [ ] `rules.ts:272-274` — make the order total and human-first:
+- [x] `rules.ts:272-274` — make the order total and human-first:
       `ORDER BY (source = 'ai') ASC, length(pattern) DESC, created_at DESC, id ASC`.
       `id ASC` is the load-bearing part: without a total order the winner among 41 tied `created_at`
       groups is whatever the sorter emits. `MerchantRule` gains `source`.
-- [ ] `aiWriteGuards.ts` gains `checkRuleDoesNotContradictOwnerRule(db, pattern, categoryId)`,
+- [x] `aiWriteGuards.ts` gains `checkRuleDoesNotContradictOwnerRule(db, pattern, categoryId)`,
       wired into `confirmMerchantRule` **before** `checkRuleAgreesWithHistory`. Contention means
       either pattern matches the other, or the two share a matching transaction. This is the guard
       that closes the hole: `checkRuleAgreesWithHistory` reads only `transactions`, so an owner rule
       for a merchant with no history is invisible to it.
-- [ ] Retire the two contradicting AI rules (`"Spotify"`, `"Backblaze"`) through `retireMerchantRule`
+- [x] Retire the two contradicting AI rules (`"Spotify"`, `"Backblaze"`) through `retireMerchantRule`
       so the retirement is itself recorded, not deleted.
-- [ ] Fix the stale comment at `rules.ts:266-270` (62 human rows, not 0).
-- [ ] `routes/rules.ts:230-232` calls `applyMerchantRulesToExistingTransactions` with no
+- [x] Fix the stale comment at `rules.ts:266-270` (62 human rows, not 0).
+- [x] `routes/rules.ts:230-232` calls `applyMerchantRulesToExistingTransactions` with no
       `skipManual`, so `POST /api/rules/apply {only_uncategorized:false}` can overwrite
       `category_source = 'human'` rows. It writes 0 today only because none of the 62 human rows
       happens to contend. That is luck, not a guard.
-- [ ] Tests: three rules with **identical** `created_at` (human streaming, human streaming, ai
+- [x] Tests: three rules with **identical** `created_at` (human streaming, human streaming, ai
       subscriptions) then `recategorizeAll`, asserting streaming wins — the identical timestamps are
       the point. And an owner rule with **zero** matching transactions must still block a
       contradicting AI rule — zero transactions is the case the existing guard waves through.
-- [ ] Expected result: `recategorizeAll` goes from 41 changes to 2, and both survivors are
+- [x] Expected result: `recategorizeAll` goes from 41 changes to 2, and both survivors are
       pre-existing human-rule effects present in the baseline.
 
 ---
@@ -481,3 +481,57 @@ and must be handled, not flattened back into looking tidy.
 - Rewriting a number an institution reported. Detection and provenance, never a silent correction —
   with the single, exactly-bounded exception in 5b.2, where the provider's own transactions prove the
   provider's own magnitude and disagree only about direction.
+
+---
+
+## Progress log
+
+| When | Landed | Verified against the live database |
+|---|---|---|
+| 2026-07-30 | **Phase 5b complete**, 3 commits (`1eee66f`, `d111cfd`, `5d8210a`) | 560 tests pass, both typechecks clean, `vite build` succeeds |
+
+**Phase 5b, measured.** Every figure produced by running the real services against a copy of
+`.mizan/mizan.db`.
+
+| | before | after |
+|---|---|---|
+| Net worth | $2,081.45 | **$3,787.23** (+$1,705.78) |
+| Liabilities | $5,653.71 owed | **$3,947.93 owed**, three cards correctly in credit |
+| Free to spend | −$1,427.96 | **+$277.82** |
+| Reconciliation, boundary artifacts | Chase Checking −$544.18, Chase Sapphire −$13.26 flagged as ledger gaps | **both adjust to 0** and drop out of `unreconciled` |
+| Mis-signed brokerage transfers | invisible | **1 finding**: Chase Checking / Fidelity Individual, 20 legs, 2026-05-21 to 2026-07-27, $700.00 that left two accounts and arrived nowhere |
+| `recategorizeAll` | 41 rows relabelled, 39 of them by AI rules that contradict the owner's | **2 rows**, both pre-existing owner-rule effects |
+
+### What the three verification rounds cost, and what they were for
+
+Phase 5b took **three** adversarial rounds, not one. The first implementation passed its own tests
+and was still wrong in ways the tests could not see. The pattern is worth keeping:
+
+1. Round 1 built the correction as a post-sync stage. It worked, and it produced **nine spurious
+   sync-panel rows every hour, forever**, because the provider rewrites the wrong sign each sync and
+   three separate mechanisms each reported the round trip. This codebase had already had that exact
+   failure once (the ~123 phantom "modified" rows an hour).
+2. Round 2 added two detectors that fired on ordinary healthy events: `direction_conflict` alarmed on
+   any brokerage deposit during a down month, and the ingest advisory compared 30 days of ledger
+   against one hour of balance movement. Both were deleted rather than tuned.
+3. Round 3's first `flowConservation` predicate fired on a payday split, on two card payments in one
+   week, and on a transfer plus its reversal. The predicate that holds requires **both legs
+   transfer-class, both outbound, neither already paired, and at least two matched pairs between the
+   same two accounts** — a coincidence is a coincidence, a repeated pattern is a defect.
+
+The standing lesson: **a detector that fires on a healthy event does not ship.** Every detector in
+this phase now has healthy-case tests proving silence, not just defect-case tests proving detection.
+
+### Deliberately not done, and why
+
+- **The mis-signed Fidelity amounts are reported, not corrected.** `upsertSimplefinTransaction`
+  overwrites `amount`, so a repair reverts within the hour, and there is no `amount_source` column,
+  so a corrected amount would be indistinguishable from a reported one. Correcting it needs the
+  transaction field provenance in Phase 6.2.
+- **The queue does not pre-filter drafts the guards would refuse.** It was built that way and
+  reverted: `merchantMatchesRulePattern`'s substring branch sweeps the bare merchant name `Uber`
+  into an `UBER *EATS` rule, so a proposal agreeing with 113 settled rows is refused, and hiding it
+  buried a legitimate suggestion with no reason and no way to see it. Refusing on click, with the
+  reason, is the visible version of the same decision. The matcher's looseness is a real defect and
+  belongs with the Phase 6 AI write work: confirming such a rule would relabel 13 ride charges as
+  food delivery.
