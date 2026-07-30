@@ -1,4 +1,9 @@
-# mizān rebuild — plan
+# mizān rebuild — plan (part I)
+
+**Everything still open now lives in `rebuild-part-2.md`.** This file remains the record of what the
+audit found and what Phases 0–5 and 7 shipped. Two of its entries were later found to be mis-framed
+and are corrected there: the Chase Checking residual is a reconciliation horizon artifact rather than
+a missing payroll, and the crypto cost basis is blocked on missing units rather than on a lot policy.
 
 Written 2026-07-30. Basis: a 58-agent audit (9 subsystem auditors, per-finding adversarial
 refutation, a completeness critic) plus direct verification against the live `.mizan/mizan.db`
