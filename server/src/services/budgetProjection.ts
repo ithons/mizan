@@ -114,30 +114,6 @@ function spendingByMonth(
   return new Map(rows.map((row) => [row.month, row.spent]));
 }
 
-function rolloverBalanceForBudget(
-  db: Database.Database,
-  budget: BudgetRow,
-  categoryIds: Set<string>,
-  selectedMonth: string
-): number {
-  if (!budget.rollover) return 0;
-
-  const createdMonth = budget.created_at.slice(0, 7);
-  const seed = Number(budget.rollover_balance ?? 0);
-  if (createdMonth >= selectedMonth) return seed;
-
-  const spending = spendingByMonth(db, categoryIds, createdMonth, selectedMonth);
-  let balance = seed;
-  let monthKey = createdMonth;
-
-  while (monthKey < selectedMonth) {
-    balance += budget.amount - (spending.get(monthKey) ?? 0);
-    monthKey = nextMonthKey(monthKey);
-  }
-
-  return balance;
-}
-
 function monthRangeForLedger(createdMonth: string, throughMonth: string, months: number): {
   firstComputedMonth: string;
   firstReturnedMonth: string;
@@ -267,6 +243,9 @@ export function getMonthlyBudgetsWithProjection(
 
   const descendants = categoryDescendants(db);
   const occurrences = recurringOccurrencesForMonth(db, startDate, endDate, now);
+  const carriedIn = budgets.some((budget) => budget.rollover)
+    ? rolloverCarriedIntoMonth(db, `${year}-${monthPart}`, now)
+    : new Map<string, number>();
 
   return budgets.map((budget) => {
     const categoryIds = descendants.get(budget.category_id) ?? new Set([budget.category_id]);
@@ -279,7 +258,9 @@ export function getMonthlyBudgetsWithProjection(
       confidence = combineConfidence(confidence, occurrence.confidence);
     }
 
-    const rolloverBalance = rolloverBalanceForBudget(db, budget, categoryIds, `${year}-${monthPart}`);
+    const rolloverBalance = budget.rollover
+      ? carriedIn.get(budget.id) ?? Number(budget.rollover_balance ?? 0)
+      : 0;
     const availableAmount = budget.amount + rolloverBalance;
     const projectedSpend = (budget.spent ?? 0) + expectedRecurring;
     const projectedRemaining = availableAmount - projectedSpend;
@@ -313,16 +294,56 @@ export function getMonthlyBudgetsWithProjection(
   });
 }
 
-export function getBudgetRolloverLedger(
+export interface RolloverLedgerOptions {
+  budgetId?: string;
+  month?: string;
+  months?: number;
+  now?: Date;
+}
+
+function recordedKey(budgetId: string, month: string): string {
+  return `${budgetId}:${month}`;
+}
+
+/**
+ * The budget amount each already-recorded month was walked with, keyed by budget and month.
+ *
+ * `budgets.amount` is the live figure and nothing versions it, so re-deriving a closed month from
+ * it restates the past: raising the Shopping budget from $400 to $500 in August would rewrite
+ * July's carryover as though July had always been $500. A month that was recorded while it was
+ * open keeps the amount that was actually in force.
+ *
+ * Keyed on `(budget_id, month)` because that, not `id`, is what the upsert conflicts on. A row
+ * written under some other id is still the row the upsert updates, and keying on `id` would miss
+ * it and silently fall back to the live amount, which is the defect this whole path exists to fix.
+ */
+function recordedBudgetAmounts(db: Database.Database, budgetId?: string): Map<string, number> {
+  const rows = db.prepare(`
+    SELECT budget_id, month, budget_amount FROM budget_rollover_ledger
+    ${budgetId ? 'WHERE budget_id = ?' : ''}
+  `).all(...(budgetId ? [budgetId] : [])) as Array<{
+    budget_id: string;
+    month: string;
+    budget_amount: number;
+  }>;
+
+  return new Map(rows.map((row) => [recordedKey(row.budget_id, row.month), row.budget_amount]));
+}
+
+/**
+ * Walk the carryover month by month.
+ *
+ * `windowed` trims the result to the caller's `months` window; the record path needs every month
+ * back to the budget's creation, because a month it skips can never be recorded later.
+ */
+function walkRolloverLedger(
   db: Database.Database,
-  options: {
-    budgetId?: string;
-    month?: string;
-    months?: number;
-    now?: Date;
-  } = {}
+  options: RolloverLedgerOptions,
+  windowed: boolean
 ): BudgetRolloverLedgerEntry[] {
-  const throughMonth = options.month ?? format(options.now ?? new Date(), 'yyyy-MM');
+  const now = options.now ?? new Date();
+  const openMonth = format(now, 'yyyy-MM');
+  const throughMonth = options.month ?? openMonth;
   const months = Math.min(Math.max(options.months ?? 12, 1), 120);
   const descendants = categoryDescendants(db);
   const where = options.budgetId ? 'WHERE b.id = ? AND b.rollover = 1' : 'WHERE b.rollover = 1';
@@ -340,19 +361,8 @@ export function getBudgetRolloverLedger(
     ORDER BY c.name ASC
   `).all(...params) as LedgerBudgetRow[];
 
-  const calculatedAt = new Date().toISOString();
-  const upsert = db.prepare(`
-    INSERT INTO budget_rollover_ledger (
-      id, budget_id, month, starting_rollover, budget_amount, actual_spend, ending_rollover, calculated_at
-    )
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-    ON CONFLICT(budget_id, month) DO UPDATE SET
-      starting_rollover = excluded.starting_rollover,
-      budget_amount = excluded.budget_amount,
-      actual_spend = excluded.actual_spend,
-      ending_rollover = excluded.ending_rollover,
-      calculated_at = excluded.calculated_at
-  `);
+  const recorded = recordedBudgetAmounts(db, options.budgetId);
+  const calculatedAt = now.toISOString();
   const entries: BudgetRolloverLedgerEntry[] = [];
 
   for (const budget of budgets) {
@@ -366,23 +376,18 @@ export function getBudgetRolloverLedger(
     let monthKey = range.firstComputedMonth;
 
     while (monthKey < range.endMonthExclusive) {
+      const id = recordedKey(budget.id, monthKey);
+      // The month in progress is still being lived in, so it tracks the live budget and freezes
+      // only once a later month has opened. Spend is always re-derived: a late-posting or
+      // recategorized transaction has to reach the month it belongs to, however old that month is.
+      const budgetAmount = monthKey < openMonth
+        ? recorded.get(id) ?? budget.amount
+        : budget.amount;
       const startingRollover = balance;
       const actualSpend = spending.get(monthKey) ?? 0;
-      const endingRollover = startingRollover + budget.amount - actualSpend;
-      const id = `${budget.id}:${monthKey}`;
+      const endingRollover = startingRollover + budgetAmount - actualSpend;
 
-      upsert.run(
-        id,
-        budget.id,
-        monthKey,
-        startingRollover,
-        budget.amount,
-        actualSpend,
-        endingRollover,
-        calculatedAt
-      );
-
-      if (monthKey >= range.firstReturnedMonth) {
+      if (!windowed || monthKey >= range.firstReturnedMonth) {
         entries.push({
           id,
           budget_id: budget.id,
@@ -392,7 +397,7 @@ export function getBudgetRolloverLedger(
           category_icon: budget.category_icon,
           month: monthKey,
           starting_rollover: startingRollover,
-          budget_amount: budget.amount,
+          budget_amount: budgetAmount,
           actual_spend: actualSpend,
           ending_rollover: endingRollover,
           calculated_at: calculatedAt,
@@ -408,4 +413,84 @@ export function getBudgetRolloverLedger(
     const categoryCompare = (a.category_name ?? '').localeCompare(b.category_name ?? '');
     return categoryCompare || a.month.localeCompare(b.month);
   });
+}
+
+/**
+ * What each rollover budget carries into `selectedMonth`, keyed by budget id.
+ *
+ * The Budget screen's `rollover_balance` and the carryover ledger are the same quantity, so they
+ * run the same walk. They used to be two walks, and the second one took the live `budgets.amount`
+ * for closed months: on the owner's ledger a single $400 to $500 raise made the Budget screen say
+ * $1,703.63 carried into August while the carryover panel said $1,603.63.
+ */
+function rolloverCarriedIntoMonth(
+  db: Database.Database,
+  selectedMonth: string,
+  now: Date
+): Map<string, number> {
+  const entries = walkRolloverLedger(db, { month: selectedMonth, months: 1, now }, true);
+  return new Map(entries.map((entry) => [entry.budget_id, entry.starting_rollover]));
+}
+
+/** Whether any budget carries a balance forward, so callers can skip a walk that has no subject. */
+export function hasRolloverBudgets(db: Database.Database): boolean {
+  return db.prepare('SELECT 1 AS present FROM budgets WHERE rollover = 1 LIMIT 1').get() !== undefined;
+}
+
+/**
+ * Read the rollover ledger. Pure: it writes nothing.
+ *
+ * It used to upsert every month it walked, which made `GET /api/budgets/rollover-ledger` a writer.
+ * `localGuard` exempts GET from the cross-origin check on the assumption that a GET cannot mutate,
+ * so any page could rewrite the table, and each read also restated every past month from the
+ * current budget amount.
+ */
+export function computeBudgetRolloverLedger(
+  db: Database.Database,
+  options: RolloverLedgerOptions = {}
+): BudgetRolloverLedgerEntry[] {
+  return walkRolloverLedger(db, options, true);
+}
+
+/**
+ * Commit the ledger, from each budget's creation month through the month in progress.
+ *
+ * The only writer. Called after a sync has settled categories and spend, and after the owner
+ * changes a budget, never from a read path.
+ */
+export function recordBudgetRolloverLedger(
+  db: Database.Database,
+  options: { budgetId?: string; now?: Date } = {}
+): { recorded: number } {
+  const entries = walkRolloverLedger(db, { budgetId: options.budgetId, now: options.now }, false);
+  const upsert = db.prepare(`
+    INSERT INTO budget_rollover_ledger (
+      id, budget_id, month, starting_rollover, budget_amount, actual_spend, ending_rollover, calculated_at
+    )
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(budget_id, month) DO UPDATE SET
+      starting_rollover = excluded.starting_rollover,
+      budget_amount = excluded.budget_amount,
+      actual_spend = excluded.actual_spend,
+      ending_rollover = excluded.ending_rollover,
+      calculated_at = excluded.calculated_at
+  `);
+
+  const write = db.transaction((rows: BudgetRolloverLedgerEntry[]) => {
+    for (const row of rows) {
+      upsert.run(
+        row.id,
+        row.budget_id,
+        row.month,
+        row.starting_rollover,
+        row.budget_amount,
+        row.actual_spend,
+        row.ending_rollover,
+        row.calculated_at
+      );
+    }
+  });
+
+  write(entries);
+  return { recorded: entries.length };
 }

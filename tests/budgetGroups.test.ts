@@ -64,6 +64,20 @@ function setupDb(): Database.Database {
       updated_at TEXT NOT NULL
     );
 
+    -- The projection reads recorded carryover amounts for closed months, so a group rollup that
+    -- contains a rollover budget touches this table too.
+    CREATE TABLE budget_rollover_ledger (
+      id TEXT PRIMARY KEY,
+      budget_id TEXT NOT NULL,
+      month TEXT NOT NULL,
+      starting_rollover INTEGER NOT NULL,
+      budget_amount INTEGER NOT NULL,
+      actual_spend INTEGER NOT NULL,
+      ending_rollover INTEGER NOT NULL,
+      calculated_at TEXT NOT NULL,
+      UNIQUE(budget_id, month)
+    );
+
     CREATE TABLE budget_group_members (
       group_id TEXT NOT NULL,
       category_id TEXT NOT NULL,

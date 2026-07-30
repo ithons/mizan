@@ -15,6 +15,7 @@ import {
   startSyncRun,
 } from './syncHistory';
 import { refreshTransactionIntegrity, type TransactionIntegrityResult } from './transactionIntegrity';
+import { hasRolloverBudgets, recordBudgetRolloverLedger } from './budgetProjection';
 import {
   correctLiabilitySigns,
   describeLiabilitySignCorrection,
@@ -505,6 +506,29 @@ async function _runFullSyncInternal(): Promise<void> {
     );
     const integrity = postSync.integrity;
     deferredError = postSync.deferredError;
+
+    // Runs after auto-categorization, because a row that just changed category changed the budget
+    // it counts against. This is the only writer of the rollover ledger now that reading it no
+    // longer records it, so a month this skips is a month the ledger has no record of.
+    // Silent on an install with no rollover budget: the stage would write nothing, and narrating
+    // it teaches the owner that a feature they never turned on is part of every sync.
+    if (hasRolloverBudgets(db)) {
+      emitSyncEvent({ type: 'sync_progress', message: 'Recording budget carryover...', progress: 95 });
+      try {
+        recordBudgetRolloverLedger(db);
+      } catch (err) {
+        const message = (err as Error).message || 'Budget carryover failed';
+        recordSyncRunItem(db, run.id, {
+          provider: 'system',
+          connection_id: 'budget-rollover-ledger',
+          institution_name: 'Budget carryover',
+          status: 'failed',
+          error_message: message,
+          recovery_action: 'Retry sync. The carryover will be recorded again next sync.',
+        });
+        deferredError = deferredError ?? new Error(message);
+      }
+    }
 
     finishSyncRun(db, run.id, {
       status: deferredError ? 'partial' : 'succeeded',

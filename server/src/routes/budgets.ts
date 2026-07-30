@@ -9,8 +9,9 @@ import {
   UpsertBudgetSchema,
 } from '../../../shared/schemas';
 import {
-  getBudgetRolloverLedger,
+  computeBudgetRolloverLedger,
   getMonthlyBudgetsWithProjection,
+  recordBudgetRolloverLedger,
 } from '../services/budgetProjection';
 import { getBudgetGroupsWithTotals } from '../services/budgetGroups';
 import { toCents, dollarizeFields } from '../services/money';
@@ -288,7 +289,7 @@ router.get('/rollover-ledger', (req: Request, res: Response, next: NextFunction)
 
     const db = getDb();
     res.json({
-      data: getBudgetRolloverLedger(db, {
+      data: computeBudgetRolloverLedger(db, {
         budgetId: typeof req.query.budgetId === 'string' ? req.query.budgetId : undefined,
         month: typeof req.query.month === 'string' ? req.query.month : undefined,
         months: months ?? undefined,
@@ -343,25 +344,30 @@ router.put(
         'SELECT id FROM budgets WHERE category_id = ?'
       ).get(categoryId) as { id: string } | undefined;
 
-      if (existing) {
-        db.prepare(`
-          UPDATE budgets
-          SET amount = ?, period = ?, rollover = ?, updated_at = ?
-          WHERE id = ?
-        `).run(toCents(body.amount), body.period, body.rollover ? 1 : 0, now, existing.id);
+      // The write and the carryover record are one transaction. Split, a failing record returned
+      // 500 for an amount change that had already landed, and the owner had no way to tell which.
+      const upsert = db.transaction((): Record<string, unknown> => {
+        const id = existing?.id ?? uuidv4();
 
-        const updated = db.prepare('SELECT * FROM budgets WHERE id = ?').get(existing.id) as Record<string, unknown>;
-        res.json({ data: dollarizeFields(updated, BUDGET_MONEY_FIELDS) });
-      } else {
-        const id = uuidv4();
-        db.prepare(`
-          INSERT INTO budgets (id, category_id, amount, period, rollover, rollover_balance, created_at, updated_at)
-          VALUES (?, ?, ?, ?, ?, 0, ?, ?)
-        `).run(id, categoryId, toCents(body.amount), body.period, body.rollover ? 1 : 0, now, now);
+        if (existing) {
+          db.prepare(`
+            UPDATE budgets
+            SET amount = ?, period = ?, rollover = ?, updated_at = ?
+            WHERE id = ?
+          `).run(toCents(body.amount), body.period, body.rollover ? 1 : 0, now, id);
+        } else {
+          db.prepare(`
+            INSERT INTO budgets (id, category_id, amount, period, rollover, rollover_balance, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, 0, ?, ?)
+          `).run(id, categoryId, toCents(body.amount), body.period, body.rollover ? 1 : 0, now, now);
+        }
 
-        const created = db.prepare('SELECT * FROM budgets WHERE id = ?').get(id) as Record<string, unknown>;
-        res.status(201).json({ data: dollarizeFields(created, BUDGET_MONEY_FIELDS) });
-      }
+        recordBudgetRolloverLedger(db, { budgetId: id });
+        return db.prepare('SELECT * FROM budgets WHERE id = ?').get(id) as Record<string, unknown>;
+      });
+
+      const budget = dollarizeFields(upsert(), BUDGET_MONEY_FIELDS);
+      res.status(existing ? 200 : 201).json({ data: budget });
     } catch (err) {
       next(err);
     }

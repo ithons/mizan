@@ -23,6 +23,7 @@ import {
   checkRuleDoesNotContradictOwnerRule,
   partitionByAuthorship,
 } from './aiWriteGuards';
+import { recordBudgetRolloverLedger } from './budgetProjection';
 import { revertAction, writeTransactionCategory } from './categoryWrites';
 import { refreshTransactionIntegrity } from './transactionIntegrity';
 import { upsertRecurringAdjustment } from './recurringAdjustments';
@@ -1002,6 +1003,11 @@ function confirmBudget(db: Database.Database, payload: Extract<AdvisorDraftPaylo
       WHERE id = ?
     `).run(amountCents, payload.period, payload.rollover ? 1 : 0, now, existing.id);
 
+    // The second writer of budgets.amount, and it has to record what it just set for the same
+    // reason the route does. Left to the next hourly sync, a month that turns over inside that
+    // window freezes at the pre-change amount with no surface anywhere to correct it.
+    recordBudgetRolloverLedger(db, { budgetId: existing.id });
+
     return { changed: result.changes, result: { budget_id: existing.id } };
   }
 
@@ -1010,6 +1016,8 @@ function confirmBudget(db: Database.Database, payload: Extract<AdvisorDraftPaylo
     INSERT INTO budgets (id, category_id, amount, period, rollover, rollover_balance, created_at, updated_at)
     VALUES (?, ?, ?, ?, ?, 0, ?, ?)
   `).run(id, payload.category_id, amountCents, payload.period, payload.rollover ? 1 : 0, now, now);
+
+  recordBudgetRolloverLedger(db, { budgetId: id });
 
   return { changed: 1, result: { budget_id: id } };
 }
