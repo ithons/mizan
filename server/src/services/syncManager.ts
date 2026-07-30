@@ -15,7 +15,14 @@ import {
   startSyncRun,
 } from './syncHistory';
 import { refreshTransactionIntegrity, type TransactionIntegrityResult } from './transactionIntegrity';
-import { describeBalanceChange } from './balanceChanges';
+import {
+  correctLiabilitySigns,
+  describeLiabilitySignCorrection,
+  type LiabilitySignCorrection,
+  type LiabilitySignReport,
+} from './liabilitySign';
+import { describeBalanceChange, type AccountBalanceChange } from './balanceChanges';
+import { toCents, toDollars } from './money';
 import { runBackgroundAiReview } from './aiWorker';
 import { withRetry } from './retry';
 
@@ -81,6 +88,7 @@ export interface PostSyncStageFns {
   detectRecurring: () => void;
   refreshTransactionIntegrity: (db: Database.Database) => TransactionIntegrityResult;
   autoCategorizeTransactions: (db: Database.Database) => { updated: number };
+  correctLiabilitySigns: (db: Database.Database) => LiabilitySignReport;
   takeSnapshot: () => void;
 }
 
@@ -88,6 +96,7 @@ const defaultPostSyncStages: PostSyncStageFns = {
   detectRecurring,
   refreshTransactionIntegrity,
   autoCategorizeTransactions,
+  correctLiabilitySigns: (db) => correctLiabilitySigns(db, new Date().toISOString()),
   takeSnapshot,
 };
 
@@ -96,15 +105,133 @@ export interface PostSyncStagesResult {
   deferredError: Error | null;
 }
 
+/** A provider's balance changes, held back until the liability signs have been settled. */
+export interface PendingBalanceChanges {
+  runItemId: string;
+  changes: AccountBalanceChange[];
+}
+
+/**
+ * Drop or restate the balance changes that a sign correction is about to undo.
+ *
+ * A liability whose provider reports its credit as debt gets that wrong number written every hour,
+ * so `balancesDiffer` sees -$283.81 becoming +$283.81 and the panel reports a $567.62 swing that
+ * never happened. A sign correction is not a balance change: where the corrected value equals what
+ * was there before the sync, the account did not move and there is nothing to report.
+ */
+export function reconcileBalanceChanges(
+  changes: AccountBalanceChange[],
+  corrections: LiabilitySignCorrection[]
+): AccountBalanceChange[] {
+  if (corrections.length === 0) return changes;
+
+  const correctedDollars = new Map(
+    corrections.map((correction) => [correction.account_id, toDollars(correction.corrected_balance)])
+  );
+
+  const kept: AccountBalanceChange[] = [];
+  for (const change of changes) {
+    const corrected = correctedDollars.get(change.accountId);
+    if (corrected === undefined) {
+      kept.push(change);
+      continue;
+    }
+    if (corrected === change.previousBalance) continue;
+    kept.push({ ...change, newBalance: corrected });
+  }
+  return kept;
+}
+
+/**
+ * What each account held before this sync started, for the accounts a provider moved.
+ *
+ * A correction's `stored_balance` is what the provider wrote moments ago, not what the ledger had
+ * been carrying, so it cannot answer "is this news?" on its own.
+ */
+function preSyncBalanceCents(pending: PendingBalanceChanges[]): Map<string, number> {
+  const balances = new Map<string, number>();
+  for (const group of pending) {
+    for (const change of group.changes) {
+      balances.set(change.accountId, toCents(change.previousBalance));
+    }
+  }
+  return balances;
+}
+
 // Each stage (recurring detection, integrity refresh, snapshot) gets its own try/catch
 // so a failure in one doesn't skip the others or mask an otherwise-successful provider sync.
 export function runPostSyncStages(
   db: Database.Database,
   runId: string,
   deferredError: Error | null,
-  stages: PostSyncStageFns = defaultPostSyncStages
+  stages: PostSyncStageFns = defaultPostSyncStages,
+  pendingBalanceChanges: PendingBalanceChanges[] = []
 ): PostSyncStagesResult {
   let nextDeferredError = deferredError;
+
+  // FIRST, ahead of every other post-sync stage: the providers have just overwritten
+  // `accounts.current_balance` with a figure whose direction may be wrong, and every stage after
+  // this one reads that column. Correcting it here keeps the window in which the ledger disagrees
+  // with itself as short as it can be, and lets the provider's balance changes be reconciled
+  // against the corrections before either is reported.
+  emitSyncEvent({ type: 'sync_progress', message: 'Verifying liability balances...', progress: 72 });
+  let corrections: LiabilitySignCorrection[] = [];
+  try {
+    const signs = stages.correctLiabilitySigns(db);
+    corrections = signs.corrections;
+
+    // Only what changed. An account that was already sitting corrected, had the provider's wrong
+    // sign written over it and got corrected back has nothing to say, and saying it hourly forever
+    // is how a panel stops being read.
+    const preSync = preSyncBalanceCents(pendingBalanceChanges);
+    const news = corrections.filter(
+      (correction) =>
+        (preSync.get(correction.account_id) ?? correction.stored_balance) !== correction.corrected_balance
+    );
+
+    if (news.length > 0 || signs.unverifiable.length > 0) {
+      const signItem = recordSyncRunItem(db, runId, {
+        provider: 'system',
+        connection_id: 'liability-sign',
+        institution_name: 'Liability balance direction',
+        status: 'succeeded',
+        error_message: signs.unverifiable.length > 0
+          ? signs.unverifiable.map((a) => `${a.account_name ?? a.account_id}: ${a.reason}`).join('; ')
+          : undefined,
+      });
+      // A corrected balance is never silently different from what the provider said.
+      for (const correction of news) {
+        recordSyncChange(db, signItem.id, {
+          entity_type: 'account',
+          entity_id: correction.account_id,
+          change_type: 'updated',
+          description: describeLiabilitySignCorrection(correction),
+        });
+      }
+    }
+  } catch (err) {
+    const message = (err as Error).message || 'Liability balance verification failed';
+    recordSyncRunItem(db, runId, {
+      provider: 'system',
+      connection_id: 'liability-sign',
+      institution_name: 'Liability balance direction',
+      status: 'failed',
+      error_message: message,
+      recovery_action: 'Retry sync. Liability balance direction will be checked again next sync.',
+    });
+    nextDeferredError = nextDeferredError ?? new Error(message);
+  }
+
+  for (const group of pendingBalanceChanges) {
+    for (const change of reconcileBalanceChanges(group.changes, corrections)) {
+      recordSyncChange(db, group.runItemId, {
+        entity_type: 'account',
+        entity_id: change.accountId,
+        change_type: 'updated',
+        description: describeBalanceChange(change),
+      });
+    }
+  }
 
   emitSyncEvent({ type: 'sync_progress', message: 'Detecting recurring transactions...', progress: 75 });
   try {
@@ -275,6 +402,11 @@ async function _runFullSyncInternal(): Promise<void> {
 
   emitSyncEvent({ type: 'sync_start', message: 'Starting full sync...' });
 
+  // Held until the liability signs are settled: a balance the provider reported with the wrong
+  // direction is about to be corrected, and reporting the provider's figure as a movement would
+  // describe a swing that never happened.
+  const pendingBalanceChanges: PendingBalanceChanges[] = [];
+
   try {
     const creds = getCredentials();
 
@@ -315,14 +447,7 @@ async function _runFullSyncInternal(): Promise<void> {
           recovery_action: needsReauth ? 'Reconnect SimpleFIN in Settings to restore access for the affected institution.' : undefined,
         });
 
-        for (const change of simplefinResult.balanceChanges) {
-          recordSyncChange(db, runItem.id, {
-            entity_type: 'account',
-            entity_id: change.accountId,
-            change_type: 'updated',
-            description: describeBalanceChange(change),
-          });
-        }
+        pendingBalanceChanges.push({ runItemId: runItem.id, changes: simplefinResult.balanceChanges });
       } catch (err) {
         const message = (err as Error).message || 'SimpleFIN sync failed';
         db.prepare(`UPDATE simplefin_connections SET status = 'sync_error' WHERE id = 'simplefin_primary' AND status != 'removed'`)
@@ -356,14 +481,7 @@ async function _runFullSyncInternal(): Promise<void> {
           transactions_modified: coinbaseResult.staleAccountCount,
         });
 
-        for (const change of coinbaseResult.balanceChanges) {
-          recordSyncChange(db, runItem.id, {
-            entity_type: 'account',
-            entity_id: change.accountId,
-            change_type: 'updated',
-            description: describeBalanceChange(change),
-          });
-        }
+        pendingBalanceChanges.push({ runItemId: runItem.id, changes: coinbaseResult.balanceChanges });
       } catch (err) {
         const message = (err as Error).message || 'Coinbase sync failed';
         recordSyncRunItem(db, run.id, {
@@ -378,7 +496,13 @@ async function _runFullSyncInternal(): Promise<void> {
       }
     }
 
-    const postSync = runPostSyncStages(db, run.id, deferredError);
+    const postSync = runPostSyncStages(
+      db,
+      run.id,
+      deferredError,
+      defaultPostSyncStages,
+      pendingBalanceChanges
+    );
     const integrity = postSync.integrity;
     deferredError = postSync.deferredError;
 

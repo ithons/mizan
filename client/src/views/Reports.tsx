@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { format, startOfMonth, endOfMonth, subMonths, startOfYear } from 'date-fns';
 import { networthApi, reportsApi } from '../lib/api';
+import { readOwedTotal } from '../lib/accountBalance';
 import { ASSET_COLORS } from '../lib/chartColors';
 import { formatWholeCurrency } from '../lib/formatters';
 import { Screen, ScreenHeader, SectionLabel, Select, TrendChart } from '../components/balance';
@@ -53,14 +54,18 @@ function rangeDates(id: RangeId): { startDate: string; endDate: string } {
 }
 
 // ── Debt-payoff distribution (unchanged behavior) ──
-interface Buckets { liquid: number; equity: number; crypto: number; other: number; liabilities: number; netWorth: number; }
+export interface Buckets { liquid: number; equity: number; crypto: number; other: number; liabilities: number; netWorth: number; }
 function before(s: NetWorthSnapshot): Buckets {
   const liquid = s.liquid_assets ?? 0, equity = s.investment_assets ?? 0, crypto = s.crypto_assets ?? 0;
   const other = Math.max(0, s.total_assets - (liquid + equity + crypto));
   return { liquid, equity, crypto, other, liabilities: s.total_liabilities, netWorth: s.net_worth };
 }
-function afterPayoff(b: Buckets): Buckets {
-  return { ...b, liquid: Math.max(0, b.liquid - b.liabilities), liabilities: Math.max(0, b.liabilities - b.liquid) };
+export function afterPayoff(b: Buckets): Buckets {
+  // Only real debt can be paid off, and only out of cash you hold. With liabilities negative (the
+  // cards net in credit) the old `b.liquid - b.liabilities` drew the After-payoff Cash bar WIDER
+  // than Now by the credit: money the owner does not have, invented on a chart.
+  const payable = Math.max(0, Math.min(b.liabilities, b.liquid));
+  return { ...b, liquid: b.liquid - payable, liabilities: b.liabilities - payable };
 }
 const SEGMENTS: Array<{ key: keyof Buckets; label: string; color: string }> = [
   { key: 'liquid', label: 'Cash', color: LIQUID_COLOR },
@@ -71,6 +76,7 @@ const SEGMENTS: Array<{ key: keyof Buckets; label: string; color: string }> = [
 function Distribution({ b, scaleMax }: { b: Buckets; scaleMax: number }) {
   const assetTotal = b.liquid + b.equity + b.crypto + b.other;
   const pct = (v: number) => (scaleMax > 0 ? (v / scaleMax) * 100 : 0);
+  const owed = readOwedTotal(b.liabilities, 'Liabilities');
   return (
     <div className="space-y-3">
       <div>
@@ -85,9 +91,14 @@ function Distribution({ b, scaleMax }: { b: Buckets; scaleMax: number }) {
       </div>
       <div>
         <div className="mb-1 flex items-baseline justify-between text-body text-muted">
-          <span>Liabilities</span><span className="tabular-nums text-ink">{formatWholeCurrency(b.liabilities)}</span>
+          <span>{owed.label}</span>
+          <span className={`tabular-nums ${owed.inCredit ? 'text-sage-deep' : 'text-ink'}`}>
+            {formatWholeCurrency(owed.amount)}
+          </span>
         </div>
         <div className="flex h-7 w-full overflow-hidden rounded-md bg-rail">
+          {/* Debt only. A credit drawn in the liability colour reads as the debt it is the opposite
+              of, so the rail stays empty and the label above carries the reading. */}
           {b.liabilities > 0 && <div style={{ width: `${pct(b.liabilities)}%`, background: LIABILITY_COLOR }} />}
         </div>
       </div>
@@ -485,6 +496,13 @@ export function Reports() {
                 <p className="mb-4 text-body leading-relaxed text-muted">
                   Paying off {formatWholeCurrency(b.liabilities)} from cash leaves net worth unchanged at{' '}
                   <span className="text-ink">{formatWholeCurrency(a.netWorth)}</span> — it reshuffles, not grows.
+                </p>
+              )}
+              {b.liabilities < 0 && (
+                <p className="mb-4 text-body leading-relaxed text-muted">
+                  Nothing to pay off: the cards hold{' '}
+                  <span className="text-sage-deep">{formatWholeCurrency(-b.liabilities)}</span> in credit rather
+                  than debt, so both columns read the same.
                 </p>
               )}
               <div className="grid grid-cols-1 gap-10 sm:grid-cols-2">

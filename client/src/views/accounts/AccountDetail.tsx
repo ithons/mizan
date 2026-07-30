@@ -4,6 +4,7 @@ import { useQuery } from '@tanstack/react-query';
 import { accountsApi, investmentsApi, transactionsApi } from '../../lib/api';
 import { ACCOUNT_TYPE_LABELS } from '../../lib/constants';
 import { formatCompactRelative, formatCurrencyColored, formatDate, formatWholeCurrency } from '../../lib/formatters';
+import { creditNote, isInCredit, signedAccountBalance } from '../../lib/accountBalance';
 import { Screen, SectionLabel, TextButton, TrendChart } from '../../components/balance';
 import { SkeletonRows } from '../../components/SkeletonLoader';
 
@@ -43,7 +44,8 @@ export function AccountDetail() {
     [history]
   );
 
-  const signedBalance = account ? (account.is_liability ? -Math.abs(account.current_balance) : account.current_balance) : 0;
+  const signedBalance = account ? signedAccountBalance(account) : 0;
+  const inCredit = account ? isInCredit(account) : false;
   const transactions = txPage?.data ?? [];
 
   if (isLoading) {
@@ -85,8 +87,15 @@ export function AccountDetail() {
             {formatCompactRelative(account.updated_at)}
           </div>
         </div>
-        <div className={`font-serif text-display tabular-nums ${signedBalance < 0 ? 'text-clay' : 'text-ink'}`}>
-          {formatWholeCurrency(signedBalance)}
+        <div className="text-right">
+          <div
+            className={`font-serif text-display tabular-nums ${
+              inCredit ? 'text-sage-deep' : signedBalance < 0 ? 'text-clay' : 'text-ink'
+            }`}
+          >
+            {formatWholeCurrency(signedBalance)}
+          </div>
+          {inCredit && <div className="mt-1 text-note text-sage-deep">{creditNote(account)}</div>}
         </div>
       </div>
 

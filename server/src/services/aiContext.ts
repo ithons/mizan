@@ -263,8 +263,15 @@ export function buildFinancialContext(): string {
     // net-worth math, and the forecast (already dollars) combine in the same unit.
     const bal = toDollars(a.current_balance);
     if (a.is_liability) {
-      liabilities += Math.abs(bal);
-      acctLines.push(`  ${a.account_name} (${a.institution_name || a.type}): ${fmt(bal)} owed`);
+      // Signed, and the label follows the sign. A card in credit is stored as a negative amount
+      // owed; Math.abs() plus a hardcoded "owed" told the model the owner owed $563.26 on a card
+      // that owed the owner $563.26, and no wording in the prompt could recover the direction.
+      liabilities += bal;
+      acctLines.push(
+        bal < 0
+          ? `  ${a.account_name} (${a.institution_name || a.type}): ${fmt(-bal)} credit balance (the card owes you)`
+          : `  ${a.account_name} (${a.institution_name || a.type}): ${fmt(bal)} owed`
+      );
     } else if (liquidTypes.has(a.type)) {
       liquid += bal;
       acctLines.push(`  ${a.account_name} (${a.type}): ${fmt(bal)}`);
@@ -296,7 +303,9 @@ export function buildFinancialContext(): string {
   if (investments > 0) lines.push(`  Investments:      ${fmt(investments)}`);
   if (crypto > 0) lines.push(`  Crypto:           ${fmt(crypto)}`);
   if (otherAssets > 0) lines.push(`  Other assets:     ${fmt(otherAssets)}`);
-  if (liabilities > 0) lines.push(`  Liabilities:      ${fmt(liabilities)}`);
+  // Non-zero rather than positive: a net credit position is a fact about the balance sheet, and
+  // dropping the line would leave the model to infer liabilities of zero from its absence.
+  if (liabilities !== 0) lines.push(`  Liabilities:      ${fmt(liabilities)}`);
   lines.push('');
   lines.push('Account breakdown:');
   lines.push(...acctLines);

@@ -9,22 +9,29 @@ import { guessAccountTypeAndLiability } from './accountClassification';
 import { isBelowBackfillFloor } from './backfillFloor';
 import { toCents, toCentsOrNull, toDollars } from './money';
 
-// We store liability balances as positive "amount owed" and negate what SimpleFIN reports
-// (which normally sends credit balances as negatives). If an institution ever reports an
-// owed balance as a positive number, negating it would store the wrong sign — flag it
-// through the sync result instead of silently corrupting net worth.
+// We store liability balances as positive "amount owed" and negate what SimpleFIN reports (which
+// normally sends credit balances as negatives).
+//
+// This guard only fires on the one shape a single number can actually diagnose: a positive provider
+// balance, whose negation produces a credit position. The opposite failure (an institution sending
+// a credit balance under the same fixed negative sign it uses for debt) is indistinguishable from
+// ordinary debt from here, so it is not guessed at: correctLiabilitySigns() settles direction
+// against the ledger once the pass's transactions have landed, and owns that reporting alone.
 export function liabilityAdjustedCents(
   balanceMagnitude: number,
   isLiability: boolean,
   accountName: string,
   errors: string[]
 ): number {
+  const cents = toCents(isLiability ? -balanceMagnitude : balanceMagnitude);
+
   if (isLiability && balanceMagnitude > 0) {
-    const msg = `Account "${accountName}" is a liability but its balance is reported positive; the stored sign may be wrong — verify this institution's balance convention.`;
+    const msg = `Account "${accountName}" is a liability but its balance is reported positive, so it is being stored as a credit balance. The sign may be wrong: verify this institution's balance convention.`;
     errors.push(msg);
     console.warn(`[simplefin] ${msg}`);
   }
-  return toCents(isLiability ? -balanceMagnitude : balanceMagnitude);
+
+  return cents;
 }
 
 interface SimplefinHolding {

@@ -20,6 +20,7 @@ import type {
   SyncRunDetail,
   Transaction,
 } from '@shared/types';
+import { creditBalancePhrase, readOwedTotal } from './accountBalance';
 import { availableBudgetAmount, budgetProjectedRemaining, budgetProjectedSpend } from './budgetMath';
 
 export type ReportAdvisorTab = 'spending' | 'income' | 'trends' | 'cashflow' | 'networth' | 'investments';
@@ -152,8 +153,12 @@ function summarizeNetWorthAccounts(evidence: ReportNetWorthEvidence): string {
       const accountName = account.account_name ?? account.account_id;
       const institutionName = account.institution_name ?? 'missing institution';
       const accountType = account.type ?? 'unknown type';
-      const role = account.is_liability ? 'liability' : 'asset';
-      return `${accountName} at ${institutionName} ${formatMoneyValue(account.balance)} ${role} (${accountType})`;
+      // A liability stores the amount OWED, so a negative one is a credit. "-$563.26 liability"
+      // leaves the direction to be inferred from a sign the model may not weigh at all.
+      const reading = account.is_liability && account.balance < 0
+        ? creditBalancePhrase(formatMoneyValue(-account.balance))
+        : `${formatMoneyValue(account.balance)} ${account.is_liability ? 'liability' : 'asset'}`;
+      return `${accountName} at ${institutionName} ${reading} (${accountType})`;
     })
     .join('; ');
 }
@@ -357,6 +362,13 @@ export function buildNetWorthEvidenceAdvisorPrompt(
   const snapshot = evidence.snapshot;
   const previousDate = evidence.previous_snapshot?.date ?? null;
   const accountSummary = summarizeNetWorthAccounts(evidence);
+  // A snapshot total arrives already summed and signed, so a net credit reaches here as a negative
+  // amount owed. "liabilities are -$852.89" states the opposite of what happened, and the
+  // per-account line below already reads the same position correctly.
+  const owed = readOwedTotal(snapshot.total_liabilities);
+  const liabilityReading = owed.inCredit
+    ? `${formatMoneyValue(owed.amount)} in credit (the cards owe you)`
+    : formatMoneyValue(owed.amount);
 
   return {
     source: 'reports',
@@ -367,7 +379,10 @@ export function buildNetWorthEvidenceAdvisorPrompt(
       date: snapshot.date,
       previousSnapshotDate: previousDate,
       totalAssets: snapshot.total_assets,
+      // Stored sign preserved; the reading travels beside it rather than replacing it, matching
+      // how a single account in credit is handed over (buildAccountAdvisorPrompt).
       totalLiabilities: snapshot.total_liabilities,
+      liabilitiesInCredit: owed.inCredit,
       netWorth: snapshot.net_worth,
       delta: evidence.delta ?? null,
       assetDelta: evidence.asset_delta ?? null,
@@ -377,7 +392,7 @@ export function buildNetWorthEvidenceAdvisorPrompt(
     },
     prompt: [
       `Explain the net-worth evidence for ${snapshot.date}.`,
-      `Assets are ${formatMoneyValue(snapshot.total_assets)}, liabilities are ${formatMoneyValue(snapshot.total_liabilities)}, and net worth is ${formatMoneyValue(snapshot.net_worth)}.`,
+      `Assets are ${formatMoneyValue(snapshot.total_assets)}, liabilities are ${liabilityReading}, and net worth is ${formatMoneyValue(snapshot.net_worth)}.`,
       previousDate ? `Compared with ${previousDate}, net worth changed by ${formatSignedMoneyValue(evidence.delta ?? 0)}.` : 'There is no prior snapshot comparison.',
       `Asset change is ${evidence.asset_delta != null ? formatSignedMoneyValue(evidence.asset_delta) : 'unknown'} and liability change is ${evidence.liability_delta != null ? formatSignedMoneyValue(evidence.liability_delta) : 'unknown'}.`,
       `Account evidence: ${accountSummary}.`,
@@ -691,6 +706,7 @@ export function buildAccountAdvisorPrompt(account: Account): AdvisorRoutePrompt 
   const creditLimit = account.credit_limit ?? null;
   const visibleState = account.is_hidden ? 'hidden' : 'visible';
   const balanceRole = account.is_liability ? 'liability' : 'asset';
+  const inCredit = account.is_liability && account.current_balance < 0;
 
   return {
     source: 'account',
@@ -708,13 +724,16 @@ export function buildAccountAdvisorPrompt(account: Account): AdvisorRoutePrompt 
       creditLimit,
       currency: account.currency,
       isLiability: account.is_liability,
+      inCredit,
       isHidden: account.is_hidden,
       updatedAt: account.updated_at,
     },
     prompt: [
       `Analyze my ${account.account_name} account at ${account.institution_name}.`,
       `It is a ${visibleState} ${account.type} ${balanceRole} connected by ${account.connection_type}.`,
-      `The current balance is ${formatCurrencyValue(account.current_balance, account.currency)}.`,
+      inCredit
+        ? `The current balance is ${creditBalancePhrase(formatCurrencyValue(-account.current_balance, account.currency))}, stored as a negative amount owed.`
+        : `The current balance is ${formatCurrencyValue(account.current_balance, account.currency)}.`,
       availableBalance != null ? `The available balance is ${formatCurrencyValue(availableBalance, account.currency)}.` : 'There is no available balance reported.',
       creditLimit != null ? `The credit limit is ${formatCurrencyValue(creditLimit, account.currency)}.` : 'There is no credit limit reported.',
       `The account was last updated at ${account.updated_at}.`,

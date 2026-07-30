@@ -13,6 +13,7 @@ import {
   reportsApi,
   transactionsApi,
 } from '../lib/api';
+import { readOwedTotal } from '../lib/accountBalance';
 import { formatCurrency, formatWholeCurrency } from '../lib/formatters';
 import { useAppStore } from '../store';
 import { QueryErrorBanner } from '../components/QueryErrorBanner';
@@ -184,6 +185,9 @@ export function Today() {
   });
 
   const sheetLoading = snapshotQ.isLoading;
+  // The total is signed: cards holding more credit than debt sum below zero, and "-$852.89" under
+  // "Owed" says the opposite of what happened.
+  const owed = readOwedTotal(snapshot?.total_liabilities ?? 0);
 
   return (
     <Screen size="wide">
@@ -222,10 +226,14 @@ export function Today() {
             </div>
             <div className="text-right">
               <div className="text-rule uppercase tracking-[0.16em] text-muted transition-colors group-hover:text-ink">
-                Owed
+                {owed.label}
               </div>
-              <div className="font-mono text-body-lg leading-[1.4] tabular-nums text-clay">
-                {formatCurrency(snapshot?.total_liabilities ?? 0)}
+              <div
+                className={`font-mono text-body-lg leading-[1.4] tabular-nums ${
+                  owed.inCredit ? 'text-sage-deep' : 'text-clay'
+                }`}
+              >
+                {formatCurrency(owed.amount)}
               </div>
             </div>
           </Link>

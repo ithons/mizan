@@ -17,6 +17,18 @@ test('credit card balances are a claim on the liquid pool', () => {
   db.close();
 });
 
+test('a card in credit frees money up instead of claiming it', () => {
+  const db = migratedTestDb();
+  insertAccount(db, { type: 'checking', current_balance: 500000 });
+  insertAccount(db, { type: 'credit', current_balance: -56326, is_liability: 1 });
+
+  const result = computeSafeToSpend(db);
+  // Math.abs() booked this $563.26 credit as $563.26 of debt, so the figure was $1,126.52 low.
+  assert.equal(result.cardBalances, -56326);
+  assert.equal(result.free, 500000 + 56326);
+  db.close();
+});
+
 test('a shortfall is reported as a shortfall, not as zero', () => {
   const db = migratedTestDb();
   insertAccount(db, { type: 'checking', current_balance: 10000 });

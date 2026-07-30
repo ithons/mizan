@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { Account, SyncHealthConnection } from '@shared/types';
 import { accountsApi, networthApi, syncApi } from '../../lib/api';
 import { formatCompactRelative, formatWholeCurrency } from '../../lib/formatters';
+import { creditNote, isInCredit, signedAccountBalance } from '../../lib/accountBalance';
 import { ACCOUNT_TYPE_LABELS } from '../../lib/constants';
 import { invalidateFinancialData } from '../../lib/queryInvalidation';
 import { useAppStore } from '../../store';
@@ -21,8 +22,10 @@ const GROUPS: Array<{ name: string; match: (a: Account) => boolean }> = [
   { name: 'Other', match: () => true },
 ];
 
-function signedBalance(a: Account): number {
-  return a.is_liability ? -Math.abs(a.current_balance) : a.current_balance;
+/** Three readings, not two: money you hold, money you owe, and money a card owes you. */
+function balanceTone(a: Account): string {
+  if (isInCredit(a)) return 'text-sage-deep';
+  return signedAccountBalance(a) < 0 ? 'text-clay' : 'text-ink';
 }
 
 const CONNECTION_LABELS: Record<Account['connection_type'], string> = {
@@ -111,13 +114,19 @@ export function Accounts() {
     return GROUPS.map((g) => {
       const rows = liveVisible.filter((a) => remaining.has(a.id) && g.match(a));
       rows.forEach((a) => remaining.delete(a.id));
-      return { name: g.name, rows, total: rows.reduce((s, a) => s + signedBalance(a), 0) };
+      const total = rows.reduce((s, a) => s + signedAccountBalance(a), 0);
+      // A subtotal over nothing but liabilities that comes out positive is a net credit, and
+      // "$3,948" under "Credit cards" would otherwise read as the debt it is the opposite of.
+      return { name: g.name, rows, total, inCredit: total > 0 && rows.every((a) => a.is_liability) };
     }).filter((g) => g.rows.length > 0);
   }, [liveVisible]);
 
-  const assets = liveVisible.reduce((s, a) => s + Math.max(0, signedBalance(a)), 0);
-  const liabilities = liveVisible.reduce((s, a) => s + Math.min(0, signedBalance(a)), 0);
-  const netWorth = assets + liabilities;
+  // Split by ROLE, the way snapshot.ts computes the same three figures on the server. Splitting by
+  // sign cannot survive a card in credit: that is a positive number belonging to a liability, and
+  // counting it as an asset would put this screen back at odds with the net worth it prints.
+  const assets = liveVisible.filter((a) => !a.is_liability).reduce((s, a) => s + a.current_balance, 0);
+  const owed = liveVisible.filter((a) => a.is_liability).reduce((s, a) => s + a.current_balance, 0);
+  const netWorth = assets - owed;
 
   const selected = (accounts ?? []).find((a) => a.id === selectedId) ?? null;
 
@@ -164,9 +173,14 @@ export function Accounts() {
           </div>
         </div>
       </div>
-      <span className={`font-serif text-sub tabular-nums ${signedBalance(a) < 0 ? 'text-clay' : 'text-ink'}`}>
-        {formatWholeCurrency(signedBalance(a))}
-      </span>
+      <div className="flex flex-shrink-0 flex-col items-end">
+        <span className={`font-serif text-sub tabular-nums ${balanceTone(a)}`}>
+          {formatWholeCurrency(signedAccountBalance(a))}
+        </span>
+        {isInCredit(a) && (
+          <span className="mt-0.5 text-rule uppercase tracking-[0.09em] text-sage-deep">In credit</span>
+        )}
+      </div>
     </Row>
   );
 
@@ -200,15 +214,23 @@ export function Accounts() {
       {/* 3-up summary */}
       <div className="mb-6 grid flex-shrink-0 grid-cols-3 gap-3 lg:gap-4">
         {[
-          { label: 'Assets', value: assets, tone: 'text-ink' },
-          { label: 'Liabilities', value: liabilities, tone: liabilities < 0 ? 'text-clay' : 'text-ink' },
-          { label: 'Net worth', value: netWorth, tone: 'text-ink' },
+          { label: 'Assets', value: assets, tone: 'text-ink', note: null },
+          {
+            // Negated, so debt keeps reading as the subtraction it is. A net credit then comes out
+            // positive, which is exactly what it is, and the note underneath says which it is.
+            label: 'Liabilities',
+            value: -owed,
+            tone: owed > 0 ? 'text-clay' : owed < 0 ? 'text-sage-deep' : 'text-ink',
+            note: owed < 0 ? 'In credit' : null,
+          },
+          { label: 'Net worth', value: netWorth, tone: 'text-ink', note: null },
         ].map((s) => (
           <div key={s.label} className="rounded-xl border border-line-2 bg-card shadow-e1 p-4">
             <div className="text-note text-muted">{s.label}</div>
             <div className={`mt-1.5 font-serif text-figure leading-tight tabular-nums ${s.tone}`}>
               {formatWholeCurrency(s.value)}
             </div>
+            {s.note && <div className="mt-1 text-rule uppercase tracking-[0.09em] text-sage-deep">{s.note}</div>}
           </div>
         ))}
       </div>
@@ -239,7 +261,11 @@ export function Accounts() {
           )}
           {groups.map((g) => (
             <div key={g.name} className="mb-6">
-              <SectionLabel underline summary={formatWholeCurrency(g.total)} className="mb-1.5">
+              <SectionLabel
+                underline
+                summary={`${formatWholeCurrency(g.total)}${g.inCredit ? ' in credit' : ''}`}
+                className="mb-1.5"
+              >
                 {g.name}
               </SectionLabel>
               {g.rows.map((a) => renderRow(a))}
@@ -277,9 +303,12 @@ export function Accounts() {
             <div className="mb-4 flex items-baseline justify-between">
               <span className="font-serif text-title text-ink">{selected.account_name}</span>
             </div>
-            <div className={`font-serif text-display tabular-nums ${signedBalance(selected) < 0 ? 'text-clay' : 'text-ink'}`}>
-              {formatWholeCurrency(signedBalance(selected))}
+            <div className={`font-serif text-display tabular-nums ${balanceTone(selected)}`}>
+              {formatWholeCurrency(signedAccountBalance(selected))}
             </div>
+            {isInCredit(selected) && (
+              <div className="mt-1 text-note text-sage-deep">{creditNote(selected)}</div>
+            )}
             <div className="mt-6">
               {[
                 { label: 'Institution', value: selected.institution_name || '—' },

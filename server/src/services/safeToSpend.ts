@@ -28,7 +28,8 @@ import { buildRecurringForecast } from './recurringForecast';
 export interface SafeToSpendBreakdown {
   /** Checking, savings and cash. Not investments, not crypto. */
   liquid: number;
-  /** Total owed on liability accounts, treated as a claim on the liquid pool. */
+  /** Net owed on liability accounts, treated as a claim on the liquid pool. Negative when the
+   * cards are collectively in credit, which is a credit to the pool rather than a claim. */
   cardBalances: number;
   /** Scheduled outflows in the forecast window. */
   upcomingBills: number;
@@ -68,8 +69,11 @@ export function computeSafeToSpend(
   let cardBalances = 0;
   for (const account of accounts) {
     if (account.is_liability) {
-      // Liability balances are stored as a positive amount owed.
-      cardBalances += Math.abs(account.current_balance);
+      // Signed, not absolute. A card can sit in CREDIT (a refund or statement credit larger than
+      // the balance), which is stored as a negative amount owed and is money coming back to the
+      // pool, not another claim on it. Math.abs() here counted three cards in credit on
+      // 2026-07-29 as $852.89 of debt, so the shortfall it reported was $1,705.78 too deep.
+      cardBalances += account.current_balance;
     } else if (liquidTypes.has(account.type)) {
       liquid += account.current_balance;
     }

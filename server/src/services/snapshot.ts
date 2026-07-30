@@ -302,11 +302,12 @@ export function backfillSnapshots(): void {
   // of today's balances wearing a past date.
   if (!earliestMonth) return;
 
-  const accountMap: Record<string, { is_liability: number; type: string }> = {};
+  const accountMap: Record<string, { is_liability: number; type: string; current_balance: number }> = {};
   for (const account of accounts) {
     accountMap[account.id] = {
       is_liability: account.is_liability,
       type: account.type,
+      current_balance: account.current_balance,
     };
   }
 
@@ -401,19 +402,24 @@ export function backfillSnapshots(): void {
       }
     }
 
-    // Neither a market-driven account nor a liability can sensibly go negative in this
-    // estimate. Market accounts overshoot when reversed contributions exceed today's value
-    // (a market loss/withdrawal we can't see); liabilities overshoot when we have a card's
-    // purchases but not its payments (e.g. a spend-only year-end summary), which would drive
-    // "owed" hugely negative. Clamp both at zero — transaction-based reconstruction is
-    // approximate, and this keeps it from producing nonsense (a phantom asset/liability).
-    // A clamped balance is also the reconstruction admitting it has no answer, so the ids are kept
+    // A market-driven account cannot sensibly go negative in this estimate: it overshoots when
+    // reversed contributions exceed today's value (a market loss or withdrawal we can't see).
+    // A liability overshoots the same way when we have a card's purchases but not its payments
+    // (a spend-only year-end summary), which would drive "owed" hugely negative.
+    //
+    // But a card CAN legitimately sit in credit, so zero is the wrong floor for a liability: it
+    // erases a real credit position and manufactures a jump on the chart. The floor is instead
+    // the credit the account demonstrably holds today, which is an observed number rather than a
+    // reconstructed one. For a card that is owed money today this is exactly the old clamp.
+    // A clamped balance is the reconstruction admitting it has no answer, so the ids are kept
     // and a month that rests entirely on them is not emitted at all.
     const clampedAccounts = new Set<string>();
     for (const id of Object.keys(approxBalances)) {
       const m = accountMap[id];
-      if (m && (marketValueTypes.has(m.type) || m.is_liability) && approxBalances[id] < 0) {
-        approxBalances[id] = 0;
+      if (!m) continue;
+      const floor = m.is_liability ? Math.min(0, m.current_balance) : 0;
+      if ((marketValueTypes.has(m.type) || m.is_liability) && approxBalances[id] < floor) {
+        approxBalances[id] = floor;
         clampedAccounts.add(id);
       }
     }

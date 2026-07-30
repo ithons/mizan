@@ -6,10 +6,12 @@ import {
   addSseClient,
   emitSyncEvent,
   isSyncStale,
+  reconcileBalanceChanges,
   removeSseClient,
   runPostSyncStages,
   terminalSyncEvent,
 } from '../server/src/services/syncManager';
+import type { AccountBalanceChange } from '../server/src/services/balanceChanges';
 import type { TransactionIntegrityResult } from '../server/src/services/transactionIntegrity';
 import type { SyncEvent } from '../shared/types';
 
@@ -86,10 +88,11 @@ test('runPostSyncStages: all stages succeed, no deferred error', (t) => {
     detectRecurring: () => { calls.push('detectRecurring'); },
     refreshTransactionIntegrity: () => { calls.push('refreshTransactionIntegrity'); return emptyIntegrity; },
     autoCategorizeTransactions: () => { calls.push('autoCategorizeTransactions'); return { updated: 0 }; },
+    correctLiabilitySigns: () => { calls.push('correctLiabilitySigns'); return { corrections: [], unverifiable: [] }; },
     takeSnapshot: () => { calls.push('takeSnapshot'); },
   });
 
-  assert.deepEqual(calls, ['detectRecurring', 'refreshTransactionIntegrity', 'autoCategorizeTransactions', 'takeSnapshot']);
+  assert.deepEqual(calls, ['correctLiabilitySigns', 'detectRecurring', 'refreshTransactionIntegrity', 'autoCategorizeTransactions', 'takeSnapshot']);
   assert.equal(result.deferredError, null);
   assert.deepEqual(result.integrity, emptyIntegrity);
 
@@ -111,10 +114,11 @@ test('runPostSyncStages: a stage failure does not skip the later stages', (t) =>
     },
     refreshTransactionIntegrity: () => { calls.push('refreshTransactionIntegrity'); return emptyIntegrity; },
     autoCategorizeTransactions: () => { calls.push('autoCategorizeTransactions'); return { updated: 0 }; },
+    correctLiabilitySigns: () => { calls.push('correctLiabilitySigns'); return { corrections: [], unverifiable: [] }; },
     takeSnapshot: () => { calls.push('takeSnapshot'); },
   });
 
-  assert.deepEqual(calls, ['detectRecurring', 'refreshTransactionIntegrity', 'autoCategorizeTransactions', 'takeSnapshot']);
+  assert.deepEqual(calls, ['correctLiabilitySigns', 'detectRecurring', 'refreshTransactionIntegrity', 'autoCategorizeTransactions', 'takeSnapshot']);
   assert.equal(result.deferredError?.message, 'recurring blew up');
   assert.deepEqual(result.integrity, emptyIntegrity);
 
@@ -135,6 +139,7 @@ test('runPostSyncStages: preserves the first deferred error when a later stage a
     detectRecurring: () => { throw new Error('recurring blew up'); },
     refreshTransactionIntegrity: () => emptyIntegrity,
     autoCategorizeTransactions: () => ({ updated: 0 }),
+    correctLiabilitySigns: () => ({ corrections: [], unverifiable: [] }),
     takeSnapshot: () => {},
   });
 
@@ -150,10 +155,11 @@ test('runPostSyncStages: integrity failure still lets snapshot run and reports i
     detectRecurring: () => { calls.push('detectRecurring'); },
     refreshTransactionIntegrity: () => { calls.push('refreshTransactionIntegrity'); throw new Error('integrity blew up'); },
     autoCategorizeTransactions: () => { calls.push('autoCategorizeTransactions'); return { updated: 0 }; },
+    correctLiabilitySigns: () => { calls.push('correctLiabilitySigns'); return { corrections: [], unverifiable: [] }; },
     takeSnapshot: () => { calls.push('takeSnapshot'); },
   });
 
-  assert.deepEqual(calls, ['detectRecurring', 'refreshTransactionIntegrity', 'autoCategorizeTransactions', 'takeSnapshot']);
+  assert.deepEqual(calls, ['correctLiabilitySigns', 'detectRecurring', 'refreshTransactionIntegrity', 'autoCategorizeTransactions', 'takeSnapshot']);
   assert.equal(result.deferredError?.message, 'integrity blew up');
   assert.deepEqual(result.integrity, emptyIntegrity);
 
@@ -162,6 +168,162 @@ test('runPostSyncStages: integrity failure still lets snapshot run and reports i
   assert.deepEqual(items.map((i) => i.connection_id), ['auto-categorization', 'transaction-integrity']);
   const integrityItem = items.find((i) => i.connection_id === 'transaction-integrity');
   assert.equal(integrityItem?.status, 'failed');
+});
+
+test('runPostSyncStages: a liability sign correction is recorded, naming both values', (t) => {
+  const db = setupSyncDb();
+  t.after(() => db.close());
+
+  runPostSyncStages(db, 'run_1', null, {
+    detectRecurring: () => {},
+    refreshTransactionIntegrity: () => emptyIntegrity,
+    autoCategorizeTransactions: () => ({ updated: 0 }),
+    correctLiabilitySigns: () => ({
+      corrections: [{
+        account_id: 'acct_1',
+        account_name: 'Discover',
+        anchor_date: '2026-07-16',
+        anchor_value: 8973,
+        stored_balance: 56326,
+        corrected_balance: -56326,
+      }],
+      unverifiable: [],
+    }),
+    takeSnapshot: () => {},
+  });
+
+  const change = db.prepare(
+    "SELECT entity_id, change_type, description FROM sync_changes"
+  ).get() as { entity_id: string; change_type: string; description: string } | undefined;
+  // A corrected balance must never be silently different from what the provider reported.
+  assert.equal(change?.entity_id, 'acct_1');
+  assert.equal(change?.change_type, 'updated');
+  assert.match(change?.description ?? '', /563\.26 owed/);
+  assert.match(change?.description ?? '', /credit balance of \$563\.26/);
+});
+
+test('runPostSyncStages: an unverifiable liability is reported rather than passed over', (t) => {
+  const db = setupSyncDb();
+  t.after(() => db.close());
+
+  runPostSyncStages(db, 'run_1', null, {
+    detectRecurring: () => {},
+    refreshTransactionIntegrity: () => emptyIntegrity,
+    autoCategorizeTransactions: () => ({ updated: 0 }),
+    correctLiabilitySigns: () => ({
+      corrections: [],
+      unverifiable: [{ account_id: 'acct_2', account_name: 'Amex', reason: 'no anchor' }],
+    }),
+    takeSnapshot: () => {},
+  });
+
+  const item = db.prepare(
+    "SELECT error_message FROM sync_run_items WHERE connection_id = 'liability-sign'"
+  ).get() as { error_message: string | null } | undefined;
+  assert.match(item?.error_message ?? '', /Amex: no anchor/);
+});
+
+// ── The hourly re-correction loop ────────────────────────────────────────────
+// A card in credit has the provider's wrong sign written over it on every sync and corrected back
+// on every sync. Left alone that manufactures a balance-change row and a correction row per card
+// per hour, forever, describing a swing that never happened.
+
+const freedomFlex: AccountBalanceChange = {
+  accountId: 'acct_1',
+  accountName: 'Chase Freedom Flex',
+  provider: 'simplefin',
+  previousBalance: -283.81,
+  newBalance: 283.81,
+  isLiability: true,
+};
+
+const flexCorrection = {
+  account_id: 'acct_1',
+  account_name: 'Chase Freedom Flex',
+  anchor_date: '2026-07-16',
+  anchor_value: 0,
+  stored_balance: 28381,
+  corrected_balance: -28381,
+};
+
+test('reconcileBalanceChanges: a pure sign flip is dropped, not reported as a $567.62 swing', () => {
+  assert.deepEqual(reconcileBalanceChanges([freedomFlex], [flexCorrection]), []);
+});
+
+test('reconcileBalanceChanges: a real movement under a flipped sign is restated, not dropped', () => {
+  const moved: AccountBalanceChange = { ...freedomFlex, newBalance: 300 };
+  const corrected = reconcileBalanceChanges([moved], [{ ...flexCorrection, stored_balance: 30000, corrected_balance: -30000 }]);
+  assert.equal(corrected.length, 1);
+  assert.equal(corrected[0].previousBalance, -283.81);
+  assert.equal(corrected[0].newBalance, -300);
+});
+
+test('reconcileBalanceChanges: an account nobody corrected passes through untouched', () => {
+  const checking: AccountBalanceChange = {
+    accountId: 'acct_9',
+    accountName: 'Chase Checking',
+    provider: 'simplefin',
+    previousBalance: 1000,
+    newBalance: 1200,
+    isLiability: false,
+  };
+  assert.deepEqual(reconcileBalanceChanges([checking], [flexCorrection]), [checking]);
+});
+
+test('runPostSyncStages: a settled card produces no rows at all on the next sync', (t) => {
+  const db = setupSyncDb();
+  t.after(() => db.close());
+
+  runPostSyncStages(db, 'run_1', null, {
+    detectRecurring: () => {},
+    refreshTransactionIntegrity: () => emptyIntegrity,
+    autoCategorizeTransactions: () => ({ updated: 0 }),
+    correctLiabilitySigns: () => ({ corrections: [flexCorrection], unverifiable: [] }),
+    takeSnapshot: () => {},
+  }, [{ runItemId: 'item_sf', changes: [freedomFlex] }]);
+
+  const changes = db.prepare('SELECT COUNT(*) AS n FROM sync_changes').get() as { n: number };
+  assert.equal(changes.n, 0, 'the card was already corrected before this sync; nothing happened to it');
+  const signItem = db.prepare(
+    "SELECT COUNT(*) AS n FROM sync_run_items WHERE connection_id = 'liability-sign'"
+  ).get() as { n: number };
+  assert.equal(signItem.n, 0);
+});
+
+test('runPostSyncStages: a correction the ledger has not seen before is still reported', (t) => {
+  const db = setupSyncDb();
+  t.after(() => db.close());
+
+  // The provider reported the same wrong figure it reported last time, so there is no balance
+  // change to reconcile against, and the pre-sync balance is the wrong one.
+  runPostSyncStages(db, 'run_1', null, {
+    detectRecurring: () => {},
+    refreshTransactionIntegrity: () => emptyIntegrity,
+    autoCategorizeTransactions: () => ({ updated: 0 }),
+    correctLiabilitySigns: () => ({ corrections: [flexCorrection], unverifiable: [] }),
+    takeSnapshot: () => {},
+  }, []);
+
+  const changes = db.prepare('SELECT COUNT(*) AS n FROM sync_changes').get() as { n: number };
+  assert.equal(changes.n, 1);
+});
+
+test('runPostSyncStages: provider balance changes still reach the panel when nothing was corrected', (t) => {
+  const db = setupSyncDb();
+  t.after(() => db.close());
+
+  runPostSyncStages(db, 'run_1', null, {
+    detectRecurring: () => {},
+    refreshTransactionIntegrity: () => emptyIntegrity,
+    autoCategorizeTransactions: () => ({ updated: 0 }),
+    correctLiabilitySigns: () => ({ corrections: [], unverifiable: [] }),
+    takeSnapshot: () => {},
+  }, [{ runItemId: 'item_sf', changes: [freedomFlex] }]);
+
+  const change = db.prepare('SELECT run_item_id, entity_id FROM sync_changes').get() as
+    { run_item_id: string; entity_id: string } | undefined;
+  assert.equal(change?.run_item_id, 'item_sf', 'a change belongs to the provider item that produced it');
+  assert.equal(change?.entity_id, 'acct_1');
 });
 
 // ── Terminal event ───────────────────────────────────────────────────────────

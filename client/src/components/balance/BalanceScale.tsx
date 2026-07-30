@@ -33,6 +33,9 @@ const BEAM_CTRL_HALF = 8.8;
  * The previous formula multiplied that share by 12 and clamped the result to 7 degrees, so it
  * saturated at any share below 21% — a sheet with 5% debt and one with none at all drew exactly
  * the same picture, across the range most people actually live in.
+ *
+ * `owed` is non-negative by construction: the caller puts a credit position on the assets pan,
+ * where it belongs, rather than handing this a negative debt to interpret.
  */
 export function beamTiltDegrees(assets: number, owed: number): number {
   const total = assets + owed;
@@ -42,8 +45,30 @@ export function beamTiltDegrees(assets: number, owed: number): number {
 
 interface BalanceScaleProps {
   assets: number;
+  /** Amount owed. Negative means the liabilities are in credit and owe the owner. */
   liabilities: number;
   className?: string;
+}
+
+export interface ScalePans {
+  held: number;
+  owed: number;
+  /** How much of `held` is a liability in credit rather than an asset, for the label to name. */
+  credit: number;
+}
+
+/**
+ * Which pan each side of the sheet belongs on.
+ *
+ * A negative liability total is a net credit: the cards owe the owner. That is weight on the
+ * ASSETS pan, not debt of the same size, and `Math.abs()` put it on the wrong side, so a sheet
+ * that was better than debt-free drew as one carrying debt. `held - owed` stays equal to net
+ * worth either way, which is the property that keeps the instrument honest against the figures
+ * printed beside it.
+ */
+export function scalePans(assets: number, liabilities: number): ScalePans {
+  const credit = Math.max(0, -liabilities);
+  return { held: assets + credit, owed: Math.max(0, liabilities), credit };
 }
 
 /**
@@ -55,8 +80,8 @@ interface BalanceScaleProps {
  * reading before the reader got to it.
  */
 export function BalanceScale({ assets, liabilities, className = '' }: BalanceScaleProps) {
-  const owed = Math.abs(liabilities);
-  const tilt = useSettledValue(beamTiltDegrees(assets, owed));
+  const { held, owed, credit } = scalePans(assets, liabilities);
+  const tilt = useSettledValue(beamTiltDegrees(held, owed));
 
   const rad = (tilt * Math.PI) / 180;
   const leftX = PIVOT_X - HALF_BEAM * Math.cos(rad);
@@ -85,10 +110,13 @@ export function BalanceScale({ assets, liabilities, className = '' }: BalanceSca
     knobY: i === 0 ? leftY : rightY,
   }));
 
+  // The only reading of the figure a screen reader gets, so the credit has to be said, not implied
+  // by a pan position nobody can see.
   const label =
-    assets + owed <= 0
+    held + owed <= 0
       ? 'Balance scale: nothing on either pan yet'
-      : `Balance scale: assets ${formatWholeCurrency(assets)} against ${formatWholeCurrency(owed)} owed`;
+      : `Balance scale: assets ${formatWholeCurrency(held)} against ${formatWholeCurrency(owed)} owed` +
+        (credit > 0 ? `, including ${formatWholeCurrency(credit)} of credit your cards owe you` : '');
 
   return (
     <svg viewBox="0 40 320 196" className={className} role="img" aria-label={label}>

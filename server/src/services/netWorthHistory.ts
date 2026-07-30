@@ -125,6 +125,7 @@ export interface AssetBuckets {
   investment: number;
   crypto: number;
   other: number;
+  /** Net owed. Negative when the liabilities in the breakdown are collectively in credit. */
   liabilities: number;
 }
 
@@ -181,7 +182,10 @@ export function deriveAssetBuckets(
       continue;
     }
     if (account.is_liability === 1) {
-      buckets.liabilities += Math.abs(rawValue);
+      // Signed. A card in credit is stored as a negative amount owed, and Math.abs() turned that
+      // credit into debt of the same size, so the bucket overstated liabilities by twice the
+      // credit and understated net worth by the same amount.
+      buckets.liabilities += rawValue;
     } else if (LIQUID_TYPES.has(account.type)) {
       buckets.liquid += rawValue;
     } else if (INVESTMENT_TYPES.has(account.type)) {
