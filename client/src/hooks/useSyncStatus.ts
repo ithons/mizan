@@ -33,14 +33,24 @@ export function useSyncStatus() {
             case 'sync_progress':
               setSyncStatus('syncing');
               break;
-            case 'sync_complete':
-              setSyncStatus('idle');
+            case 'sync_complete': {
+              // A partial run failed a stage after its provider writes had already committed, so it
+              // refreshes like any other completion: what changes is that it reports the failure.
+              const partial = data.status === 'partial';
+              setSyncStatus(partial ? 'error' : 'idle');
               setLastSynced(data.completedAt ?? new Date().toISOString());
               invalidateFinancialData(queryClient);
-              addToast({ type: 'success', message: 'Sync complete' });
+              addToast(partial
+                ? { type: 'error', message: data.message || 'Sync finished with issues' }
+                : { type: 'success', message: 'Sync complete' });
               break;
+            }
             case 'sync_error':
               setSyncStatus('error');
+              // A sync that dies mid-run can already have committed provider writes, so dropping
+              // the caches is right either way; not dropping them left the ledger on screen older
+              // than the ledger in the database for the whole staleTime.
+              invalidateFinancialData(queryClient);
               addToast({ type: 'error', message: data.message || 'Sync failed' });
               break;
           }

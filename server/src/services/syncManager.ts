@@ -2,7 +2,7 @@ import type { Response } from 'express';
 import type Database from 'better-sqlite3';
 import type { SyncEvent } from '../../../shared/types';
 import { syncCoinbase } from './coinbase';
-import { syncSimplefin } from './simplefin';
+import { syncSimplefin, triageSimplefinErrors } from './simplefin';
 import { detectRecurring } from './recurring';
 import { autoCategorizeTransactions } from './rules';
 import { takeSnapshot } from './snapshot';
@@ -53,6 +53,29 @@ export function emitSyncEvent(event: SyncEvent): void {
 }
 
 
+
+/**
+ * The one event that ends a run, whether or not the run succeeded.
+ *
+ * A partial run has already committed provider writes by the time a later stage fails, so it has to
+ * reach the client as a completion the client will act on. Emitting only `sync_error` left Today,
+ * Accounts, Budget and Reports rendering pre-sync figures for the whole 5-minute staleTime under a
+ * header still claiming the previous sync time: run 888332de wrote 111 changed transactions and
+ * then auto-categorization threw 'FOREIGN KEY constraint failed'. A failed sync can still have
+ * committed writes, so the failure travels inside the completion rather than instead of it.
+ */
+export function terminalSyncEvent(deferredError: Error | null, completedAt: string): SyncEvent {
+  if (!deferredError) {
+    return { type: 'sync_complete', message: 'Sync complete', progress: 100, completedAt, status: 'succeeded' };
+  }
+  return {
+    type: 'sync_complete',
+    message: `Sync finished with issues: ${deferredError.message}`,
+    progress: 100,
+    completedAt,
+    status: 'partial',
+  };
+}
 
 export interface PostSyncStageFns {
   detectRecurring: () => void;
@@ -265,24 +288,31 @@ async function _runFullSyncInternal(): Promise<void> {
         // SimpleFIN reports per-institution problems (e.g. reauth needed) inside a
         // successful HTTP response's `errors` array rather than as an HTTP failure, so a
         // sync can return fewer/no accounts for an affected institution while still
-        // "succeeding" unless this is surfaced explicitly.
-        const hasProviderErrors = simplefinResult.errors.length > 0;
+        // "succeeding" unless this is surfaced explicitly. Only the auth-shaped messages may
+        // claim reauth: the same array also carries advisories, and telling the owner their
+        // institution login had expired over "Requested date range exceeds limit of 90 days and
+        // was capped." pointed them at re-linking the bank, the riskiest action available.
+        const triage = triageSimplefinErrors(simplefinResult.errors);
+        const needsReauth = triage.reauth.length > 0;
+        const providerMessages = [...triage.reauth, ...triage.advisories];
         // Persist reauth state onto the connection so sync-health (and the per-account
         // badges) reflect it; a clean sync clears it back to active.
         db.prepare(`UPDATE simplefin_connections SET status = ? WHERE id = 'simplefin_primary' AND status != 'removed'`)
-          .run(hasProviderErrors ? 'reauth_required' : 'active');
+          .run(needsReauth ? 'reauth_required' : 'active');
         const runItem = recordSyncRunItem(db, run.id, {
           provider: 'simplefin',
           connection_id: 'simplefin_primary',
           institution_name: 'SimpleFIN',
-          status: hasProviderErrors ? 'reauth_required' : 'succeeded',
+          status: needsReauth ? 'reauth_required' : 'succeeded',
           accounts_seen: simplefinResult.accountCount,
           transactions_added: simplefinResult.added,
           transactions_modified: simplefinResult.modified,
           transactions_removed: simplefinResult.removed,
           transactions_skipped: simplefinResult.skipped,
-          error_message: hasProviderErrors ? simplefinResult.errors.join('; ') : undefined,
-          recovery_action: hasProviderErrors ? 'Reconnect SimpleFIN in Settings to restore access for the affected institution.' : undefined,
+          // Advisories still get reported on the item, which the sync panel renders whatever the
+          // item's status is; what they no longer do is set that status.
+          error_message: providerMessages.length > 0 ? providerMessages.join('; ') : undefined,
+          recovery_action: needsReauth ? 'Reconnect SimpleFIN in Settings to restore access for the affected institution.' : undefined,
         });
 
         for (const change of simplefinResult.balanceChanges) {
@@ -362,12 +392,12 @@ async function _runFullSyncInternal(): Promise<void> {
     });
     finished = true;
 
+    emitSyncEvent(terminalSyncEvent(deferredError, new Date().toISOString()));
+
     if (deferredError) {
       throw deferredError;
     }
 
-    emitSyncEvent({ type: 'sync_complete', message: 'Sync complete', progress: 100, completedAt: new Date().toISOString() });
-    
     // Proactive background AI worker
     setTimeout(() => {
       runBackgroundAiReview().catch(err => {
@@ -376,6 +406,9 @@ async function _runFullSyncInternal(): Promise<void> {
     }, 100);
   } catch (err) {
     const message = (err as Error).message || 'Sync failed';
+    // `finished` means the run already recorded its outcome and emitted its terminal event. A
+    // partial run rethrows so its caller still sees the failure, and must not then be re-reported
+    // as a total failure that landed nothing.
     if (!finished) {
       finishSyncRun(db, run.id, {
         status: 'failed',
@@ -383,8 +416,8 @@ async function _runFullSyncInternal(): Promise<void> {
         error_message: message,
         recovery_action: 'Retry sync. If it continues failing, check provider settings.',
       });
+      emitSyncEvent({ type: 'sync_error', message });
     }
-    emitSyncEvent({ type: 'sync_error', message });
     throw err;
   }
 }

@@ -480,6 +480,14 @@ export interface NetWorthSnapshot {
   liquid_assets?: number | null;
   investment_assets?: number | null;
   crypto_assets?: number | null;
+  /**
+   * How many accounts the row could account for, out of how many it was written against. An
+   * estimated month reaches only as far back as each account's own ledger, so an older point
+   * covers fewer accounts than a newer one and the two are not comparable. NULL means the row
+   * predates migration 044. Counts, not money: they stay integers through the dollar boundary.
+   */
+  covered_accounts?: number | null;
+  total_accounts?: number | null;
 }
 
 export interface SyncEvent {
@@ -487,6 +495,10 @@ export interface SyncEvent {
   message: string;
   progress?: number;
   completedAt?: string;
+  // Set on sync_complete. 'partial' means a stage failed after provider writes had already
+  // committed: the run is over and the ledger moved, so the client must refresh on it exactly as
+  // it would on a clean run, and say the run had issues.
+  status?: 'succeeded' | 'partial';
 }
 
 export type SyncHealthStatus = 'empty' | 'healthy' | 'stale' | 'attention';

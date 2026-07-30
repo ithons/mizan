@@ -37,6 +37,29 @@ interface SimplefinHolding {
   currency?: string | null;
 }
 
+// The slice of a SimpleFIN Bridge `/accounts` response this sync reads. Nothing deep-validates
+// the payload, so `simplefinAccountsOrThrow` is the one trust boundary: fields the loop already
+// copes with being absent are optional here, and the two amount fields stay `unknown` because
+// parseFinancialAmount is what decides whether they are numbers.
+interface SimplefinTransactionPayload {
+  id: string;
+  posted: number;
+  amount: unknown;
+  payee?: string | null;
+  description?: string | null;
+  pending?: boolean | null;
+}
+
+interface SimplefinAccountPayload {
+  id: string;
+  name: string;
+  currency?: string | null;
+  balance: unknown;
+  org?: { name?: string | null } | null;
+  transactions?: SimplefinTransactionPayload[] | null;
+  holdings?: SimplefinHolding[] | null;
+}
+
 // A provider basis of 0 means "not reported", never "acquired for nothing". Stored as 0 it reads
 // as a known basis and books the position's entire market value as unrealized gain: SPAXX, a
 // Fidelity cash sweep that is worth exactly what was put into it, was reported as pure profit and
@@ -146,6 +169,69 @@ function parseFinancialAmount(raw: unknown, label: string): number {
 }
 
 /**
+ * The response's `accounts` array, or a thrown error.
+ *
+ * HTTP 200 is not proof of a payload. The bridge answers a maintenance window with an HTML page,
+ * and any body without an `accounts` array used to parse to accountCount 0, `errors` [], and an
+ * empty seen-set. Nothing then failed: the stale-account pass read the empty seen-set as "every
+ * account closed" and zeroed all nine balances, syncManager marked the connection active and the
+ * run succeeded, and takeSnapshot() wrote the zeroes into net-worth history as a measured fact for
+ * the day. An absent accounts array says nothing about what the accounts hold, so the stage has to
+ * fail rather than succeed emptily.
+ */
+export function simplefinAccountsOrThrow(data: unknown): SimplefinAccountPayload[] {
+  const accounts = (data as { accounts?: unknown } | null | undefined)?.accounts;
+  if (!Array.isArray(accounts)) {
+    throw new Error(
+      'SimpleFIN answered 200 with no accounts array; refusing to read an unreadable response as zero accounts.'
+    );
+  }
+  return accounts as SimplefinAccountPayload[];
+}
+
+export function providerErrorStrings(data: unknown): string[] {
+  const raw = (data as { errors?: unknown } | null | undefined)?.errors;
+  if (!Array.isArray(raw)) return [];
+  return raw.filter((entry): entry is string => typeof entry === 'string');
+}
+
+// SimpleFIN puts advisories in the same `errors` array it uses for access failures. The bridge
+// answers this app's own 730-day first-sync request with "Requested date range exceeds limit of 90
+// days and was capped.", and reading any string in that array as an expired institution login told
+// the owner to re-link the bank, which is the riskiest action the app offers. Only auth-shaped
+// messages may claim reauth; everything else is still reported, just not as a login problem.
+const REAUTH_ERROR_PATTERNS: RegExp[] = [
+  /re-?auth/i,
+  /re-?connect/i,
+  /re-?link/i,
+  /credential/i,
+  /log ?in|sign ?in|password/i,
+  /expired/i,
+  /unauthori[sz]ed/i,
+  /forbidden/i,
+  /access (has been |was )?(denied|revoked)/i,
+  /mfa|multi-factor|two-factor|verification code/i,
+];
+
+export interface SimplefinErrorTriage {
+  /** Messages that mean the institution connection itself needs a fresh login. */
+  reauth: string[];
+  /** Everything else the provider said: capped date ranges, per-account notices, our own data warnings. */
+  advisories: string[];
+}
+
+export function triageSimplefinErrors(errors: string[]): SimplefinErrorTriage {
+  const triage: SimplefinErrorTriage = { reauth: [], advisories: [] };
+  for (const message of errors) {
+    const target = REAUTH_ERROR_PATTERNS.some((pattern) => pattern.test(message))
+      ? triage.reauth
+      : triage.advisories;
+    target.push(message);
+  }
+  return triage;
+}
+
+/**
  * Zero out SimpleFIN accounts that the provider no longer returns.
  *
  * An account closed at the institution stops appearing in the response entirely, so absence is
@@ -169,6 +255,16 @@ export function zeroAccountsMissingFromResponse(
   now: string,
   providerErrors: string[]
 ): AccountBalanceChange[] {
+  // Total absence is the "unknown" case, never the "closed" case. No institution's accounts all
+  // vanish at once, but an unreadable 200 produces exactly this seen-set, and one such pass would
+  // zero every balance and hand the zeroes to the same run's net-worth snapshot.
+  if (seenAccountIds.size === 0) {
+    console.warn(
+      '[simplefin] Response carried no accounts at all; skipping the stale-account pass rather than reading total absence as total closure.'
+    );
+    return [];
+  }
+
   if (providerErrors.length > 0) {
     console.warn(
       `[simplefin] Provider reported ${providerErrors.length} error(s); skipping the stale-account pass so a partial response cannot zero real balances.`
@@ -204,6 +300,108 @@ export function zeroAccountsMissingFromResponse(
   return changes;
 }
 
+export interface SimplefinTransactionValues {
+  providerId: string;
+  date: string;
+  /** Integer cents, already negative for spend. */
+  amount: number;
+  merchantName: string | null;
+  originalName: string;
+  pending: number;
+}
+
+export type SimplefinTransactionWrite = 'added' | 'modified' | 'unchanged';
+
+interface ExistingTransactionRow {
+  date: string;
+  amount: number;
+  merchant_name: string | null;
+  original_name: string;
+  pending: number;
+}
+
+/**
+ * Write one provider transaction, reporting whether it actually changed anything.
+ *
+ * Two things this deliberately no longer does.
+ *
+ * It does not rewrite `merchant_name` on a row that has already posted. The owner is allowed to
+ * correct a merchant (UpdateTransactionSchema permits `merchant_name`), and the old unconditional
+ * refresh reverted every such correction within the hour with nothing on screen to say so. No
+ * provenance for a rename is stored anywhere, so the test is the row's own state instead: while a
+ * transaction is pending the provider is still settling it and may legitimately sharpen the payee,
+ * and once it has posted the payee does not change at the institution, so a divergence from that
+ * point on is the owner's. `original_name` carries the provider's raw description either way, so
+ * nothing is lost from the record.
+ *
+ * And it does not count a row it did not change. Every row in the payload used to be reported as
+ * 'modified', so the sync panel claimed ~123 updated transactions every hour on a ledger that had
+ * not moved. That panel is also where reauth prompts and partial failures appear, and noise there
+ * is what teaches the owner to stop reading it.
+ */
+export function upsertSimplefinTransaction(
+  db: Database.Database,
+  accountId: string,
+  values: SimplefinTransactionValues,
+  now: string
+): SimplefinTransactionWrite {
+  const existing = db.prepare(`
+    SELECT date, amount, merchant_name, original_name, pending
+    FROM transactions
+    WHERE simplefin_transaction_id = ?
+  `).get(values.providerId) as ExistingTransactionRow | undefined;
+
+  if (!existing) {
+    db.prepare(`
+      INSERT INTO transactions
+        (id, simplefin_transaction_id, account_id, date, amount, merchant_name,
+         original_name, pending, is_manual, source_type, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, 'simplefin', ?, ?)
+    `).run(
+      uuidv4(),
+      values.providerId,
+      accountId,
+      values.date,
+      values.amount,
+      values.merchantName,
+      values.originalName,
+      values.pending,
+      now,
+      now
+    );
+    return 'added';
+  }
+
+  const stillSettling = existing.pending === 1 || values.pending === 1;
+  const ownerOwnsMerchant = !stillSettling && (existing.merchant_name ?? '') !== '';
+  const merchantName = ownerOwnsMerchant ? existing.merchant_name : values.merchantName;
+
+  if (
+    existing.date === values.date &&
+    existing.amount === values.amount &&
+    existing.merchant_name === merchantName &&
+    existing.original_name === values.originalName &&
+    existing.pending === values.pending
+  ) {
+    return 'unchanged';
+  }
+
+  db.prepare(`
+    UPDATE transactions
+    SET date = ?, amount = ?, merchant_name = ?, original_name = ?, pending = ?, updated_at = ?
+    WHERE simplefin_transaction_id = ?
+  `).run(
+    values.date,
+    values.amount,
+    merchantName,
+    values.originalName,
+    values.pending,
+    now,
+    values.providerId
+  );
+  return 'modified';
+}
+
 export async function syncSimplefin(): Promise<SimplefinSyncResult> {
   const creds = getCredentials();
   if (!creds.simplefin?.accessUrl) {
@@ -231,13 +429,13 @@ export async function syncSimplefin(): Promise<SimplefinSyncResult> {
 
   const startDate = Math.floor(Date.now() / 1000) - (lookbackDays * 86400);
   const res = await client.get(`/accounts?start-date=${startDate}`);
-  const data = res.data;
+  const accounts = simplefinAccountsOrThrow(res.data);
 
-  const accountCount = data.accounts?.length || 0;
-  const errors: string[] = Array.isArray(data.errors) ? data.errors : [];
+  const accountCount = accounts.length;
+  const errors: string[] = providerErrorStrings(res.data);
   const seenAccountIds = new Set<string>();
 
-  for (const acct of (data.accounts || [])) {
+  for (const acct of accounts) {
     seenAccountIds.add(acct.id);
     const currency = acct.currency || 'USD';
     const institutionName = acct.org?.name || 'SimpleFIN';
@@ -341,9 +539,7 @@ export async function syncSimplefin(): Promise<SimplefinSyncResult> {
     }
 
     // Process transactions
-    for (const txn of (acct.transactions || [])) {
-      const existingTxn = db.prepare('SELECT id FROM transactions WHERE simplefin_transaction_id = ?').get(txn.id);
-
+    for (const txn of (acct.transactions ?? [])) {
       // Normalize the posted epoch to a LOCAL calendar day: see services/dates.ts for why
       // (every "today"/"this month" boundary in the app is local, and a late-night purchase
       // should stay on the day it happened). This comment used to claim UTC, which was true
@@ -364,39 +560,19 @@ export async function syncSimplefin(): Promise<SimplefinSyncResult> {
         skipped++;
         continue;
       }
-      const merchantName = txn.payee || null;
-      const originalName = txn.description || '';
-      // Not every institution reports this via SimpleFIN Bridge - defaults to posted (0)
-      // when the field is absent from the payload, matching the column's schema default.
-      const pending = txn.pending === true ? 1 : 0;
+      const write = upsertSimplefinTransaction(db, accountId, {
+        providerId: txn.id,
+        date,
+        amount,
+        merchantName: txn.payee || null,
+        originalName: txn.description || '',
+        // Not every institution reports this via SimpleFIN Bridge - defaults to posted (0)
+        // when the field is absent from the payload, matching the column's schema default.
+        pending: txn.pending === true ? 1 : 0,
+      }, now);
 
-      if (existingTxn) {
-        db.prepare(`
-          UPDATE transactions
-          SET date = ?, amount = ?, merchant_name = ?, original_name = ?, pending = ?, updated_at = ?
-          WHERE simplefin_transaction_id = ?
-        `).run(date, amount, merchantName, originalName, pending, now, txn.id);
-        modified++;
-      } else {
-        db.prepare(`
-          INSERT INTO transactions
-            (id, simplefin_transaction_id, account_id, date, amount, merchant_name,
-             original_name, pending, is_manual, source_type, created_at, updated_at)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, 'simplefin', ?, ?)
-        `).run(
-          uuidv4(),
-          txn.id,
-          accountId,
-          date,
-          amount,
-          merchantName,
-          originalName,
-          pending,
-          now,
-          now
-        );
-        added++;
-      }
+      if (write === 'added') added++;
+      else if (write === 'modified') modified++;
     }
 
     if (Array.isArray(acct.holdings) && acct.holdings.length > 0) {

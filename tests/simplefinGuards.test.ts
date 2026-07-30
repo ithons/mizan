@@ -1,7 +1,16 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import Database from 'better-sqlite3';
-import { liabilityAdjustedCents, upsertHoldingsFromSimplefin, zeroAccountsMissingFromResponse } from '../server/src/services/simplefin';
+import {
+  liabilityAdjustedCents,
+  providerErrorStrings,
+  simplefinAccountsOrThrow,
+  triageSimplefinErrors,
+  upsertHoldingsFromSimplefin,
+  upsertSimplefinTransaction,
+  zeroAccountsMissingFromResponse,
+} from '../server/src/services/simplefin';
+import { insertAccount, insertTransaction, migratedTestDb } from './helpers/schema';
 
 test('a liability reported negative (the normal SimpleFIN convention) stores positive owed', () => {
   const errors: string[] = [];
@@ -84,6 +93,242 @@ test('a response carrying provider errors never zeroes a missing account', () =>
   const absent = db.prepare("SELECT current_balance FROM accounts WHERE id = 'a_absent'").get() as { current_balance: number };
   assert.equal(absent.current_balance, 100170, 'balance preserved: absence here means "unknown", not "empty"');
   assert.deepEqual(changes, [], 'and nothing is reported as a balance change');
+  db.close();
+});
+
+test('a response with no accounts at all never zeroes a balance, even with no errors reported', () => {
+  const db = setupAccountsDb();
+  // The maintenance-page case: HTTP 200, nothing parseable, so no account ids were seen and the
+  // provider reported no errors either. Absence of every account is "unknown", not "all closed".
+  const changes = zeroAccountsMissingFromResponse(db, new Set<string>(), '2026-07-24', []);
+
+  const balances = (db.prepare('SELECT id, current_balance FROM accounts ORDER BY id').all() as Array<{ id: string; current_balance: number }>);
+  assert.deepEqual(balances, [
+    { id: 'a_absent', current_balance: 100170 },
+    { id: 'a_seen', current_balance: 429055 },
+  ]);
+  assert.deepEqual(changes, []);
+  db.close();
+});
+
+test('the empty-response guard holds against the real migrated schema', () => {
+  const db = migratedTestDb();
+  const accountId = insertAccount(db, { connection_type: 'simplefin', current_balance: 429055, is_manual: 0 });
+  db.prepare('UPDATE accounts SET simplefin_account_id = ? WHERE id = ?').run('sf_1', accountId);
+
+  const changes = zeroAccountsMissingFromResponse(db, new Set<string>(), '2026-07-24', []);
+
+  const row = db.prepare('SELECT current_balance FROM accounts WHERE id = ?').get(accountId) as { current_balance: number };
+  assert.equal(row.current_balance, 429055);
+  assert.deepEqual(changes, []);
+  db.close();
+});
+
+// ── Unreadable 200s ──────────────────────────────────────────────────────────
+// accountCount 0 with no errors used to be indistinguishable from a real empty response, which
+// made a maintenance HTML page look like a successful sync of nothing.
+
+test('a 200 without an accounts array fails the stage instead of reporting zero accounts', () => {
+  const maintenancePage = '<html><body>SimpleFIN Bridge is down for maintenance</body></html>';
+  assert.throws(() => simplefinAccountsOrThrow(maintenancePage), /no accounts array/);
+  assert.throws(() => simplefinAccountsOrThrow({}), /no accounts array/);
+  assert.throws(() => simplefinAccountsOrThrow({ errors: ['something went wrong'] }), /no accounts array/);
+  assert.throws(() => simplefinAccountsOrThrow({ accounts: null }), /no accounts array/);
+  assert.throws(() => simplefinAccountsOrThrow(null), /no accounts array/);
+});
+
+test('a genuinely empty account list is still a valid response', () => {
+  assert.deepEqual(simplefinAccountsOrThrow({ accounts: [] }), []);
+  assert.equal(simplefinAccountsOrThrow({ accounts: [{ id: 'a', name: 'Checking', balance: '1.00' }] }).length, 1);
+});
+
+test('provider errors are read only from an array of strings', () => {
+  assert.deepEqual(providerErrorStrings({ errors: ['a', 'b'] }), ['a', 'b']);
+  assert.deepEqual(providerErrorStrings({ errors: 'a string, not a list' }), []);
+  assert.deepEqual(providerErrorStrings({ errors: ['keep', { nested: true }, 7] }), ['keep']);
+  assert.deepEqual(providerErrorStrings(undefined), []);
+});
+
+// ── Advisories vs auth failures ──────────────────────────────────────────────
+// The bridge caps the app's own 730-day first-sync request and says so in `errors`. Reading that as
+// an expired login told the owner to re-link the institution, the riskiest action the app offers.
+
+test('the capped-date-range notice is an advisory, not a reauth prompt', () => {
+  const triage = triageSimplefinErrors(['Requested date range exceeds limit of 90 days and was capped.']);
+  assert.deepEqual(triage.reauth, []);
+  assert.equal(triage.advisories.length, 1);
+});
+
+test('a real access failure is still classified as reauth', () => {
+  const triage = triageSimplefinErrors([
+    'Wealthfront: connection needs to be re-authorized',
+    'Requested date range exceeds limit of 90 days and was capped.',
+    'Chase: credentials are no longer valid',
+  ]);
+  assert.equal(triage.reauth.length, 2);
+  assert.deepEqual(triage.advisories, ['Requested date range exceeds limit of 90 days and was capped.']);
+});
+
+test("this app's own data warnings are advisories, not login problems", () => {
+  const errors: string[] = [];
+  liabilityAdjustedCents(500, true, 'Weird Card', errors);
+  errors.push('Account "Euro Savings" is in EUR, but Mizān treats balances as USD — its value may be misstated.');
+  errors.push('SimpleFIN returned a non-numeric transaction abc amount: "n/a"');
+
+  const triage = triageSimplefinErrors(errors);
+  assert.deepEqual(triage.reauth, [], 'none of these mean the institution login expired');
+  assert.equal(triage.advisories.length, 3);
+});
+
+// ── Provider writes vs owner edits ───────────────────────────────────────────
+// The old unconditional UPDATE rewrote date/amount/merchant_name/original_name/pending for every
+// row in the payload, which reverted the owner's merchant corrections within the hour and reported
+// every untouched row as 'modified'.
+
+function insertSimplefinTransaction(
+  db: Database.Database,
+  providerId: string,
+  overrides: Parameters<typeof insertTransaction>[1] = {}
+): string {
+  const id = insertTransaction(db, { source_type: 'simplefin', ...overrides });
+  db.prepare('UPDATE transactions SET simplefin_transaction_id = ? WHERE id = ?').run(providerId, id);
+  return id;
+}
+
+test('a hand-edited merchant name survives a resync of the same posted transaction', () => {
+  const db = migratedTestDb();
+  const accountId = insertAccount(db, { connection_type: 'simplefin', is_manual: 0 });
+  const txnId = insertSimplefinTransaction(db, 'sf_txn_1', {
+    account_id: accountId,
+    date: '2026-07-10',
+    amount: -4211,
+    merchant_name: 'Trader Joe’s',        // the owner's correction
+    original_name: 'TRADER JOES #431 CAMBRIDGE MA',
+    pending: 0,
+  });
+
+  const write = upsertSimplefinTransaction(db, accountId, {
+    providerId: 'sf_txn_1',
+    date: '2026-07-10',
+    amount: -4211,
+    merchantName: 'TRADER JOES #431',          // what the provider keeps sending
+    originalName: 'TRADER JOES #431 CAMBRIDGE MA',
+    pending: 0,
+  }, '2026-07-30T12:00:00.000Z');
+
+  const row = db.prepare('SELECT merchant_name, original_name FROM transactions WHERE id = ?').get(txnId) as
+    { merchant_name: string; original_name: string };
+  assert.equal(row.merchant_name, 'Trader Joe’s');
+  assert.equal(row.original_name, 'TRADER JOES #431 CAMBRIDGE MA', 'the provider still owns the raw description');
+  assert.equal(write, 'unchanged', 'and the row is not reported as touched');
+  db.close();
+});
+
+test('a settling transaction still takes the provider date, amount and payee', () => {
+  const db = migratedTestDb();
+  const accountId = insertAccount(db, { connection_type: 'simplefin', is_manual: 0 });
+  const txnId = insertSimplefinTransaction(db, 'sf_txn_2', {
+    account_id: accountId,
+    date: '2026-07-10',
+    amount: -5000,
+    merchant_name: 'SQ *RESTAURANT',
+    original_name: 'SQ *RESTAURANT',
+    pending: 1,
+  });
+
+  // The authorization posts two days later with the tip added and a cleaner payee.
+  const write = upsertSimplefinTransaction(db, accountId, {
+    providerId: 'sf_txn_2',
+    date: '2026-07-12',
+    amount: -6000,
+    merchantName: 'Restaurant Name',
+    originalName: 'SQ *RESTAURANT NAME',
+    pending: 0,
+  }, '2026-07-30T12:00:00.000Z');
+
+  assert.equal(write, 'modified');
+  const row = db.prepare('SELECT date, amount, merchant_name, pending FROM transactions WHERE id = ?').get(txnId) as
+    { date: string; amount: number; merchant_name: string; pending: number };
+  assert.deepEqual(row, { date: '2026-07-12', amount: -6000, merchant_name: 'Restaurant Name', pending: 0 });
+  db.close();
+});
+
+test('a blank merchant name is filled in by the provider rather than protected', () => {
+  const db = migratedTestDb();
+  const accountId = insertAccount(db, { connection_type: 'simplefin', is_manual: 0 });
+  const txnId = insertSimplefinTransaction(db, 'sf_txn_3', {
+    account_id: accountId,
+    merchant_name: null,
+    original_name: 'ACH CREDIT',
+    pending: 0,
+  });
+
+  const write = upsertSimplefinTransaction(db, accountId, {
+    providerId: 'sf_txn_3',
+    date: '2026-07-01',
+    amount: -1000,
+    merchantName: 'Payroll',
+    originalName: 'ACH CREDIT',
+    pending: 0,
+  }, '2026-07-30T12:00:00.000Z');
+
+  assert.equal(write, 'modified');
+  const row = db.prepare('SELECT merchant_name FROM transactions WHERE id = ?').get(txnId) as { merchant_name: string };
+  assert.equal(row.merchant_name, 'Payroll');
+  db.close();
+});
+
+test('an unchanged row is not counted as modified and its updated_at is left alone', () => {
+  const db = migratedTestDb();
+  const accountId = insertAccount(db, { connection_type: 'simplefin', is_manual: 0 });
+  const values = {
+    providerId: 'sf_txn_4',
+    date: '2026-07-10',
+    amount: -1234,
+    merchantName: 'Backblaze',
+    originalName: 'BACKBLAZE INC',
+    pending: 0,
+  };
+
+  assert.equal(upsertSimplefinTransaction(db, accountId, values, '2026-07-29T12:00:00.000Z'), 'added');
+  const afterInsert = db.prepare('SELECT updated_at FROM transactions WHERE simplefin_transaction_id = ?').get('sf_txn_4') as
+    { updated_at: string };
+
+  // The next twelve hourly syncs serve exactly the same row.
+  for (let i = 0; i < 12; i += 1) {
+    assert.equal(upsertSimplefinTransaction(db, accountId, values, '2026-07-30T12:00:00.000Z'), 'unchanged');
+  }
+
+  const afterResyncs = db.prepare('SELECT updated_at FROM transactions WHERE simplefin_transaction_id = ?').get('sf_txn_4') as
+    { updated_at: string };
+  assert.equal(afterResyncs.updated_at, afterInsert.updated_at, 'a no-op sync must not restamp the row');
+  db.close();
+});
+
+test('a real provider revision is still counted as modified', () => {
+  const db = migratedTestDb();
+  const accountId = insertAccount(db, { connection_type: 'simplefin', is_manual: 0 });
+  insertSimplefinTransaction(db, 'sf_txn_5', {
+    account_id: accountId,
+    date: '2026-07-10',
+    amount: -1234,
+    merchant_name: 'Backblaze',
+    original_name: 'BACKBLAZE INC',
+    pending: 0,
+  });
+
+  const write = upsertSimplefinTransaction(db, accountId, {
+    providerId: 'sf_txn_5',
+    date: '2026-07-10',
+    amount: -1999,
+    merchantName: 'Backblaze',
+    originalName: 'BACKBLAZE INC',
+    pending: 0,
+  }, '2026-07-30T12:00:00.000Z');
+
+  assert.equal(write, 'modified');
+  const row = db.prepare("SELECT amount FROM transactions WHERE simplefin_transaction_id = 'sf_txn_5'").get() as { amount: number };
+  assert.equal(row.amount, -1999);
   db.close();
 });
 
