@@ -1100,16 +1100,26 @@ export function getNetWorthAttribution(
   if (options.endDate) { conditions.push('date <= ?'); params.push(options.endDate); }
   const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
 
+  // Measured endpoints only. Baselining on a reconstruction attributes the difference between a
+  // guess and a fact to individual accounts and renders it with no marker: on the live database
+  // Reports' fixed 6-month window picked the estimated 2026-02-01 row, whose breakdown asserts
+  // Chase Checking held $0.00, and printed "Net worth rose $3,070.54" with per-account bars to
+  // match, while the chart directly above it drew that same point as an estimate.
+  const measuredWhere = conditions.length > 0
+    ? `WHERE ${conditions.join(' AND ')} AND is_estimated = 0`
+    : 'WHERE is_estimated = 0';
+
   const bounds = db.prepare(`
     SELECT MIN(date) AS first_date, MAX(date) AS last_date, COUNT(*) AS count
-    FROM net_worth_snapshots ${where}
+    FROM net_worth_snapshots ${measuredWhere}
   `).get(...params) as { first_date: string | null; last_date: string | null; count: number };
 
   // One snapshot is a point, not a movement — there is nothing to attribute.
   if (bounds.count < 2 || !bounds.first_date || !bounds.last_date) return null;
 
   const snapshotAt = (date: string) => db.prepare(`
-    SELECT date, net_worth, breakdown FROM net_worth_snapshots WHERE date = ? ORDER BY date LIMIT 1
+    SELECT date, net_worth, breakdown FROM net_worth_snapshots
+    WHERE date = ? AND is_estimated = 0 ORDER BY date LIMIT 1
   `).get(date) as { date: string; net_worth: number; breakdown: string | null } | undefined;
 
   const start = snapshotAt(bounds.first_date);
@@ -1145,7 +1155,11 @@ export function getNetWorthAttribution(
   const accounts = Array.from(new Set([...Object.keys(startBalances), ...Object.keys(endBalances)]))
     .map((accountId) => {
       const account = accountsById.get(accountId);
+      // An account that no longer exists cannot be classified, and guessing "asset" made a deleted
+      // credit card's balance read as money the owner had. Its movement is still reported, with a
+      // null is_liability so the caller can show it as unattributable rather than as a gain.
       const isLiability = account ? account.is_liability === 1 : false;
+      const resolved = account !== undefined;
       const startBalance = startBalances[accountId] ?? 0;
       const endBalance = endBalances[accountId] ?? 0;
       const balanceDelta = endBalance - startBalance;
@@ -1161,7 +1175,8 @@ export function getNetWorthAttribution(
         // a positive amount owed, so a credit-card balance growing by $100 moves net worth DOWN by
         // $100. Negating here is what makes these deltas sum to the headline net-worth delta —
         // without it a rising card balance rendered as a green gain.
-        delta: isLiability ? -balanceDelta : balanceDelta,
+        delta: resolved ? (isLiability ? -balanceDelta : balanceDelta) : balanceDelta,
+        resolved,
       };
     })
     .filter((account) => account.delta !== 0)

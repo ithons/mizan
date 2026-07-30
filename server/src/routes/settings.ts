@@ -22,6 +22,8 @@ import {
   buildLocalBackupRestorePreview,
   restoreLocalBackup,
   LocalBackupValidationError,
+  LOCAL_RESTORE_TABLES,
+  type LocalRestoreTableName,
 } from '../services/localBackup';
 import { buildCsvImportPreview, commitCsvImport } from '../services/csvImport';
 import { listDataImportRuns, recordDataImportRun } from '../services/importRuns';
@@ -34,6 +36,13 @@ import {
 import type { z } from 'zod';
 
 const router = Router();
+
+/**
+ * Tables a factory reset keeps. Only the category taxonomy: it is seeded by migrations, so
+ * deleting it leaves an install with nowhere to file a transaction and no way back short of
+ * rebuilding the database.
+ */
+const FACTORY_RESET_PRESERVED: ReadonlySet<LocalRestoreTableName> = new Set(['categories']);
 
 function routeParam(value: string | string[] | undefined): string | null {
   return typeof value === 'string' && value.length > 0 ? value : null;
@@ -289,38 +298,15 @@ router.delete(
     try {
       const db = getDb();
 
-      // Full factory reset: clear every user-data table (children before parents), the
-      // AI history/audit tables, and app_preferences (the AI profile + settings). Only
-      // schema_migrations is preserved.
-      db.exec(`
-        DELETE FROM messages;
-        DELETE FROM conversations;
-        DELETE FROM advisor_actions;
-        DELETE FROM advisor_drafts;
-        DELETE FROM holdings_history;
-        DELETE FROM holdings;
-        DELETE FROM securities;
-        DELETE FROM budget_rollover_ledger;
-        DELETE FROM budget_group_members;
-        DELETE FROM budget_groups;
-        DELETE FROM merchant_rule_revisions;
-        DELETE FROM merchant_rules;
-        DELETE FROM transaction_category_revisions;
-        DELETE FROM recurring_occurrence_adjustments;
-        DELETE FROM recurring_patterns;
-        DELETE FROM goals;
-        DELETE FROM transactions;
-        DELETE FROM budgets;
-        DELETE FROM accounts;
-        DELETE FROM net_worth_snapshots;
-        DELETE FROM simplefin_connections;
-        DELETE FROM coinbase_connections;
-        DELETE FROM sync_changes;
-        DELETE FROM sync_run_items;
-        DELETE FROM sync_runs;
-        DELETE FROM data_import_runs;
-        DELETE FROM app_preferences;
-      `);
+      // Full factory reset: clear every user-data table, the AI history/audit tables, and
+      // app_preferences (the AI profile + settings). Driven off LOCAL_RESTORE_TABLES rather
+      // than a hand-written list, because a hand-written list is exactly how the backup set
+      // silently fell nine tables behind the schema. Reversed, that list is children before
+      // parents, which is what the live connection's `foreign_keys = ON` requires.
+      for (const table of [...LOCAL_RESTORE_TABLES].reverse()) {
+        if (FACTORY_RESET_PRESERVED.has(table)) continue;
+        db.prepare(`DELETE FROM "${table}"`).run();
+      }
 
       res.json({ data: { success: true } });
     } catch (err) {

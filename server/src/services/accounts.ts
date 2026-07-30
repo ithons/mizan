@@ -228,28 +228,32 @@ export function mergeAccounts(
   const now = new Date().toISOString();
 
   db.transaction(() => {
-    // Move provider IDs from source to target.
-    const providerFields: string[] = [];
-    const providerValues: any[] = [];
+    // Release the source's provider ids BEFORE claiming them on the target.
+    //
+    // `simplefin_account_id` and `coinbase_account_id` are both UNIQUE, and SQLite has no deferred
+    // unique constraints, so writing the source's id onto the target while the source row still held
+    // it threw on the spot. Merging any provider-linked account simply failed, and the failure was
+    // a raw constraint error rather than anything the UI could explain.
+    db.prepare(`
+      UPDATE accounts
+      SET simplefin_account_id = NULL, coinbase_account_id = NULL, updated_at = ?
+      WHERE id = ?
+    `).run(now, sourceAccountId);
 
-    if (source.simplefin_account_id) {
-      providerFields.push('simplefin_account_id = ?');
-      providerValues.push(source.simplefin_account_id);
-    }
-
-    // Update target account connection info to match source.
     db.prepare(`
       UPDATE accounts
       SET connection_type = ?,
           connection_id = ?,
-          ${providerFields.length > 0 ? providerFields.join(', ') + ',' : ''}
+          simplefin_account_id = ?,
+          coinbase_account_id = ?,
           current_balance = ?,
           updated_at = ?
       WHERE id = ?
     `).run(
       source.connection_type,
       source.connection_id,
-      ...providerValues,
+      source.simplefin_account_id ?? null,
+      source.coinbase_account_id ?? null,
       source.current_balance,
       now,
       targetAccountId
@@ -262,18 +266,105 @@ export function mergeAccounts(
       WHERE account_id = ?
     `).run(targetAccountId, now, sourceAccountId);
 
-    // Reassign holdings and investment transactions.
     db.prepare(`
       UPDATE holdings
       SET account_id = ?, updated_at = ?
       WHERE account_id = ?
     `).run(targetAccountId, now, sourceAccountId);
 
-    // Remove the source account.
+    // holdings_history is the lesson migration 033 had to learn by hand.
+    //
+    // It carries `ON DELETE CASCADE` on account_id, so deleting the source below destroys every
+    // historical position it held. Migration 033 consolidated eight per-coin Coinbase accounts into
+    // one and had to rebuild exactly these rows afterwards; that repair went into the migration and
+    // never into this function, so the next merge would have destroyed them again.
+    //
+    // The composite key is (account_id, security_id, date), so a date where BOTH accounts held the
+    // same security would collide. Sum those rather than letting one silently win: two rows for the
+    // same security on the same day are two parts of one position once the accounts are one account.
+    db.prepare(`
+      UPDATE OR REPLACE holdings_history
+      SET account_id = ?
+      WHERE account_id = ?
+        AND NOT EXISTS (
+          SELECT 1 FROM holdings_history existing
+          WHERE existing.account_id = ?
+            AND existing.security_id = holdings_history.security_id
+            AND existing.date = holdings_history.date
+        )
+    `).run(targetAccountId, sourceAccountId, targetAccountId);
+
+    db.prepare(`
+      UPDATE holdings_history AS target
+      SET quantity = quantity + COALESCE((
+            SELECT s.quantity FROM holdings_history s
+            WHERE s.account_id = ? AND s.security_id = target.security_id AND s.date = target.date
+          ), 0),
+          institution_value = institution_value + COALESCE((
+            SELECT s.institution_value FROM holdings_history s
+            WHERE s.account_id = ? AND s.security_id = target.security_id AND s.date = target.date
+          ), 0)
+      WHERE target.account_id = ?
+    `).run(sourceAccountId, sourceAccountId, targetAccountId);
+
+    db.prepare('DELETE FROM holdings_history WHERE account_id = ?').run(sourceAccountId);
+
+    // A goal linked to the source would be silently unlinked by ON DELETE SET NULL, quietly
+    // detaching the goal from the money backing it.
+    db.prepare('UPDATE goals SET account_id = ? WHERE account_id = ?').run(targetAccountId, sourceAccountId);
+
+    // The lesson migration 039 had to learn by hand: the source id stays inside every historical
+    // net_worth_snapshots.breakdown, where it becomes an id pointing at nothing. Migration 039
+    // remapped exactly these orphans after 033 deleted eight accounts, and that repair also never
+    // made it into this function.
+    remapAccountIdInSnapshots(db, sourceAccountId, targetAccountId);
+
     db.prepare('DELETE FROM accounts WHERE id = ?').run(sourceAccountId);
   })();
 
   return { ok: true };
+}
+
+/**
+ * Rewrite every historical breakdown so `fromAccountId`'s balance is attributed to `toAccountId`.
+ *
+ * Values are summed where both ids appear on the same date: after a merge they are two parts of one
+ * account, so the month's net worth must not change. That is the property migration 039 was
+ * restoring, and it is the property this keeps.
+ */
+export function remapAccountIdInSnapshots(
+  db: Database.Database,
+  fromAccountId: string,
+  toAccountId: string
+): number {
+  const rows = db.prepare('SELECT id, breakdown FROM net_worth_snapshots').all() as Array<{
+    id: string;
+    breakdown: string;
+  }>;
+  const update = db.prepare('UPDATE net_worth_snapshots SET breakdown = ? WHERE id = ?');
+  let changed = 0;
+
+  for (const row of rows) {
+    let breakdown: Record<string, unknown>;
+    try {
+      breakdown = JSON.parse(row.breakdown) as Record<string, unknown>;
+    } catch {
+      continue;
+    }
+    if (!(fromAccountId in breakdown)) continue;
+
+    const moved = breakdown[fromAccountId];
+    delete breakdown[fromAccountId];
+    if (typeof moved === 'number' && Number.isFinite(moved)) {
+      const existing = breakdown[toAccountId];
+      breakdown[toAccountId] =
+        typeof existing === 'number' && Number.isFinite(existing) ? existing + moved : moved;
+    }
+    update.run(JSON.stringify(breakdown), row.id);
+    changed += 1;
+  }
+
+  return changed;
 }
 
 export type DeleteAccountResult = { ok: true } | { ok: false; reason: 'not_found' };
@@ -288,7 +379,16 @@ export function deleteAccount(db: Database.Database, id: string): DeleteAccountR
   }
 
   if (account.is_manual) {
-    // Clean up associated transactions before deleting the account.
+    // Historical breakdowns are deliberately left intact.
+    //
+    // The account's past balances DID happen, so rewriting them would silently change what net
+    // worth was in every earlier month. What the app must not do is guess about an id it can no
+    // longer resolve: `deriveAssetBuckets` therefore counts an unresolvable account under `other`
+    // rather than assuming it was a non-liability asset, which is what made a removed credit card
+    // read as money the owner had.
+    //
+    // holdings and holdings_history cascade away with the account. That is correct HERE and wrong in
+    // mergeAccounts, where the positions survive under the target: see the note there.
     db.prepare('DELETE FROM transactions WHERE account_id = ?').run(id);
     db.prepare('DELETE FROM accounts WHERE id = ?').run(id);
   } else {

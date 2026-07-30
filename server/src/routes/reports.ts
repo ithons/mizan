@@ -17,6 +17,7 @@ import type {
   SpendingReport,
 } from '../../../shared/types';
 import { dollarizeFields, toDollars } from '../services/money';
+import { deriveAssetBuckets } from '../services/netWorthHistory';
 
 const router = Router();
 
@@ -290,15 +291,21 @@ router.get('/investments', (req: Request, res: Response, next: NextFunction): vo
 
     // is_estimated travels with the point. TrendChart already knows how to draw a reconstruction
     // differently from a measurement; this endpoint was the one consumer that never told it.
-    const snapshots = db.prepare(`
-      SELECT
-        date,
-        COALESCE(investment_assets, 0) AS value,
-        is_estimated
+    //
+    // The value is derived from the breakdown rather than read from `investment_assets`, because
+    // that column was frozen from the account types in force when the row was written. Both Fidelity
+    // accounts were auto-typed `checking` before being corrected, so the stored column still says
+    // $0.00 for two days when the portfolio held $1,661.66.
+    const snapshots = (db.prepare(`
+      SELECT date, breakdown, is_estimated
       FROM net_worth_snapshots
       ${where}
       ORDER BY date ASC
-    `).all(...params);
+    `).all(...params) as Array<{ date: string; breakdown: string; is_estimated: number }>).map((row) => ({
+      date: row.date,
+      value: deriveAssetBuckets(db, row.breakdown).investment,
+      is_estimated: row.is_estimated,
+    }));
 
     // Total portfolio value
     const totalValue = db.prepare(
