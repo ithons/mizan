@@ -156,6 +156,7 @@ export interface RevertableRevision {
   transaction_id: string;
   from_category_id: string | null;
   from_source: string | null;
+  to_category_id: string | null;
 }
 
 /**
@@ -172,7 +173,7 @@ export function revertableRevisionsForAction(
   actionId: string
 ): RevertableRevision[] {
   return db.prepare(`
-    SELECT r.id, r.transaction_id, r.from_category_id, r.from_source
+    SELECT r.id, r.transaction_id, r.from_category_id, r.from_source, r.to_category_id
     FROM transaction_category_revisions r
     WHERE r.action_id = ?
       AND r.revert_of IS NULL
@@ -190,18 +191,41 @@ export function revertableRevisionsForAction(
 }
 
 /**
- * Restore each revertable revision's prior category and prior source.
+ * The newest revision still standing for a transaction, under the same definition undo uses: the
+ * newest row that is neither a revert nor already reverted.
+ *
+ * A writer that displaces a category temporarily (transfer pairing) needs this to hand the row back
+ * as it found it. It returns `to_category_id` as well, so the caller can check the revision is the
+ * one IT wrote before reverting it: if a later pass has written the row since, its revision is the
+ * newest and reverting that would discard someone else's decision.
+ */
+export function latestRevertableRevision(
+  db: Database.Database,
+  transactionId: string
+): RevertableRevision | undefined {
+  return db.prepare(`
+    SELECT id, transaction_id, from_category_id, from_source, to_category_id
+    FROM transaction_category_revisions
+    WHERE transaction_id = ?
+      AND revert_of IS NULL
+      AND reverted_at IS NULL
+    ORDER BY created_at DESC, rowid DESC
+    LIMIT 1
+  `).get(transactionId) as RevertableRevision | undefined;
+}
+
+/**
+ * Restore each revision's prior category and prior source.
  *
  * Restoring the source matters: the old undo wrote `category_source = 'rule'` for every row it
  * touched, so undoing an AI action that had displaced a hand-made choice handed that choice back
  * relabelled as machine-authored, and the next `skipManual` pass was then free to overwrite it.
  */
-export function revertAction(
+export function revertRevisions(
   db: Database.Database,
-  actionId: string,
+  revisions: readonly RevertableRevision[],
   now = new Date().toISOString()
 ): number {
-  const revisions = revertableRevisionsForAction(db, actionId);
   if (revisions.length === 0) return 0;
 
   const reverted = writeTransactionCategories(
@@ -223,4 +247,12 @@ export function revertAction(
   for (const r of revisions) consume.run(now, r.id);
 
   return reverted;
+}
+
+export function revertAction(
+  db: Database.Database,
+  actionId: string,
+  now = new Date().toISOString()
+): number {
+  return revertRevisions(db, revertableRevisionsForAction(db, actionId), now);
 }
