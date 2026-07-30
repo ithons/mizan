@@ -7,6 +7,7 @@ import { buildRecurringForecast } from '../services/recurringForecast';
 import { suggestMerchantRules } from '../services/rules';
 import { getAnomalyInsights } from '../services/anomalyInsights';
 import { computeSafeToSpend } from '../services/safeToSpend';
+import { reconcileAccounts } from '../services/reconciliation';
 import { getMonthlyBudgetsWithProjection } from '../services/budgetProjection';
 import { toDollars } from '../services/money';
 import { excludedFromTotalsSql } from '../services/transactionFilters';
@@ -96,6 +97,32 @@ function ageInDays(iso: string | null): number | null {
 
   return differenceInCalendarDays(new Date(), parsed);
 }
+
+// GET /reconciliation - does the ledger explain each account's balance?
+// The one check that decides whether every other number in the app is true. Nothing checked this
+// relationship before, and the app's silence about it read as a claim of completeness.
+router.get('/reconciliation', (_req: Request, res: Response, next: NextFunction): void => {
+  try {
+    const report = reconcileAccounts(getDb());
+    const toDollarFields = (account: (typeof report.accounts)[number]) => ({
+      ...account,
+      observed_delta: toDollars(account.observed_delta),
+      explained_delta: toDollars(account.explained_delta),
+      residual: toDollars(account.residual),
+      largest_window_residual: toDollars(account.largest_window_residual),
+    });
+    res.json({
+      data: {
+        accounts: report.accounts.map(toDollarFields),
+        unreconciled: report.unreconciled.map(toDollarFields),
+        total_residual: toDollars(report.total_residual),
+        measured_snapshot_count: report.measured_snapshot_count,
+      },
+    });
+  } catch (err) {
+    next(err);
+  }
+});
 
 // GET /safe-to-spend - what is left after every claim already made on the liquid pool.
 // Served from the server so the Today screen and the advisor cannot disagree about it.
