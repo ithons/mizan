@@ -1,17 +1,13 @@
-import { format, startOfMonth } from 'date-fns';
 import type Database from 'better-sqlite3';
 import type {
   DataQualityIssue,
-  DataQualityStatus,
   DataQualitySummary,
   InsightSeverity,
   RecurringForecast,
-  ReportSummary,
   SyncHealth,
   TransactionReviewSummary,
 } from '../../../shared/types';
 import { buildRecurringForecast } from './recurringForecast';
-import { getReportSummary } from './reporting';
 import { getSyncHealth } from './syncHealth';
 import { getTransactionReviewSummary } from './transactionReview';
 import { getPersonalFinanceInvariantIssues } from './personalFinanceInvariants';
@@ -21,12 +17,11 @@ interface DataQualityInputs {
   syncHealth: SyncHealth;
   reviewSummary: TransactionReviewSummary;
   forecast: RecurringForecast;
-  reportSummary: ReportSummary;
   invariantIssues?: PersonalFinanceInvariantIssue[];
 }
 
-interface ScoredIssue extends DataQualityIssue {
-  penalty: number;
+interface WeightedIssue extends DataQualityIssue {
+  weight: number;
 }
 
 const severityRank: Record<InsightSeverity, number> = {
@@ -36,8 +31,34 @@ const severityRank: Record<InsightSeverity, number> = {
   positive: 3,
 };
 
-function plural(count: number, singular: string, pluralLabel = `${singular}s`): string {
-  return `${count} ${count === 1 ? singular : pluralLabel}`;
+/**
+ * A counted noun phrase plus whether it takes a singular verb.
+ *
+ * The old helper handed back only the phrase, so every call site wrote the verb by hand and got it
+ * wrong at one: "1 transfer or investment flow were excluded", "1 recurring item need review".
+ * Returning a value that is not a string makes interpolating the subject without choosing a verb a
+ * type error, so agreement is decided in exactly one place.
+ */
+interface Counted {
+  text: string;
+  isOne: boolean;
+}
+
+function counted(count: number, singular: string, pluralNoun = `${singular}s`): Counted {
+  return { text: `${count} ${count === 1 ? singular : pluralNoun}`, isOne: count === 1 };
+}
+
+// Two counted nouns joined are two things, so the joined subject takes a plural verb even when
+// every part of it reads "1 something".
+function joinCounted(parts: Counted[]): Counted {
+  return {
+    text: parts.map((part) => part.text).join(', '),
+    isOne: parts.length === 1 && parts[0].isOne,
+  };
+}
+
+function sentence(subject: Counted, singularVerb: string, pluralVerb: string, rest: string): string {
+  return `${subject.text} ${subject.isOne ? singularVerb : pluralVerb} ${rest}`;
 }
 
 function issue(
@@ -46,168 +67,114 @@ function issue(
   message: string,
   route: string,
   severity: InsightSeverity,
-  penalty: number
-): ScoredIssue {
-  return { id, label, message, route, severity, penalty };
+  weight: number
+): WeightedIssue {
+  return { id, label, message, route, severity, weight };
 }
 
-function statusFromIssues(
-  issues: ScoredIssue[],
-  score: number,
-  syncStatus: SyncHealth['status']
-): {
-  status: DataQualityStatus;
-  statusLabel: string;
-  statusDetail: string;
-} {
-  if (issues.some((item) => item.severity === 'critical')) {
-    return {
-      status: 'attention',
-      statusLabel: 'Needs attention',
-      statusDetail: 'One or more data sources need action before Mizān can fully trust the numbers.',
-    };
-  }
-
-  if (syncStatus === 'stale' || syncStatus === 'empty') {
-    return {
-      status: 'stale',
-      statusLabel: syncStatus === 'empty' ? 'Not connected' : 'Sync is stale',
-      statusDetail: syncStatus === 'empty'
-        ? 'Connect live institutions before relying on reports, budgets, or advisor answers.'
-        : 'Sync one or more institutions before relying on current balances and recent activity.',
-    };
-  }
-
-  if (issues.some((item) => item.severity === 'warning') || score < 90) {
-    return {
-      status: 'review',
-      statusLabel: 'Review recommended',
-      statusDetail: 'Core data is usable, but review queues or forecast confidence can improve the picture.',
-    };
-  }
-
-  return {
-    status: 'healthy',
-    statusLabel: 'Reliable enough',
-    statusDetail: 'Core data is fresh and the main review queues are clear.',
-  };
+function queueCount(reviewSummary: TransactionReviewSummary, id: string): number {
+  return reviewSummary.queues.find((queue) => queue.id === id)?.count ?? 0;
 }
 
+function transactionReviewIssue(reviewSummary: TransactionReviewSummary): WeightedIssue | null {
+  if (reviewSummary.total_open <= 0) return null;
+
+  const uncategorized = queueCount(reviewSummary, 'uncategorized');
+  const parts = [
+    [uncategorized, 'uncategorized transaction'],
+    [queueCount(reviewSummary, 'rule_suggestions'), 'rule suggestion'],
+    [queueCount(reviewSummary, 'pending'), 'pending transaction'],
+    [queueCount(reviewSummary, 'recurring_candidates'), 'recurring candidate'],
+    [queueCount(reviewSummary, 'duplicate_candidates'), 'possible duplicate'],
+    [queueCount(reviewSummary, 'transfer_candidates'), 'detected transfer'],
+  ] as const;
+  const named = parts
+    .filter(([count]) => count > 0)
+    .map(([count, noun]) => counted(count, noun));
+
+  return issue(
+    'transaction-review',
+    'Transaction review backlog',
+    named.length > 0
+      ? sentence(joinCounted(named), 'needs', 'need', 'review before reports can be fully trusted.')
+      : sentence(counted(reviewSummary.total_open, 'review item'), 'needs', 'need', 'attention.'),
+    '/review',
+    reviewSummary.total_open > 10 || uncategorized > 5 ? 'warning' : 'info',
+    Math.min(25, Math.ceil(reviewSummary.total_open * 1.5))
+  );
+}
+
+function cashFlowReviewIssue(forecast: RecurringForecast): WeightedIssue | null {
+  if (forecast.review_count <= 0) return null;
+
+  const subject = counted(forecast.review_count, 'recurring item');
+  const overdue = counted(forecast.overdue_count, 'overdue item');
+
+  return issue(
+    'cash-flow-review',
+    'Cash flow confidence',
+    forecast.overdue_count > 0
+      ? sentence(subject, 'needs', 'need', `review, including ${overdue.text}.`)
+      : sentence(subject, 'needs', 'need', 'confirmation before the forecast is dependable.'),
+    '/bills',
+    forecast.overdue_count > 0 ? 'warning' : 'info',
+    Math.min(20, forecast.overdue_count * 8 + (forecast.review_count - forecast.overdue_count) * 4)
+  );
+}
+
+function syncIssue(syncHealth: SyncHealth): WeightedIssue | null {
+  switch (syncHealth.status) {
+    case 'attention':
+      return issue('sync-attention', 'Connection needs attention', syncHealth.status_detail, '/accounts', 'critical', 35);
+    case 'stale':
+      return issue('sync-stale', 'Sync is stale', syncHealth.status_detail, '/accounts', 'warning', 20);
+    case 'empty':
+      return issue('sync-empty', 'No live connections', syncHealth.status_detail, '/accounts', 'warning', 30);
+    default:
+      return null;
+  }
+}
+
+/**
+ * Every issue here is something the owner can act on. Report exclusions used to be listed too, and
+ * they are the reason this panel never reached a clean state: a routine checking-to-savings
+ * transfer, both legs categorized and the pair confirmed, put a permanent row in a list of things
+ * to fix. Excluding transfers, investment and crypto flows from income and spending totals is the
+ * intended behaviour of `transactionFilters.excludedFromTotalsSql`, not a defect, and the counts
+ * still reach the owner where they belong: `ReportSummary.excluded_flows` on the Reports screen and
+ * in the advisor's financial context. Nothing that only describes correct behaviour goes in here.
+ *
+ * `weight` orders ties inside one severity band. It is never summed, never serialized, and is not a
+ * score; the panel reports conditions, and a grade derived from them would be a claim nothing
+ * measured.
+ */
 export function summarizeDataQuality({
   syncHealth,
   reviewSummary,
   forecast,
-  reportSummary,
   invariantIssues = [],
 }: DataQualityInputs): DataQualitySummary {
-  const issues: ScoredIssue[] = [...invariantIssues];
-
-  if (syncHealth.status === 'attention') {
-    issues.push(issue(
-      'sync-attention',
-      'Connection needs attention',
-      syncHealth.status_detail,
-      '/accounts',
-      'critical',
-      35
-    ));
-  } else if (syncHealth.status === 'stale') {
-    issues.push(issue(
-      'sync-stale',
-      'Sync is stale',
-      syncHealth.status_detail,
-      '/accounts',
-      'warning',
-      20
-    ));
-  } else if (syncHealth.status === 'empty') {
-    issues.push(issue(
-      'sync-empty',
-      'No live connections',
-      syncHealth.status_detail,
-      '/accounts',
-      'warning',
-      30
-    ));
-  }
-
-  if (reviewSummary.total_open > 0) {
-    const uncategorized = reviewSummary.queues.find((queue) => queue.id === 'uncategorized')?.count ?? 0;
-    const rules = reviewSummary.queues.find((queue) => queue.id === 'rule_suggestions')?.count ?? 0;
-    const pending = reviewSummary.queues.find((queue) => queue.id === 'pending')?.count ?? 0;
-    const recurring = reviewSummary.queues.find((queue) => queue.id === 'recurring_candidates')?.count ?? 0;
-    const duplicates = reviewSummary.queues.find((queue) => queue.id === 'duplicate_candidates')?.count ?? 0;
-    const transfers = reviewSummary.queues.find((queue) => queue.id === 'transfer_candidates')?.count ?? 0;
-    const reviewParts = [
-      uncategorized > 0 ? plural(uncategorized, 'uncategorized transaction') : null,
-      rules > 0 ? plural(rules, 'rule suggestion') : null,
-      pending > 0 ? plural(pending, 'pending transaction') : null,
-      recurring > 0 ? plural(recurring, 'recurring candidate') : null,
-      duplicates > 0 ? plural(duplicates, 'possible duplicate') : null,
-      transfers > 0 ? plural(transfers, 'detected transfer') : null,
-    ].filter((part): part is string => Boolean(part));
-
-    issues.push(issue(
-      'transaction-review',
-      'Transaction review backlog',
-      reviewParts.length > 0
-        ? `${reviewParts.join(', ')} need review before reports can be fully trusted.`
-        : `${plural(reviewSummary.total_open, 'review item')} need attention.`,
-      '/review',
-      reviewSummary.total_open > 10 || uncategorized > 5 ? 'warning' : 'info',
-      Math.min(25, Math.ceil(reviewSummary.total_open * 1.5))
-    ));
-  }
-
-  if (forecast.review_count > 0) {
-    issues.push(issue(
-      'cash-flow-review',
-      'Cash flow confidence',
-      forecast.overdue_count > 0
-        ? `${plural(forecast.review_count, 'recurring item')} need review, including ${plural(forecast.overdue_count, 'overdue item')}.`
-        : `${plural(forecast.review_count, 'recurring item')} need confirmation before the forecast is dependable.`,
-      '/bills',
-      forecast.overdue_count > 0 ? 'warning' : 'info',
-      Math.min(20, forecast.overdue_count * 8 + (forecast.review_count - forecast.overdue_count) * 4)
-    ));
-  }
-
-  if (reportSummary.excluded_flows.length > 0) {
-    const count = reportSummary.excluded_flows.reduce((sum, flow) => sum + flow.count, 0);
-    issues.push(issue(
-      'report-exclusions',
-      'Report exclusions applied',
-      `${plural(count, 'transfer or investment flow')} were excluded from income and spending reports for cleaner comparisons.`,
-      '/reports',
-      'info',
-      0
-    ));
-  }
-
-  const score = Math.max(0, 100 - issues.reduce((sum, item) => sum + item.penalty, 0));
-  const status = statusFromIssues(issues, score, syncHealth.status);
+  const issues: WeightedIssue[] = [
+    ...invariantIssues,
+    syncIssue(syncHealth),
+    transactionReviewIssue(reviewSummary),
+    cashFlowReviewIssue(forecast),
+  ].filter((item): item is WeightedIssue => item !== null);
 
   return {
-    status: status.status,
-    status_label: status.statusLabel,
-    status_detail: status.statusDetail,
-    score,
     issues: issues
-      .sort((a, b) => severityRank[a.severity] - severityRank[b.severity] || b.penalty - a.penalty)
-      .map(({ penalty: _penalty, ...item }) => item),
+      .sort((a, b) => severityRank[a.severity] - severityRank[b.severity] || b.weight - a.weight)
+      .map(({ weight: _weight, ...item }) => item),
   };
 }
 
 export function getDataQualitySummary(db: Database.Database): DataQualitySummary {
-  const today = new Date();
-  const startDate = format(startOfMonth(today), 'yyyy-MM-dd');
-  const endDate = format(today, 'yyyy-MM-dd');
+  const now = new Date();
 
   return summarizeDataQuality({
     syncHealth: getSyncHealth(db),
     reviewSummary: getTransactionReviewSummary(db),
     forecast: buildRecurringForecast(db, 60),
-    reportSummary: getReportSummary(db, { startDate, endDate }),
-    invariantIssues: getPersonalFinanceInvariantIssues(db, today),
+    invariantIssues: getPersonalFinanceInvariantIssues(db, now),
   });
 }

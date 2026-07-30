@@ -16,7 +16,7 @@ import { buildAdvisorDrafts } from './advisorDrafts';
 import { toDollars } from './money';
 import { calculateGoalProgress } from './goalProgress';
 import {
-  getBudgetRolloverLedger,
+  computeBudgetRolloverLedger,
   getMonthlyBudgetsWithProjection,
 } from './budgetProjection';
 import { getBudgetGroupsWithTotals } from './budgetGroups';
@@ -114,6 +114,10 @@ export function buildAdvisorReadTools(
   const reportSummary = getReportSummary(db, { startDate, endDate });
   const forecast = buildRecurringForecast(db, 60);
   const budgets = getMonthlyBudgetsWithProjection(db, year, month, now);
+  // Derived, not counted. budget_rollover_ledger is now a record of what past syncs wrote, so its
+  // COUNT can be 0 while the read returns a full history, and the data map would say "empty" about
+  // a panel that renders rows.
+  const rolloverLedger = computeBudgetRolloverLedger(db, { now });
   const hasReportData = reportSummary.income.current !== 0 || reportSummary.expenses.current !== 0;
 
   const accountCount = count(db, 'SELECT COUNT(*) AS count FROM accounts WHERE is_hidden = 0');
@@ -125,7 +129,6 @@ export function buildAdvisorReadTools(
   );
   const goalCount = count(db, 'SELECT COUNT(*) AS count FROM goals WHERE is_archived = 0');
   const budgetGroupCount = count(db, 'SELECT COUNT(*) AS count FROM budget_groups');
-  const rolloverLedgerCount = count(db, 'SELECT COUNT(*) AS count FROM budget_rollover_ledger');
   const recurringAdjustmentCount = count(db, 'SELECT COUNT(*) AS count FROM recurring_occurrence_adjustments');
   const importRunCount = count(db, 'SELECT COUNT(*) AS count FROM data_import_runs');
   const holdingCount = count(db, 'SELECT COUNT(*) AS count FROM holdings');
@@ -156,7 +159,7 @@ export function buildAdvisorReadTools(
     tool('reports', 'Reports', hasReportData ? 'available' : 'empty', hasReportData ? 1 : 0, '/reports'),
     tool('budgets', 'Budgets', budgets.length > 0 ? 'available' : 'empty', budgets.length, '/budget'),
     tool('budget_groups', 'Budget groups', budgetGroupCount > 0 ? 'available' : 'empty', budgetGroupCount, '/budget'),
-    tool('rollover_ledger', 'Rollover ledger', rolloverLedgerCount > 0 ? 'available' : 'empty', rolloverLedgerCount, '/budget'),
+    tool('rollover_ledger', 'Rollover ledger', rolloverLedger.length > 0 ? 'available' : 'empty', rolloverLedger.length, '/budget'),
     tool('goals', 'Goals', goalCount > 0 ? 'available' : 'empty', goalCount, '/goals'),
     tool('recurring', 'Bills and recurring', forecast.occurrences.length > 0 ? 'available' : 'empty', forecast.occurrences.length, '/bills'),
     tool('recurring_adjustments', 'Recurring adjustments', recurringAdjustmentCount > 0 ? 'available' : 'empty', recurringAdjustmentCount, '/bills'),
@@ -267,7 +270,7 @@ function analyzeBudget(
   const groups = getBudgetGroupsWithTotals(db, year, month, now)
     .filter((group) => group.totals.budget_count > 0)
     .sort((a, b) => a.totals.projected_remaining - b.totals.projected_remaining);
-  const rolloverRows = getBudgetRolloverLedger(db, { month: monthKey, months: 3, now }).slice(0, 5);
+  const rolloverRows = computeBudgetRolloverLedger(db, { month: monthKey, months: 3, now }).slice(0, 5);
   if (budgets.length === 0) {
     return {
       answer: 'No monthly budgets are configured yet, so Mizān cannot project budget risk.',
@@ -571,16 +574,15 @@ function dataQualityCitation(issue: DataQualityIssue): AdvisorCitation {
 
 function analyzeQuality(db: Database.Database): Pick<AdvisorAnalysis, 'answer' | 'citations'> {
   const quality = getDataQualitySummary(db);
-  const lines = [
-    `Data quality is ${quality.status_label.toLowerCase()} with a score of ${quality.score}/100.`,
-    quality.status_detail,
-  ];
-
-  if (quality.issues.length > 0) {
-    lines.push(quality.issues.slice(0, 5).map((issue) => `${issue.label}: ${issue.message}`).join('\n'));
-  } else {
-    lines.push('No active trust issues are blocking the main balances, reports, budgets, or advisor answers.');
-  }
+  const open = quality.issues.length;
+  // Named issues only. DataQualitySummary no longer carries a grade, and the answer says what is
+  // wrong rather than how wrong things are in aggregate.
+  const lines = open === 0
+    ? ['Data quality is clear: nothing is blocking the main balances, reports, budgets, or advisor answers.']
+    : [
+        `Data quality is carrying ${open} open ${open === 1 ? 'issue' : 'issues'}.`,
+        quality.issues.slice(0, 5).map((issue) => `${issue.label}: ${issue.message}`).join('\n'),
+      ];
 
   return {
     answer: lines.join('\n\n'),
@@ -589,7 +591,7 @@ function analyzeQuality(db: Database.Database): Pick<AdvisorAnalysis, 'answer' |
         id: 'data-quality:summary',
         kind: 'data_quality',
         label: 'Data quality summary',
-        detail: `${quality.score}/100, ${quality.status}`,
+        detail: open === 0 ? 'No open issues' : `${open} open ${open === 1 ? 'issue' : 'issues'}`,
         route: '/',
       }),
       ...quality.issues.slice(0, 6).map(dataQualityCitation),

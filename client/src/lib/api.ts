@@ -1,5 +1,6 @@
 import type {
   Account,
+  AccountBalanceHistory,
   AdvisorAnalysis,
   AdvisorConfirmResponse,
   AdvisorContextResponse,
@@ -93,8 +94,7 @@ async function apiFetch<T>(url: string, options?: RequestInit): Promise<T> {
 
 export const accountsApi = {
   list: () => apiFetch<Account[]>('/api/accounts'),
-  history: (id: string) =>
-    apiFetch<Array<{ date: string; balance: number; estimated: boolean }>>(`/api/accounts/${id}/history`),
+  history: (id: string) => apiFetch<AccountBalanceHistory>(`/api/accounts/${id}/history`),
   createManual: (body: {
     account_name: string;
     type: string;

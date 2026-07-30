@@ -38,6 +38,60 @@ export interface Account {
   updated_at: string;
 }
 
+/**
+ * Where one point on an account's balance chart came from.
+ *
+ * - `ledger`: replayed from this account's own transactions off its current balance. Every point of
+ *   a `ledger` basis series is this one, which is why that line never changes style mid-series.
+ * - `measured`: a value a net-worth snapshot recorded. Only the snapshot basis produces these.
+ * - `estimated`: a reverse-replay reconstruction stored as a snapshot, for months the ledger never
+ *   reached. Only the snapshot basis produces these.
+ */
+export type BalancePointSource = 'ledger' | 'measured' | 'estimated';
+
+export type BalanceSeriesBasis = 'ledger' | 'snapshot';
+
+/** Why the series begins where it does. A chart that starts mid-air must say so. */
+export type BalanceSeriesStart =
+  | 'first_transaction'
+  | 'backfill_floor'
+  | 'requested_window'
+  | 'snapshot_series'
+  | 'no_ledger'
+  | 'account_not_found';
+
+export interface BalanceHistoryPoint {
+  date: string;
+  /** Net-worth signed: an asset's balance, or minus what a liability owes. Dollars at the API edge. */
+  balance: number;
+  source: BalancePointSource;
+}
+
+/** A balance a net-worth snapshot recorded for this account on one day inside the drawn window. */
+export interface BalanceMeasurement {
+  date: string;
+  /**
+   * What the snapshot recorded that day, net-worth signed like `BalanceHistoryPoint.balance` and in
+   * dollars at the API edge. It is NOT a difference against the line and nothing here compares the
+   * two: the chart draws it as a point on the line, so a divergence is seen rather than asserted.
+   */
+  balance: number;
+}
+
+export interface AccountBalanceHistory {
+  basis: BalanceSeriesBasis;
+  points: BalanceHistoryPoint[];
+  start_date: string | null;
+  start_reason: BalanceSeriesStart;
+  /**
+   * Measured snapshots falling inside the drawn window, to be marked as points on the line. Always
+   * empty on the `snapshot` basis, where the measurements are already the line itself.
+   */
+  measurements: BalanceMeasurement[];
+  /** How many transactions built the drawn window, not how many the account has ever held. */
+  transaction_count: number;
+}
+
 export interface Transaction {
   id: string;
   simplefin_transaction_id?: string | null;
@@ -252,7 +306,7 @@ export interface RecurringPattern {
   /**
    * Coefficient of variation of this pattern's amounts. Patterns admitted on cadence alone (a
    * paycheck tracking hours, a utility bill) carry a high value here, and `average_amount` is only
-   * a median for them — surface it as approximate rather than as a known amount.
+   * a median for them, so surface it as approximate rather than as a known amount.
    */
   amount_variance?: number;
   frequency: 'weekly' | 'biweekly' | 'monthly' | 'quarterly' | 'annual';
@@ -639,8 +693,6 @@ export interface Insight {
   action_route?: string;
 }
 
-export type DataQualityStatus = 'healthy' | 'review' | 'stale' | 'attention';
-
 export interface DataQualityIssue {
   id: string;
   label: string;
@@ -649,11 +701,12 @@ export interface DataQualityIssue {
   severity: InsightSeverity;
 }
 
+/**
+ * Open conditions only. There is deliberately no score and no status verdict: a number out of 100
+ * and the label derived from it stated a judgement where a measurement belongs, and both were still
+ * readable through `GET /api/insights/quality` after the panel stopped rendering them.
+ */
 export interface DataQualitySummary {
-  status: DataQualityStatus;
-  status_label: string;
-  status_detail: string;
-  score: number;
   issues: DataQualityIssue[];
 }
 

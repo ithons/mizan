@@ -2,8 +2,10 @@ import { format, subDays } from 'date-fns';
 import type Database from 'better-sqlite3';
 import type { DataQualityIssue, InsightSeverity } from '../../../shared/types';
 
+// `weight` orders ties within one severity band in dataQuality.ts. It is never summed into a
+// score and never leaves the server.
 export interface PersonalFinanceInvariantIssue extends DataQualityIssue {
-  penalty: number;
+  weight: number;
 }
 
 interface AccountRow {
@@ -27,9 +29,9 @@ function issue(
   message: string,
   route: string,
   severity: InsightSeverity,
-  penalty: number
+  weight: number
 ): PersonalFinanceInvariantIssue {
-  return { id, label, message, route, severity, penalty };
+  return { id, label, message, route, severity, weight };
 }
 
 function count(db: Database.Database, sql: string, ...params: unknown[]): number {
@@ -103,11 +105,15 @@ function stalePendingTransactionsIssue(
 
   if (stalePending === 0) return null;
 
+  // `?range=all` and not `?pending=true`: Transactions reads only `uncategorized` and `range`, so
+  // the pending param was silently dropped and the row landed on an unfiltered this-month list that
+  // need not even contain the rows being described. `range=all` is a param that screen honours, and
+  // it guarantees a row older than 7 days is inside the visible window.
   return issue(
     'stale-pending-transactions',
     'Old pending transactions',
-    `${stalePending} pending ${stalePending === 1 ? 'transaction is' : 'transactions are'} older than 7 days. Pending transactions stay out of reports until they post or are corrected.`,
-    '/transactions?pending=true',
+    `${stalePending} pending ${stalePending === 1 ? 'transaction is' : 'transactions are'} older than 7 days and may never post. Pending rows stay out of reports until they post or are removed.`,
+    '/transactions?range=all',
     'warning',
     Math.min(15, stalePending * 3)
   );

@@ -15,6 +15,7 @@ import {
 } from '../../lib/csvImportMapping';
 import { Modal } from '../../components/Modal';
 import { SyncActivityPanel } from '../../components/SyncActivityPanel';
+import { DataQualityPanel } from '../../components/DataQualityPanel';
 import type {
   CsvImportPreview,
   DataImportRun,
@@ -606,6 +607,8 @@ export function DataSection() {
           </div>
         )}
       </div>
+
+      <DataQualityPanel />
 
       <SyncActivityPanel runs={syncRuns} showDetail />
 
