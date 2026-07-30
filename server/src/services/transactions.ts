@@ -3,6 +3,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { toCents } from './money';
 import { adjustManualAccountBalance } from './manualAccountBalance';
 import { applyMerchantRuleToMatchingTransactions, upsertMerchantRule } from './rules';
+import { recordCategoryRevision, writeTransactionCategories } from './categoryWrites';
 
 // All money here is integer cents (the DB contract). Callers dollarize at the
 // response boundary. Query-string parsing and the resulting 400s stay in the route;
@@ -282,6 +283,7 @@ export function updateTransaction(
         account_id: string;
         amount: number;
         category_id: string | null;
+        category_source: string | null;
         is_manual: number;
         merchant_name: string | null;
         original_name: string;
@@ -351,6 +353,20 @@ export function updateTransaction(
     const updateTransactionTx = db.transaction(() => {
       db.prepare(`UPDATE transactions SET ${updates.join(', ')} WHERE id = ?`).run(...values);
 
+      // A hand edit is a category write like any other and belongs in the revision log, so undo
+      // can see that a human decision now sits on top of whatever the AI had done. The write
+      // itself stays in the statement above because it is atomic with amount/notes/date.
+      if (input.category_id !== undefined) {
+        recordCategoryRevision(db, {
+          transactionId: id,
+          fromCategoryId: existing.category_id,
+          toCategoryId: categoryId,
+          fromSource: existing.category_source ?? null,
+          toSource: categoryId ? 'human' : null,
+          now,
+        });
+      }
+
       if (amountCents !== undefined && existing.is_manual) {
         balanceChanged = adjustManualAccountBalance(
           db,
@@ -368,7 +384,7 @@ export function updateTransaction(
   let categorization: TransactionCategorization = { rule_id: null, pattern: null, applied: 0 };
   if (input.category_id !== undefined && categoryId) {
     const merchantName = existing.merchant_name || existing.original_name;
-    const ruleId = upsertMerchantRule(db, merchantName, categoryId, now);
+    const ruleId = upsertMerchantRule(db, merchantName, categoryId, now, { source: 'human' }).ruleId;
     const result = applyMerchantRuleToMatchingTransactions(db, merchantName, categoryId, now);
     categorization = { rule_id: ruleId, pattern: merchantName, applied: result.updated };
   }
@@ -456,12 +472,18 @@ export function bulkCategorizeTransactions(
       throw new Error('MISSING_TRANSACTIONS');
     }
 
-    db.prepare(`
-      UPDATE transactions
-      SET category_id = ?, review_status = 'reviewed', manually_categorized = 1, updated_at = ?,
-          category_source = 'human', category_action_id = NULL, category_previous_id = category_id
-      WHERE id IN (${placeholders})
-    `).run(categoryId, now, ...transactionIds);
+    writeTransactionCategories(
+      db,
+      transactionIds.map((transactionId) => ({
+        transactionId,
+        categoryId,
+        source: 'human' as const,
+        actionId: null,
+        markManual: true,
+        reviewStatus: 'reviewed' as const,
+      })),
+      now
+    );
 
     const patterns = new Set(
       selectedTransactions
@@ -470,7 +492,7 @@ export function bulkCategorizeTransactions(
     );
 
     for (const pattern of patterns) {
-      upsertMerchantRule(db, pattern, categoryId, now);
+      upsertMerchantRule(db, pattern, categoryId, now, { source: 'human' });
     }
   });
 

@@ -20,6 +20,7 @@ function setup(): Database.Database {
       is_income INTEGER NOT NULL DEFAULT 0, is_investment INTEGER NOT NULL DEFAULT 0
     );
     CREATE TABLE transactions (
+      manually_categorized INTEGER NOT NULL DEFAULT 0,
       id TEXT PRIMARY KEY, account_id TEXT, date TEXT, amount INTEGER, merchant_name TEXT,
       original_name TEXT DEFAULT '', category_id TEXT, notes TEXT, pending INTEGER DEFAULT 0,
       recurring_id TEXT, review_status TEXT DEFAULT 'open',

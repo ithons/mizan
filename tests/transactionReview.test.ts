@@ -15,6 +15,7 @@ function setupReviewDb(): Database.Database {
     );
 
     CREATE TABLE transactions (
+      manually_categorized INTEGER NOT NULL DEFAULT 0,
       id TEXT PRIMARY KEY,
       account_id TEXT NOT NULL,
       date TEXT NOT NULL,
@@ -69,7 +70,23 @@ function setupReviewDb(): Database.Database {
       id TEXT PRIMARY KEY,
       pattern TEXT NOT NULL,
       category_id TEXT NOT NULL,
-      created_at TEXT NOT NULL
+      created_at TEXT NOT NULL,
+      source TEXT NOT NULL DEFAULT 'human',
+      action_id TEXT,
+      updated_at TEXT,
+      retired_at TEXT
+    );
+    CREATE UNIQUE INDEX idx_merchant_rules_pattern_live
+      ON merchant_rules(lower(pattern)) WHERE retired_at IS NULL;
+    CREATE TABLE merchant_rule_revisions (
+      id TEXT PRIMARY KEY, rule_id TEXT NOT NULL, pattern TEXT NOT NULL,
+      from_category_id TEXT, to_category_id TEXT, source TEXT NOT NULL,
+      action_id TEXT, operation TEXT NOT NULL, created_at TEXT NOT NULL
+    );
+    CREATE TABLE transaction_category_revisions (
+      id TEXT PRIMARY KEY, transaction_id TEXT NOT NULL,
+      from_category_id TEXT, to_category_id TEXT, from_source TEXT, to_source TEXT,
+      action_id TEXT, revert_of TEXT, reverted_at TEXT, created_at TEXT NOT NULL
     );
 
     -- suggestMerchantRules reads skipped suggestions from here.

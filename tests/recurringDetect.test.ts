@@ -13,6 +13,7 @@ function setupDb(): Database.Database {
   const db = new Database(':memory:');
   db.exec(`
     CREATE TABLE transactions (
+      manually_categorized INTEGER NOT NULL DEFAULT 0,
       id TEXT PRIMARY KEY,
       date TEXT NOT NULL,
       amount INTEGER NOT NULL,

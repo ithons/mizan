@@ -28,7 +28,8 @@ function setupDb(): Database.Database {
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
     );
-    CREATE TABLE transactions (id TEXT PRIMARY KEY, account_id TEXT NOT NULL);
+    CREATE TABLE transactions (
+      manually_categorized INTEGER NOT NULL DEFAULT 0,id TEXT PRIMARY KEY, account_id TEXT NOT NULL);
     CREATE TABLE holdings (
       id TEXT PRIMARY KEY, account_id TEXT NOT NULL, security_id TEXT NOT NULL,
       UNIQUE(account_id, security_id)

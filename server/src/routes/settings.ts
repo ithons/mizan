@@ -303,7 +303,9 @@ router.delete(
         DELETE FROM budget_rollover_ledger;
         DELETE FROM budget_group_members;
         DELETE FROM budget_groups;
+        DELETE FROM merchant_rule_revisions;
         DELETE FROM merchant_rules;
+        DELETE FROM transaction_category_revisions;
         DELETE FROM recurring_occurrence_adjustments;
         DELETE FROM recurring_patterns;
         DELETE FROM goals;

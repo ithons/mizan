@@ -28,6 +28,7 @@ function setupDb(): Database.Database {
     );
 
     CREATE TABLE transactions (
+      manually_categorized INTEGER NOT NULL DEFAULT 0,
       id TEXT PRIMARY KEY,
       category_id TEXT,
       recurring_id TEXT,

@@ -41,7 +41,7 @@ function getRule(db: Database.Database, id: string) {
       ) AS match_count
     FROM merchant_rules mr
     JOIN categories c ON c.id = mr.category_id
-    WHERE mr.id = ?
+    WHERE mr.id = ? AND mr.retired_at IS NULL
   `).get(id);
 }
 
@@ -62,6 +62,7 @@ router.get('/', (_req: Request, res: Response, next: NextFunction): void => {
         ) AS match_count
       FROM merchant_rules mr
       JOIN categories c ON c.id = mr.category_id
+      WHERE mr.retired_at IS NULL
       ORDER BY mr.created_at DESC
     `).all();
 
@@ -145,7 +146,8 @@ router.post(
       }
 
       const now = new Date().toISOString();
-      const id = upsertMerchantRule(db, body.pattern, body.category_id, now);
+      const upsert = upsertMerchantRule(db, body.pattern, body.category_id, now, { source: 'human' });
+      const id = upsert.ruleId;
       let applied = 0;
       if (body.apply_existing_overwrite) {
         // Re-label every past transaction matching this rule (not just uncategorized),

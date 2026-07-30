@@ -8,10 +8,18 @@ import type {
   AdvisorDraftPayload,
 } from '../../../shared/types';
 import {
-  applyMerchantRulesToExistingTransactions,
+  applyMerchantRuleToMatchingTransactions,
+  countMerchantRuleImpact,
   suggestMerchantRules,
   upsertMerchantRule,
 } from './rules';
+import {
+  checkBlastRadius,
+  checkPatternLength,
+  checkRuleAgreesWithHistory,
+  partitionByAuthorship,
+} from './aiWriteGuards';
+import { revertAction, writeTransactionCategory } from './categoryWrites';
 import { refreshTransactionIntegrity } from './transactionIntegrity';
 import { upsertRecurringAdjustment } from './recurringAdjustments';
 import { setManualCostBasis, setSecurityMetadata } from './investmentMetadata';
@@ -795,20 +803,61 @@ function confirmMerchantRule(
 } {
   assertCategory(db, payload.category_id);
   const now = new Date().toISOString();
-  const ruleId = upsertMerchantRule(db, payload.pattern, payload.category_id, now);
+
+  // Three guards, in code rather than in the prompt, because a bound the model is merely asked to
+  // respect is not a bound. See aiWriteGuards.ts for why each exists.
+  const lengthCheck = checkPatternLength(payload.pattern);
+  if (!lengthCheck.ok) {
+    return { changed: 0, result: { rule_id: null, applied: 0, refused: lengthCheck.reason, detail: lengthCheck.detail } };
+  }
+
+  const agreementCheck = checkRuleAgreesWithHistory(db, payload.pattern, payload.category_id);
+  if (!agreementCheck.ok) {
+    return { changed: 0, result: { rule_id: null, applied: 0, refused: agreementCheck.reason, detail: agreementCheck.detail } };
+  }
+
   // Rows swept in by the rule carry this action's id, so undoing the action reverts the whole
-  // blast radius and not just the one transaction that motivated it. That matters here: rule
-  // matching is substring plus 0.86 fuzzy similarity across the entire ledger.
+  // blast radius and not just the one transaction that motivated it. `onlyUncategorized: false`
+  // is deliberate: with a fully-categorized ledger the old uncategorized-only sweep touched zero
+  // rows, yet still reported changed=1 and wrote an advisor_actions row with an Undo button that
+  // could only ever 409. An action either has a real blast radius and a real undo, or it is not
+  // an action. `skipManual` keeps hand-made choices out of that radius.
+  const impact = payload.apply_existing
+    ? countMerchantRuleImpact(db, payload.pattern, payload.category_id, { overwrite: true })
+    : 0;
+  const radiusCheck = checkBlastRadius(impact);
+  if (!radiusCheck.ok) {
+    return { changed: 0, result: { rule_id: null, applied: 0, refused: radiusCheck.reason, detail: radiusCheck.detail } };
+  }
+
+  const upsert = upsertMerchantRule(db, payload.pattern, payload.category_id, now, {
+    source: 'ai',
+    actionId,
+    // allowRecategorize defaults to false for 'ai': see UpsertMerchantRuleOptions.
+  });
+
+  if (upsert.status === 'conflict') {
+    return {
+      changed: 0,
+      result: {
+        rule_id: upsert.ruleId,
+        applied: 0,
+        refused: 'rule_exists_with_different_category' as const,
+        detail: `a rule for "${payload.pattern}" already points at ${upsert.fromCategoryId}.`,
+      },
+    };
+  }
+
   const applied = payload.apply_existing
-    ? applyMerchantRulesToExistingTransactions(db, {
-        onlyUncategorized: true,
+    ? applyMerchantRuleToMatchingTransactions(db, payload.pattern, payload.category_id, now, {
+        overwrite: true,
         provenance: { source: 'ai', actionId },
       }).updated
     : 0;
 
   return {
-    changed: applied + (ruleId ? 1 : 0),
-    result: { rule_id: ruleId, applied },
+    changed: applied + (upsert.status === 'created' ? 1 : 0),
+    result: { rule_id: upsert.ruleId, applied, status: upsert.status },
   };
 }
 
@@ -828,17 +877,36 @@ function confirmCategorizeTransaction(
   `).get(payload.transaction_id) as { id: string; merchant_name: string | null; original_name: string } | undefined;
   if (!transaction) throw new Error('Transaction not found');
 
+  // A hand-made choice is never overwritten by the model. `applyMerchantRulesToExistingTransactions`
+  // has always had a skipManual guard; this path had none, and the chat tool accepts up to 200
+  // arbitrary transaction ids, so it was the one way an autonomous write could land on top of one
+  // of the owner's own decisions. Reported as a skip rather than thrown: a batch of 200 should not
+  // fail because one row in it was yours.
+  const authorship = partitionByAuthorship(db, [payload.transaction_id]);
+  if (authorship.humanAuthored.length > 0) {
+    return {
+      changed: 0,
+      result: {
+        transaction_id: payload.transaction_id,
+        category_id: category.id,
+        skipped: 'human_authored' as const,
+        detail: 'you categorized this transaction by hand, so the advisor left it alone.',
+      },
+    };
+  }
+
   const now = new Date().toISOString();
-  const result = db.prepare(`
-    UPDATE transactions
-    SET category_id = ?,
-        review_status = 'reviewed',
-        updated_at = ?,
-        category_source = 'ai',
-        category_action_id = ?,
-        category_previous_id = category_id
-    WHERE id = ?
-  `).run(payload.category_id, now, actionId, payload.transaction_id);
+  const changed = writeTransactionCategory(
+    db,
+    {
+      transactionId: payload.transaction_id,
+      categoryId: payload.category_id,
+      source: 'ai',
+      actionId,
+      reviewStatus: 'reviewed',
+    },
+    now
+  );
 
   // Deliberately does NOT mint a merchant rule. It used to, on every categorization, built from
   // `merchant_name || original_name` (raw bank description text on SimpleFIN rows) and then
@@ -849,7 +917,7 @@ function confirmCategorizeTransaction(
   refreshTransactionIntegrity(db);
 
   return {
-    changed: result.changes,
+    changed,
     result: { transaction_id: payload.transaction_id, category_id: category.id },
   };
 }
@@ -1044,6 +1112,62 @@ function confirmSectorMetadata(
   return { changed: 1, result: { security_id: security.id, sector: security.sector } };
 }
 
+/**
+ * Whether an open draft's premise is still true.
+ *
+ * Drafts are generated from a snapshot of the ledger and then persisted, but nothing ever
+ * re-examined them: `aiWorker` only deletes drafts a fresh pass regenerates, and it only drafts for
+ * rows where `category_id IS NULL`, so a draft whose transaction has since been categorized can
+ * never be superseded and never expires. On the live database that left 14 `categorize_transaction`
+ * drafts pointing at transactions that already have a category (four of them proposing the category
+ * the row is already in, three pointing at a category migration 036 deleted), pinning the review
+ * count and the data-quality penalty at their caps forever with no work behind them. Worse,
+ * confirming one silently re-categorized a settled transaction.
+ *
+ * Checked on read rather than fixed by a one-off cleanup, because a cleanup would decay the same
+ * way: this is the invariant, not a repair.
+ */
+export function isDraftStillActionable(
+  db: Database.Database,
+  payload: AdvisorDraftPayload
+): boolean {
+  const categoryExists = (id: string): boolean =>
+    db.prepare('SELECT 1 FROM categories WHERE id = ?').get(id) !== undefined;
+
+  switch (payload.kind) {
+    case 'categorize_transaction': {
+      if (!categoryExists(payload.category_id)) return false;
+      const txn = db.prepare(
+        'SELECT category_id, manually_categorized, category_source FROM transactions WHERE id = ?'
+      ).get(payload.transaction_id) as
+        | { category_id: string | null; manually_categorized: number; category_source: string | null }
+        | undefined;
+      if (!txn) return false;
+      // The draft's premise is "this row is uncategorized". Once it isn't, the draft is a
+      // proposal to overwrite a decision nobody asked it to revisit.
+      if (txn.category_id !== null) return false;
+      if (txn.manually_categorized === 1 || txn.category_source === 'human') return false;
+      return true;
+    }
+    case 'create_merchant_rule':
+      return categoryExists(payload.category_id);
+    case 'update_budget':
+      return categoryExists(payload.category_id);
+    case 'update_goal_target':
+      return (
+        db.prepare('SELECT 1 FROM goals WHERE id = ? AND is_archived = 0').get(payload.goal_id) !== undefined
+      );
+    case 'confirm_recurring':
+      return (
+        db.prepare('SELECT 1 FROM recurring_patterns WHERE id = ?').get(payload.recurring_id) !== undefined
+      );
+    default:
+      // Kinds without a cheap liveness check stay visible; a draft that cannot be validated is
+      // better shown than silently swallowed.
+      return true;
+  }
+}
+
 export function dismissAdvisorDraft(db: Database.Database, id: string): { changed: number } {
   const result = db.prepare(`
     UPDATE advisor_drafts
@@ -1073,13 +1197,20 @@ export interface UndoAdvisorActionResult {
 /**
  * Reverse every categorization an AI action made.
  *
- * Each row it touched carries the action id and the category it displaced, so this restores the
- * exact prior state rather than blanket-clearing to uncategorized (which would throw away a
- * correction the AI made to a wrongly-categorized row).
+ * Reads `transaction_category_revisions` (migration 042), so each row is restored to the exact
+ * category AND the exact source it had before this action, rather than blanket-clearing to
+ * uncategorized (which would throw away a correction the AI made to a wrongly-categorized row).
  *
- * Rows the user has since edited by hand are skipped: `updateTransaction` clears
- * category_action_id on a manual edit precisely so an undo cannot reach back through a human
- * decision made after the fact.
+ * Restoring the source matters as much as the category: the previous implementation wrote
+ * `category_source = 'rule'` for every row it touched, so undoing an action that had displaced a
+ * hand-made choice handed that choice back relabelled as machine-authored, and the next
+ * `skipManual` pass was then free to overwrite it.
+ *
+ * Undo behaves like a stack. Only revisions that are still the newest for their transaction can be
+ * reverted; if a later action or a hand edit has written the row since, this action's revision is
+ * buried and reverting it would silently discard the newer decision. Undo the later action first
+ * and this one becomes revertable again. Under the old single-slot scheme the later write simply
+ * destroyed the earlier action's record and there was no way back at all.
  *
  * A merchant rule the action created is left in place. Deleting it would be a second, unasked
  * change, and the rule is visible and removable in Settings; undo here means "put the ledger
@@ -1090,20 +1221,9 @@ export function undoAdvisorAction(db: Database.Database, actionId: string): Undo
   const action = db.prepare('SELECT id FROM advisor_actions WHERE id = ?').get(actionId);
   if (!action) return { ok: false, reason: 'not_found', reverted: 0 };
 
-  const now = new Date().toISOString();
-  const result = db.prepare(`
-    UPDATE transactions
-    SET category_id = category_previous_id,
-        category_previous_id = NULL,
-        category_action_id = NULL,
-        category_source = CASE WHEN category_previous_id IS NULL THEN NULL ELSE 'rule' END,
-        review_status = CASE WHEN category_previous_id IS NULL THEN 'open' ELSE review_status END,
-        updated_at = ?
-    WHERE category_action_id = ?
-  `).run(now, actionId);
-
-  if (result.changes === 0) return { ok: false, reason: 'nothing_to_undo', reverted: 0 };
-  return { ok: true, reverted: result.changes };
+  const reverted = revertAction(db, actionId);
+  if (reverted === 0) return { ok: false, reason: 'nothing_to_undo', reverted: 0 };
+  return { ok: true, reverted };
 }
 
 export function listAdvisorActions(db: Database.Database, limit = 50): AdvisorActionLog[] {

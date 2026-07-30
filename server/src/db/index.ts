@@ -50,8 +50,19 @@ export function closeDb(): void {
 }
 
 export function runMigrations(): void {
-  const db = getDb();
+  runMigrationsOn(getDb());
+}
 
+/**
+ * Apply every pending migration to an arbitrary connection.
+ *
+ * Split out from `runMigrations()` so tests can build the REAL schema in memory instead of
+ * hand-writing a minimal one. Hand-written test schemas cannot catch a divergence from what the
+ * migrations actually produce: a test whose inline table omits a NOT NULL, a CHECK, or a column
+ * added by a later migration passes happily on data production would reject or store differently.
+ * That blind spot has bitten this repo before, and it is why `migratedTestDb()` exists.
+ */
+export function runMigrationsOn(db: Database.Database): void {
   // Bootstrap schema_migrations table
   db.exec(`
     CREATE TABLE IF NOT EXISTS schema_migrations (

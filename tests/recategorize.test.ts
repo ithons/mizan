@@ -6,7 +6,28 @@ import { recategorizeAll, applyMerchantRuleToMatchingTransactions } from '../ser
 function setup(): Database.Database {
   const db = new Database(':memory:');
   db.exec(`
-    CREATE TABLE merchant_rules (id TEXT PRIMARY KEY, pattern TEXT NOT NULL, category_id TEXT NOT NULL, created_at TEXT NOT NULL);
+    CREATE TABLE merchant_rules (
+      id TEXT PRIMARY KEY,
+      pattern TEXT NOT NULL,
+      category_id TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      source TEXT NOT NULL DEFAULT 'human',
+      action_id TEXT,
+      updated_at TEXT,
+      retired_at TEXT
+    );
+    CREATE UNIQUE INDEX idx_merchant_rules_pattern_live
+      ON merchant_rules(lower(pattern)) WHERE retired_at IS NULL;
+    CREATE TABLE merchant_rule_revisions (
+      id TEXT PRIMARY KEY, rule_id TEXT NOT NULL, pattern TEXT NOT NULL,
+      from_category_id TEXT, to_category_id TEXT, source TEXT NOT NULL,
+      action_id TEXT, operation TEXT NOT NULL, created_at TEXT NOT NULL
+    );
+    CREATE TABLE transaction_category_revisions (
+      id TEXT PRIMARY KEY, transaction_id TEXT NOT NULL,
+      from_category_id TEXT, to_category_id TEXT, from_source TEXT, to_source TEXT,
+      action_id TEXT, revert_of TEXT, reverted_at TEXT, created_at TEXT NOT NULL
+    );
 
     -- suggestMerchantRules reads skipped suggestions from here.
     CREATE TABLE app_preferences (
@@ -26,7 +47,7 @@ function setup(): Database.Database {
     CREATE TABLE categories (id TEXT PRIMARY KEY, name TEXT NOT NULL);
   `);
   db.prepare("INSERT INTO categories (id, name) VALUES ('cat_coffee','Coffee'), ('cat_wrong','Wrong'), ('cat_manual','Manual')").run();
-  db.prepare("INSERT INTO merchant_rules VALUES ('r1','STARBUCKS','cat_coffee','2026-01-01')").run();
+  db.prepare("INSERT INTO merchant_rules (id, pattern, category_id, created_at) VALUES ('r1','STARBUCKS','cat_coffee','2026-01-01')").run();
   const ins = db.prepare(
     'INSERT INTO transactions (id, merchant_name, original_name, category_id, manually_categorized) VALUES (?,?,?,?,?)'
   );
@@ -85,7 +106,7 @@ test('a rule pointing at a deleted category is skipped, not allowed to fail the 
   // Categories get folded/renamed by migrations; a rule can outlive its target. Writing the
   // dangling id used to raise "FOREIGN KEY constraint failed" and abort the entire
   // auto-categorization sync stage, so one stale mapping took down every other row.
-  db.prepare("INSERT INTO merchant_rules VALUES ('r2','WHOLEFOODS','cat_deleted','2026-01-02')").run();
+  db.prepare("INSERT INTO merchant_rules (id, pattern, category_id, created_at) VALUES ('r2','WHOLEFOODS','cat_deleted','2026-01-02')").run();
   db.prepare("INSERT INTO transactions (id, merchant_name, original_name, category_id, manually_categorized) VALUES ('t4','WHOLEFOODS','WHOLEFOODS',NULL,0)").run();
 
   assert.doesNotThrow(() => recategorizeAll(db));

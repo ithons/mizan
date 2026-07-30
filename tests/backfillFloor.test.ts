@@ -25,6 +25,7 @@ test('guard drops sub-floor provider rows in a real insert loop', () => {
   db.exec(`
     CREATE TABLE accounts (id TEXT PRIMARY KEY, backfill_floor_date TEXT);
     CREATE TABLE transactions (
+      manually_categorized INTEGER NOT NULL DEFAULT 0,
       id TEXT PRIMARY KEY, account_id TEXT, date TEXT, amount INTEGER,
       source_type TEXT
     );

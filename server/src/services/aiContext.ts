@@ -456,6 +456,29 @@ export function buildFinancialContext(): string {
     }
   }
 
+  // ── Merchant rules that already exist ────────────────────────────────────
+  // The worker proposed rules without ever being shown this list, so it re-proposed the same
+  // merchants on every sync: 7 create_merchant_rule actions for Spotify, 8 for Trupanion, 7 for
+  // Backblaze. Two of those Spotify proposals disagreed with each other and moved the rule between
+  // categories two hours apart, relabelling every matching transaction twice. A model cannot avoid
+  // re-proposing something it cannot see.
+  const merchantRules = db.prepare(`
+    SELECT mr.pattern, COALESCE(c.name, mr.category_id) AS category_name, mr.source
+    FROM merchant_rules mr
+    LEFT JOIN categories c ON c.id = mr.category_id
+    WHERE mr.retired_at IS NULL
+    ORDER BY mr.pattern COLLATE NOCASE
+  `).all() as Array<{ pattern: string; category_name: string; source: string }>;
+
+  if (merchantRules.length > 0) {
+    lines.push('');
+    lines.push(`### Merchant Rules Already In Place (${merchantRules.length})`);
+    lines.push('  Do not propose a rule for a merchant that already has one. To change one, say so explicitly.');
+    for (const rule of merchantRules) {
+      lines.push(`  ${rule.pattern} -> ${rule.category_name}${rule.source === 'ai' ? ' (set by you)' : ''}`);
+    }
+  }
+
   const ruleSuggestions = reviewSummary.rule_suggestions;
   if (ruleSuggestions.length > 0) {
     const uncategorizedMatches = ruleSuggestions.reduce(

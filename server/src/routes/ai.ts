@@ -152,10 +152,14 @@ router.post('/actions/:id/undo', (req: Request, res: Response, next: NextFunctio
     const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
     const result = undoAdvisorAction(getDb(), id);
     if (!result.ok) {
+      // Do not assert a cause the server did not verify. `nothing_to_undo` means no revision from
+      // this action is still the newest for its transaction: a later action may have written the
+      // same rows, the rows may have been hand-edited, or the action may never have changed a row
+      // at all. Blaming a hand edit specifically was a guess, and usually the wrong one.
       res.status(result.reason === 'not_found' ? 404 : 409).json({
         error: result.reason === 'not_found'
           ? 'Action not found'
-          : 'Nothing left to undo: those rows have since been changed by hand.',
+          : 'Nothing left to undo for this action: its changes have since been superseded.',
       });
       return;
     }

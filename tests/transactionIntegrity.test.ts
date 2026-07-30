@@ -30,6 +30,7 @@ function setupIntegrityDb(): Database.Database {
     );
 
     CREATE TABLE transactions (
+      manually_categorized INTEGER NOT NULL DEFAULT 0,
       id TEXT PRIMARY KEY,
       account_id TEXT NOT NULL,
       date TEXT NOT NULL,

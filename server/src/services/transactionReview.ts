@@ -1,10 +1,12 @@
 import type Database from 'better-sqlite3';
+import type { AdvisorDraftPayload } from '../../../shared/types';
 import type {
   RecurringPattern,
   TransactionReviewQueueSummary,
   TransactionReviewSummary,
 } from '../../../shared/types';
 import { suggestMerchantRules } from './rules';
+import { isDraftStillActionable } from './advisorDrafts';
 import { safeJsonParse } from './jsonSafe';
 import {
   getDuplicateCandidateGroups,
@@ -81,6 +83,9 @@ export function getTransactionReviewSummary(db: Database.Database): TransactionR
       // A draft with an unreadable payload cannot be applied — drop it rather
       // than surface a broken card.
       if (payload === null) return null;
+      // A draft whose premise no longer holds is not work; showing it as work pins the review
+      // count and the data-quality penalty on nothing. See isDraftStillActionable.
+      if (!isDraftStillActionable(db, payload as AdvisorDraftPayload)) return null;
       return { ...row, payload, changes: changes ?? [], citations: citations ?? [], confirmation_required: true };
     })
     .filter((d): d is NonNullable<typeof d> => d !== null);

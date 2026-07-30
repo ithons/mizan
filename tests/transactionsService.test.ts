@@ -11,6 +11,7 @@ function setupDb(): Database.Database {
     CREATE TABLE accounts (id TEXT PRIMARY KEY, account_name TEXT, institution_name TEXT);
     CREATE TABLE categories (id TEXT PRIMARY KEY, name TEXT, color TEXT, icon TEXT, parent_id TEXT);
     CREATE TABLE transactions (
+      manually_categorized INTEGER NOT NULL DEFAULT 0,
       id TEXT PRIMARY KEY, account_id TEXT, date TEXT, amount INTEGER,
       merchant_name TEXT, original_name TEXT, category_id TEXT, notes TEXT,
       pending INTEGER DEFAULT 0, recurring_id TEXT, review_status TEXT DEFAULT 'open',

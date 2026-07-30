@@ -16,6 +16,7 @@ function setupDb(): Database.Database {
     );
 
     CREATE TABLE transactions (
+      manually_categorized INTEGER NOT NULL DEFAULT 0,
       id TEXT PRIMARY KEY,
       date TEXT NOT NULL,
       amount REAL NOT NULL,
