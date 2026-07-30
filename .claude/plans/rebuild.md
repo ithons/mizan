@@ -139,11 +139,11 @@ are done and committed. Per-account estimation floors and the sync-integrity set
 
 - [x] **Snapshot buckets are frozen classification.** `snapshot.ts:74` computes liquid/investment/crypto from `accounts.type` at write time and never recomputes. Your two Fidelity accounts were auto-typed `checking` then retyped, so 2026-06-30 and 07-01 record `investment_assets = 0` for a portfolio holding $1,661.66, and the Investments chart plots $2,441.93 → $0.00 → $0.00 → $1,665.86. Derive buckets at query time from each snapshot's `breakdown` JSON joined to current account types.
 - [x] **Net-worth attribution** reads today's `is_liability` against balances frozen months ago, so retyping re-signs history while the headline does not move, and a deleted account is silently an asset. That is the condition migration 039 repaired by hand.
-- [ ] **One new card truncates 2.5 years.** `estimateFloorMonth` takes the *maximum* first-transaction date across value-holding accounts, so Chase Freedom Flex (opened 2026-03-10) caps the whole walk. 2,198 imported transactions reaching 2023-09-16 produce five estimated points. Move to per-account floors with the partial-coverage band stated explicitly rather than drawn as one continuous line.
-- [ ] Purge estimated snapshots that fall below a later, higher floor (one already exists at 2026-02-01)
+- [x] **One new card truncates 2.5 years.** `estimateFloorMonth` takes the *maximum* first-transaction date across value-holding accounts, so Chase Freedom Flex (opened 2026-03-10) caps the whole walk. 2,198 imported transactions reaching 2023-09-16 produce five estimated points. Move to per-account floors with the partial-coverage band stated explicitly rather than drawn as one continuous line.
+- [x] Purge estimated snapshots that fall below a later, higher floor (one already exists at 2026-02-01)
 - [x] **`mergeAccounts` / `deleteAccount` learn the 033 and 039 lessons**: reassign `holdings_history` (currently `ON DELETE CASCADE`, so deletion destroys exactly what 033 rebuilt by hand), and fold the removed account id out of every historical `breakdown`. Also fix the `simplefin_account_id` UNIQUE collision in `mergeAccounts` (writes the source id onto the target before deleting the source).
 - [x] **Backup is not a backup.** `LOCAL_BACKUP_TABLES` covers 17 of 26 while the preview reports "Ready, 17/18, zero warnings". Missing 9 tables / 587 rows: `holdings_history`, `advisor_actions`, `advisor_drafts`, `conversations`, `messages`, `budget_groups`, `budget_group_members`, `budget_rollover_ledger`, `recurring_occurrence_adjustments`. After restore the 86 rows carrying `category_action_id` point at nothing and undo 404s. Make the set FK-closed, in parent-before-child order, and tolerate a missing table key as empty-plus-warning rather than a fatal 400.
-- [ ] **Sync integrity**: a 200 with no `accounts` key zeroes all nine balances and reports success (bail when `seenAccountIds.size === 0`); a partial sync throws before `sync_complete` so the client never invalidates; `simplefin.ts:362` unconditionally overwrites hand-edited `date`/`amount`/`merchant_name` that `UpdateTransactionSchema` explicitly permits editing; 123 unchanged rows count as "modified" every hour; benign SimpleFIN `errors` strings (including the date-range-capped notice our own 730-day resync guarantees) trigger the destructive reconnect prompt.
+- [x] **Sync integrity**: a 200 with no `accounts` key zeroes all nine balances and reports success (bail when `seenAccountIds.size === 0`); a partial sync throws before `sync_complete` so the client never invalidates; `simplefin.ts:362` unconditionally overwrites hand-edited `date`/`amount`/`merchant_name` that `UpdateTransactionSchema` explicitly permits editing; 123 unchanged rows count as "modified" every hour; benign SimpleFIN `errors` strings (including the date-range-capped notice our own 730-day resync guarantees) trigger the destructive reconnect prompt.
 - [ ] `GET /api/budgets/rollover-ledger` writes on every read and re-derives past months from the budget's *current* amount. Split read from write; the guard exempts GET from the origin check precisely because GETs were assumed not to mutate.
 - [ ] Regression test per repaired invariant, not just per data fix
 
@@ -151,11 +151,11 @@ are done and committed. Per-account estimation floors and the sync-integrity set
 
 ## Phase 5 — Derived numbers that earn belief
 
-- [ ] **Recurring patterns get a category.** `recurring.ts:279-295` never writes `category_id`, so all 11 rows are NULL, so `budgetProjection.ts:186`'s `IS NOT NULL` filter means `expected_recurring` is always 0 and `forecast_confidence` always `'none'`. The budget projection shipped in `9c565ba` renders nothing on real data. Majority category with a clear-majority requirement; ties record NULL.
-- [ ] **Recurring amounts from a recent window, with drift shown.** Payroll stores `average_amount = 39893` while the last four occurrences are all `54418` and the forecast's own AVG gives `47691`. Two disagreeing "expected amount" values both render on Bills.
-- [ ] **Recurring dates.** Detection anchors `next_expected` at `last_seen + rounded median gap` instead of day-of-month, so Backblaze (charges on the 17th) is forecast 2026-08-16 and flagged overdue on its real due date. Chained `addMonths` clamps a 31st-anchored bill to the 28th and never recovers. `daysUntil` is a wall-clock delta, so from local noon every countdown is a day short and contradicts its own calendar-derived `status`.
+- [x] **Recurring patterns get a category.** `recurring.ts:279-295` never writes `category_id`, so all 11 rows are NULL, so `budgetProjection.ts:186`'s `IS NOT NULL` filter means `expected_recurring` is always 0 and `forecast_confidence` always `'none'`. The budget projection shipped in `9c565ba` renders nothing on real data. Majority category with a clear-majority requirement; ties record NULL.
+- [x] **Recurring amounts from a recent window, with drift shown.** Payroll stores `average_amount = 39893` while the last four occurrences are all `54418` and the forecast's own AVG gives `47691`. Two disagreeing "expected amount" values both render on Bills.
+- [x] **Recurring dates.** Detection anchors `next_expected` at `last_seen + rounded median gap` instead of day-of-month, so Backblaze (charges on the 17th) is forecast 2026-08-16 and flagged overdue on its real due date. Chained `addMonths` clamps a 31st-anchored bill to the 28th and never recovers. `daysUntil` is a wall-clock delta, so from local noon every countdown is a day short and contradicts its own calendar-derived `status`.
 - [ ] **Ledger-derived daily balance history** for deposit and credit accounts: today's balance minus every later transaction. Consistent with the ledger by construction, kills the invented cliffs and the six-day July hole, and removes the "was the app running that day" dependency. Snapshots stay as measured anchors, drawn marked. Market-driven accounts keep the documented reverse-replay treatment.
-- [ ] **Reconciliation invariant**: per account, per window, balance delta versus summed transactions, reported as an unexplained residual. Nothing in the app checks this today. Must use a cumulative multi-window horizon or it will scream on healthy accounts.
+- [x] **Reconciliation invariant**: per account, per window, balance delta versus summed transactions, reported as an unexplained residual. Nothing in the app checks this today. Must use a cumulative multi-window horizon or it will scream on healthy accounts.
 - [ ] **Surface the data-quality layer that already exists.** `getDataQualitySummary` composes sync health, review backlog, forecast confidence, exclusions and the invariants; `routes/insights.ts:98` serves it; `insightsApi.quality()` is defined; nothing renders it. Render the issue list, not the score.
 - [ ] **Brokerage contribution sign.** Fidelity Individual carries "Electronic Funds Transfer Received (Cash)" rows at `amount = -10000` on four July dates; your own `data/fidelity/` export shows `+100`. Four contributions a month read as $400 leaving the household. Pair with the matching Chase Checking outflow as transfers.
 - [ ] **Crypto cost basis** from the buy/sell rows already in the ledger (all 8 Coinbase holdings are NULL while the README claims crypto tracks unrealized gain). Needs a stated lot policy: a 2025-09-04 BTC sell already exists, so sum-of-buys is wrong.
@@ -272,3 +272,38 @@ the migration-042 provenance tables, `securities` timestamps that do not exist, 
 a test that builds its own schema cannot catch a divergence from the migrated one. `migratedTestDb()`
 in `tests/helpers/schema.ts` now exists and every new test uses it. Converting the remaining
 hand-written schemas is a Phase 9 item.
+
+
+---
+
+## Rendering hazards created by the correctness work
+
+These are consequences of making the data honest, and Phase 7/8 must handle them rather than
+flooring them back into looking tidy.
+
+1. **A spending category can be negative.** July 2026 Shopping is **-$1,203.63** because that month's
+   Amazon and REI credits exceed its purchases. `ProgressBar` cannot take a negative width, a
+   share-of-total percentage against a signed total is meaningless, and a "top spending" list sorted
+   by amount puts the largest credit last.
+2. **An isolated estimated point invites false interpolation.** 2024-07-01 survives the
+   informativeness gate legitimately, on one real $10 crypto buy, but its nearest neighbour is
+   2025-04-01 nine months later. A line drawn between them interpolates nine months that do not
+   exist. Coverage is 6/14 there. The trace has to break, not connect.
+3. **Coverage changes along the series and part of the "cliff" is not money.** Estimated 2026-06-01
+   is $3,823.16 at 14/14 coverage against measured 2026-06-30 at $1,068.29 at **11/11**. The new
+   coverage columns reveal that some of that drop is accounts arriving in mizan rather than money
+   moving, which nothing could see before. The chart must not present the two as the same quantity.
+4. **`free` is signed now.** "Short this month" and "free to spend" are different states and must
+   read differently, not as a red number in the same slot.
+
+## Verified figures, second pass
+
+| | before | after |
+|---|---|---|
+| Backblaze next charge | 2026-08-16 (a day early, then flagged overdue on the real date) | **2026-08-17** |
+| Payroll expected amount | $398.93 stored / $476.91 forecast (two numbers on one screen) | **$544.18** on both |
+| Month-end bill walk from 01-31 | 01-31, 02-28, 03-28, stuck | **01-31, 02-28, 03-31, 04-30** |
+| Patterns carrying a category | 0 of 11 | **4 of 11** (the rest have no clear majority, which is the tie-safe answer) |
+| Estimated net-worth points | 5, oldest 2026-02-01 | **16, oldest 2024-07-01**, each with coverage |
+| Ten flat months of $380.00 | drawn as history | **not emitted at all** |
+| Ledger-to-balance reconciliation | did not exist | 6 of 14 accounts unreconciled, largest residual **-$1,126.52** on Discover |
