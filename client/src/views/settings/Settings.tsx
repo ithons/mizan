@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useSearchParams } from 'react-router-dom';
 import { accountsApi, aiApi, categoriesApi, flattenCategories, rulesApi, settingsApi, simplefinApi } from '../../lib/api';
 import { formatCompactRelative } from '../../lib/formatters';
+import { useThemePreference, type ThemePreference } from '../../lib/theme';
 import { useAppStore } from '../../store';
 import { Screen, SectionLabel } from '../../components/balance';
 import { SimplefinSection } from './SimplefinSection';
@@ -44,6 +45,34 @@ function SettingsRow({
 
 function ExpandedPanel({ children }: { children: ReactNode }) {
   return <div className="mb-2 mt-1 rounded-xl border border-line-2 bg-card shadow-e1 p-5">{children}</div>;
+}
+
+const THEME_OPTIONS: { value: ThemePreference; label: string }[] = [
+  { value: 'light', label: 'Light' },
+  { value: 'dark', label: 'Dark' },
+  { value: 'system', label: 'System' },
+];
+
+function ThemeToggle() {
+  const [theme, setTheme] = useThemePreference();
+  return (
+    <div role="radiogroup" aria-label="Appearance" className="flex gap-1.5">
+      {THEME_OPTIONS.map((option) => (
+        <button
+          key={option.value}
+          type="button"
+          role="radio"
+          aria-checked={theme === option.value}
+          onClick={() => setTheme(option.value)}
+          className={`rounded-md border px-2.5 py-1 text-note transition-colors ${
+            theme === option.value ? 'border-sage bg-sage/10 text-ink' : 'border-line-2 text-muted hover:bg-well'
+          }`}
+        >
+          {option.label}
+        </button>
+      ))}
+    </div>
+  );
 }
 
 const UNDOABLE_AI_KINDS = new Set(['categorize_transaction', 'create_merchant_rule']);
@@ -408,7 +437,7 @@ export function Settings() {
               </div>
             </ExpandedPanel>
           )}
-          <SettingsRow title="Appearance" trailing={<span className="text-muted">Light</span>} last />
+          <SettingsRow title="Appearance" trailing={<ThemeToggle />} last />
         </div>
 
         {/* Data */}

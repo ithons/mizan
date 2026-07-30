@@ -10,7 +10,7 @@ export default {
   theme: {
     extend: {
       colors: {
-        // Balance palette. Values MUST stay in `rgb(var(--mz-*-c) / <alpha-value>)` form — a bare
+        // Balance palette. Values MUST stay in `rgb(var(--mz-*-c) / <alpha-value>)` form. A bare
         // `var(--mz-*)` string makes Tailwind's parseColor() return null and silently drop every
         // `/alpha` utility built on that color. See the header comment in client/src/index.css.
         paper: mz('paper'),
@@ -29,6 +29,10 @@ export default {
           2: mz('muted-2'),
         },
         faint: mz('faint'),
+        // A reverse-replayed balance is not a measured one. That distinction used to survive only
+        // as a dashed stroke inside TrendChart; it is a color now so an estimate can look like an
+        // estimate anywhere a number is rendered.
+        estimate: mz('estimate'),
         line: {
           DEFAULT: mz('line'),
           2: mz('line-2'),
@@ -65,7 +69,7 @@ export default {
           active: mz('review-active'),
         },
 
-        // Legacy aliases for not-yet-converted components. Same channel rule applies — these are
+        // Legacy aliases for not-yet-converted components. Same channel rule applies: these are
         // what `bg-negative/10` and `border-negative/30` in ConfirmRemoveModal resolve against.
         background: legacy('bg'),
         surface: legacy('surface'),
@@ -99,7 +103,7 @@ export default {
       },
       // Named steps with explicit leading. The app previously rendered 28 distinct sizes, 25 of
       // them arbitrary px literals (75x text-[13px], 52x text-[13.5px]) and four with two
-      // spellings that disagreed on line-height — text-sm is 14/20 while text-[14px] inherits
+      // spellings that disagreed on line-height: text-sm is 14/20 while text-[14px] inherits
       // preflight's 1.5, so the same size drifted 1px depending on how it was written.
       // Tracking is deliberately NOT baked in: several call sites already set their own
       // `tracking-[…]`, and a letter-spacing inside the step would collide with it unpredictably.
@@ -117,13 +121,13 @@ export default {
         hero: ['38px', { lineHeight: '1' }],
         'hero-lg': ['44px', { lineHeight: '1' }],
       },
-      // Warm elevation, keyed to ink-soft (74 66 52) rather than black. A neutral black shadow
-      // over #f3ede1 composites to a desaturated grey-beige that reads as smudge; keeping the
-      // paper's chroma reads as shade.
+      // Elevation is a var per theme, not a literal. The warm ink-soft shadow that reads as shade
+      // over light paper is LIGHTER than the dark ground, so hardcoding it made every dialog and
+      // card glow instead of lift once the dark theme existed. Values live in index.css.
       boxShadow: {
-        e1: '0 1px 2px rgb(74 66 52 / 0.06)',
-        e2: '0 4px 12px -2px rgb(74 66 52 / 0.10), 0 2px 4px -2px rgb(74 66 52 / 0.06)',
-        e3: '0 16px 40px -8px rgb(74 66 52 / 0.18), 0 4px 10px -4px rgb(74 66 52 / 0.10)',
+        e1: 'var(--mz-e1)',
+        e2: 'var(--mz-e2)',
+        e3: 'var(--mz-e3)',
       },
       borderRadius: {
         DEFAULT: '8px',

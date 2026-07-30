@@ -1,10 +1,72 @@
-@import url('https://fonts.googleapis.com/css2?family=Newsreader:opsz,wght@6..72,300;6..72,400;6..72,500&family=Instrument+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap');
+/* Self-hosted, because this app's premise is that the ledger never leaves the machine and a
+ * `@import url(https://fonts.googleapis.com/...)` phoned Google on every cold load and left the
+ * app typographically naked offline. Google serves one variable file per family and pins it with
+ * a static `font-weight`, so all three weights of a family were byte-identical downloads; one
+ * face per family per subset with the real axis range replaces eight of them.
+ *
+ * The ranges are the fonts' actual `wght` axes (Newsreader 200-800, Instrument Sans 400-700,
+ * JetBrains Mono 100-800). Declaring the real range is what keeps `font-light` on the net-worth
+ * hero from being faked: the old import asked for JetBrains Mono 400;500 while Today.tsx renders
+ * that number at 300, so the single most important figure in the app was synthetically thinned.
+ *
+ * latin-ext is not optional here. The wordmark is MIZĀN and U+0100/U+0101 live in latin-ext, not
+ * latin. U+2192 (the "Connect →" arrow) is in neither Google subset and still falls back to the
+ * system stack, exactly as it did before.
+ */
+@font-face {
+  font-family: 'Newsreader';
+  font-style: normal;
+  font-weight: 200 800;
+  font-display: swap;
+  src: url('/fonts/newsreader-latin.woff2') format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: 'Newsreader';
+  font-style: normal;
+  font-weight: 200 800;
+  font-display: swap;
+  src: url('/fonts/newsreader-latin-ext.woff2') format('woff2');
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+@font-face {
+  font-family: 'Instrument Sans';
+  font-style: normal;
+  font-weight: 400 700;
+  font-display: swap;
+  src: url('/fonts/instrument-sans-latin.woff2') format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: 'Instrument Sans';
+  font-style: normal;
+  font-weight: 400 700;
+  font-display: swap;
+  src: url('/fonts/instrument-sans-latin-ext.woff2') format('woff2');
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+@font-face {
+  font-family: 'JetBrains Mono';
+  font-style: normal;
+  font-weight: 100 800;
+  font-display: swap;
+  src: url('/fonts/jetbrains-mono-latin.woff2') format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: 'JetBrains Mono';
+  font-style: normal;
+  font-weight: 100 800;
+  font-display: swap;
+  src: url('/fonts/jetbrains-mono-latin-ext.woff2') format('woff2');
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
 
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
-/* Balance palette — paper / warm-neutral + sage accent.
+/* Balance palette, light and dark.
  *
  * Every token is declared TWICE on purpose:
  *   --mz-x-c   space-separated RGB channels, consumed by tailwind.config.js as
@@ -15,59 +77,132 @@
  *
  * The channel form is not cosmetic. Tailwind 3's `withAlphaValue` runs `parseColor()` on the
  * configured value; given a bare `var(--mz-x)` string it returns null and DROPS THE UTILITY
- * ENTIRELY, with no warning. That silently deleted all 16 `/alpha` call sites in this app —
- * every skeleton (`bg-line/70`), both dialog scrims (`bg-ink/25`, `bg-ink/20`), the error
+ * ENTIRELY, with no warning. That silently deleted all 16 `/alpha` call sites in this app:
+ * every skeleton (`bg-track/60`), both dialog scrims (`bg-ink/25`, `bg-ink/20`), the error
  * banner tint (`bg-clay/5`), the destructive-confirm tint, and two selected states.
  * Do not collapse these back into single hex declarations.
+ *
+ * Theming swaps ONLY the channel triplets. The composed `--mz-x` aliases are declared once, in
+ * the base block, and follow for free because custom-property substitution resolves against
+ * whichever `--mz-x-c` won the cascade on that element. Nothing below this line may introduce a
+ * second copy of an alias, and no theme block may redefine one.
+ *
+ * ============================================================================================
+ * WHY THE RAMPS MOVED
+ *
+ * The old palette held twelve neutrals inside 25 L* points (card-white 100.0 down to dot 75.2),
+ * then jumped 19 points to the first text value. The page was therefore a two-value image: a
+ * near-white mush plus dark text. `card` on `paper` measured 1.072:1, `rail` on `paper` 1.046:1,
+ * `line-2` on `card` 1.283:1, so a surface was defined entirely by a hairline. There is no room
+ * to elevate anything when the ground already sits at L* 94.
+ *
+ * Three structural facts drive the new values:
+ *   1. Ground moves down (light L* 87.8, dark L* 13.0) so surfaces have runway to rise into.
+ *      card-on-paper goes 1.072:1 -> 1.240:1 light, 1.190:1 dark. A card is now a value, not a
+ *      hairline.
+ *   2. Chroma was inverted. sage C=0.045 and sage-deep C=0.054 lost to tan C=0.060 and gold
+ *      C=0.123, so the color carrying income and assets was less saturated than a decorative
+ *      fill. Now every semantic accent (sage 0.096, sage-deep 0.109, clay 0.120, gold 0.120)
+ *      out-saturates every piece of furniture (tan 0.041 is the loudest).
+ *   3. gold sat at OKLCh h 78.8 against paper's h 84.6, so the caution color was a saturated
+ *      version of the background's own hue and read as ambient. It now sits at h 57.7, roughly
+ *      23 degrees clear of the neutral family, and is dark enough in light mode to be read as
+ *      text (it is used as text in five places, at 2.18:1 before).
+ * ============================================================================================
+ * MEASURED CONTRAST (WCAG 2.1, computed from these exact triplets, not estimated)
+ *
+ *                        LIGHT              DARK
+ *                     paper   card       paper   card
+ *   ink              11.66   14.46      13.34   11.21
+ *   ink-soft          7.56    9.38       9.32    7.83
+ *   muted             5.67    7.04       6.95    5.84
+ *   muted-2           4.52    5.61       5.90    4.96
+ *   estimate          6.56    8.14       8.13    6.83
+ *   sage-deep         4.93    6.11       8.38    7.05    (positive money)
+ *   clay              5.47    6.78       6.10    5.13    (negative money)
+ *   gold              4.57    5.67       7.40    6.22
+ *   sage                -     4.85         -     5.85    (also `bg-sage` + `text-card`)
+ *   pill-text on sage-tint  5.14                 5.68
+ *   review-text on review-bg 4.93                5.53
+ *
+ * Every money numeral clears AA on both grounds in both themes. The old secondary ramp measured
+ * 3.24:1 / 2.36:1 / 2.01:1 and failed outright; the ramp that replaced it cleared AA on a paper
+ * of L* 93.9, and these values re-clear it on a paper of L* 87.8.
+ *
+ * `faint` is the one token that does not reach AA (light 3.26 on paper, dark 4.10) and is
+ * deliberately non-text, same as before. Today.tsx uses `text-faint` on two small strings; that
+ * is the view violating the token contract, not the token.
+ *
+ * `muted-2` on `rail` is 3.67:1 light. `rail` is a fill (nav, selected row, code chip, bar
+ * track) and every call site pairs it with `text-ink`; do not start putting secondary text on it.
+ * ============================================================================================
+ * NEUTRAL LADDER (CIE L*)
+ *   light  rail 80.2 | line-3 72.8 | track 74.1 | line-2 76.8 | line 81.7 | well 83.5 |
+ *          PAPER 87.8 | card 96.0 | card-alt 98.6 | card-white 100.0
+ *   dark   rail 9.0 | PAPER 13.0 | card 19.3 | card-alt 21.9 | well 24.8 | line 27.9 |
+ *          track 28.8 | card-white 31.3 | line-2 33.9 | line-3 40.2
+ * `well` is the hover wash and inverts direction by theme on purpose: it recedes from a light
+ * card (-12.5 L*) and rises off a dark one (+5.5 L*), so hover always means "this row moved".
  */
-:root {
-  --mz-paper-c: 243 237 225;
-  --mz-rail-c: 239 232 218;
-  --mz-card-c: 250 245 234;
-  --mz-card-alt-c: 251 247 239;
+:root,
+:root[data-theme='light'] {
+  color-scheme: light;
+
+  --mz-paper-c: 229 219 202;
+  --mz-rail-c: 209 198 176;
+  --mz-card-c: 248 243 234;
+  --mz-card-alt-c: 253 251 245;
   --mz-card-white-c: 255 255 255;
 
-  --mz-ink-c: 42 36 28;
-  --mz-ink-soft-c: 74 66 52;
-  /* Secondary text ramp, darkened to clear WCAG AA on paper. Was #8c8272 / #a89a84 / #b3a894,
-     which measured 3.24:1 / 2.36:1 / 2.01:1 — i.e. every muted string in the app failed. */
-  --mz-muted-c: 107 97 81; /* #6b6151 — 5.21:1 on paper */
-  --mz-muted-2-c: 125 115 98; /* #7d7362 — 4.00:1, uppercase labels */
-  --mz-faint-c: 143 133 116; /* #8f8574 — 3.11:1, non-text only */
+  --mz-ink-c: 38 33 25;
+  --mz-ink-soft-c: 71 63 50;
+  --mz-muted-c: 91 81 66;
+  --mz-muted-2-c: 105 96 79;
+  --mz-faint-c: 128 118 101;
+  /* Achromatic and cool against the warm measured ink, because this app distinguishes a balance
+     it read from the bank from one it reverse-replayed, and that distinction previously survived
+     only as a dashed stroke inside TrendChart. */
+  --mz-estimate-c: 67 74 80;
 
-  --mz-line-c: 236 227 211;
-  --mz-line-2-c: 228 217 199;
-  --mz-line-3-c: 221 210 191;
-  /* Fills that must read as extent, not decoration: skeleton bodies, progress tracks, and the
-     hover/selected wash. `line` at 1.17:1 on card was below the perceptual floor. */
-  --mz-track-c: 214 202 179; /* #d6cab3 — 1.39:1 on paper */
-  --mz-well-c: 230 221 201; /* #e6ddc9 — 1.14:1, row hover */
-  --mz-dot-c: 196 184 162;
+  --mz-line-c: 214 202 180;
+  --mz-line-2-c: 202 188 165;
+  --mz-line-3-c: 191 177 152;
+  --mz-track-c: 192 181 160;
+  --mz-well-c: 218 207 187;
+  --mz-dot-c: 163 151 130;
 
-  --mz-sage-c: 124 139 111;
-  --mz-sage-deep-c: 92 112 80;
-  --mz-sage-soft-c: 138 154 118;
-  --mz-sage-tint-c: 238 241 232;
-  --mz-sage-tint-border-c: 219 225 208;
-  --mz-sage-panel-c: 240 242 235;
-  --mz-sage-panel-border-c: 215 221 201;
-  --mz-pill-text-c: 92 106 82;
+  --mz-sage-c: 83 116 55;
+  --mz-sage-deep-c: 59 102 34;
+  --mz-sage-soft-c: 126 153 98;
+  --mz-sage-tint-c: 222 233 213;
+  --mz-sage-tint-border-c: 192 209 179;
+  --mz-sage-panel-c: 225 235 218;
+  --mz-sage-panel-border-c: 190 207 179;
+  --mz-pill-text-c: 67 104 41;
 
-  --mz-clay-c: 138 74 56;
-  --mz-clay-scale-c: 181 101 74;
-  --mz-gold-c: 201 150 58;
-  --mz-tan-c: 203 176 138;
-  --mz-beam-c: 201 189 166;
+  --mz-clay-c: 143 58 39;
+  --mz-clay-scale-c: 192 88 60;
+  --mz-gold-c: 148 78 0;
+  --mz-tan-c: 187 168 143;
+  --mz-beam-c: 175 165 145;
 
-  --mz-pill-muted-bg-c: 239 232 218;
-  --mz-pill-muted-border-c: 224 213 193;
+  --mz-pill-muted-bg-c: 214 205 185;
+  --mz-pill-muted-border-c: 193 182 161;
 
-  --mz-review-bg-c: 246 237 216;
-  --mz-review-border-c: 226 207 169;
-  --mz-review-text-c: 138 106 58;
-  --mz-review-active-c: 242 230 207;
+  --mz-review-bg-c: 250 225 198;
+  --mz-review-border-c: 232 191 152;
+  --mz-review-text-c: 143 82 12;
+  --mz-review-active-c: 244 213 180;
 
-  /* Composed aliases — keep every raw var(--mz-*) reference working unchanged. */
+  --mz-info-c: 77 117 152;
+
+  /* Keyed to ink-soft rather than black: a neutral black shadow over warm paper composites to a
+     desaturated grey-beige that reads as smudge, while the paper's own chroma reads as shade. */
+  --mz-e1: 0 1px 2px rgb(71 63 50 / 0.07);
+  --mz-e2: 0 4px 12px -2px rgb(71 63 50 / 0.12), 0 2px 4px -2px rgb(71 63 50 / 0.07);
+  --mz-e3: 0 16px 40px -8px rgb(71 63 50 / 0.20), 0 4px 10px -4px rgb(71 63 50 / 0.11);
+
+  /* Composed aliases. Declared once for both themes; see the note above. */
   --mz-paper: rgb(var(--mz-paper-c));
   --mz-rail: rgb(var(--mz-rail-c));
   --mz-card: rgb(var(--mz-card-c));
@@ -79,6 +214,7 @@
   --mz-muted: rgb(var(--mz-muted-c));
   --mz-muted-2: rgb(var(--mz-muted-2-c));
   --mz-faint: rgb(var(--mz-faint-c));
+  --mz-estimate: rgb(var(--mz-estimate-c));
 
   --mz-line: rgb(var(--mz-line-c));
   --mz-line-2: rgb(var(--mz-line-2-c));
@@ -111,7 +247,7 @@
   --mz-review-active: rgb(var(--mz-review-active-c));
 
   /* Legacy aliases so not-yet-converted components inherit the Balance look. These carry channel
-     forms too — ConfirmRemoveModal uses `bg-negative/10 border-negative/30`, which was one of the
+     forms too: ConfirmRemoveModal uses `bg-negative/10 border-negative/30`, which was one of the
      dead alpha sites. */
   --color-bg-c: var(--mz-paper-c);
   --color-surface-c: var(--mz-card-c);
@@ -121,7 +257,7 @@
   --color-positive-c: var(--mz-sage-deep-c);
   --color-negative-c: var(--mz-clay-c);
   --color-warning-c: var(--mz-gold-c);
-  --color-info-c: 124 139 153;
+  --color-info-c: var(--mz-info-c);
 
   --color-bg: rgb(var(--color-bg-c));
   --color-surface: rgb(var(--color-surface-c));
@@ -144,6 +280,124 @@
   --color-info: rgb(var(--color-info-c));
   --color-info-5: rgb(var(--color-info-c) / 0.05);
   --color-info-10: rgb(var(--color-info-c) / 0.1);
+}
+
+/* Dark: ground at L* 13.0 held in the paper hue family (OKLCh h ~80), so it reads as ink and
+ * oiled brass rather than as a trading terminal. 83 L* points of runway above the ground is what
+ * lets panel, card, hover, selected and both inks each take a distinct value.
+ *
+ * The dark triplets are written twice, once here and once under [data-theme='dark'], because a
+ * media query and an attribute selector cannot share a rule. The attribute wins by specificity
+ * (0,2,0 over 0,1,0) in both directions, so an explicit choice always beats the OS.
+ */
+@media (prefers-color-scheme: dark) {
+  :root {
+    color-scheme: dark;
+
+    --mz-paper-c: 38 33 25;
+    --mz-rail-c: 29 25 19;
+    --mz-card-c: 52 46 37;
+    --mz-card-alt-c: 57 52 43;
+    --mz-card-white-c: 79 73 61;
+
+    --mz-ink-c: 239 234 225;
+    --mz-ink-soft-c: 204 197 184;
+    --mz-muted-c: 179 170 153;
+    --mz-muted-2-c: 166 156 140;
+    --mz-faint-c: 137 128 112;
+    --mz-estimate-c: 178 186 193;
+
+    --mz-line-c: 72 65 54;
+    --mz-line-2-c: 86 79 66;
+    --mz-line-3-c: 102 94 79;
+    --mz-track-c: 74 67 55;
+    --mz-well-c: 65 58 48;
+    --mz-dot-c: 123 113 93;
+
+    --mz-sage-c: 145 182 116;
+    --mz-sage-deep-c: 157 200 130;
+    --mz-sage-soft-c: 133 164 101;
+    --mz-sage-tint-c: 49 61 40;
+    --mz-sage-tint-border-c: 65 82 51;
+    --mz-sage-panel-c: 46 56 38;
+    --mz-sage-panel-border-c: 65 80 52;
+    --mz-pill-text-c: 153 194 128;
+
+    --mz-clay-c: 234 132 109;
+    --mz-clay-scale-c: 251 142 112;
+    --mz-gold-c: 246 155 81;
+    --mz-tan-c: 160 142 117;
+    --mz-beam-c: 113 103 85;
+
+    --mz-pill-muted-bg-c: 54 49 39;
+    --mz-pill-muted-border-c: 82 74 61;
+
+    --mz-review-bg-c: 75 53 27;
+    --mz-review-border-c: 107 72 36;
+    --mz-review-text-c: 232 166 106;
+    --mz-review-active-c: 88 63 34;
+
+    --mz-info-c: 123 164 201;
+
+    /* Near-black at high alpha: an ink-soft shadow is lighter than a dark ground, so the light
+       theme's warm shadow would have glowed instead of shading. */
+    --mz-e1: 0 1px 2px rgb(0 0 0 / 0.40);
+    --mz-e2: 0 4px 12px -2px rgb(0 0 0 / 0.52), 0 2px 4px -2px rgb(0 0 0 / 0.40);
+    --mz-e3: 0 16px 40px -8px rgb(0 0 0 / 0.66), 0 4px 10px -4px rgb(0 0 0 / 0.48);
+  }
+}
+
+:root[data-theme='dark'] {
+  color-scheme: dark;
+
+  --mz-paper-c: 38 33 25;
+  --mz-rail-c: 29 25 19;
+  --mz-card-c: 52 46 37;
+  --mz-card-alt-c: 57 52 43;
+  --mz-card-white-c: 79 73 61;
+
+  --mz-ink-c: 239 234 225;
+  --mz-ink-soft-c: 204 197 184;
+  --mz-muted-c: 179 170 153;
+  --mz-muted-2-c: 166 156 140;
+  --mz-faint-c: 137 128 112;
+  --mz-estimate-c: 178 186 193;
+
+  --mz-line-c: 72 65 54;
+  --mz-line-2-c: 86 79 66;
+  --mz-line-3-c: 102 94 79;
+  --mz-track-c: 74 67 55;
+  --mz-well-c: 65 58 48;
+  --mz-dot-c: 123 113 93;
+
+  --mz-sage-c: 145 182 116;
+  --mz-sage-deep-c: 157 200 130;
+  --mz-sage-soft-c: 133 164 101;
+  --mz-sage-tint-c: 49 61 40;
+  --mz-sage-tint-border-c: 65 82 51;
+  --mz-sage-panel-c: 46 56 38;
+  --mz-sage-panel-border-c: 65 80 52;
+  --mz-pill-text-c: 153 194 128;
+
+  --mz-clay-c: 234 132 109;
+  --mz-clay-scale-c: 251 142 112;
+  --mz-gold-c: 246 155 81;
+  --mz-tan-c: 160 142 117;
+  --mz-beam-c: 113 103 85;
+
+  --mz-pill-muted-bg-c: 54 49 39;
+  --mz-pill-muted-border-c: 82 74 61;
+
+  --mz-review-bg-c: 75 53 27;
+  --mz-review-border-c: 107 72 36;
+  --mz-review-text-c: 232 166 106;
+  --mz-review-active-c: 88 63 34;
+
+  --mz-info-c: 123 164 201;
+
+  --mz-e1: 0 1px 2px rgb(0 0 0 / 0.40);
+  --mz-e2: 0 4px 12px -2px rgb(0 0 0 / 0.52), 0 2px 4px -2px rgb(0 0 0 / 0.40);
+  --mz-e3: 0 16px 40px -8px rgb(0 0 0 / 0.66), 0 4px 10px -4px rgb(0 0 0 / 0.48);
 }
 
 @layer base {
@@ -180,7 +434,7 @@
 }
 /* NOTE: `both` keeps the final `transform: translateY(0)` applied forever, and an element with a
    non-`none` transform becomes the containing block for `position: fixed` descendants. Any overlay
-   rendered INSIDE a view therefore sizes itself to the page, not the viewport — which put dialogs
+   rendered INSIDE a view therefore sizes itself to the page, not the viewport, which put dialogs
    thousands of pixels off-screen on long lists. Overlays must portal to <body> (see Modal.tsx). */
 .mz-screen { animation: mz-rise 0.35s ease both; }
 .mz-rise-fast { animation: mz-rise 0.2s ease both; }

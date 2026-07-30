@@ -4,6 +4,20 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Mizān</title>
+    <script>
+      // Runs before the module bundle and therefore before first paint. Reading the preference
+      // from React instead would paint the whole app in the wrong theme and then repaint it.
+      // Absent or unreadable, no attribute is set and the prefers-color-scheme media query in
+      // index.css governs, which is what 'system' means. Key mirrors client/src/lib/theme.ts.
+      try {
+        var mzTheme = localStorage.getItem('mizan-theme');
+        if (mzTheme === 'light' || mzTheme === 'dark') {
+          document.documentElement.setAttribute('data-theme', mzTheme);
+        }
+      } catch (err) {
+        // Storage blocked. Falling through to the OS preference is the correct outcome.
+      }
+    </script>
   </head>
   <body>
     <div id="root"></div>
