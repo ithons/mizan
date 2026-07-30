@@ -1,7 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import http from 'node:http';
+import express from 'express';
 import Database from 'better-sqlite3';
 import { recategorizeAll, applyMerchantRuleToMatchingTransactions } from '../server/src/services/rules';
+import { _setDbForTesting } from '../server/src/db/index';
+import rulesRouter from '../server/src/routes/rules';
+import { TEST_NOW, insertCategory, insertTransaction, migratedTestDb } from './helpers/schema';
 
 function setup(): Database.Database {
   const db = new Database(':memory:');
@@ -116,4 +121,60 @@ test('a rule pointing at a deleted category is skipped, not allowed to fail the 
   // ...and the healthy rows in the same pass were still categorized.
   const t3 = db.prepare("SELECT category_id FROM transactions WHERE id = 't3'").get() as { category_id: string | null };
   assert.equal(t3.category_id, 'cat_coffee', 'a stale rule must not block the rest of the pass');
+});
+
+// POST /api/rules/apply is the only whole-ledger rule sweep that used to run without `skipManual`,
+// so with only_uncategorized false it could relabel a row the owner categorized by hand. On the
+// real database it writes zero human rows, but only because no human row happens to match a rule.
+// That is luck, not a guard, so this drives the real router over HTTP.
+test('POST /rules/apply over the whole ledger leaves hand-categorized rows alone', async (t) => {
+  const db = migratedTestDb();
+  t.after(() => db.close());
+
+  const coffee = insertCategory(db, { name: 'Coffee' });
+  const mine = insertCategory(db, { name: 'Mine' });
+  db.prepare(
+    'INSERT INTO merchant_rules (id, pattern, category_id, created_at, source, updated_at) VALUES (?,?,?,?,?,?)'
+  ).run('r_starbucks', 'STARBUCKS', coffee, TEST_NOW, 'human', TEST_NOW);
+
+  const byFlag = insertTransaction(db, {
+    merchant_name: 'STARBUCKS',
+    category_id: mine,
+    manually_categorized: 1,
+  });
+  const bySource = insertTransaction(db, {
+    merchant_name: 'STARBUCKS',
+    category_id: mine,
+    category_source: 'human',
+  });
+  const machine = insertTransaction(db, { merchant_name: 'STARBUCKS', category_source: 'rule' });
+
+  _setDbForTesting(db);
+  const app = express();
+  app.use(express.json());
+  app.use('/api/rules', rulesRouter);
+  const server = http.createServer(app);
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+
+  try {
+    const address = server.address();
+    if (!address || typeof address === 'string') throw new Error('no server address');
+    const response = await fetch(`http://127.0.0.1:${address.port}/api/rules/apply`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ only_uncategorized: false }),
+    });
+    assert.equal(response.status, 200);
+    const body = (await response.json()) as { data: { updated: number } };
+    assert.equal(body.data.updated, 1, 'only the machine-authored row may move');
+  } finally {
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
+
+  const cat = (id: string) =>
+    (db.prepare('SELECT category_id FROM transactions WHERE id = ?').get(id) as { category_id: string | null })
+      .category_id;
+  assert.equal(cat(byFlag), mine);
+  assert.equal(cat(bySource), mine);
+  assert.equal(cat(machine), coffee);
 });

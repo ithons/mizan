@@ -44,12 +44,42 @@ export type GuardRejectionReason =
   | 'pattern_too_short'
   | 'blast_radius_exceeded'
   | 'contradicts_history'
-  | 'rule_exists_with_different_category';
+  | 'contradicts_owner_rule'
+  | 'rule_exists_with_different_category'
+  | 'human_authored';
 
 const ok: GuardResult = { ok: true };
 
 function reject(reason: GuardRejectionReason, detail: string): GuardResult {
   return { ok: false, reason, detail };
+}
+
+/**
+ * A guard refused the write, so nothing happened and nothing may be recorded as having happened.
+ *
+ * Thrown rather than returned. A refusal used to travel back inside an opaque `result` blob that no
+ * caller read, while the draft was still marked confirmed and an `advisor_actions` row was written
+ * anyway: the owner saw an applied action whose Undo reverted nothing. Every caller of
+ * `confirmAdvisorDraft` already treats a throw as "this draft did not apply" (the batch reports it
+ * per draft, the worker leaves the row open for review), so throwing is what makes the code agree
+ * with the rule it already states: an action either has a real blast radius and a real undo, or it
+ * is not an action.
+ *
+ * `status` is read by the error middleware. A refusal is a 409 and not a 500: it is the owner's own
+ * data saying no, not a fault, and the message is written to be shown as-is.
+ */
+export class DraftRefusedError extends Error {
+  readonly status = 409;
+
+  constructor(readonly reason: GuardRejectionReason, readonly detail: string) {
+    super(`Refused: ${detail}`);
+    this.name = 'DraftRefusedError';
+  }
+}
+
+/** Let a passing guard through; turn a refusal into the one failure shape callers handle. */
+export function assertGuardPassed(result: GuardResult): void {
+  if (!result.ok) throw new DraftRefusedError(result.reason, result.detail);
 }
 
 export function checkPatternLength(pattern: string): GuardResult {
@@ -128,6 +158,72 @@ export function checkRuleAgreesWithHistory(
     'contradicts_history',
     `${history.majorityCount} of ${history.categorizedTotal} categorized "${pattern}" transactions are already in a different category.`
   );
+}
+
+/** The distinct merchant names a pattern would sweep, which is also its whole reach. */
+function namesSweptBy(db: Database.Database, pattern: string): string[] {
+  const rows = db.prepare(
+    'SELECT DISTINCT COALESCE(NULLIF(merchant_name, \'\'), original_name) AS name FROM transactions'
+  ).all() as Array<{ name: string }>;
+  return rows.map((row) => row.name).filter((name) => merchantMatchesRulePattern(name, pattern));
+}
+
+/**
+ * Whether two patterns can ever fight over the same row: either the two patterns match each other,
+ * or some transaction in the ledger matches both.
+ *
+ * One match call, not one per direction: `merchantMatchesRulePattern` is symmetric by construction.
+ * Its substring clause already tests containment both ways, and equality and the bigram similarity
+ * are symmetric relations, so swapping the arguments cannot change the answer. The second call was
+ * unreachable, and a comment claiming the two directions differ would send the next reader looking
+ * for a distinction that does not exist. `tests/aiWriteGuards.test.ts` pins the symmetry, since it
+ * is the matcher's property that makes one call enough.
+ */
+function rulesContend(
+  pattern: string,
+  ownerPattern: string,
+  sweptNames: () => string[]
+): boolean {
+  if (merchantMatchesRulePattern(pattern, ownerPattern)) return true;
+  return sweptNames().some((name) => merchantMatchesRulePattern(name, ownerPattern));
+}
+
+/**
+ * A model-authored rule may not contend with a rule the owner wrote.
+ *
+ * `checkRuleAgreesWithHistory` is not enough on its own: it reads only `transactions`, so an owner
+ * rule for a merchant with no settled history is invisible to it, and it waves that case through.
+ * The owner's rule is itself a statement of intent about rows that do not exist yet. `source` is
+ * anything but 'ai' here, so a 'suggestion' rule counts as the owner's: it is written only when the
+ * owner approves it.
+ */
+export function checkRuleDoesNotContradictOwnerRule(
+  db: Database.Database,
+  pattern: string,
+  categoryId: string
+): GuardResult {
+  const proposed = pattern.trim();
+  if (!proposed) return ok;
+
+  const ownerRules = db.prepare(
+    "SELECT pattern, category_id FROM merchant_rules WHERE retired_at IS NULL AND source <> 'ai'"
+  ).all() as Array<{ pattern: string; category_id: string }>;
+
+  // Scanned once and reused across every owner rule. Matching each owner pattern against the whole
+  // ledger instead is ~1.2M fuzzy comparisons on the owner's data, seconds inside a write path.
+  let swept: string[] | null = null;
+  const sweptNames = (): string[] => (swept ??= namesSweptBy(db, proposed));
+
+  for (const owner of ownerRules) {
+    if (owner.category_id === categoryId) continue;
+    if (!rulesContend(proposed, owner.pattern, sweptNames)) continue;
+    return reject(
+      'contradicts_owner_rule',
+      `"${proposed}" contends with your own rule "${owner.pattern}", which points at ${owner.category_id}.`
+    );
+  }
+
+  return ok;
 }
 
 export interface AuthorshipPartition {

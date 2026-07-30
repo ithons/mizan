@@ -6,8 +6,16 @@ import {
   applyMerchantRulesToExistingTransactions,
   autoCategorizeTransactions,
   merchantMatchesRulePattern,
+  recategorizeAll,
   upsertMerchantRule,
 } from '../server/src/services/rules';
+import {
+  TEST_NOW,
+  insertAccount,
+  insertCategory,
+  insertTransaction,
+  migratedTestDb,
+} from './helpers/schema';
 
 function setupDb(): Database.Database {
   const db = new Database(':memory:');
@@ -205,4 +213,96 @@ test('autoCategorizeTransactions applies merchant rules first, then falls back t
     { id: 'no_match', category_id: null },
     { id: 'rule_match', category_id: 'cat_food_coffee' },
   ]);
+});
+
+// Every rule below is written at TEST_NOW. The identical timestamps ARE the test: the live table
+// holds 236 rules across 41 distinct created_at values, so the old `ORDER BY created_at DESC`
+// decided nothing for a merchant several rules reach and left the winner to the sorter, which
+// walked the pattern index and handed the shortest, alphabetically-first pattern the match.
+test('an AI rule never outranks an owner rule, whatever the sorter would have picked', (t) => {
+  const db = migratedTestDb();
+  t.after(() => db.close());
+
+  const streaming = insertCategory(db, { name: 'Streaming' });
+  const subscriptions = insertCategory(db, { name: 'Subscriptions' });
+  const account = insertAccount(db);
+
+  // The 2026-07-29 arrangement, exactly: one broad AI rule against two specific owner rules.
+  upsertMerchantRule(db, 'Spotify', subscriptions, TEST_NOW, { source: 'ai' });
+  upsertMerchantRule(db, 'SPOTIFY 877-778-1161, NY', streaming, TEST_NOW, { source: 'human' });
+  upsertMerchantRule(db, 'Spotify USA', streaming, TEST_NOW, { source: 'human' });
+
+  const ids = [
+    insertTransaction(db, {
+      account_id: account,
+      merchant_name: 'SPOTIFY 877-778-1161, NY',
+      category_id: subscriptions,
+      category_source: 'ai',
+    }),
+    insertTransaction(db, { account_id: account, merchant_name: 'Spotify USA' }),
+    insertTransaction(db, {
+      account_id: account,
+      merchant_name: 'Spotify USA',
+      category_id: streaming,
+      category_source: 'rule',
+    }),
+  ];
+
+  recategorizeAll(db);
+
+  for (const id of ids) {
+    const row = db.prepare('SELECT category_id FROM transactions WHERE id = ?').get(id) as {
+      category_id: string | null;
+    };
+    assert.equal(row.category_id, streaming, `${id} must resolve to the owner's category`);
+  }
+});
+
+test('an owner-approved suggestion rule ranks with the owner, not with the model', (t) => {
+  const db = migratedTestDb();
+  t.after(() => db.close());
+
+  const streaming = insertCategory(db, { name: 'Streaming' });
+  const subscriptions = insertCategory(db, { name: 'Subscriptions' });
+
+  // 'suggestion' is written only by approveMerchantRuleSuggestions, which is the owner accepting
+  // it. No live row on the real database carries this source yet, so this is the only evidence.
+  // The AI pattern is the longer of the two, so specificity would pick it: only source can save
+  // this row.
+  upsertMerchantRule(db, 'Family Plan', subscriptions, TEST_NOW, { source: 'ai' });
+  upsertMerchantRule(db, 'Spotify', streaming, TEST_NOW, { source: 'suggestion' });
+
+  const id = insertTransaction(db, { merchant_name: 'Spotify Family Plan' });
+  recategorizeAll(db);
+
+  const row = db.prepare('SELECT category_id FROM transactions WHERE id = ?').get(id) as {
+    category_id: string | null;
+  };
+  assert.equal(row.category_id, streaming);
+});
+
+test('two rules alike in source, length and timestamp are still separated, by id', (t) => {
+  const db = migratedTestDb();
+  t.after(() => db.close());
+
+  const shopping = insertCategory(db, { name: 'Shopping' });
+  const books = insertCategory(db, { name: 'Books' });
+  const account = insertAccount(db);
+
+  // Inserted with chosen ids because that is the tiebreak under test: same source, same pattern
+  // length, same instant. Without `id ASC` the winner is whatever the sorter hands back, which
+  // here is the alphabetically earlier pattern.
+  const insert = db.prepare(
+    'INSERT INTO merchant_rules (id, pattern, category_id, created_at, source, updated_at) VALUES (?,?,?,?,?,?)'
+  );
+  insert.run('rule_zzz', 'Amazon Prime', shopping, TEST_NOW, 'human', TEST_NOW);
+  insert.run('rule_aaa', 'Kindle Books', books, TEST_NOW, 'human', TEST_NOW);
+
+  const id = insertTransaction(db, { account_id: account, merchant_name: 'AMAZON PRIME KINDLE BOOKS' });
+  applyMerchantRulesToExistingTransactions(db, { onlyUncategorized: false, skipManual: true });
+
+  const row = db.prepare('SELECT category_id FROM transactions WHERE id = ?').get(id) as {
+    category_id: string | null;
+  };
+  assert.equal(row.category_id, books, 'the lower id wins, and does so every time');
 });

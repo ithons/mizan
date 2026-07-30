@@ -6,6 +6,7 @@ import { getTransactionReviewSummary } from './transactionReview';
 import type { AdvisorDraftAction, AdvisorDraftPayload, AdvisorCitation, AdvisorDraftChange } from '../../../shared/types';
 import { buildRecurringForecast } from './recurringForecast';
 import { confirmAdvisorDraft, isAutonomousDraftKind } from './advisorDrafts';
+import { DraftRefusedError } from './aiWriteGuards';
 import { toDollars } from './money';
 import { AiWorkerDraftSchema } from '../../../shared/schemas';
 
@@ -189,6 +190,7 @@ Example JSON format for each kind you're likely to use:
     let inserted = 0;
     let autoApplied = 0;
     let rejected = 0;
+    let refused = 0;
 
     const insertDraft = db.prepare(`
       INSERT INTO advisor_drafts (id, kind, label, summary, route, payload, changes, citations, status, created_at, updated_at)
@@ -249,7 +251,17 @@ Example JSON format for each kind you're likely to use:
             status = 'confirmed';
             autoApplied++;
           } catch (err) {
-            console.error(`[ai-worker] Auto-apply failed for draft ${id}, leaving it for manual review:`, err);
+            if (err instanceof DraftRefusedError) {
+              // Policy, not failure: the guards read the owner's own rules and history and said no.
+              // The draft stays open and the review queue still offers it, deliberately. The guards
+              // have measured false positives, so hiding a suggestion because they would refuse it
+              // buries a legitimate proposal with no reason and no way to see it. Refusing on click,
+              // with the reason, is the visible version of the same decision.
+              refused++;
+              console.log(`[ai-worker] Guards refused draft ${id} (${err.reason}): ${err.detail}`);
+            } else {
+              console.error(`[ai-worker] Auto-apply failed for draft ${id}, leaving it for manual review:`, err);
+            }
           }
         }
 
@@ -270,7 +282,7 @@ Example JSON format for each kind you're likely to use:
       }
     })();
 
-    console.log(`[ai-worker] Generated and saved ${inserted} proactive drafts (${autoApplied} auto-applied${rejected ? `, ${rejected} rejected as malformed` : ''}).`);
+    console.log(`[ai-worker] Generated and saved ${inserted} proactive drafts (${autoApplied} auto-applied${refused ? `, ${refused} refused by guards` : ''}${rejected ? `, ${rejected} rejected as malformed` : ''}).`);
 
   } catch (err) {
     console.error('[ai-worker] Error running background AI review:', err);

@@ -227,8 +227,14 @@ router.post(
     try {
       const db = getDb();
       const body = req.body as { only_uncategorized: boolean };
+      // skipManual is not optional here. With only_uncategorized false this sweeps the whole
+      // ledger, and without it a rule may relabel a row the owner categorized by hand. It writes
+      // no human rows on the current data only because no human row happens to match a rule, which
+      // is luck rather than a guard. Every other whole-ledger path (recategorizeAll, the overwrite
+      // branch of POST /) already refuses to touch them.
       const result = applyMerchantRulesToExistingTransactions(db, {
         onlyUncategorized: body.only_uncategorized,
+        skipManual: true,
       });
 
       res.json({ data: result });

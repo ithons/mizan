@@ -13,10 +13,14 @@ import {
   suggestMerchantRules,
   upsertMerchantRule,
 } from './rules';
+import type { GuardRejectionReason, GuardResult } from './aiWriteGuards';
 import {
+  DraftRefusedError,
+  assertGuardPassed,
   checkBlastRadius,
   checkPatternLength,
   checkRuleAgreesWithHistory,
+  checkRuleDoesNotContradictOwnerRule,
   partitionByAuthorship,
 } from './aiWriteGuards';
 import { revertAction, writeTransactionCategory } from './categoryWrites';
@@ -795,30 +799,37 @@ export function buildAdvisorDrafts(
   }).slice(0, 4);
 }
 
-function confirmMerchantRule(
+/**
+ * Every reason a `create_merchant_rule` confirm would refuse, decided without writing anything.
+ *
+ * Five guards, in code rather than in the prompt, because a bound the model is merely asked to
+ * respect is not a bound. See aiWriteGuards.ts for why each exists.
+ *
+ * The single definition of "would this write be refused", and it belongs to the WRITE path only.
+ * `isDraftStillActionable` deliberately does not ask it: these guards have false positives, and
+ * filtering the queue with them removes a healthy suggestion with no reason shown and no way to see
+ * it. `checkRuleDoesNotContradictOwnerRule` refuses 'UBER *EATS' -> food delivery, which 113 of the
+ * owner's settled rows agree with, because `merchantMatchesRulePattern` sweeps the bare merchant
+ * name "Uber" into both that pattern and the owner's own 'UBER   *TRIP HELP.UBER.COM, CA' rule. A
+ * refusal at confirm time is a 409 whose text the owner reads, so the draft is explainable and
+ * dismissable instead of silently absent.
+ */
+function checkMerchantRuleWritable(
   db: Database.Database,
-  payload: Extract<AdvisorDraftPayload, { kind: 'create_merchant_rule' }>,
-  actionId: string
-): {
-  changed: number;
-  result: unknown;
-} {
-  assertCategory(db, payload.category_id);
-  const now = new Date().toISOString();
+  payload: Extract<AdvisorDraftPayload, { kind: 'create_merchant_rule' }>
+): GuardResult {
+  const length = checkPatternLength(payload.pattern);
+  if (!length.ok) return length;
 
-  // Three guards, in code rather than in the prompt, because a bound the model is merely asked to
-  // respect is not a bound. See aiWriteGuards.ts for why each exists.
-  const lengthCheck = checkPatternLength(payload.pattern);
-  if (!lengthCheck.ok) {
-    return { changed: 0, result: { rule_id: null, applied: 0, refused: lengthCheck.reason, detail: lengthCheck.detail } };
-  }
+  // Ahead of the history check, which only sees settled transactions and so cannot see an owner
+  // rule for a merchant that has none yet.
+  const ownerRule = checkRuleDoesNotContradictOwnerRule(db, payload.pattern, payload.category_id);
+  if (!ownerRule.ok) return ownerRule;
 
-  const agreementCheck = checkRuleAgreesWithHistory(db, payload.pattern, payload.category_id);
-  if (!agreementCheck.ok) {
-    return { changed: 0, result: { rule_id: null, applied: 0, refused: agreementCheck.reason, detail: agreementCheck.detail } };
-  }
+  const history = checkRuleAgreesWithHistory(db, payload.pattern, payload.category_id);
+  if (!history.ok) return history;
 
-  // Rows swept in by the rule carry this action's id, so undoing the action reverts the whole
+  // Rows swept in by the rule carry the action's id, so undoing the action reverts the whole
   // blast radius and not just the one transaction that motivated it. `onlyUncategorized: false`
   // is deliberate: with a fully-categorized ledger the old uncategorized-only sweep touched zero
   // rows, yet still reported changed=1 and wrote an advisor_actions row with an Undo button that
@@ -827,10 +838,58 @@ function confirmMerchantRule(
   const impact = payload.apply_existing
     ? countMerchantRuleImpact(db, payload.pattern, payload.category_id, { overwrite: true })
     : 0;
-  const radiusCheck = checkBlastRadius(impact);
-  if (!radiusCheck.ok) {
-    return { changed: 0, result: { rule_id: null, applied: 0, refused: radiusCheck.reason, detail: radiusCheck.detail } };
+  const blastRadius = checkBlastRadius(impact);
+  if (!blastRadius.ok) return blastRadius;
+
+  // What `upsertMerchantRule` refuses at write time: an AI write defaults to
+  // allowRecategorize: false, so a live rule for this pattern pointing elsewhere never resolves
+  // itself. Checked here too, or the draft is immortal for that reason instead of the others.
+  const existing = db.prepare(
+    'SELECT category_id FROM merchant_rules WHERE lower(pattern) = lower(?) AND retired_at IS NULL LIMIT 1'
+  ).get(payload.pattern.trim()) as { category_id: string } | undefined;
+  if (existing && existing.category_id !== payload.category_id) {
+    return {
+      ok: false,
+      reason: 'rule_exists_with_different_category',
+      detail: `a rule for "${payload.pattern}" already points at ${existing.category_id}.`,
+    };
   }
+
+  return { ok: true };
+}
+
+/**
+ * What one draft handler did, as the audit trail needs to read it.
+ *
+ * `wroteNothing` is set only by a handler that can prove it touched nothing, and is never inferred
+ * from `changed === 0`: `changed` counts what the owner would recognize as changed, and a handler
+ * can genuinely write (a rule pattern rewrite, and the revision row recording it) while relabelling
+ * no transactions at all.
+ */
+interface DraftApplyResult {
+  changed: number;
+  result: unknown;
+  wroteNothing?: boolean;
+}
+
+function confirmMerchantRule(
+  db: Database.Database,
+  payload: Extract<AdvisorDraftPayload, { kind: 'create_merchant_rule' }>,
+  actionId: string
+): DraftApplyResult {
+  assertCategory(db, payload.category_id);
+  const now = new Date().toISOString();
+
+  // A refusal throws, so this function returns only when the write was allowed.
+  assertGuardPassed(checkMerchantRuleWritable(db, payload));
+
+  // Read before the upsert. Its 'unchanged' status covers two different worlds: a rule already
+  // identical to the proposal (nothing is written) and a rule whose stored pattern gets rewritten
+  // to the proposed casing (a rule row and a revision row are written). The status alone cannot
+  // tell them apart, and only the first is a no-op.
+  const storedPattern = (db.prepare(
+    'SELECT pattern FROM merchant_rules WHERE lower(pattern) = lower(?) AND retired_at IS NULL LIMIT 1'
+  ).get(payload.pattern.trim()) as { pattern: string } | undefined)?.pattern;
 
   const upsert = upsertMerchantRule(db, payload.pattern, payload.category_id, now, {
     source: 'ai',
@@ -838,16 +897,14 @@ function confirmMerchantRule(
     // allowRecategorize defaults to false for 'ai': see UpsertMerchantRuleOptions.
   });
 
+  // The guard above already refuses this, reading the same table. Kept because the alternative to
+  // throwing here is a `changed: 0` that gets recorded as an action with nothing behind it: the
+  // write's own answer stays authoritative even if the pre-check ever stops agreeing with it.
   if (upsert.status === 'conflict') {
-    return {
-      changed: 0,
-      result: {
-        rule_id: upsert.ruleId,
-        applied: 0,
-        refused: 'rule_exists_with_different_category' as const,
-        detail: `a rule for "${payload.pattern}" already points at ${upsert.fromCategoryId}.`,
-      },
-    };
+    throw new DraftRefusedError(
+      'rule_exists_with_different_category',
+      `a rule for "${payload.pattern}" already points at ${upsert.fromCategoryId}.`
+    );
   }
 
   const applied = payload.apply_existing
@@ -857,9 +914,16 @@ function confirmMerchantRule(
       }).updated
     : 0;
 
+  // The worker re-proposes a rule the ledger already has on every pass. That upsert relabels
+  // nothing and rewrites nothing, so it is not an action: see the audit-trail write in
+  // confirmAdvisorDraft.
+  const wroteNothing =
+    upsert.status === 'unchanged' && storedPattern === payload.pattern.trim() && applied === 0;
+
   return {
     changed: applied + (upsert.status === 'created' ? 1 : 0),
     result: { rule_id: upsert.ruleId, applied, status: upsert.status },
+    wroteNothing,
   };
 }
 
@@ -882,19 +946,14 @@ function confirmCategorizeTransaction(
   // A hand-made choice is never overwritten by the model. `applyMerchantRulesToExistingTransactions`
   // has always had a skipManual guard; this path had none, and the chat tool accepts up to 200
   // arbitrary transaction ids, so it was the one way an autonomous write could land on top of one
-  // of the owner's own decisions. Reported as a skip rather than thrown: a batch of 200 should not
-  // fail because one row in it was yours.
+  // of the owner's own decisions. A batch of 200 still does not fail because one row in it was
+  // yours: every caller applies one draft at a time and records the refusal against that draft.
   const authorship = partitionByAuthorship(db, [payload.transaction_id]);
   if (authorship.humanAuthored.length > 0) {
-    return {
-      changed: 0,
-      result: {
-        transaction_id: payload.transaction_id,
-        category_id: category.id,
-        skipped: 'human_authored' as const,
-        detail: 'you categorized this transaction by hand, so the advisor left it alone.',
-      },
-    };
+    throw new DraftRefusedError(
+      'human_authored',
+      'you categorized this transaction by hand, so the advisor left it alone.'
+    );
   }
 
   const now = new Date().toISOString();
@@ -1152,6 +1211,10 @@ export function isDraftStillActionable(
       return true;
     }
     case 'create_merchant_rule':
+      // Only the category, deliberately. Asking `checkMerchantRuleWritable` here as well hid every
+      // draft the guards would refuse, and the guards refuse healthy proposals (see the note on
+      // that function). A suggestion the owner cannot see is worse than one that refuses when
+      // clicked: the refusal is a 409 carrying its own reason, which is readable and dismissable.
       return categoryExists(payload.category_id);
     case 'update_budget':
       return categoryExists(payload.category_id);
@@ -1237,6 +1300,15 @@ export function listAdvisorActions(db: Database.Database, limit = 50): AdvisorAc
   `).all(limit) as AdvisorActionLog[];
 }
 
+/**
+ * Apply one draft, atomically with the row that records it in the audit trail.
+ *
+ * A guard that refuses throws `DraftRefusedError` from inside the transaction, which rolls back and
+ * propagates: the draft stays open, no `advisor_actions` row is written, and the caller is handed
+ * the reason. It used to return `{ changed: 0 }` with the reason buried in an opaque `result` blob
+ * while this function marked the draft confirmed and logged the action regardless, so a refusal
+ * showed up in Settings as something that happened, with an Undo that reverted nothing.
+ */
 export function confirmAdvisorDraft(
   db: Database.Database,
   draftAction: AdvisorDraftAction,
@@ -1266,7 +1338,7 @@ export function confirmAdvisorDraft(
   const actionId = uuidv4();
 
   const apply = db.transaction(() => {
-    let result: { changed: number; result: unknown };
+    let result: DraftApplyResult;
     switch (draftAction.payload.kind) {
       case 'create_merchant_rule':
         result = confirmMerchantRule(db, draftAction.payload, actionId); break;
@@ -1296,24 +1368,31 @@ export function confirmAdvisorDraft(
 
     // Marks the persisted background-worker row (if this draft came from one) as confirmed,
     // so getTransactionReviewSummary() stops returning it. No-op for ephemeral chat-drafts
-    // whose id isn't a real advisor_drafts row.
+    // whose id isn't a real advisor_drafts row. A handler that wrote nothing still resolves its
+    // draft: the state the draft proposes already holds, and leaving it open makes it immortal.
     db.prepare(`
       UPDATE advisor_drafts SET status = 'confirmed', updated_at = ? WHERE id = ? AND status = 'open'
     `).run(new Date().toISOString(), draftAction.id);
 
-    // Record the applied action in the visible audit trail, atomically with the mutation.
-    db.prepare(`
-      INSERT INTO advisor_actions (id, kind, label, summary, source, payload, created_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?)
-    `).run(
-      actionId,
-      draftAction.kind,
-      draftAction.label,
-      draftAction.summary,
-      source,
-      JSON.stringify(draftAction.payload),
-      new Date().toISOString()
-    );
+    // Record the applied action in the visible audit trail, atomically with the mutation. A
+    // refusal never reaches here; it threw, taking the status update above with it. A handler that
+    // wrote nothing gets no action either: re-proposing a rule the ledger already has is a no-op
+    // the worker performs every pass, and recording it produces exactly what the refusal path was
+    // fixed to stop producing, an action with no blast radius and an Undo that reverts nothing.
+    if (!result.wroteNothing) {
+      db.prepare(`
+        INSERT INTO advisor_actions (id, kind, label, summary, source, payload, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+      `).run(
+        actionId,
+        draftAction.kind,
+        draftAction.label,
+        draftAction.summary,
+        source,
+        JSON.stringify(draftAction.payload),
+        new Date().toISOString()
+      );
+    }
 
     return result;
   });
@@ -1333,8 +1412,15 @@ export interface BatchConfirmOutcome {
   status: 'applied' | 'skipped';
   /** Present on 'applied'. */
   changed?: number;
-  /** Present on 'skipped': why this draft could not be applied. */
+  /**
+   * Present on 'skipped'. One of the tokens below when nothing was refused ('not_found_or_resolved',
+   * 'unreadable_payload', 'apply_failed'), and the guard's own sentence when `refused` is set.
+   * Never raw exception text: a Zod path or a SQLite constraint string is a fault for the log, not
+   * something to render to the owner.
+   */
   reason?: string;
+  /** Set when a write guard refused, which is what tells a refusal apart from a fault. */
+  refused?: GuardRejectionReason;
   label?: string;
 }
 
@@ -1409,12 +1495,17 @@ export function confirmAdvisorDraftsByIds(
       const result = confirmAdvisorDraft(db, draftAction, true, 'user_confirm');
       outcomes.push({ id, status: 'applied', changed: result.changed, label: row.label });
     } catch (err) {
-      outcomes.push({
-        id,
-        status: 'skipped',
-        reason: err instanceof Error ? err.message : 'unknown_error',
-        label: row.label,
-      });
+      // A refusal is a decision the guards made about this draft, not a failure of the batch: the
+      // draft is still open for the owner to look at, and `detail` is a sentence written to be
+      // shown. Anything else is a fault, and its message is exception text (a Zod issue path, a
+      // SQLite constraint) that means nothing to the owner, so it goes to the log and the outcome
+      // says only that applying failed.
+      if (err instanceof DraftRefusedError) {
+        outcomes.push({ id, status: 'skipped', reason: err.detail, refused: err.reason, label: row.label });
+      } else {
+        console.error(`[advisor] Confirming draft ${id} failed:`, err);
+        outcomes.push({ id, status: 'skipped', reason: 'apply_failed', label: row.label });
+      }
     }
   }
 

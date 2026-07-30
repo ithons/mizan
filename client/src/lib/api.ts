@@ -647,6 +647,34 @@ export const settingsApi = {
 
 // ─── AI Advisor ──────────────────────────────────────────────────────────────
 
+/**
+ * Mirrors `GuardRejectionReason` (server/src/services/aiWriteGuards.ts). Restated rather than
+ * imported because the client never imports server modules; it exists so a refusal can be told
+ * apart from a fault without parsing the prose that explains it, which is how `ReviewInbox` reads
+ * an outcome.
+ */
+export type DraftRefusalReason =
+  | 'pattern_too_short'
+  | 'blast_radius_exceeded'
+  | 'contradicts_history'
+  | 'contradicts_owner_rule'
+  | 'rule_exists_with_different_category'
+  | 'human_authored';
+
+export interface BatchConfirmOutcome {
+  id: string;
+  status: 'applied' | 'skipped';
+  changed?: number;
+  /**
+   * Present on 'skipped': one of 'not_found_or_resolved', 'unreadable_payload', 'apply_failed', or
+   * the guard's own sentence when `refused` is set. The server never puts exception text here.
+   */
+  reason?: string;
+  /** Set when a write guard refused, rather than something failing. */
+  refused?: DraftRefusalReason;
+  label?: string;
+}
+
 export const aiApi = {
   getContext: () => apiFetch<AdvisorContextResponse>('/api/ai/context'),
   listActions: () =>
@@ -717,13 +745,7 @@ export const aiApi = {
     apiFetch<{
       applied: number;
       skipped: number;
-      outcomes: Array<{
-        id: string;
-        status: 'applied' | 'skipped';
-        changed?: number;
-        reason?: string;
-        label?: string;
-      }>;
+      outcomes: BatchConfirmOutcome[];
     }>('/api/ai/drafts/confirm', {
       method: 'POST',
       body: JSON.stringify({ ids }),

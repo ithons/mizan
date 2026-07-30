@@ -6,9 +6,15 @@ import {
   checkBlastRadius,
   checkPatternLength,
   checkRuleAgreesWithHistory,
+  checkRuleDoesNotContradictOwnerRule,
   partitionByAuthorship,
 } from '../server/src/services/aiWriteGuards';
-import { upsertMerchantRule, retireMerchantRule } from '../server/src/services/rules';
+import {
+  applyMerchantRulesToExistingTransactions,
+  merchantMatchesRulePattern,
+  retireMerchantRule,
+  upsertMerchantRule,
+} from '../server/src/services/rules';
 import { isDraftStillActionable } from '../server/src/services/advisorDrafts';
 import {
   revertAction,
@@ -219,5 +225,123 @@ test('a draft whose premise no longer holds is not surfaced as work', () => {
   assert.equal(draftFor('missing-transaction', food), false);
   // Three of the real drafts pointed at a category migration 036 deleted.
   assert.equal(draftFor(uncategorized, 'cat_deleted_by_a_migration'), false);
+  db.close();
+});
+
+test('an owner rule with no matching history still blocks a contradicting AI rule', () => {
+  const db = migratedTestDb();
+  const software = insertCategory(db, { name: 'Software' });
+  const subscriptions = insertCategory(db, { name: 'Subscriptions' });
+
+  upsertMerchantRule(db, 'BACKBLAZE INC', software, TEST_NOW, { source: 'human' });
+
+  // Zero settled transactions, so the history guard has nothing to weigh and waves it through.
+  // That is exactly the hole: an owner rule is a statement of intent about rows that do not exist
+  // yet, and reading only `transactions` cannot see it.
+  assert.equal(checkRuleAgreesWithHistory(db, 'Backblaze', subscriptions).ok, true);
+
+  const blocked = checkRuleDoesNotContradictOwnerRule(db, 'Backblaze', subscriptions);
+  assert.equal(blocked.ok, false);
+  assert.equal(blocked.ok === false && blocked.reason, 'contradicts_owner_rule');
+
+  // Agreeing with the owner is not contention, and neither is an unrelated merchant.
+  assert.equal(checkRuleDoesNotContradictOwnerRule(db, 'Backblaze', software).ok, true);
+  assert.equal(checkRuleDoesNotContradictOwnerRule(db, 'Netflix', subscriptions).ok, true);
+  db.close();
+});
+
+test('two patterns that miss each other still contend when one transaction matches both', () => {
+  const db = migratedTestDb();
+  const hotels = insertCategory(db, { name: 'Hotels' });
+  const travel = insertCategory(db, { name: 'Travel' });
+
+  upsertMerchantRule(db, 'SILVER CITY MOUNTAIN', hotels, TEST_NOW, { source: 'human' });
+  // Neither pattern matches the other, so pattern overlap alone would let this through.
+  assert.equal(merchantMatchesRulePattern('SILVER CITY MOUNTAIN', 'THREE RIVERS CA'), false);
+  assert.equal(checkRuleDoesNotContradictOwnerRule(db, 'THREE RIVERS CA', travel).ok, true);
+
+  insertTransaction(db, { merchant_name: 'SILVER CITY MOUNTAIN RES THREE RIVERS CA' });
+
+  const blocked = checkRuleDoesNotContradictOwnerRule(db, 'THREE RIVERS CA', travel);
+  assert.equal(blocked.ok, false);
+  assert.equal(blocked.ok === false && blocked.reason, 'contradicts_owner_rule');
+  db.close();
+});
+
+test('a retired owner rule stops contending, and an AI rule does not gate another AI rule', () => {
+  const db = migratedTestDb();
+  const software = insertCategory(db, { name: 'Software' });
+  const subscriptions = insertCategory(db, { name: 'Subscriptions' });
+
+  const owner = upsertMerchantRule(db, 'BACKBLAZE INC', software, TEST_NOW, { source: 'human' });
+  assert.equal(checkRuleDoesNotContradictOwnerRule(db, 'Backblaze', subscriptions).ok, false);
+
+  assert.equal(retireMerchantRule(db, owner.ruleId as string), true);
+  assert.equal(checkRuleDoesNotContradictOwnerRule(db, 'Backblaze', subscriptions).ok, true);
+
+  // An AI rule pointing elsewhere is handled by the upsert conflict path, not by this guard.
+  upsertMerchantRule(db, 'BACKBLAZE INC', software, TEST_NOW, { source: 'ai' });
+  assert.equal(checkRuleDoesNotContradictOwnerRule(db, 'Backblaze', subscriptions).ok, true);
+  db.close();
+});
+
+test('the rule matcher is symmetric, which is why contention needs one containment test', () => {
+  // `rulesContend` used to call the matcher in both directions. It cannot matter: the substring
+  // clause already tests containment both ways, and equality and the bigram similarity are
+  // symmetric relations. 200,000 random pairs and every pair drawn from the 236 live rule patterns
+  // and 4,000 live merchant names found no asymmetric case. This pins the property the single call
+  // rests on, so making the matcher directional breaks here rather than silently in the guard.
+  const corpus = [
+    'Backblaze',
+    'BACKBLAZE INC',
+    'Spotify',
+    'SPOTIFY 877-778-1161, NY',
+    'Spotify USA',
+    'REI',
+    'REI #123 SEATTLE',
+    'MOGE TEE BOS_CENTRAL 131-27305592, IL',
+    'MGE TEE (BOS_CENTRAL 131-27305592 IL',
+    'Blue Bottle',
+    'Blue Bottle Coffee',
+    'Netflix',
+    '',
+    'ab',
+  ];
+
+  for (const left of corpus) {
+    for (const right of corpus) {
+      assert.equal(
+        merchantMatchesRulePattern(left, right),
+        merchantMatchesRulePattern(right, left),
+        `"${left}" vs "${right}" answered differently depending on argument order`
+      );
+    }
+  }
+
+  // Not vacuous: the corpus contains pairs that match and pairs that do not.
+  assert.equal(merchantMatchesRulePattern('BACKBLAZE INC', 'Backblaze'), true);
+  assert.equal(merchantMatchesRulePattern('Netflix', 'Backblaze'), false);
+});
+
+test('among the owner rules the more specific pattern wins the overlap, not the newest', () => {
+  const db = migratedTestDb();
+  const streaming = insertCategory(db, { name: 'Streaming' });
+  const subscriptions = insertCategory(db, { name: 'Subscriptions' });
+
+  // Both are the owner's, so the human-first term in the ordering cannot decide this. The longer
+  // pattern is the OLDER one, so specificity and recency point at different categories.
+  upsertMerchantRule(db, 'SPOTIFY 877-778-1161, NY', streaming, '2026-01-01T00:00:00.000Z', { source: 'human' });
+  upsertMerchantRule(db, 'Spotify', subscriptions, '2026-07-01T00:00:00.000Z', { source: 'human' });
+
+  const txn = insertTransaction(db, { merchant_name: 'SPOTIFY 877-778-1161, NY' });
+  applyMerchantRulesToExistingTransactions(db, { onlyUncategorized: true });
+
+  const row = db.prepare('SELECT category_id FROM transactions WHERE id = ?').get(txn) as {
+    category_id: string;
+  };
+  // `length(pattern) DESC` re-ranks the owner's rules against each other and not only against the
+  // model's. That is a deliberate policy: the narrower claim about a row beats the more recent one.
+  // Under the old `created_at DESC` the newer, vaguer rule took it.
+  assert.equal(row.category_id, streaming);
   db.close();
 });

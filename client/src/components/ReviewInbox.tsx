@@ -9,6 +9,7 @@ import type {
   Transaction,
   TransferCandidatePair,
 } from '@shared/types';
+import type { BatchConfirmOutcome } from '../lib/api';
 import { aiApi, categoriesApi, recurringApi, rulesApi, transactionsApi } from '../lib/api';
 import { formatCurrency } from '../lib/formatters';
 import { invalidateFinancialData } from '../lib/queryInvalidation';
@@ -42,6 +43,35 @@ function shortDate(value: string): string {
     return Number.isNaN(parsed.getTime()) ? value : format(parsed, 'MMM d, yyyy');
   } catch {
     return value;
+  }
+}
+
+interface SkipReading {
+  /** What happened to the draft, which is the part that differs between a refusal and a fault. */
+  verb: string;
+  /** The sentence behind it, when there is one. */
+  detail: string | null;
+}
+
+/**
+ * Why one draft in a batch did not apply, in the owner's words.
+ *
+ * A refusal and a fault are different events and must not read alike: the guards deciding against a
+ * draft leaves it exactly as it was and is explained by the sentence they wrote, while a fault is
+ * the app failing and has nothing to say to the owner. `refused` is what separates them, which is
+ * why it is read here rather than sniffing the prose for a prefix.
+ */
+function readSkip(outcome: BatchConfirmOutcome): SkipReading {
+  if (outcome.refused) {
+    return { verb: 'was left alone', detail: outcome.reason ?? 'the write guards refused it' };
+  }
+  switch (outcome.reason) {
+    case 'not_found_or_resolved':
+      return { verb: 'was already applied or dismissed', detail: null };
+    case 'unreadable_payload':
+      return { verb: 'could not be applied', detail: 'its saved payload could not be read' };
+    default:
+      return { verb: 'could not be applied', detail: 'the failure is recorded in the server log' };
   }
 }
 
@@ -192,6 +222,9 @@ export function ReviewInbox() {
   const [bulkCategory, setBulkCategory] = useState('');
   const [selectedPatterns, setSelectedPatterns] = useState<Set<string>>(new Set());
   const [selectedDrafts, setSelectedDrafts] = useState<Set<string>>(new Set());
+  // Outcomes of the last bulk confirm that did not apply. Kept until the next one, because a toast
+  // is gone before the owner can read why a suggestion was left alone.
+  const [skippedDrafts, setSkippedDrafts] = useState<BatchConfirmOutcome[]>([]);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   // merchant label -> AI-proposed category. Advisory only; applied on an explicit click.
   const [suggestions, setSuggestions] = useState<Record<string, { id: string; name: string }>>({});
@@ -320,10 +353,14 @@ export function ReviewInbox() {
   const dismissDraft = useMutation({ mutationFn: (id: string) => aiApi.dismissDraft(id), onSuccess: invalidate, onError });
   const confirmDrafts = useMutation({
     mutationFn: (ids: string[]) => aiApi.confirmDrafts(ids),
+    // Last run's explanations belong to last run, including when this one fails outright.
+    onMutate: () => setSkippedDrafts([]),
     onSuccess: (result) => {
       setSelectedDrafts(new Set());
       // Drafts apply independently, so a batch can partly fail. Naming the count that did NOT apply
-      // is the difference between a trustworthy bulk action and one that quietly drops work.
+      // is the difference between a trustworthy bulk action and one that quietly drops work, and
+      // the count alone is not the reason: the server computes one per draft, so it is shown.
+      setSkippedDrafts(result.outcomes.filter((o) => o.status === 'skipped'));
       const skipped = result.skipped > 0 ? ` · ${result.skipped} skipped` : '';
       addToast({
         type: result.skipped > 0 ? 'error' : 'success',
@@ -661,6 +698,20 @@ export function ReviewInbox() {
                   </>
                 )}
               </div>
+              {skippedDrafts.length > 0 && (
+                <ul className="mb-3 space-y-1 text-note text-muted">
+                  {skippedDrafts.map((outcome) => {
+                    const reading = readSkip(outcome);
+                    return (
+                      <li key={outcome.id}>
+                        <span className="text-ink-soft">{outcome.label ?? 'A suggestion'}</span>{' '}
+                        {reading.verb}
+                        {reading.detail ? ` · ${reading.detail}` : ''}
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
               {(summary?.ai_drafts ?? []).map((draft) => {
               const proposed =
                 draft.payload.kind === 'categorize_transaction' ? draft.payload.category_id : undefined;

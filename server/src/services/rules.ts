@@ -64,6 +64,7 @@ export function dismissRuleSuggestion(db: Database.Database, pattern: string): v
 interface MerchantRule {
   pattern: string;
   category_id: string;
+  source: MerchantRuleSource;
 }
 
 interface TransactionRuleCandidate {
@@ -269,9 +270,30 @@ export function applyMerchantRulesToExistingTransactions(
   options: { onlyUncategorized?: boolean; skipManual?: boolean; provenance?: CategoryProvenance } = {}
 ): RuleApplicationResult {
   const onlyUncategorized = options.onlyUncategorized ?? true;
-  const rules = db.prepare(
-    'SELECT pattern, category_id FROM merchant_rules WHERE retired_at IS NULL ORDER BY created_at DESC'
-  ).all() as MerchantRule[];
+  // Several rules can match one merchant, and the first match wins, so this ORDER BY is the
+  // resolution policy. It used to be `created_at DESC` alone, which decided nothing: 236 live
+  // rules share 41 distinct timestamps, so ties fell to SQLite's sorter. That is how an AI rule
+  // for "Spotify" -> Subscriptions came to outrank the owner's "SPOTIFY 877-778-1161, NY" ->
+  // Streaming on all 32 matching rows. Owner intent outranks a model's, the more specific pattern
+  // outranks the vaguer one, and `id ASC` makes the order total so the sorter never decides.
+  // 'suggestion' ranks with 'human': it is written only by approveMerchantRuleSuggestions, which
+  // is the owner accepting the suggestion.
+  //
+  // `length(pattern) DESC` re-ranks the owner's rules against EACH OTHER too, not only against the
+  // model's, and that is the intended policy rather than a side effect of aiming at the AI case: an
+  // overlap between two owner rules used to go to whichever was written last and now goes to
+  // whichever says more about the row. "SPOTIFY 877-778-1161, NY" is a claim about one merchant at
+  // one number; "Spotify" is a claim about anything spelled like Spotify, and the narrower claim
+  // should win no matter which was typed first. Pinned by tests/aiWriteGuards.test.ts.
+  const rules = db.prepare(`
+    SELECT pattern, category_id, source
+    FROM merchant_rules
+    WHERE retired_at IS NULL
+    ORDER BY (source = 'ai') ASC,
+             length(pattern) DESC,
+             created_at DESC,
+             id ASC
+  `).all() as MerchantRule[];
 
   if (rules.length === 0) return { updated: 0 };
 
@@ -279,9 +301,9 @@ export function applyMerchantRulesToExistingTransactions(
   if (onlyUncategorized) clauses.push('category_id IS NULL');
   // Two markers for the same thing, because they were introduced years apart and neither is
   // reliable alone. manually_categorized (026) is the older flag and a bulk re-categorization
-  // pass can clear it wholesale (it currently reads 0 on every row here, though 92 were set
-  // earlier). category_source (041) records provenance per write. Honor both, so a hand-made
-  // choice survives a full re-check even if one marker has been wiped.
+  // pass can clear it wholesale; category_source (041) records provenance per write. On the
+  // owner's ledger 62 rows carry both. Honor both, so a hand-made choice survives a full re-check
+  // even if one marker has been wiped.
   if (options.skipManual) clauses.push("manually_categorized = 0 AND COALESCE(category_source, '') <> 'human'");
   const conditions = clauses.length > 0 ? `WHERE ${clauses.join(' AND ')}` : '';
   const transactions = db.prepare(`
