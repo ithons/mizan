@@ -18,15 +18,21 @@ type AccountRow = Record<string, unknown> & {
 export interface AccountBalancePoint {
   date: string;
   balance: number; // integer cents; route dollarizes
+  estimated: boolean;
 }
 
 // Per-account balance over time, pulled from the per-account breakdown already stored in each
 // net_worth_snapshot. Snapshots from before the account existed simply don't list it, so they're
 // skipped. This reuses net-worth history rather than maintaining a second balance ledger.
 export function getAccountBalanceHistory(db: Database.Database, accountId: string): AccountBalancePoint[] {
+  // Carries is_estimated, because a reverse-replay reconstruction of an account's balance is not
+  // a balance that was ever observed. Without it AccountDetail drew one solid measured line through
+  // Wealthfront Cash at $502 -> $1,504 -> $1,509 -> $1,513 -> $1,517 -> $0.00 -> $1.70, where the
+  // first five points are reconstructions for months the account was not even connected and the
+  // collapse to zero never happened.
   const rows = db.prepare(
-    'SELECT date, breakdown FROM net_worth_snapshots ORDER BY date ASC'
-  ).all() as Array<{ date: string; breakdown: string }>;
+    'SELECT date, breakdown, is_estimated FROM net_worth_snapshots ORDER BY date ASC'
+  ).all() as Array<{ date: string; breakdown: string; is_estimated: number }>;
 
   const out: AccountBalancePoint[] = [];
   for (const row of rows) {
@@ -38,7 +44,7 @@ export function getAccountBalanceHistory(db: Database.Database, accountId: strin
     }
     const cents = breakdown[accountId];
     if (typeof cents === 'number' && Number.isFinite(cents)) {
-      out.push({ date: row.date, balance: cents });
+      out.push({ date: row.date, balance: cents, estimated: row.is_estimated === 1 });
     }
   }
   return out;

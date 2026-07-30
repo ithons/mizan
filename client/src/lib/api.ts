@@ -94,7 +94,7 @@ async function apiFetch<T>(url: string, options?: RequestInit): Promise<T> {
 export const accountsApi = {
   list: () => apiFetch<Account[]>('/api/accounts'),
   history: (id: string) =>
-    apiFetch<Array<{ date: string; balance: number }>>(`/api/accounts/${id}/history`),
+    apiFetch<Array<{ date: string; balance: number; estimated: boolean }>>(`/api/accounts/${id}/history`),
   createManual: (body: {
     account_name: string;
     type: string;
@@ -490,7 +490,7 @@ export const reportsApi = {
     const q = new URLSearchParams();
     if (params?.startDate) q.set('startDate', params.startDate);
     if (params?.endDate) q.set('endDate', params.endDate);
-    return apiFetch<{ total_value: number; history: Array<{ date: string; value: number }>; allocation: Array<{ security_type: string; total_value: number }>; holdings: unknown[] }>(`/api/reports/investments?${q.toString()}`);
+    return apiFetch<{ total_value: number; history: Array<{ date: string; value: number; estimated: boolean }>; allocation: Array<{ security_type: string; total_value: number }>; holdings: unknown[] }>(`/api/reports/investments?${q.toString()}`);
   },
 };
 

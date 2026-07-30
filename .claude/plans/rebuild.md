@@ -122,13 +122,13 @@ cashflow expenses ($782.22) exactly, so the two surfaces reconcile for the first
 
 ## Phase 3 — What the AI is told
 
-- [ ] **The "3-month average" divides four months by three.** `aiContext.ts:319`. Window is Apr 1–Jul 29 (four `strftime` buckets), divided by the literal 3. Model is told income $4,396/mo and expenses $5,189/mo where the four-month truth is $3,297 and $3,892. Fix by making the range the three complete months the label promises (`endOfMonth(subMonths(today,1))`), not by dividing by `months.length`, which still blends a partial month.
-- [ ] **Provenance as a mechanism, not per-consumer patches.** `is_estimated` appears in six places in the whole codebase and reaches Reports/Accounts only because `routes/networth.ts:53` happens to `SELECT *`. Introduce a single snapshot read path that always carries it, and make the type non-optional so a consumer cannot silently drop it. Fixes the AI trend, `get_net_worth_history`, `AccountDetail`'s balance chart, and the Investments chart in one move.
-- [ ] The system prompt instructs the model to flag estimates; give it the flag it is being asked to use
-- [ ] **Holdings `LIMIT 15` totals.** `totalPortfolio`, `totalCostBasis`, `totalReturn` and the whole asset-mix percentage table are computed from a truncated slice and printed as the portfolio total. Correct today by luck (14 holdings).
-- [ ] **Three disagreeing investment totals** coexist on the same data: $2,044.62 (account balances), $2,144.62 (holdings sum), $2,443.67 (balances of accounts holding holdings). Two appear in the same prompt.
-- [ ] `formatMoney` renders to the cent on purpose; confirm nothing else in the AI path abbreviates
-- [ ] Test: `aiContextNumbers.test.ts` asserts the divisor and that estimated rows are marked
+- [x] **The "3-month average" divides four months by three.** `aiContext.ts:319`. Window is Apr 1–Jul 29 (four `strftime` buckets), divided by the literal 3. Model is told income $4,396/mo and expenses $5,189/mo where the four-month truth is $3,297 and $3,892. Fix by making the range the three complete months the label promises (`endOfMonth(subMonths(today,1))`), not by dividing by `months.length`, which still blends a partial month.
+- [x] **Provenance as a mechanism, not per-consumer patches.** `is_estimated` appears in six places in the whole codebase and reaches Reports/Accounts only because `routes/networth.ts:53` happens to `SELECT *`. Introduce a single snapshot read path that always carries it, and make the type non-optional so a consumer cannot silently drop it. Fixes the AI trend, `get_net_worth_history`, `AccountDetail`'s balance chart, and the Investments chart in one move.
+- [x] The system prompt instructs the model to flag estimates; give it the flag it is being asked to use
+- [x] **Holdings `LIMIT 15` totals.** `totalPortfolio`, `totalCostBasis`, `totalReturn` and the whole asset-mix percentage table are computed from a truncated slice and printed as the portfolio total. Correct today by luck (14 holdings).
+- [x] **Three disagreeing investment totals** coexist on the same data: $2,044.62 (account balances), $2,144.62 (holdings sum), $2,443.67 (balances of accounts holding holdings). Two appear in the same prompt.
+- [x] `formatMoney` renders to the cent on purpose; confirmed nothing else in the AI path abbreviates
+- [x] Test: `aiContextNumbers.test.ts` asserts the divisor and that estimated rows are marked
 
 ---
 

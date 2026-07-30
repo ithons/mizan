@@ -4,6 +4,7 @@ import type Anthropic from '@anthropic-ai/sdk';
 import { format, startOfMonth, subMonths } from 'date-fns';
 import { listTransactions, type TransactionListFilters } from './transactions';
 import { getReadOnlyDb } from '../db/index';
+import { readSnapshots } from './netWorthHistory';
 import { toDollars } from './money';
 import { getCashflowReport, getSpendingReport } from './reporting';
 import { buildRecurringForecast } from './recurringForecast';
@@ -363,18 +364,19 @@ function getUpcomingBillsTool(db: Database.Database, input: ToolInput): unknown 
 
 function getNetWorthHistoryTool(db: Database.Database, input: ToolInput): unknown {
   const months = Math.min(Math.max(Number(input.months) || 12, 1), 60);
-  const rows = db.prepare(`
-    SELECT date, net_worth, total_assets, total_liabilities
-    FROM net_worth_snapshots
-    WHERE date >= date('now', '-' || ? || ' months')
-    ORDER BY date ASC
-  `).all(months) as Array<{ date: string; net_worth: number; total_assets: number; total_liabilities: number }>;
+  // date('now') is UTC and disagrees with the local month boundaries every other surface uses,
+  // so the cutoff is computed in local time here rather than in SQLite.
+  const since = format(startOfMonth(subMonths(new Date(), months)), 'yyyy-MM-dd');
+  const rows = readSnapshots(db, { since, order: 'asc' });
   return {
     history: rows.map((r) => ({
       date: r.date,
       net_worth: toDollars(r.net_worth),
       assets: toDollars(r.total_assets),
       liabilities: toDollars(r.total_liabilities),
+      // A reconstruction, not a measurement. Without this the model narrates the join between the
+      // estimated and measured segments as an observed event.
+      estimated: r.is_estimated,
     })),
   };
 }

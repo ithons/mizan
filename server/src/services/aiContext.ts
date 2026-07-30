@@ -1,4 +1,4 @@
-import { format, startOfMonth, subMonths } from 'date-fns';
+import { endOfMonth, format, parseISO, startOfMonth, subMonths } from 'date-fns';
 import type {
   AdvisorAction,
   AdvisorContextResponse,
@@ -17,6 +17,7 @@ import { getTransactionReviewSummary } from './transactionReview';
 import { getSyncHealth } from './syncHealth';
 import { buildAdvisorReadTools } from './advisorTools';
 import { getPreference } from './preferences';
+import { estimateNote, readSnapshotBefore, readSnapshots } from './netWorthHistory';
 
 export const ADVISOR_PROFILE_PREFERENCE_KEY = 'advisor_user_profile';
 
@@ -207,7 +208,6 @@ export function buildFinancialContext(): string {
   const db = getDb();
   const today = new Date();
   const thisMonthStart = format(startOfMonth(today), 'yyyy-MM-dd');
-  const threeMonthsAgo = format(startOfMonth(subMonths(today, 3)), 'yyyy-MM-dd');
   const sixMonthsAgo = format(startOfMonth(subMonths(today, 6)), 'yyyy-MM-dd');
 
   const lines: string[] = [`## Financial Snapshot - ${format(today, 'MMMM d, yyyy')}`];
@@ -283,11 +283,9 @@ export function buildFinancialContext(): string {
   const totalAssets = liquid + investments + crypto + otherAssets;
   const netWorth = totalAssets - liabilities;
 
-  // Net worth vs last month
-  const lastMonthSnapshot = db.prepare(`
-    SELECT net_worth FROM net_worth_snapshots
-    WHERE date < ? ORDER BY date DESC LIMIT 1
-  `).get(thisMonthStart) as { net_worth: number } | undefined;
+  // Net worth vs last month. Measured only: a delta against a reconstruction is a comparison
+  // between a fact and a guess, and stating it as "+$X vs last month" presents it as a fact.
+  const lastMonthSnapshot = readSnapshotBefore(db, thisMonthStart, { measuredOnly: true });
 
   // netWorth is dollars (from dollarized balances); the snapshot column is cents.
   const nwDelta = lastMonthSnapshot ? netWorth - toDollars(lastMonthSnapshot.net_worth) : null;
@@ -303,11 +301,23 @@ export function buildFinancialContext(): string {
   lines.push('Account breakdown:');
   lines.push(...acctLines);
 
-  // ── Cash Flow (3-month average) ──────────────────────────────────────────
-  const cashflow = getCashflowReport(db, {
-    startDate: threeMonthsAgo,
-    endDate: format(today, 'yyyy-MM-dd'),
-  });
+  // ── Cash Flow (average over complete months) ─────────────────────────────
+  //
+  // The window is the last AVERAGE_MONTHS *complete* months, and the divisor is that same number.
+  // Those two used to disagree: the range ran from startOfMonth(today - 3 months) to TODAY, which
+  // spans four calendar months (three whole ones plus the current partial), and the sum of all four
+  // was divided by the literal 3. On 2026-07-29 that told the model $4,396.32/mo of income and
+  // $5,189.15/mo of expenses where the real four-month averages were $3,297.24 and $3,891.86:
+  // every figure inflated by exactly a third, in the one number behind every "can I afford this"
+  // answer the advisor gives.
+  //
+  // Excluding the current month is deliberate. Including a month that is four days old and dividing
+  // by a whole number understates it roughly eightfold, which is the same class of error in the
+  // opposite direction.
+  const AVERAGE_MONTHS = 3;
+  const averageStart = format(startOfMonth(subMonths(today, AVERAGE_MONTHS)), 'yyyy-MM-dd');
+  const averageEnd = format(endOfMonth(subMonths(today, 1)), 'yyyy-MM-dd');
+  const cashflow = getCashflowReport(db, { startDate: averageStart, endDate: averageEnd });
   const cashflowTotals = cashflow.months.reduce(
     (totals, month) => ({
       income: totals.income + month.income,
@@ -316,12 +326,14 @@ export function buildFinancialContext(): string {
     { income: 0, expenses: 0 }
   );
 
-  const avgIncome = cashflowTotals.income / 3;
-  const avgExpenses = cashflowTotals.expenses / 3;
+  const avgIncome = cashflowTotals.income / AVERAGE_MONTHS;
+  const avgExpenses = cashflowTotals.expenses / AVERAGE_MONTHS;
   const avgNet = avgIncome - avgExpenses;
 
   lines.push('');
-  lines.push('### Cash Flow - 3-month average');
+  lines.push(
+    `### Cash Flow - average of the ${AVERAGE_MONTHS} complete months ${format(parseISO(averageStart), 'MMMM')} to ${format(parseISO(averageEnd), 'MMMM yyyy')} (excludes the current partial month)`
+  );
   lines.push(`  Income:   ${fmt(toDollars(avgIncome))}/mo`);
   lines.push(`  Expenses: ${fmt(toDollars(avgExpenses))}/mo`);
   lines.push(`  Net:      ${fmt(toDollars(avgNet))}/mo`);
@@ -501,6 +513,13 @@ export function buildFinancialContext(): string {
   // the same context blob.
   // institution_value and cost_basis are inline-SQL integer cents; dollarize at read so the
   // portfolio totals, asset-mix values, and per-holding lines below are all in dollars.
+  //
+  // Deliberately unlimited. This query used to end in LIMIT 15 while `totalPortfolio`,
+  // `totalCostBasis`, the return percentage and the whole asset-mix table were computed from that
+  // truncated slice and then printed under the heading "Investment Portfolio - $X". With 6 holdings
+  // it happened to be right; at 16 the model would have been handed a partial sum labelled as the
+  // total, with allocation percentages summing to 100% of the wrong denominator. Only the
+  // human-facing "Top holdings" list is truncated, and it says so when it truncates.
   const holdings = (db.prepare(`
     SELECT
       s.ticker, s.name AS sec_name, s.type AS sec_type,
@@ -510,7 +529,6 @@ export function buildFinancialContext(): string {
     JOIN accounts a ON a.id = h.account_id
     WHERE a.is_hidden = 0 AND a.type != 'crypto_wallet'
     ORDER BY h.institution_value DESC
-    LIMIT 15
   `).all() as Array<{
     ticker: string | null; sec_name: string; sec_type: string;
     quantity: number; institution_value: number; cost_basis: number | null;
@@ -539,6 +557,15 @@ export function buildFinancialContext(): string {
 
     lines.push('');
     lines.push(`### Investment Portfolio - ${fmt(totalPortfolio)}${totalReturn != null ? ` (${pct(totalReturn)} total return)` : ''}`);
+    // Two different totals for the same money appeared in this prompt with nothing connecting
+    // them: the Net Worth section sums ACCOUNT BALANCES while this section sums HOLDING VALUES,
+    // and on the live data they differ by $100.00. A model reading both had no way to know whether
+    // it was looking at one number twice or two numbers once, so it is told which is which.
+    if (Math.abs(totalPortfolio - investments) >= 0.01) {
+      lines.push(
+        `  Note: the Net Worth section reports investments as ${fmt(investments)} from account balances, while this figure sums individual holdings. The ${fmt(Math.abs(totalPortfolio - investments))} difference is uninvested cash or a provider lag, not two separate pots of money. Do not add them together.`
+      );
+    }
     if (totalGain != null) {
       lines.push(`  Unrealized gain/loss: ${fmt(totalGain)} on ${fmt(totalCostBasis)} cost basis (${basisKnown.length} of ${holdings.length} holdings have a basis)`);
     }
@@ -548,8 +575,13 @@ export function buildFinancialContext(): string {
       lines.push(`    ${type}: ${fmt(val)} (${Math.round((val / totalPortfolio) * 100)}%)`);
     }
 
-    lines.push('  Top holdings:');
-    for (const h of holdings.slice(0, 10)) {
+    const TOP_HOLDINGS = 10;
+    lines.push(
+      holdings.length > TOP_HOLDINGS
+        ? `  Top ${TOP_HOLDINGS} holdings of ${holdings.length} (the totals above cover all ${holdings.length}):`
+        : '  Holdings:'
+    );
+    for (const h of holdings.slice(0, TOP_HOLDINGS)) {
       const gain = h.cost_basis != null && h.cost_basis > 0 ? h.institution_value - h.cost_basis : null;
       const ret = h.cost_basis != null && h.cost_basis > 0
         ? ((h.institution_value - h.cost_basis) / h.cost_basis) * 100
@@ -560,16 +592,19 @@ export function buildFinancialContext(): string {
   }
 
   // ── Net Worth Trend (6 months) ───────────────────────────────────────────
-  const nwHistory = db.prepare(`
-    SELECT date, net_worth FROM net_worth_snapshots
-    WHERE date >= ? ORDER BY date ASC
-  `).all(sixMonthsAgo) as Array<{ date: string; net_worth: number }>;
+  const nwHistory = readSnapshots(db, { since: sixMonthsAgo, order: 'asc' });
 
   if (nwHistory.length >= 2) {
+    const estimatedCount = nwHistory.filter((snap) => snap.is_estimated).length;
     lines.push('');
     lines.push('### Net Worth Trend (last 6 months)');
+    if (estimatedCount > 0) {
+      lines.push(
+        `  ${estimatedCount} of these ${nwHistory.length} points are reconstructions, not measurements. Do not narrate movement between an estimate and a measurement as if it were an observed event.`
+      );
+    }
     for (const snap of nwHistory) {
-      lines.push(`  ${snap.date}: ${fmt(toDollars(snap.net_worth))}`);
+      lines.push(`  ${snap.date}: ${fmt(toDollars(snap.net_worth))}${estimateNote(snap)}`);
     }
   }
 

@@ -259,6 +259,7 @@ function setupAdvisorDb(): Database.Database {
     );
 
     CREATE TABLE net_worth_snapshots (
+      is_estimated INTEGER NOT NULL DEFAULT 0,
       id TEXT PRIMARY KEY,
       date TEXT NOT NULL,
       total_assets REAL NOT NULL DEFAULT 0,

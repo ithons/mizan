@@ -64,7 +64,7 @@ test('createManualAccount derives liability for credit type', (t) => {
 test('getAccountBalanceHistory extracts one account\'s series from snapshot breakdowns', (t) => {
   const db = new Database(':memory:');
   t.after(() => db.close());
-  db.exec(`CREATE TABLE net_worth_snapshots (id TEXT PRIMARY KEY, date TEXT NOT NULL, breakdown TEXT NOT NULL)`);
+  db.exec(`CREATE TABLE net_worth_snapshots (id TEXT PRIMARY KEY, date TEXT NOT NULL, breakdown TEXT NOT NULL, is_estimated INTEGER NOT NULL DEFAULT 0)`);
   const ins = db.prepare('INSERT INTO net_worth_snapshots (id, date, breakdown) VALUES (?,?,?)');
   ins.run('s1', '2026-01-01', JSON.stringify({ acct: 10000, other: 5000 }));
   ins.run('s2', '2026-02-01', JSON.stringify({ acct: 12000, other: 5000 }));
@@ -73,7 +73,7 @@ test('getAccountBalanceHistory extracts one account\'s series from snapshot brea
 
   const hist = getAccountBalanceHistory(db, 'acct');
   assert.deepEqual(hist, [
-    { date: '2026-01-01', balance: 10000 },
-    { date: '2026-02-01', balance: 12000 },
+    { date: '2026-01-01', balance: 10000, estimated: false },
+    { date: '2026-02-01', balance: 12000, estimated: false },
   ]);
 });

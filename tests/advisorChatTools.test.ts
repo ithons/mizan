@@ -52,7 +52,11 @@ function setup(): Database.Database {
       adjusted_date TEXT, adjusted_amount INTEGER, note TEXT,
       created_at TEXT DEFAULT '2026-06-01', updated_at TEXT DEFAULT '2026-06-01'
     );
-    CREATE TABLE net_worth_snapshots (id TEXT PRIMARY KEY, date TEXT, net_worth INTEGER, total_assets INTEGER, total_liabilities INTEGER, breakdown TEXT DEFAULT '{}');
+    CREATE TABLE net_worth_snapshots (
+      id TEXT PRIMARY KEY, date TEXT, net_worth INTEGER, total_assets INTEGER, total_liabilities INTEGER,
+      liquid_assets INTEGER, investment_assets INTEGER, crypto_assets INTEGER,
+      breakdown TEXT DEFAULT '{}', is_estimated INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL DEFAULT '2026-07-01');
   `);
   db.prepare("INSERT INTO accounts (id,account_name,institution_name) VALUES ('chk','Checking','Bank')").run();
   db.prepare(`INSERT INTO categories (id,name,parent_id,is_income) VALUES

@@ -1100,6 +1100,8 @@ export interface LocalBackupRestorePreviewTable {
   backup_rows: number;
   current_rows: number;
   restorable: boolean;
+  /** False when the backup predates the table; it is then restored empty rather than rejected. */
+  present_in_backup: boolean;
   missing_columns: string[];
   extra_columns: string[];
 }
@@ -1109,7 +1111,9 @@ export interface LocalBackupRestorePreview {
   app?: string;
   version?: number;
   exported_at?: string;
+  /** Tables the restore covers. The denominator of the N/M the preview reports. */
   table_count: number;
+  /** Covered tables the backup supplies and that restore as-is. The numerator. */
   restorable_table_count: number;
   total_rows: number;
   restorable_rows: number;

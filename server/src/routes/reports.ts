@@ -288,10 +288,13 @@ router.get('/investments', (req: Request, res: Response, next: NextFunction): vo
 
     const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
 
+    // is_estimated travels with the point. TrendChart already knows how to draw a reconstruction
+    // differently from a measurement; this endpoint was the one consumer that never told it.
     const snapshots = db.prepare(`
       SELECT
         date,
-        COALESCE(investment_assets, 0) AS value
+        COALESCE(investment_assets, 0) AS value,
+        is_estimated
       FROM net_worth_snapshots
       ${where}
       ORDER BY date ASC
@@ -302,10 +305,13 @@ router.get('/investments', (req: Request, res: Response, next: NextFunction): vo
       'SELECT SUM(institution_value) AS total FROM holdings'
     ).get() as { total: number | null };
 
-    const history = (snapshots as Array<{ date: string; value: number }>).map((snapshot) => ({
-      date: snapshot.date,
-      value: toDollars(snapshot.value),
-    }));
+    const history = (snapshots as Array<{ date: string; value: number; is_estimated: number }>).map(
+      (snapshot) => ({
+        date: snapshot.date,
+        value: toDollars(snapshot.value),
+        estimated: snapshot.is_estimated === 1,
+      })
+    );
 
     res.json({
       data: {

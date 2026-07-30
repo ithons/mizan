@@ -16,6 +16,7 @@ function setupInvariantDb(): Database.Database {
     );
 
     CREATE TABLE net_worth_snapshots (
+      is_estimated INTEGER NOT NULL DEFAULT 0,
       id TEXT PRIMARY KEY,
       date TEXT NOT NULL,
       breakdown TEXT NOT NULL,

@@ -36,7 +36,10 @@ export function AccountDetail() {
   });
 
   const chart = useMemo(
-    () => (history ?? []).map((p) => ({ date: p.date, value: p.balance })),
+    // `estimated` was never carried, so this chart drew reverse-replay reconstructions as one
+    // solid measured line: Wealthfront Cash appeared to hold $1,517 and collapse to $0.00 at the
+    // end of June, an event that never happened for an account that was not yet connected.
+    () => (history ?? []).map((p) => ({ date: p.date, value: p.balance, estimated: p.estimated })),
     [history]
   );
 
