@@ -110,7 +110,7 @@ export function getOnboardingPlan({
         ? 'The review queue is clear.'
         : `${reviewCount} review item${reviewCount === 1 ? '' : 's'} need confirmation before the dashboard is trusted.`,
       status: stepStatus(reviewDone, firstOpenId === 'review'),
-      route: '/transactions',
+      route: '/ledger?uncategorized=1',
       actionLabel: 'Review transactions',
     },
     {

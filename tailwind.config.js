@@ -40,7 +40,11 @@ export default {
         },
         track: mz('track'),
         well: mz('well'),
-        dot: mz('dot'),
+        // There is deliberately no `dot` here. `border-dot` existed for one thing, the nav rail's
+        // twelve 7px marks, which measured 1.70:1 against the rail on light. The rail is words now
+        // and the utility emitted zero CSS the moment they went, which is the same dead-entry shape
+        // the `cat-1..8` ramp had. `--mz-dot` stays in index.css: three inline swatch fallbacks in
+        // Settings read it through `var()`, which never went through Tailwind.
         sage: {
           DEFAULT: mz('sage'),
           deep: mz('sage-deep'),

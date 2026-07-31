@@ -66,6 +66,14 @@
 @tailwind components;
 @tailwind utilities;
 
+/* A metric, not a colour, so it sits outside the theme blocks and neither theme may redefine it.
+ * Two files need the same number and must not disagree: `NavRail` is this wide, and the ⌘K sheet
+ * insets its right edge by this plus a gutter so it lands over the content column rather than
+ * over the navigation. */
+:root {
+  --mz-rail-w: 164px;
+}
+
 /* Balance palette, light and dark.
  *
  * Every token is declared TWICE on purpose:
@@ -78,7 +86,8 @@
  * The channel form is not cosmetic. Tailwind 3's `withAlphaValue` runs `parseColor()` on the
  * configured value; given a bare `var(--mz-x)` string it returns null and DROPS THE UTILITY
  * ENTIRELY, with no warning. That once deleted every `/alpha` call site in the app at the same
- * time: the skeletons (`bg-track/60`), both dialog scrims (`bg-ink/25`, `bg-ink/20`), the error
+ * time: the skeletons (`bg-track/60`), both dialog scrims (`bg-ink/25`, and the ⌘K sheet's, since
+ * lightened to `bg-ink/10` so the screen behind it stays readable), the error
  * banner tint (`bg-clay/5`), the destructive-confirm tint, and the selected states. Nothing
  * failed; the utilities simply were not in the built CSS.
  *
@@ -471,6 +480,13 @@
   0%, 49% { opacity: 1; }
   50%, 100% { opacity: 0; }
 }
+/* The ⌘K sheet rises off the bottom edge it is anchored to, so the motion says where it came from
+   and the screen above it never moves. */
+@keyframes mz-sheet {
+  from { opacity: 0; transform: translateY(14px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.mz-sheet { animation: mz-sheet 0.18s ease-out both; }
 /* NOTE: `both` keeps the final `transform: translateY(0)` applied forever, and an element with a
    non-`none` transform becomes the containing block for `position: fixed` descendants. Any overlay
    rendered INSIDE a view therefore sizes itself to the page, not the viewport, which put dialogs
@@ -507,7 +523,7 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .mz-screen, .mz-rise-fast, .mz-stagger > *, .mz-draw, .mz-grow { animation: none; }
+  .mz-screen, .mz-rise-fast, .mz-stagger > *, .mz-draw, .mz-grow, .mz-sheet { animation: none; }
 }
 
 /* scrollbar styling */

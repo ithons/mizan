@@ -3,6 +3,21 @@ import type { AppPreference } from '../../../shared/types';
 
 const CORRUPT = Symbol('corrupt-preference');
 
+/**
+ * Keys migration 054 deleted, kept named so a restore cannot put them back.
+ *
+ * `restoreLocalBackup` rewrites `app_preferences` wholesale from a JSON file the owner chose, and a
+ * backup taken before 054 still carries all three. `advisor_auto_apply_high_confidence` is the one
+ * that makes this worth a guard rather than a comment: it reads `true` and states an autonomy
+ * policy removed in f61109b, and `run_sql_query` has no table allowlist, so a restored copy would
+ * go straight back to describing the model's own rules incorrectly.
+ */
+export const RETIRED_PREFERENCE_KEYS: ReadonlySet<string> = new Set([
+  'dashboard_layout',
+  'custom_report_views',
+  'advisor_auto_apply_high_confidence',
+]);
+
 interface PreferenceRow {
   key: string;
   value: string;

@@ -1,4 +1,5 @@
 import type Database from 'better-sqlite3';
+import { RETIRED_PREFERENCE_KEYS } from './preferences';
 
 /**
  * Every table a full backup carries, ordered parents before children.
@@ -526,6 +527,10 @@ export function restoreLocalBackup(
     let restoredRows = 0;
     for (const table of LOCAL_RESTORE_TABLES) {
       for (const row of backup.tables[table]) {
+        // A backup taken before migration 054 still carries the three retired preference keys, and
+        // this path rewrites the table wholesale. Skipped rather than deleted afterwards so
+        // `restored_rows` stays the count of rows that actually landed.
+        if (table === 'app_preferences' && RETIRED_PREFERENCE_KEYS.has(String(row.key))) continue;
         insertBackupRow(db, table, targetColumns[table], row);
         restoredRows++;
       }

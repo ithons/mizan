@@ -20,23 +20,23 @@ test('preferences persist structured JSON by key', (t) => {
   const db = setupDb();
   t.after(() => db.close());
 
-  assert.equal(getPreference(db, 'dashboard_layout'), null);
+  assert.equal(getPreference(db, 'example_key'), null);
 
   const saved = setPreference(
     db,
-    'dashboard_layout',
+    'example_key',
     [{ id: 'overview', hidden: false, pinned: true }],
     '2026-06-30T12:00:00.000Z'
   );
 
-  assert.equal(saved.key, 'dashboard_layout');
+  assert.equal(saved.key, 'example_key');
   assert.deepEqual(saved.value, [{ id: 'overview', hidden: false, pinned: true }]);
   assert.equal(saved.created_at, '2026-06-30T12:00:00.000Z');
   assert.equal(saved.updated_at, '2026-06-30T12:00:00.000Z');
 
   const updated = setPreference(
     db,
-    'dashboard_layout',
+    'example_key',
     [{ id: 'overview', hidden: true, pinned: false }],
     '2026-06-30T13:00:00.000Z'
   );
