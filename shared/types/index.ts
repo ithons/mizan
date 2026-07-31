@@ -899,7 +899,10 @@ export interface AdvisorContextResponse {
   tools: AdvisorToolStatus[];
 }
 
-export type AdvisorEffort = 'low' | 'medium' | 'high';
+// The full effort ladder the current Claude family accepts. Not every model takes every
+// level, so the request shape is derived per model in advisorSettings.ts rather than
+// assumed here.
+export type AdvisorEffort = 'low' | 'medium' | 'high' | 'xhigh' | 'max';
 
 // Advisor chat model/effort/context-section configuration. The option lists are
 // server-authoritative (the model is whitelisted so a tampered client can't

@@ -1,6 +1,8 @@
+import type Anthropic from '@anthropic-ai/sdk';
 import { v4 as uuidv4 } from 'uuid';
 import { getDb } from '../db/index';
-import { getAnthropicClient } from './anthropicClient';
+import { getAnthropicClient, readModelText } from './anthropicClient';
+import { JOB_MODELS, buildModelRequestShape } from './advisorSettings';
 import { buildFinancialContext } from './aiContext';
 import { getTransactionReviewSummary } from './transactionReview';
 import type { AdvisorDraftAction, AdvisorDraftPayload, AdvisorCitation, AdvisorDraftChange } from '../../../shared/types';
@@ -36,13 +38,131 @@ function draftTargetKey(payload: AdvisorDraftPayload): string {
   }
 }
 
+// ─── Output contract ─────────────────────────────────────────────────────────
+// The worker used to ask for raw JSON in prose, strip a markdown fence defensively, and
+// JSON.parse whatever came back. Structured outputs make the shape a request parameter the
+// API enforces, so the fence never appears and the parse cannot fail on a malformed reply.
+// The Zod schema behind it (AiWorkerDraftSchema) stays as defence in depth: this schema
+// cannot express the cross-field rule that a draft's `kind` equals its `payload.kind`, and
+// it is the payload that reaches a write path.
+//
+// Structured outputs restrict the schema: every object needs `additionalProperties: false`,
+// no recursion, and no length/range keywords. `tests/aiRequestShape.test.ts` walks this
+// object and asserts those constraints, because getting them wrong is a 400 on every run.
+
+const nullableString = { anyOf: [{ type: 'string' }, { type: 'null' }] } as const;
+
+function draftPayloadVariant(
+  kind: string,
+  properties: Record<string, unknown>
+): Record<string, unknown> {
+  const withKind = { kind: { const: kind }, ...properties };
+  return {
+    type: 'object',
+    properties: withKind,
+    required: Object.keys(withKind),
+    additionalProperties: false,
+  };
+}
+
+// Mirrors the 'Allowed kind values' list in the system prompt below. A kind the prompt
+// permits but this schema omits is a kind the model cannot emit at all.
+const DRAFT_KINDS = [
+  'categorize_transaction',
+  'create_merchant_rule',
+  'create_recurring_adjustment',
+  'update_budget',
+  'update_goal_target',
+  'create_budget_group',
+] as const;
+
+export const WORKER_DRAFTS_FORMAT: Anthropic.JSONOutputFormat = {
+  type: 'json_schema',
+  schema: {
+    type: 'object',
+    properties: {
+      drafts: {
+        type: 'array',
+        items: {
+          type: 'object',
+          properties: {
+            kind: { type: 'string', enum: [...DRAFT_KINDS] },
+            label: { type: 'string' },
+            summary: { type: 'string' },
+            route: { type: 'string' },
+            payload: {
+              anyOf: [
+                draftPayloadVariant('categorize_transaction', {
+                  transaction_id: { type: 'string' },
+                  category_id: { type: 'string' },
+                }),
+                draftPayloadVariant('create_merchant_rule', {
+                  pattern: { type: 'string' },
+                  category_id: { type: 'string' },
+                  apply_existing: { type: 'boolean' },
+                }),
+                draftPayloadVariant('create_recurring_adjustment', {
+                  recurring_id: { type: 'string' },
+                  original_date: { type: 'string' },
+                  action: { type: 'string', enum: ['skip', 'snooze', 'adjust'] },
+                  adjusted_date: nullableString,
+                  adjusted_amount: { anyOf: [{ type: 'number' }, { type: 'null' }] },
+                  note: nullableString,
+                }),
+                draftPayloadVariant('update_budget', {
+                  category_id: { type: 'string' },
+                  amount: { type: 'number' },
+                  period: { const: 'monthly' },
+                  rollover: { type: 'boolean' },
+                }),
+                draftPayloadVariant('update_goal_target', {
+                  goal_id: { type: 'string' },
+                  target_amount: { type: 'number' },
+                }),
+                draftPayloadVariant('create_budget_group', {
+                  name: { type: 'string' },
+                  color: nullableString,
+                }),
+              ],
+            },
+            changes: {
+              type: 'array',
+              items: {
+                type: 'object',
+                properties: {
+                  field: { type: 'string' },
+                  before: {
+                    anyOf: [{ type: 'string' }, { type: 'number' }, { type: 'boolean' }, { type: 'null' }],
+                  },
+                  after: {
+                    anyOf: [{ type: 'string' }, { type: 'number' }, { type: 'boolean' }, { type: 'null' }],
+                  },
+                },
+                required: ['field', 'before', 'after'],
+                additionalProperties: false,
+              },
+            },
+          },
+          required: ['kind', 'label', 'summary', 'route', 'payload', 'changes'],
+          additionalProperties: false,
+        },
+      },
+    },
+    required: ['drafts'],
+    additionalProperties: false,
+  },
+};
+
 // Re-entrancy guard: the worker is fired via setTimeout after every sync, and it awaits a
 // slow LLM call, so two passes could otherwise overlap (rapid syncs) and double-apply or
 // race each other's draft supersession. Only one pass runs at a time.
 let workerRunning = false;
 
 export async function runBackgroundAiReview(): Promise<void> {
-  const anthropic = getAnthropicClient();
+  // One retry, not the SDK's two, because `workerRunning` below turns a hung request into
+  // every later review pass being skipped for as long as it lasts. Two attempts at five
+  // minutes bounds that at ten, well inside the hourly sync cadence that fires this.
+  const anthropic = getAnthropicClient({ maxRetries: 1 });
   if (!anthropic) {
     console.log('[ai-worker] Skipped: no Anthropic credentials configured (API key, auth token, or `ant auth login` profile).');
     return;
@@ -100,10 +220,10 @@ export async function runBackgroundAiReview(): Promise<void> {
     }
 
     const systemPrompt = `You are Mizān's background AI co-pilot. Your job is to review the user's latest sync delta and generate proactive, actionable 1-click drafts.
-You must output a JSON array of draft objects. Return ONLY valid JSON, with no markdown code fences and no conversational text before or after it.
-If there are no meaningful drafts to generate, return an empty array [].
+Respond with an object of the form {"drafts": [ ... ]}, one entry per draft.
+If there are no meaningful drafts to generate, return {"drafts": []}.
 
-Allowed 'kind' values: 'categorize_transaction', 'create_merchant_rule', 'create_recurring_adjustment', 'update_budget', 'update_goal_target', 'create_budget_group'.
+Allowed 'kind' values: ${DRAFT_KINDS.map((k) => `'${k}'`).join(', ')}.
 
 For a 'categorize_transaction' draft, "payload.transaction_id" MUST be copied exactly from the "id" field of one of the transactions listed under "Uncategorized transactions" below, and "payload.category_id" MUST be copied exactly from the "id" field of one of the categories listed under "Valid categories" below. Never invent a transaction id or use a category's display name in place of its id — an id that doesn't match exactly will silently fail to apply.
 
@@ -128,60 +248,70 @@ ${recentDetects.map(d => `- [${d.entity_type}] ${d.description}`).join('\n')}
 
 Every payload object MUST repeat "kind" inside it, identical to the draft's own top-level "kind" — a draft whose payload.kind doesn't match its own kind is silently rejected.
 
-Example JSON format for each kind you're likely to use:
-[
-  {
-    "kind": "categorize_transaction",
-    "label": "Categorize Trupanion",
-    "summary": "Trupanion (-$39.02) is pet insurance.",
-    "route": "/transactions",
-    "payload": { "kind": "categorize_transaction", "transaction_id": "<id copied from the list above>", "category_id": "<id copied from the list above>" },
-    "changes": [{ "field": "category", "before": "Uncategorized", "after": "Health" }],
-    "citations": []
-  },
-  {
-    "kind": "create_merchant_rule",
-    "label": "Always categorize Trupanion as Health",
-    "summary": "Auto-categorize future Trupanion charges as Health.",
-    "route": "/transactions",
-    "payload": { "kind": "create_merchant_rule", "pattern": "Trupanion", "category_id": "<id copied from the list above>", "apply_existing": true },
-    "changes": [],
-    "citations": []
-  }
-]`;
+Example format for each kind you're likely to use:
+{
+  "drafts": [
+    {
+      "kind": "categorize_transaction",
+      "label": "Categorize Trupanion",
+      "summary": "Trupanion (-$39.02) is pet insurance.",
+      "route": "/transactions",
+      "payload": { "kind": "categorize_transaction", "transaction_id": "<id copied from the list above>", "category_id": "<id copied from the list above>" },
+      "changes": [{ "field": "category", "before": "Uncategorized", "after": "Health" }]
+    },
+    {
+      "kind": "create_merchant_rule",
+      "label": "Always categorize Trupanion as Health",
+      "summary": "Auto-categorize future Trupanion charges as Health.",
+      "route": "/transactions",
+      "payload": { "kind": "create_merchant_rule", "pattern": "Trupanion", "category_id": "<id copied from the list above>", "apply_existing": true },
+      "changes": []
+    }
+  ]
+}`;
 
-    // Let's ask the LLM for suggestions
+    // Deliberately no cache_control on this prompt. Its prefix is unstable by construction:
+    // buildFinancialContext() opens with today's date and interpolates the last successful
+    // sync timestamp, rewritten by the very sync that fires this worker, before 15 volatile
+    // transactions and 20 sync changes. Every call would write a fresh entry at 1.25× and read
+    // none back, and the hourly cadence outruns the 5-minute TTL regardless.
+    const job = JOB_MODELS.background_review;
     const response = await anthropic.messages.create({
-      model: 'claude-haiku-4-5',
-      // Up to 15 categorize_transaction drafts plus other draft kinds can exceed 1024
-      // tokens and get cut off mid-JSON (observed: a real run truncated mid-object).
-      max_tokens: 4096,
+      model: job.model,
+      // Thinking counts against this, and adaptive thinking would spend most of the previous
+      // 4096 before writing a single draft. 16000 is not a measured figure: no token count was
+      // taken for a pass. It is a deliberately generous ceiling, set so that truncation cannot
+      // be the failure mode, which is why hitting it is warned about below rather than expected.
+      max_tokens: 16000,
       system: systemPrompt,
       messages: [{ role: 'user', content: 'Generate proactive drafts based on the latest sync state.' }],
-      temperature: 0.1,
+      // No sampling parameter: a temperature is a 400 on this model. Every optional parameter
+      // here is derived from the model rather than assumed, so retiering this job cannot send
+      // a shape the new model rejects.
+      ...buildModelRequestShape(job.model, { effort: job.effort, outputFormat: WORKER_DRAFTS_FORMAT }),
     });
 
     if (response.stop_reason === 'max_tokens') {
       console.warn('[ai-worker] Model response hit max_tokens; draft JSON is likely truncated and may fail to parse.');
     }
-    const firstBlock = response.content[0];
-    const rawText = firstBlock && firstBlock.type === 'text' ? firstBlock.text : '';
-    if (!rawText) {
-      console.warn('[ai-worker] Model returned no usable text content (empty or non-text); skipping this pass.');
-      return;
-    }
-    // The model is instructed to return raw JSON, but strip a ```/```json fence
-    // defensively in case it wraps the response anyway.
-    const text = rawText.trim().replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/, '').trim();
-    let drafts: any[] = [];
+
+    // readModelText raises on a refusal or a response carrying no text, so neither can pass
+    // through here looking like "the model had nothing to suggest". The outer catch logs it.
+    const text = readModelText(response).trim();
+    let drafts: unknown[];
     try {
-      drafts = JSON.parse(text);
+      const parsed = JSON.parse(text) as { drafts?: unknown };
+      if (!Array.isArray(parsed?.drafts)) {
+        throw new Error(`expected {"drafts": [...]}, got ${typeof parsed}`);
+      }
+      drafts = parsed.drafts;
     } catch (parseError) {
-      console.error('[ai-worker] Failed to parse AI JSON response:', rawText);
-      return;
+      // Unreachable while the structured-output contract holds; kept because the contract is
+      // a request parameter and a stripped or rejected one would otherwise fail silently.
+      throw new Error(`[ai-worker] Model response did not match the draft output contract: ${(parseError as Error).message}`);
     }
 
-    if (!Array.isArray(drafts) || drafts.length === 0) {
+    if (drafts.length === 0) {
       console.log('[ai-worker] No drafts generated.');
       return;
     }

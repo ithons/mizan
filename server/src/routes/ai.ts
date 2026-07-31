@@ -25,11 +25,18 @@ import {
 } from '../services/advisorDrafts';
 import { analyzeAdvisorQuestion } from '../services/advisorTools';
 import { ADVISOR_TOOLS, runAdvisorTool } from '../services/advisorChatTools';
-import { getAdvisorSettings, updateAdvisorSettings } from '../services/advisorSettings';
+import { buildModelRequestShape, getAdvisorSettings, updateAdvisorSettings } from '../services/advisorSettings';
 import { suggestCategoriesForMerchants } from '../services/aiCategorySuggest';
 import type { AdvisorConfirmRequest, ChatMessage } from '../../../shared/types';
 
 const router = Router();
+
+/**
+ * Agentic-loop bound for POST /chat: stream a turn; if the model asks for a (read-only) tool,
+ * run it, feed the result back, and stream again. Bounded so a misbehaving model can't loop
+ * forever. Exported so a test asserts against the same bound the loop uses.
+ */
+export const MAX_TOOL_ROUNDS = 8;
 
 function getClient(): Anthropic {
   const client = getAnthropicClient();
@@ -348,9 +355,11 @@ router.post('/chat', async (req: Request, res: Response, next: NextFunction): Pr
   // Seed the conversation from the client turns, then grow it as the model calls tools.
   const conversation: Anthropic.MessageParam[] = messages.map((m) => ({ role: m.role, content: m.content }));
 
-  // Agentic loop: stream a turn; if the model asks for a (read-only) tool, run it, feed the
-  // result back, and stream again. Bounded so a misbehaving model can't loop forever.
-  const MAX_TOOL_ROUNDS = 8;
+  // Set once a turn ends with something other than another tool request. If the loop below
+  // runs out of rounds while the model is still asking for tools, this stays false: the owner
+  // would otherwise get a completed stream carrying tool_use events and no answer, the same
+  // silent partial as a refusal or an empty content array.
+  let answered = false;
 
   // Accumulated across every tool round so we can confirm the ephemeral cache on the stable
   // prefix (system prompt + snapshot + tool list) actually gets read back rather than re-billed.
@@ -360,29 +369,41 @@ router.post('/chat', async (req: Request, res: Response, next: NextFunction): Pr
 
   try {
     for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
-      const stream = anthropic.messages.stream({
-        // model + effort are user-configurable (Settings -> Advisor), server-whitelisted to
-        // the current Claude family in advisorSettings.ts.
-        model,
-        // Thinking tokens count against max_tokens; adaptive thinking can spend most of a
-        // smaller budget reasoning before ever writing the answer.
-        max_tokens: 8192,
-        // 'adaptive' is the only valid thinking mode for the whitelisted models (budget_tokens 400s).
-        // display: 'summarized' surfaces visible reasoning text ('omitted' returns empty blocks).
-        thinking: { type: 'adaptive', display: 'summarized' },
-        output_config: { effort },
-        // Stable prefix (prompt + snapshot) is cached; ADVISOR_TOOLS is a fixed list, so the
-        // cached prefix holds across every tool round of the conversation.
-        system: [
-          {
-            type: 'text',
-            text: systemText,
-            cache_control: { type: 'ephemeral' },
-          },
-        ],
-        tools: ADVISOR_TOOLS,
-        messages: conversation,
-      });
+      const stream = anthropic.messages.stream(
+        {
+          // model + effort are user-configurable (Settings -> Advisor), server-whitelisted to
+          // the current Claude family in advisorSettings.ts.
+          model,
+          // Thinking tokens count against max_tokens, and this loop runs up to MAX_TOOL_ROUNDS
+          // turns at an effort the owner picks. 64000 is not a measured figure: no token count
+          // was ever taken for a turn here. It is a deliberately generous ceiling, set so that
+          // truncation cannot be the failure mode. The SDK's non-streaming guard, which refuses
+          // a large max_tokens and tells you to stream (`calculateNonstreamingTimeout` in
+          // @anthropic-ai/sdk/client.js), never sees this request: it runs only for a
+          // non-streaming create on a client with no timeout set, and this call streams.
+          // What bounds the wall clock is the explicit per-request timeout below.
+          max_tokens: 64000,
+          // Derived from the model, never assumed: thinking mode, effort support and structured
+          // output all differ across the family, and a request built without reference to the
+          // model it names is the same latent defect the migration comments in db/migrations
+          // record. A model this table does not know gets a bare request.
+          ...buildModelRequestShape(model, { effort, thinkingDisplay: 'summarized' }),
+          // Stable prefix (prompt + snapshot) is cached; ADVISOR_TOOLS is a fixed list, so the
+          // cached prefix holds across every tool round of the conversation.
+          system: [
+            {
+              type: 'text',
+              text: systemText,
+              cache_control: { type: 'ephemeral' },
+            },
+          ],
+          tools: ADVISOR_TOOLS,
+          messages: conversation,
+        },
+        // Longer than the client default: the owner is watching this one, it streams, and a
+        // turn at 'max' effort with tool rounds can legitimately run for minutes.
+        { timeout: 600_000 }
+      );
 
       let thinkingBlockIndex: number | null = null;
 
@@ -410,7 +431,27 @@ router.post('/chat', async (req: Request, res: Response, next: NextFunction): Pr
       cacheReadTokens += message.usage.cache_read_input_tokens ?? 0;
       cacheCreationTokens += message.usage.cache_creation_input_tokens ?? 0;
       uncachedInputTokens += message.usage.input_tokens;
-      if (message.stop_reason !== 'tool_use') break;
+
+      // A safety classifier can decline with an HTTP 200 and no content at all. Left
+      // unhandled that reads as a successful, empty answer, so say what happened instead.
+      if (message.stop_reason === 'refusal') {
+        const detail = message.stop_details?.explanation ?? message.stop_details?.category ?? null;
+        const reason = detail ? `The model declined to answer: ${detail}` : 'The model declined to answer.';
+        res.write(`data: ${JSON.stringify({ type: 'error', message: reason })}\n\n`);
+        res.end();
+        return;
+      }
+
+      if (message.stop_reason !== 'tool_use') {
+        // Same class: a 200 with an empty content array is not an answer.
+        if (message.content.length === 0) {
+          res.write(`data: ${JSON.stringify({ type: 'error', message: 'The model returned an empty response.' })}\n\n`);
+          res.end();
+          return;
+        }
+        answered = true;
+        break;
+      }
 
       // Run every requested tool and feed the results back. Most are pure SELECTs; two
       // (categorize_transactions, create_merchant_rule) write, scoped to the autonomous domain
@@ -434,6 +475,15 @@ router.post('/chat', async (req: Request, res: Response, next: NextFunction): Pr
     console.log(
       `[ai/chat] cache read ${cacheReadTokens} tok, cache write ${cacheCreationTokens} tok, uncached input ${uncachedInputTokens} tok`
     );
+
+    // Ran out of rounds with the model still asking for tools. Every tool it asked for did run,
+    // but no turn ever produced an answer, so this stream is not a completed one.
+    if (!answered) {
+      const message = `The advisor stopped after ${MAX_TOOL_ROUNDS} tool rounds without finishing its answer. Ask again, more narrowly.`;
+      res.write(`data: ${JSON.stringify({ type: 'error', message })}\n\n`);
+      res.end();
+      return;
+    }
 
     res.write(`data: ${JSON.stringify({ type: 'done' })}\n\n`);
     res.end();

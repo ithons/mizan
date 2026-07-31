@@ -1,4 +1,5 @@
-import { getAnthropicClient } from './anthropicClient';
+import { getAnthropicClient, readModelText } from './anthropicClient';
+import { JOB_MODELS, buildModelRequestShape } from './advisorSettings';
 import type Database from 'better-sqlite3';
 
 export interface CategorySuggestion {
@@ -7,9 +8,10 @@ export interface CategorySuggestion {
   category_name: string;
 }
 
-// Bulk merchant classification is a high-volume, low-nuance job, so it uses the same fast/cheap
-// model as the background draft worker rather than the (configurable) conversational advisor model.
-const SUGGEST_MODEL = 'claude-haiku-4-5';
+// Bulk merchant classification is high-volume and near-lookup, so it takes the cheapest
+// capable model rather than the (configurable) conversational advisor model. The assignment
+// lives in JOB_MODELS so every job's model choice reads from one table.
+const SUGGEST_JOB = JOB_MODELS.bulk_categorization;
 
 // Caps the blast radius of one request: the prompt lists every merchant, and the reply lists one
 // object per merchant, so an unbounded list would blow past max_tokens and truncate the JSON.
@@ -22,6 +24,10 @@ export const MAX_SUGGEST_MERCHANTS = 60;
  * Any suggestion naming a category id that doesn't exist is dropped rather than returned, so a
  * hallucinated id can never reach a write path (the same guard class that keeps a stale id from
  * failing the auto-categorization stage in rules.ts).
+ *
+ * Throws when the model declines or returns something unreadable. An empty array means the model
+ * was asked and recognised nothing; a failure has to look different from that, or a broken call
+ * reads on screen as "no merchant here could be identified".
  */
 export async function suggestCategoriesForMerchants(
   db: Database.Database,
@@ -56,10 +62,13 @@ Valid categories:
 ${categories.map((c) => `- id: "${c.id}", name: "${c.parent_name ? `${c.parent_name} / ` : ''}${c.name}"`).join('\n')}`;
 
   const response = await anthropic.messages.create({
-    model: SUGGEST_MODEL,
+    model: SUGGEST_JOB.model,
     max_tokens: 4096,
     system: systemPrompt,
-    temperature: 0.1,
+    // No sampling parameter: temperature/top_p/top_k are a 400 on every 4.7+ model, and this
+    // call site only survived one because it happened to name a model that still accepts them.
+    // Derived rather than hardcoded so the request can never carry a parameter this model rejects.
+    ...buildModelRequestShape(SUGGEST_JOB.model, { effort: SUGGEST_JOB.effort }),
     messages: [
       {
         role: 'user',
@@ -72,20 +81,17 @@ ${categories.map((c) => `- id: "${c.id}", name: "${c.parent_name ? `${c.parent_n
     console.warn('[ai-suggest] Response hit max_tokens; some suggestions may be missing.');
   }
 
-  const firstBlock = response.content[0];
-  const rawText = firstBlock && firstBlock.type === 'text' ? firstBlock.text : '';
-  if (!rawText) return [];
-
   // Instructed to return raw JSON, but strip a fence defensively.
-  const text = rawText.trim().replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/, '').trim();
+  const text = readModelText(response).trim().replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/, '').trim();
   let parsed: unknown;
   try {
     parsed = JSON.parse(text);
   } catch {
-    console.error('[ai-suggest] Could not parse model JSON; returning no suggestions.');
-    return [];
+    throw new Error('[ai-suggest] Model returned text that is not JSON; no suggestions can be read from it.');
   }
-  if (!Array.isArray(parsed)) return [];
+  if (!Array.isArray(parsed)) {
+    throw new Error('[ai-suggest] Model returned JSON that is not an array of suggestions.');
+  }
 
   const requested = new Set(unique);
   const out: CategorySuggestion[] = [];
