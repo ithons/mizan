@@ -1,6 +1,7 @@
-import React, { useEffect } from 'react';
+import React, { useId } from 'react';
 import { createPortal } from 'react-dom';
 import { X } from 'lucide-react';
+import { useOverlay, useShortcuts } from '../lib/keyboard';
 
 interface ModalProps {
   open: boolean;
@@ -11,14 +12,15 @@ interface ModalProps {
 }
 
 export function Modal({ open, onClose, title, children, maxWidth = '480px' }: ModalProps) {
-  useEffect(() => {
-    if (!open) return;
-    const handleKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
-    };
-    window.addEventListener('keydown', handleKey);
-    return () => window.removeEventListener('keydown', handleKey);
-  }, [open, onClose]);
+  /**
+   * Every open dialog used to hold its own window listener for Escape, so one press closed all of
+   * them at once, and none of them told the screen underneath to stop answering the keyboard: the
+   * ledger compensated by naming its own three modals in a condition of its own. Registering as an
+   * overlay does both jobs, and `overlay.close` reaches only the dialog on top of the stack.
+   */
+  const owner = useId();
+  useOverlay(owner, open);
+  useShortcuts(owner, { 'overlay.close': onClose }, open);
 
   if (!open) return null;
 
