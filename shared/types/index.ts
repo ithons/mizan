@@ -952,33 +952,87 @@ export interface AdvisorContextResponse {
   context: string;
   configured: boolean;
   /** Which credential form the SDK resolved. Never the secret itself. */
-  credential_source?: 'api_key' | 'auth_token' | 'oauth_profile' | 'none';
+  credential_source?: AdvisorCredentialSource;
   generated_at: string;
   sync_health: SyncHealth;
   actions: AdvisorAction[];
   tools: AdvisorToolStatus[];
 }
 
-// The full effort ladder the current Claude family accepts. Not every model takes every
-// level, so the request shape is derived per model in advisorSettings.ts rather than
-// assumed here.
+// The union of every effort ladder the offered models accept. NOT every model takes every
+// level: Gemini's dial has three rungs with these names and no `xhigh` or `max`, and Haiku
+// 4.5 has none at all. The request shape is derived per model in advisorSettings.ts, and the
+// per-model `efforts` list below is what a dial must render from.
 export type AdvisorEffort = 'low' | 'medium' | 'high' | 'xhigh' | 'max';
 
-// Advisor chat model/effort/context-section configuration. The option lists are
-// server-authoritative (the model is whitelisted so a tampered client can't
-// point it at an arbitrary string); the client renders its controls from them.
+export type AiProviderId = 'anthropic' | 'openai' | 'gemini';
+
+/** How a provider's credential was found. `stored` means `.mizan/credentials.json`. */
+export type AdvisorCredentialSource = 'env' | 'oauth_profile' | 'stored' | 'none';
+
+/**
+ * One offered model, with the facts a surface needs to render only knobs that exist.
+ *
+ * `efforts` is per model rather than per provider on purpose: an effort dial that is not
+ * rendered for a model with no effort ladder is better than one that silently does nothing.
+ */
+export interface AdvisorModelOption {
+  id: string;
+  label: string;
+  provider: AiProviderId;
+  /** False when this provider has no credential; picking it would fail at the first question. */
+  configured: boolean;
+  /** Whether reasoning is configurable and its summary streams. */
+  reasoning: boolean;
+  efforts: AdvisorEffort[];
+  context_window: number;
+  max_output_tokens: number;
+  /** What caching this model gets and what it costs, said before the owner picks it. */
+  caching_note: string;
+}
+
+export interface AdvisorProviderStatus {
+  id: AiProviderId;
+  configured: boolean;
+  credential_source: AdvisorCredentialSource;
+}
+
+/** A fixed-purpose job and the model serving it, which need not share the advisor's provider. */
+export interface AdvisorJobAssignment {
+  job: string;
+  model: string;
+  effort: AdvisorEffort | null;
+  provider: AiProviderId;
+  /**
+   * False when the assigned model's provider has no credential. The job then skips before it
+   * writes an `ai_runs` row, so there is no run, no digest entry and no error anywhere else:
+   * this flag is the only surface that state reaches.
+   */
+  configured: boolean;
+  available: Array<{ id: string; label: string; provider: AiProviderId; configured: boolean }>;
+}
+
+// Advisor chat model/effort configuration. The option lists are server-authoritative (the
+// model is whitelisted so a tampered client can't point it at an arbitrary string, which
+// matters more now that every provider SDK widens its model parameter to `string`); the
+// client renders its controls from them.
 export interface AdvisorSettings {
   model: string;
   effort: AdvisorEffort;
   available: {
-    models: Array<{ id: string; label: string }>;
+    models: AdvisorModelOption[];
+    /** The union of every ladder. Prefer the selected model's own `efforts`. */
     efforts: AdvisorEffort[];
+    providers: AdvisorProviderStatus[];
   };
+  jobs: AdvisorJobAssignment[];
 }
 
 export interface AdvisorSettingsUpdate {
   model?: string;
   effort?: AdvisorEffort;
+  /** Job name to model id. Cross-provider tiering is a feature, not an accident. */
+  jobs?: Record<string, string>;
 }
 
 export interface ApiResponse<T> {

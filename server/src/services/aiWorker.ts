@@ -1,8 +1,7 @@
-import type Anthropic from '@anthropic-ai/sdk';
 import type Database from 'better-sqlite3';
 import { getDb } from '../db/index';
-import { getAnthropicClient, readModelText } from './anthropicClient';
-import { buildModelRequestShape } from './advisorSettings';
+import { providerForModel } from './aiProviders';
+import { literal } from './aiProviders/schema';
 import { buildFinancialContext } from './aiContext';
 import { getTransactionReviewSummary } from './transactionReview';
 import type { AdvisorCitation, AdvisorDraftChange, AdvisorDraftPayload } from '../../../shared/types';
@@ -10,6 +9,7 @@ import { buildRecurringForecast } from './recurringForecast';
 import { toDollars } from './money';
 import { AiWorkerDraftSchema } from '../../../shared/schemas';
 import { describeAutonomyForPrompt } from './draftAutonomy';
+import type { ProviderUsage } from './aiProviders/types';
 import {
   AI_JOBS,
   runAiJob,
@@ -39,9 +39,12 @@ const JOB = AI_JOBS.background_review;
 // cannot express the cross-field rule that a draft's `kind` equals its `payload.kind`, and
 // it is the payload that reaches a write path.
 //
-// Structured outputs restrict the schema: every object needs `additionalProperties: false`,
-// no recursion, and no length/range keywords. `tests/aiRequestShape.test.ts` walks this
-// object and asserts those constraints, because getting them wrong is a 400 on every run.
+// The three providers restrict the schema differently, and in both directions: Anthropic
+// forbids the length/range keywords, OpenAI allows those but forbids `allOf`/`not`/`if`, and
+// Gemini publishes a supported list and states that it IGNORES anything outside it. So this
+// schema is written to the intersection, and `tests/aiRequestShape.test.ts` walks it against
+// a per-provider ruleset rather than one shared assertion. Getting it wrong is a 400 on every
+// run for two of them and, worse, a silently unenforced rule on the third.
 
 const nullableString = { anyOf: [{ type: 'string' }, { type: 'null' }] } as const;
 
@@ -49,7 +52,10 @@ function draftPayloadVariant(
   kind: string,
   properties: Record<string, unknown>
 ): Record<string, unknown> {
-  const withKind = { kind: { const: kind }, ...properties };
+  // `literal()` emits a single-member `enum`, not `const`. Anthropic accepts `const`, OpenAI
+  // does not document it, and Gemini drops unsupported keywords silently, which would delete
+  // the discriminator that makes `kind === payload.kind` enforceable at all, with no error.
+  const withKind = { kind: literal(kind), ...properties };
   return {
     type: 'object',
     properties: withKind,
@@ -63,80 +69,79 @@ function draftPayloadVariant(
 // a usable payload; `tests/aiJobs.test.ts` asserts the two lists agree.
 const DRAFT_KINDS = JOB.writes;
 
-export const WORKER_DRAFTS_FORMAT: Anthropic.JSONOutputFormat = {
-  type: 'json_schema',
-  schema: {
-    type: 'object',
-    properties: {
-      drafts: {
-        type: 'array',
-        items: {
-          type: 'object',
-          properties: {
-            kind: { type: 'string', enum: [...DRAFT_KINDS] },
-            label: { type: 'string' },
-            summary: { type: 'string' },
-            route: { type: 'string' },
-            payload: {
-              anyOf: [
-                draftPayloadVariant('categorize_transaction', {
-                  transaction_id: { type: 'string' },
-                  category_id: { type: 'string' },
-                }),
-                draftPayloadVariant('create_merchant_rule', {
-                  pattern: { type: 'string' },
-                  category_id: { type: 'string' },
-                  apply_existing: { type: 'boolean' },
-                }),
-                draftPayloadVariant('retire_merchant_rule', {
-                  rule_id: { type: 'string' },
-                }),
-                draftPayloadVariant('create_recurring_adjustment', {
-                  recurring_id: { type: 'string' },
-                  original_date: { type: 'string' },
-                  action: { type: 'string', enum: ['skip', 'snooze', 'adjust'] },
-                  adjusted_date: nullableString,
-                  adjusted_amount: { anyOf: [{ type: 'number' }, { type: 'null' }] },
-                  note: nullableString,
-                }),
-                draftPayloadVariant('update_budget', {
-                  category_id: { type: 'string' },
-                  amount: { type: 'number' },
-                  period: { const: 'monthly' },
-                  rollover: { type: 'boolean' },
-                }),
-                draftPayloadVariant('update_goal_target', {
-                  goal_id: { type: 'string' },
-                  target_amount: { type: 'number' },
-                }),
-              ],
-            },
-            changes: {
-              type: 'array',
-              items: {
-                type: 'object',
-                properties: {
-                  field: { type: 'string' },
-                  before: {
-                    anyOf: [{ type: 'string' }, { type: 'number' }, { type: 'boolean' }, { type: 'null' }],
-                  },
-                  after: {
-                    anyOf: [{ type: 'string' }, { type: 'number' }, { type: 'boolean' }, { type: 'null' }],
-                  },
+export const WORKER_DRAFTS_SCHEMA_NAME = 'mizan_advisor_drafts';
+
+export const WORKER_DRAFTS_SCHEMA: Record<string, unknown> = {
+  type: 'object',
+  properties: {
+    drafts: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          kind: { type: 'string', enum: [...DRAFT_KINDS] },
+          label: { type: 'string' },
+          summary: { type: 'string' },
+          route: { type: 'string' },
+          payload: {
+            anyOf: [
+              draftPayloadVariant('categorize_transaction', {
+                transaction_id: { type: 'string' },
+                category_id: { type: 'string' },
+              }),
+              draftPayloadVariant('create_merchant_rule', {
+                pattern: { type: 'string' },
+                category_id: { type: 'string' },
+                apply_existing: { type: 'boolean' },
+              }),
+              draftPayloadVariant('retire_merchant_rule', {
+                rule_id: { type: 'string' },
+              }),
+              draftPayloadVariant('create_recurring_adjustment', {
+                recurring_id: { type: 'string' },
+                original_date: { type: 'string' },
+                action: { type: 'string', enum: ['skip', 'snooze', 'adjust'] },
+                adjusted_date: nullableString,
+                adjusted_amount: { anyOf: [{ type: 'number' }, { type: 'null' }] },
+                note: nullableString,
+              }),
+              draftPayloadVariant('update_budget', {
+                category_id: { type: 'string' },
+                amount: { type: 'number' },
+                period: literal('monthly'),
+                rollover: { type: 'boolean' },
+              }),
+              draftPayloadVariant('update_goal_target', {
+                goal_id: { type: 'string' },
+                target_amount: { type: 'number' },
+              }),
+            ],
+          },
+          changes: {
+            type: 'array',
+            items: {
+              type: 'object',
+              properties: {
+                field: { type: 'string' },
+                before: {
+                  anyOf: [{ type: 'string' }, { type: 'number' }, { type: 'boolean' }, { type: 'null' }],
                 },
-                required: ['field', 'before', 'after'],
-                additionalProperties: false,
+                after: {
+                  anyOf: [{ type: 'string' }, { type: 'number' }, { type: 'boolean' }, { type: 'null' }],
+                },
               },
+              required: ['field', 'before', 'after'],
+              additionalProperties: false,
             },
           },
-          required: ['kind', 'label', 'summary', 'route', 'payload', 'changes'],
-          additionalProperties: false,
         },
+        required: ['kind', 'label', 'summary', 'route', 'payload', 'changes'],
+        additionalProperties: false,
       },
     },
-    required: ['drafts'],
-    additionalProperties: false,
   },
+  required: ['drafts'],
+  additionalProperties: false,
 };
 
 // ─── What counts as this pass's delta ────────────────────────────────────────
@@ -380,12 +385,26 @@ Example format for each kind you're likely to use:
 }`;
 }
 
-function readUsage(response: Anthropic.Message): AiJobUsage {
+/**
+ * The run row records UNCACHED input, whichever provider answered.
+ *
+ * `ProviderUsage.uncachedInputTokens` is already reconciled: Anthropic's `input_tokens`
+ * excludes its cache fields while OpenAI's and Gemini's include them, so each adapter does
+ * its own subtraction and this column means one thing across all three.
+ *
+ * The two cache columns are passed through, nulls included, because `ai_runs` distinguishes
+ * "not reported" from "zero" and this is the only place that distinction can be lost. Gemini
+ * always reports a null write (its write is a separate call), Anthropic reports one only when
+ * the response carried the field, and OpenAI reports one only when `input_tokens_details`
+ * carried it. `cache_read_tokens` is the one that cannot be null on any provider: see the
+ * note on `readUsage` in aiProviders/anthropic.ts for why the shared type forbids it.
+ */
+function readUsage(usage: ProviderUsage): AiJobUsage {
   return {
-    input_tokens: response.usage?.input_tokens ?? null,
-    output_tokens: response.usage?.output_tokens ?? null,
-    cache_read_tokens: response.usage?.cache_read_input_tokens ?? null,
-    cache_write_tokens: response.usage?.cache_creation_input_tokens ?? null,
+    input_tokens: usage.uncachedInputTokens,
+    output_tokens: usage.outputTokens,
+    cache_read_tokens: usage.cacheReadTokens,
+    cache_write_tokens: usage.cacheWriteTokens,
   };
 }
 
@@ -446,16 +465,17 @@ export function refilableTransactions(db: Database.Database): PromptRefilableTra
  * Returns proposals rather than writing them: `writes` is only enforceable if the job cannot
  * reach a write path itself.
  */
-export const collectBackgroundReview: AiJobCollect = async ({ db, runId, startedAt }) => {
-  // One retry, not the SDK's two, because the framework's per-job re-entrancy guard turns a hung
-  // request into every later review pass being skipped for as long as it lasts. Two attempts at
-  // five minutes bounds that at ten, well inside the hourly sync cadence that fires this.
-  const anthropic = getAnthropicClient({ maxRetries: 1 });
-  if (!anthropic) {
-    // runAiJob checks the same credentials before starting a pass, so this is unreachable rather
-    // than a fallback. Thrown, not returned quietly: a pass that produced nothing because the
-    // client vanished mid-flight must not read like a pass that had nothing to suggest.
-    throw new Error('No Anthropic client available after the pass had already started.');
+export const collectBackgroundReview: AiJobCollect = async ({ db, assignment, runId, startedAt }) => {
+  // Which model runs this pass is the owner's, per JOB_MODELS and any override they set, so
+  // it may belong to any of the three providers. Taken from the run context rather than
+  // resolved again here: `ai_runs.model` is written from this same value, and a second lookup
+  // is a second chance for the audit row and the request to name different models.
+  const provider = providerForModel(assignment.model);
+  if (!provider.isConfigured()) {
+    // runAiJob checks credentials before starting a pass, so this is unreachable rather than
+    // a fallback. Thrown, not returned quietly: a pass that produced nothing because the
+    // credential vanished mid-flight must not read like a pass that had nothing to suggest.
+    throw new Error(`No ${provider.id} credentials after the pass had already started.`);
   }
 
   const reviewSummary = getTransactionReviewSummary(db);
@@ -532,33 +552,43 @@ export const collectBackgroundReview: AiJobCollect = async ({ db, runId, started
     detections: freshDetects,
   });
 
-  // Deliberately no cache_control on this prompt. Its prefix is unstable by construction:
+  // No prefix caching on this pass, on any provider, and the reason is the same for two of
+  // them and different for the third. The prefix is unstable by construction:
   // buildFinancialContext() opens with today's date and interpolates the last successful
   // sync timestamp, rewritten by the very sync that fires this worker, before 15 volatile
-  // transactions and 20 sync changes. Every call would write a fresh entry at 1.25× and read
-  // none back, and the hourly cadence outruns the 5-minute TTL regardless.
-  const response = await anthropic.messages.create({
-    model: JOB.model,
+  // transactions and 20 sync changes. On Anthropic and OpenAI a breakpoint would write a
+  // fresh entry at 1.25x and read none back, and the hourly cadence outruns both TTLs. On
+  // Gemini there is no write premium in the published pricing, so the argument there is the
+  // storage bill and the unmatched prefix, not the write. Gemini's implicit prefix matching
+  // still applies for free and with no guarantee, which is the honest thing to say about it.
+  const response = await provider.generateStructured({
+    model: assignment.model,
+    effort: assignment.effort,
+    systemText: systemPrompt,
+    userText: 'Generate proactive drafts based on the latest sync state.',
+    schema: WORKER_DRAFTS_SCHEMA,
+    schemaName: WORKER_DRAFTS_SCHEMA_NAME,
     // Thinking counts against this, and adaptive thinking would spend most of the previous
     // 4096 before writing a single draft. 16000 is not a measured figure: no token count was
     // taken for a pass. It is a deliberately generous ceiling, set so that truncation cannot
     // be the failure mode, which is why hitting it is warned about below rather than expected.
-    max_tokens: 16000,
-    system: systemPrompt,
-    messages: [{ role: 'user', content: 'Generate proactive drafts based on the latest sync state.' }],
-    // No sampling parameter: a temperature is a 400 on this model. Every optional parameter
-    // here is derived from the model rather than assumed, so retiering this job cannot send
-    // a shape the new model rejects.
-    ...buildModelRequestShape(JOB.model, { effort: JOB.effort, outputFormat: WORKER_DRAFTS_FORMAT }),
+    maxOutputTokens: 16000,
+    timeoutMs: 300_000,
+    // One retry, not the two the Anthropic and OpenAI SDKs default to, because the framework's
+    // per-job re-entrancy guard turns a hung request into every later review pass being
+    // skipped for as long as it lasts. Two attempts at five minutes bounds that at ten, well
+    // inside the hourly sync cadence that fires this. Gemini retries NOTHING unless asked, so
+    // passing this is what gives that provider a retry at all rather than lowering one.
+    maxRetries: 1,
   });
 
-  if (response.stop_reason === 'max_tokens') {
-    console.warn('[ai-worker] Model response hit max_tokens; draft JSON is likely truncated and may fail to parse.');
+  if (response.truncated) {
+    console.warn('[ai-worker] Model response hit its output cap; draft JSON is likely truncated and may fail to parse.');
   }
 
-  // readModelText raises on a refusal or a response carrying no text, so neither can pass
+  // The provider raises on a refusal or a response carrying no text, so neither can pass
   // through here looking like "the model had nothing to suggest".
-  const text = readModelText(response).trim();
+  const text = response.text;
   let drafts: unknown[];
   try {
     const parsed = JSON.parse(text) as { drafts?: unknown };
@@ -595,7 +625,7 @@ export const collectBackgroundReview: AiJobCollect = async ({ db, runId, started
     });
   }
 
-  return { status: 'collected', proposals, malformed, usage: readUsage(response) };
+  return { status: 'collected', proposals, malformed, usage: readUsage(response.usage) };
 };
 
 /**

@@ -19,6 +19,7 @@ import { getHoldingHistory } from './investmentMetadata';
 import { getSyncRunDetail, listSyncRuns } from './syncHistory';
 import { reconcileAccounts } from './reconciliation';
 import { buildSchemaDoc, describeTables, getCategoryProvenance, transactionReportInclusion } from './schemaDoc';
+import type { AdvisorToolSpec } from './aiProviders/types';
 import type { AdvisorDraftAction, AdvisorDraftPayload } from '../../../shared/types';
 
 /** Stable id per payload, matching advisorDrafts' own scheme, so repeats collapse. */
@@ -267,6 +268,22 @@ export const ADVISOR_TOOLS: Anthropic.Tool[] = [
     },
   },
 ];
+
+/**
+ * The same tools in provider-neutral form, DERIVED from the list above rather than written
+ * twice. Each provider renames the schema field its own way (`input_schema` on Anthropic,
+ * `parameters` on OpenAI, `parametersJsonSchema` on Gemini), and a second hand-maintained
+ * list would be one more pair of things that have to agree by hand.
+ *
+ * Every name here also satisfies Gemini's stricter rule (leading letter or underscore, then
+ * letters, digits, `_`, `.`, `:`, `-`, at most 128 characters); `tests/aiRequestShape.test.ts`
+ * asserts it rather than leaving it to a 400 on the first Gemini chat.
+ */
+export const ADVISOR_TOOL_SPECS: readonly AdvisorToolSpec[] = ADVISOR_TOOLS.map((tool) => ({
+  name: tool.name,
+  description: tool.description ?? '',
+  parameters: tool.input_schema as unknown as Record<string, unknown>,
+}));
 
 type ToolInput = Record<string, unknown>;
 

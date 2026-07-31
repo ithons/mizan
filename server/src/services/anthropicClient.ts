@@ -1,7 +1,5 @@
-import fs from 'fs';
-import os from 'os';
-import path from 'path';
 import Anthropic from '@anthropic-ai/sdk';
+import { resolveCredential, type CredentialSource } from './aiProviders/credentials';
 
 /**
  * Single place the app decides whether it can talk to Anthropic, and how.
@@ -15,73 +13,40 @@ import Anthropic from '@anthropic-ai/sdk';
  *   2. ANTHROPIC_AUTH_TOKEN        (e.g. a short-lived OAuth access token)
  *   3. an OAuth profile from `ant auth login`, stored under the Anthropic config dir
  *
- * So the client is constructed bare and the SDK picks whichever is present. This function's only
- * job is to answer "is there anything to authenticate with?" without throwing.
+ * So when one of those is present the client is constructed bare and the SDK picks it. Phase 10
+ * adds a fourth source below all of them, the encrypted `.mizan/credentials.json` store, which
+ * the SDK knows nothing about and therefore has to be passed explicitly. The ordering lives in
+ * `aiProviders/credentials.ts` because OpenAI and Gemini resolve the same way minus the OAuth
+ * profile, which is Anthropic's alone.
  */
 
-function configDir(): string {
-  return process.env.ANTHROPIC_CONFIG_DIR ?? path.join(os.homedir(), '.config', 'anthropic');
-}
-
-/** True when an `ant auth login` profile exists on disk. */
-function hasOAuthProfile(): boolean {
-  try {
-    const credentials = path.join(configDir(), 'credentials');
-    return fs.existsSync(credentials) && fs.readdirSync(credentials).some((f) => f.endsWith('.json'));
-  } catch {
-    return false; // An unreadable config dir means "no profile", never a crash.
-  }
-}
-
 export function hasAnthropicCredentials(): boolean {
-  return Boolean(
-    process.env.ANTHROPIC_API_KEY ||
-    process.env.ANTHROPIC_AUTH_TOKEN ||
-    process.env.ANTHROPIC_PROFILE ||
-    hasOAuthProfile()
-  );
+  return resolveCredential('anthropic').source !== 'none';
 }
 
 /** Describes the credential in use, for settings/status surfaces. Never returns the secret. */
-export function anthropicCredentialSource(): 'api_key' | 'auth_token' | 'oauth_profile' | 'none' {
-  if (process.env.ANTHROPIC_API_KEY) return 'api_key';
-  if (process.env.ANTHROPIC_AUTH_TOKEN) return 'auth_token';
-  if (process.env.ANTHROPIC_PROFILE || hasOAuthProfile()) return 'oauth_profile';
-  return 'none';
+export function anthropicCredentialSource(): CredentialSource {
+  return resolveCredential('anthropic').source;
 }
 
 /**
- * Per-request wall clock for every client this factory builds.
+ * Per-request wall clock for the Anthropic adapter's one-shot calls.
  *
  * The SDK's own defaults are a 600_000 ms timeout and 2 retries (`BaseAnthropic.DEFAULT_TIMEOUT`
  * and the `maxRetries` fallback in `@anthropic-ai/sdk/client.js`), and a timed-out request is
  * itself retried, so a wedged call can hold a caller for 30 minutes. That is not survivable for
- * the background worker, whose `workerRunning` re-entrancy guard turns one hang into every
- * subsequent review pass being skipped, silently, for as long as it lasts.
+ * the background worker, whose per-job re-entrancy guard turns one hang into every subsequent
+ * review pass being skipped, silently, for as long as it lasts.
  *
- * Five minutes bounds each caller that takes this default by `timeout x (maxRetries + 1)`:
- * `aiWorker.ts` passes `maxRetries: 1`, so two attempts cap it at 10 minutes, inside the default
- * 60-minute sync cadence that fires it (`DEFAULT_SYNC_INTERVAL_MINUTES` in `index.ts`);
- * `aiCategorySuggest.ts` keeps the SDK's 2 retries, so three attempts cap it at 15. It does NOT
- * bound the chat route, which overrides the timeout on the request itself (`routes/ai.ts`) and
- * keeps the SDK's 2 retries, giving that path a 30-minute worst case.
+ * Five minutes bounds each caller by `timeout x (maxRetries + 1)`: the worker passes
+ * `maxRetries: 1`, so two attempts cap it at 10 minutes, inside the default 60-minute sync
+ * cadence that fires it (`DEFAULT_SYNC_INTERVAL_MINUTES` in `index.ts`); the classifier passes
+ * 2, so three attempts cap it at 15. The chat route sets its own longer timeout because the
+ * owner is watching it. The same arithmetic holds on OpenAI, whose measured defaults are
+ * identical; Gemini makes ONE attempt unless retries are asked for, so there the number
+ * supplies a retry rather than lowering one.
  */
 export const DEFAULT_ANTHROPIC_TIMEOUT_MS = 300_000;
-
-export interface AnthropicClientOptions {
-  /** SDK retry count. Total wall clock is `DEFAULT_ANTHROPIC_TIMEOUT_MS x (maxRetries + 1)`. */
-  maxRetries?: number;
-}
-
-/** A client, or null when nothing is configured. Callers must handle null rather than throwing. */
-export function getAnthropicClient(options: AnthropicClientOptions = {}): Anthropic | null {
-  if (!hasAnthropicCredentials()) return null;
-  // No apiKey on purpose: the SDK applies the credential resolution order documented above.
-  return new Anthropic({
-    timeout: DEFAULT_ANTHROPIC_TIMEOUT_MS,
-    ...(options.maxRetries === undefined ? {} : { maxRetries: options.maxRetries }),
-  });
-}
 
 export type AnthropicResponseProblem = 'refusal' | 'empty_content' | 'no_text_block';
 

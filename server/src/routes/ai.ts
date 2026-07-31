@@ -1,11 +1,9 @@
 import { Router, Request, Response, NextFunction } from 'express';
-import Anthropic from '@anthropic-ai/sdk';
 import { getDb } from '../db/index';
-import {
-  anthropicCredentialSource,
-  getAnthropicClient,
-  hasAnthropicCredentials,
-} from '../services/anthropicClient';
+import { providerForModel, providerStatuses } from '../services/aiProviders';
+import { resolveCredential } from '../services/aiProviders/credentials';
+import { clearProviderKey, setProviderKey } from '../services/aiProviders/credentials';
+import { AI_PROVIDER_IDS, type AiProviderId, type ChatStreamEvent } from '../services/aiProviders/types';
 import { buildAdvisorContextSnapshot, ADVISOR_SYSTEM_PROMPT, ADVISOR_PROFILE_PREFERENCE_KEY } from '../services/aiContext';
 import { getPreference, setPreference } from '../services/preferences';
 import {
@@ -33,8 +31,14 @@ import {
 import { DRAFT_KIND_AUTONOMY } from '../services/draftAutonomy';
 import { analyzeAdvisorQuestion } from '../services/advisorTools';
 import { createMemory, deleteMemory, listMemories, supersedeMemory } from '../services/aiMemory';
-import { ADVISOR_TOOLS, runAdvisorTool } from '../services/advisorChatTools';
-import { buildModelRequestShape, getAdvisorSettings, updateAdvisorSettings } from '../services/advisorSettings';
+import { ADVISOR_TOOLS, ADVISOR_TOOL_SPECS, runAdvisorTool } from '../services/advisorChatTools';
+import {
+  MODEL_CAPABILITIES,
+  getAdvisorModel,
+  getAdvisorSettings,
+  getJobModel,
+  updateAdvisorSettings,
+} from '../services/advisorSettings';
 import { suggestCategoriesForMerchants } from '../services/aiCategorySuggest';
 import type {
   AdvisorAutonomyEntry,
@@ -52,25 +56,34 @@ const router = Router();
  */
 export const MAX_TOOL_ROUNDS = 8;
 
-function getClient(): Anthropic {
-  const client = getAnthropicClient();
-  if (!client) {
-    throw new Error(
-      'No Anthropic credentials found. Set ANTHROPIC_API_KEY in .env, or ANTHROPIC_AUTH_TOKEN, or sign in with `ant auth login`.'
-    );
-  }
-  return client;
-}
+/**
+ * Output ceiling for one chat turn.
+ *
+ * Not a measured figure: no token count was ever taken for a turn here. It is a deliberately
+ * generous bound set so that truncation cannot be the failure mode, capped at whatever the
+ * chosen model actually accepts so a request can never ask a model for more than it allows.
+ */
+const CHAT_MAX_OUTPUT_TOKENS = 64_000;
+
+/**
+ * Longer than any SDK default: the owner is watching this one, it streams, and a turn at the
+ * top effort level with tool rounds can legitimately run for minutes.
+ */
+const CHAT_TIMEOUT_MS = 600_000;
 
 // GET /api/ai/context - return the financial context snapshot (for the UI preview panel)
 router.get('/context', (_req: Request, res: Response, next: NextFunction): void => {
   try {
     const snapshot = buildAdvisorContextSnapshot();
+    // Reported for the provider the ADVISOR would actually call, not for Anthropic. Gating
+    // this on one provider while the owner has pointed the advisor at another is how a
+    // working configuration reads as "not set up".
+    const advisor = providerForModel(getAdvisorModel(getDb()));
     res.json({
       data: {
         ...snapshot,
-        configured: hasAnthropicCredentials(),
-        credential_source: anthropicCredentialSource(),
+        configured: advisor.isConfigured(),
+        credential_source: resolveCredential(advisor.id).source,
       },
     });
   } catch (err) {
@@ -431,8 +444,12 @@ router.post('/suggest-categories', async (req: Request, res: Response, next: Nex
       return;
     }
     const merchants = raw.filter((m: unknown): m is string => typeof m === 'string');
-    if (!hasAnthropicCredentials()) {
-      res.status(503).json({ error: 'No Anthropic credentials configured: AI suggestions are unavailable' });
+    // Checked against the provider serving THIS job, which the owner may have retiered away
+    // from the advisor's. `suggestCategoriesForMerchants` returns [] when it cannot call
+    // anything, and an empty list here would read as "no merchant could be identified".
+    const classifier = providerForModel(getJobModel(getDb(), 'bulk_categorization').model);
+    if (!classifier.isConfigured()) {
+      res.status(503).json({ error: `No ${classifier.id} credentials configured: AI suggestions are unavailable` });
       return;
     }
     res.json({ data: await suggestCategoriesForMerchants(getDb(), merchants) });
@@ -552,11 +569,20 @@ router.post('/chat', async (req: Request, res: Response, next: NextFunction): Pr
   }
   const messages = turns.messages;
 
-  let anthropic: Anthropic;
+  const db = getDb();
+  const { model, effort } = getAdvisorSettings(db);
+
+  let provider;
   try {
-    anthropic = getClient();
+    provider = providerForModel(model);
   } catch (err) {
     res.status(503).json({ error: (err as Error).message });
+    return;
+  }
+  if (!provider.isConfigured()) {
+    res.status(503).json({
+      error: `No credentials configured for ${provider.id}. Add a key in Settings, or pick a model from a provider that has one.`,
+    });
     return;
   }
 
@@ -566,150 +592,127 @@ router.post('/chat', async (req: Request, res: Response, next: NextFunction): Pr
   res.setHeader('X-Accel-Buffering', 'no');
   res.flushHeaders();
 
-  const db = getDb();
-  const { model, effort } = getAdvisorSettings(db);
   const snapshot = buildAdvisorContextSnapshot();
+  // The stable prefix, identical for every provider. The financial context does not change
+  // shape to suit a caching mechanism; each adapter decides how to cache THIS text, and none
+  // of them may alter it. Every figure in it must stay true whoever is being asked.
   const systemText = `${ADVISOR_SYSTEM_PROMPT}\n\n${snapshot.context}`;
 
-  // Seed from the reconstructed turns, then grow it as the model calls tools.
-  const conversation: Anthropic.MessageParam[] = messages.map((m) => ({ role: m.role, content: m.content }));
-
-  // Set once a turn ends with something other than another tool request. If the loop below
-  // runs out of rounds while the model is still asking for tools, this stays false: the owner
-  // would otherwise get a completed stream carrying tool_use events and no answer, the same
-  // silent partial as a refusal or an empty content array.
-  let answered = false;
-
-  // Accumulated across every tool round so we can confirm the ephemeral cache on the stable
-  // prefix (system prompt + snapshot + tool list) actually gets read back rather than re-billed.
-  let cacheReadTokens = 0;
-  let cacheCreationTokens = 0;
-  let uncachedInputTokens = 0;
+  const emit = (event: ChatStreamEvent): void => {
+    res.write(`data: ${JSON.stringify(event)}\n\n`);
+  };
 
   try {
-    for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
-      const stream = anthropic.messages.stream(
-        {
-          // model + effort are user-configurable (Settings -> Advisor), server-whitelisted to
-          // the current Claude family in advisorSettings.ts.
-          model,
-          // Thinking tokens count against max_tokens, and this loop runs up to MAX_TOOL_ROUNDS
-          // turns at an effort the owner picks. 64000 is not a measured figure: no token count
-          // was ever taken for a turn here. It is a deliberately generous ceiling, set so that
-          // truncation cannot be the failure mode. The SDK's non-streaming guard, which refuses
-          // a large max_tokens and tells you to stream (`calculateNonstreamingTimeout` in
-          // @anthropic-ai/sdk/client.js), never sees this request: it runs only for a
-          // non-streaming create on a client with no timeout set, and this call streams.
-          // What bounds the wall clock is the explicit per-request timeout below.
-          max_tokens: 64000,
-          // Derived from the model, never assumed: thinking mode, effort support and structured
-          // output all differ across the family, and a request built without reference to the
-          // model it names is the same latent defect the migration comments in db/migrations
-          // record. A model this table does not know gets a bare request.
-          ...buildModelRequestShape(model, { effort, thinkingDisplay: 'summarized' }),
-          // Stable prefix (prompt + snapshot) is cached; ADVISOR_TOOLS is a fixed list, so the
-          // cached prefix holds across every tool round of the conversation.
-          system: [
-            {
-              type: 'text',
-              text: systemText,
-              cache_control: { type: 'ephemeral' },
-            },
-          ],
-          tools: ADVISOR_TOOLS,
-          messages: conversation,
-        },
-        // Longer than the client default: the owner is watching this one, it streams, and a
-        // turn at 'max' effort with tool rounds can legitimately run for minutes.
-        { timeout: 600_000 }
-      );
-
-      let thinkingBlockIndex: number | null = null;
-
-      for await (const event of stream) {
-        if (event.type === 'content_block_start') {
-          if (event.content_block.type === 'thinking') {
-            thinkingBlockIndex = event.index;
-            res.write(`data: ${JSON.stringify({ type: 'thinking_start' })}\n\n`);
-          } else if (event.content_block.type === 'tool_use') {
-            // Surface tool activity so the UI can show e.g. "Looking at your transactions…".
-            res.write(`data: ${JSON.stringify({ type: 'tool_use', name: event.content_block.name })}\n\n`);
-          }
-        } else if (event.type === 'content_block_delta') {
-          if (event.delta.type === 'text_delta') {
-            res.write(`data: ${JSON.stringify({ type: 'chunk', text: event.delta.text })}\n\n`);
-          } else if (event.delta.type === 'thinking_delta') {
-            res.write(`data: ${JSON.stringify({ type: 'thinking', text: event.delta.thinking })}\n\n`);
-          }
-        } else if (event.type === 'content_block_stop' && event.index === thinkingBlockIndex) {
-          res.write(`data: ${JSON.stringify({ type: 'thinking_end' })}\n\n`);
-        }
-      }
-
-      const message = await stream.finalMessage();
-      cacheReadTokens += message.usage.cache_read_input_tokens ?? 0;
-      cacheCreationTokens += message.usage.cache_creation_input_tokens ?? 0;
-      uncachedInputTokens += message.usage.input_tokens;
-
-      // A safety classifier can decline with an HTTP 200 and no content at all. Left
-      // unhandled that reads as a successful, empty answer, so say what happened instead.
-      if (message.stop_reason === 'refusal') {
-        const detail = message.stop_details?.explanation ?? message.stop_details?.category ?? null;
-        const reason = detail ? `The model declined to answer: ${detail}` : 'The model declined to answer.';
-        res.write(`data: ${JSON.stringify({ type: 'error', message: reason })}\n\n`);
-        res.end();
-        return;
-      }
-
-      if (message.stop_reason !== 'tool_use') {
-        // Same class: a 200 with an empty content array is not an answer.
-        if (message.content.length === 0) {
-          res.write(`data: ${JSON.stringify({ type: 'error', message: 'The model returned an empty response.' })}\n\n`);
-          res.end();
-          return;
-        }
-        answered = true;
-        break;
-      }
-
-      // Run every requested tool and feed the results back. Most are pure SELECTs; two
-      // (categorize_transactions, create_merchant_rule) write, scoped to the autonomous domain
-      // and routed through confirmAdvisorDraft so each one lands in the audit trail and is
-      // undoable by action id. Model-authored SQL still runs on the read-only connection only.
-      const toolResults: Anthropic.ToolResultBlockParam[] = [];
-      for (const block of message.content) {
-        if (block.type === 'tool_use') {
-          const result = runAdvisorTool(db, block.name, block.input as Record<string, unknown>);
-          toolResults.push({
-            type: 'tool_result',
-            tool_use_id: block.id,
-            content: JSON.stringify(result),
-          });
-        }
-      }
-      conversation.push({ role: 'assistant', content: message.content });
-      conversation.push({ role: 'user', content: toolResults });
-    }
-
-    console.log(
-      `[ai/chat] cache read ${cacheReadTokens} tok, cache write ${cacheCreationTokens} tok, uncached input ${uncachedInputTokens} tok`
+    const result = await provider.streamChat(
+      {
+        model,
+        effort,
+        systemText,
+        tools: ADVISOR_TOOL_SPECS,
+        turns: messages.map((m) => ({ role: m.role, content: m.content })),
+        // Bounded by what the model itself accepts, from the capability table, so a request
+        // can never ask a 64K-output model for 64,000 tokens it will not give.
+        maxOutputTokens: Math.min(
+          CHAT_MAX_OUTPUT_TOKENS,
+          MODEL_CAPABILITIES[model]?.maxOutputTokens ?? CHAT_MAX_OUTPUT_TOKENS
+        ),
+        timeoutMs: CHAT_TIMEOUT_MS,
+        maxToolRounds: MAX_TOOL_ROUNDS,
+        // Most tools are pure SELECTs; two (categorize_transactions, create_merchant_rule)
+        // write, scoped to the autonomous domain and routed through confirmAdvisorDraft so
+        // each one lands in the audit trail and is undoable by action id. Model-authored SQL
+        // still runs on the read-only connection only.
+        runTool: (name, input) => runAdvisorTool(db, name, input),
+      },
+      emit
     );
 
-    // Ran out of rounds with the model still asking for tools. Every tool it asked for did run,
-    // but no turn ever produced an answer, so this stream is not a completed one.
-    if (!answered) {
-      const message = `The advisor stopped after ${MAX_TOOL_ROUNDS} tool rounds without finishing its answer. Ask again, more narrowly.`;
-      res.write(`data: ${JSON.stringify({ type: 'error', message })}\n\n`);
-      res.end();
+    // Cache effectiveness is REPORTED, per provider, not assumed. A breakpoint that never
+    // gets read still bills its write premium, and the usage figures are the only way to
+    // tell that apart from a working cache.
+    console.log(
+      `[ai/chat] ${provider.id}/${model}: ${result.cacheNote}, uncached input ${result.usage.uncachedInputTokens} tok, output ${result.usage.outputTokens} tok`
+    );
+
+    if (result.failure) {
+      emit_error(res, result.failure.message);
       return;
     }
 
     res.write(`data: ${JSON.stringify({ type: 'done' })}\n\n`);
     res.end();
   } catch (err) {
-    const msg = (err as Error).message || 'AI request failed';
-    res.write(`data: ${JSON.stringify({ type: 'error', message: msg })}\n\n`);
-    res.end();
+    emit_error(res, (err as Error).message || 'AI request failed');
+  }
+});
+
+/** Every non-answer leaves the stream the same way: an error frame, then close. */
+function emit_error(res: Response, message: string): void {
+  res.write(`data: ${JSON.stringify({ type: 'error', message })}\n\n`);
+  res.end();
+}
+
+// --- Per-provider credentials ---
+//
+// Keys land in the same AES-256-GCM store as the bank credentials, with `.env` taking
+// precedence exactly as it does for Coinbase. Nothing here ever returns a key: the response
+// says which source is in use and whether one exists, and that is all a settings screen needs.
+
+function parseProviderId(raw: unknown): AiProviderId | null {
+  const id = Array.isArray(raw) ? raw[0] : raw;
+  return AI_PROVIDER_IDS.includes(id as AiProviderId) ? (id as AiProviderId) : null;
+}
+
+// GET /api/ai/providers - which providers can be reached, and how
+router.get('/providers', (_req: Request, res: Response, next: NextFunction): void => {
+  try {
+    res.json({ data: { providers: providerStatuses() } });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// PUT /api/ai/providers/:provider/key - store a key for one provider
+router.put('/providers/:provider/key', (req: Request, res: Response, next: NextFunction): void => {
+  try {
+    const provider = parseProviderId(req.params.provider);
+    if (!provider) {
+      res.status(404).json({ error: 'Unknown provider' });
+      return;
+    }
+    const apiKey = typeof req.body?.api_key === 'string' ? req.body.api_key.trim() : '';
+    if (!apiKey) {
+      res.status(400).json({ error: 'api_key (non-empty string) is required' });
+      return;
+    }
+    setProviderKey(provider, apiKey);
+    res.json({ data: { providers: providerStatuses() } });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// DELETE /api/ai/providers/:provider/key - forget a stored key.
+// A key supplied through `.env` is not reachable from here and the response says so, rather
+// than reporting success on a deletion that changed nothing the owner can see.
+router.delete('/providers/:provider/key', (req: Request, res: Response, next: NextFunction): void => {
+  try {
+    const provider = parseProviderId(req.params.provider);
+    if (!provider) {
+      res.status(404).json({ error: 'Unknown provider' });
+      return;
+    }
+    clearProviderKey(provider);
+    const after = providerStatuses().find((p) => p.id === provider);
+    if (after?.source === 'env') {
+      res.status(409).json({
+        error: `The stored key was removed, but ${provider} is still configured from the environment.`,
+      });
+      return;
+    }
+    res.json({ data: { providers: providerStatuses() } });
+  } catch (err) {
+    next(err);
   }
 });
 

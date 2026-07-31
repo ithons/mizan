@@ -10,6 +10,12 @@ function setupDb(): Database.Database {
       id TEXT PRIMARY KEY, name TEXT NOT NULL, parent_id TEXT,
       is_income INTEGER NOT NULL DEFAULT 0, sort_order INTEGER NOT NULL DEFAULT 0
     );
+    -- The classifier reads its model assignment from preferences now, because the owner can
+    -- point this job at a different provider than the advisor uses. An absent table would be
+    -- a thrown "no such table", not a fall back to the default.
+    CREATE TABLE app_preferences (
+      key TEXT PRIMARY KEY, value TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+    );
   `);
   db.prepare("INSERT INTO categories (id,name,is_income) VALUES ('cat_food_groceries','Groceries',0)").run();
   return db;

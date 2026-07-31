@@ -1,7 +1,12 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useSearchParams } from 'react-router-dom';
-import type { AdvisorAutonomyEntry, AdvisorDraftActionKind } from '@shared/types';
+import type {
+  AdvisorAutonomyEntry,
+  AdvisorDraftActionKind,
+  AdvisorProviderStatus,
+  AiProviderId,
+} from '@shared/types';
 import {
   accountsApi,
   aiApi,
@@ -15,7 +20,7 @@ import {
 import { formatCompactRelative } from '../../lib/formatters';
 import { useThemePreference, type ThemePreference } from '../../lib/theme';
 import { useAppStore } from '../../store';
-import { Screen, SectionLabel } from '../../components/balance';
+import { Screen, SectionLabel, Select } from '../../components/balance';
 import { SimplefinSection } from './SimplefinSection';
 import { CoinbaseSection } from './CoinbaseSection';
 import { CategoriesSection } from './CategoriesSection';
@@ -230,10 +235,13 @@ export function AiActionRow({
 
 // The SDK accepts three credential forms, not just an env API key (services/anthropicClient.ts).
 // /api/ai/context already reported which one is in use; nothing displayed it.
+// The four ways a credential is found, matching AdvisorCredentialSource. `env` covers both
+// ANTHROPIC_API_KEY and ANTHROPIC_AUTH_TOKEN because the server does not report which, and
+// naming one would be a claim it did not check.
 const CREDENTIAL_SOURCE_LABEL: Record<string, string> = {
-  api_key: 'ANTHROPIC_API_KEY',
-  auth_token: 'ANTHROPIC_AUTH_TOKEN',
+  env: 'from the environment',
   oauth_profile: 'signed in via `ant auth login`',
+  stored: 'stored, encrypted',
   none: 'no credential found',
 };
 
@@ -349,6 +357,103 @@ function AdvisorContextEditor({ open, onToggle }: { open: boolean; onToggle: () 
   );
 }
 
+const PROVIDER_LABEL: Record<AiProviderId, string> = {
+  anthropic: 'Anthropic',
+  openai: 'OpenAI',
+  gemini: 'Google Gemini',
+};
+
+const PROVIDER_ENV_VAR: Record<AiProviderId, string> = {
+  anthropic: 'ANTHROPIC_API_KEY',
+  openai: 'OPENAI_API_KEY',
+  gemini: 'GEMINI_API_KEY',
+};
+
+function formatTokens(n: number): string {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(2).replace(/\.?0+$/, '')}M`;
+  if (n >= 1_000) return `${Math.round(n / 1_000)}K`;
+  return String(n);
+}
+
+/**
+ * One provider's key. Never renders a key back: the server does not return one, so this shows
+ * where the credential came from and offers to replace or forget it.
+ */
+function ProviderKeyRow({ status }: { status: AdvisorProviderStatus }) {
+  const qc = useQueryClient();
+  const { addToast } = useAppStore();
+  const [draft, setDraft] = useState('');
+  const invalidate = () => {
+    qc.invalidateQueries({ queryKey: ['ai-settings'] });
+    qc.invalidateQueries({ queryKey: ['ai-providers'] });
+  };
+  const save = useMutation({
+    mutationFn: (key: string) => aiApi.saveProviderKey(status.id, key),
+    onSuccess: () => {
+      setDraft('');
+      invalidate();
+      addToast({ type: 'success', message: `${PROVIDER_LABEL[status.id]} key saved` });
+    },
+    onError: (err: Error) => addToast({ type: 'error', message: err.message }),
+  });
+  const forget = useMutation({
+    mutationFn: () => aiApi.clearProviderKey(status.id),
+    onSuccess: () => {
+      invalidate();
+      addToast({ type: 'success', message: `${PROVIDER_LABEL[status.id]} key removed` });
+    },
+    onError: (err: Error) => addToast({ type: 'error', message: err.message }),
+  });
+
+  const sourceLabel =
+    status.credential_source === 'env'
+      ? `from ${PROVIDER_ENV_VAR[status.id]}`
+      : status.credential_source === 'oauth_profile'
+        ? 'signed in via `ant auth login`'
+        : status.credential_source === 'stored'
+          ? 'stored, encrypted'
+          : 'no credential found';
+
+  return (
+    <div className="rounded-lg border border-line-2 p-3">
+      <div className="flex items-center justify-between">
+        <span className="text-body text-ink">{PROVIDER_LABEL[status.id]}</span>
+        <span className={status.configured ? 'text-note text-sage-deep' : 'text-note text-muted-2'}>{sourceLabel}</span>
+      </div>
+      {/* An environment key is not reachable from here, so no control pretends otherwise. */}
+      {status.credential_source !== 'env' && status.credential_source !== 'oauth_profile' && (
+        <div className="mt-2 flex gap-2">
+          <input
+            type="password"
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            placeholder={status.configured ? 'Replace the stored key' : 'Paste an API key'}
+            className="min-w-0 flex-1 rounded-lg border border-line-2 bg-rail px-3 py-2 font-mono text-note text-ink outline-none focus:border-sage"
+          />
+          <button
+            type="button"
+            disabled={!draft.trim() || save.isPending}
+            onClick={() => save.mutate(draft.trim())}
+            className="rounded-lg bg-sage px-3 py-2 text-body text-card transition-opacity disabled:opacity-50"
+          >
+            Save
+          </button>
+          {status.credential_source === 'stored' && (
+            <button
+              type="button"
+              disabled={forget.isPending}
+              onClick={() => forget.mutate()}
+              className="rounded-lg border border-line-2 px-3 py-2 text-body text-muted transition-colors hover:bg-well disabled:opacity-50"
+            >
+              Forget
+            </button>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function AdvisorModelPanel({ open, onToggle }: { open: boolean; onToggle: () => void }) {
   const qc = useQueryClient();
   const { addToast } = useAppStore();
@@ -363,13 +468,22 @@ function AdvisorModelPanel({ open, onToggle }: { open: boolean; onToggle: () => 
     onError: (err: Error) => addToast({ type: 'error', message: err.message }),
   });
 
-  const modelLabel = settings?.available.models.find((m) => m.id === settings.model)?.label ?? settings?.model ?? '';
+  const selected = settings?.available.models.find((m) => m.id === settings.model);
+  const modelLabel = selected?.label ?? settings?.model ?? '';
+  // The dial renders from THE SELECTED MODEL's ladder, never from a provider-wide list.
+  // Gemini's reasoning dial has three rungs where Anthropic's and OpenAI's have five, and a
+  // rung rendered for a model that has no name for it is a control that does nothing.
+  const efforts = selected?.efforts ?? [];
 
   return (
     <>
       <SettingsRow
         title="Model & effort"
-        sub={settings ? `${modelLabel} · ${settings.effort} effort` : 'Choose the model and how hard it thinks'}
+        sub={
+          settings
+            ? `${modelLabel}${efforts.length > 0 ? ` · ${settings.effort} effort` : ' · no effort dial'}`
+            : 'Choose the model, the provider, and how hard it thinks'
+        }
         trailing={<span className="text-muted">{open ? 'Hide' : 'Configure'}</span>}
         onClick={onToggle}
       />
@@ -383,36 +497,115 @@ function AdvisorModelPanel({ open, onToggle }: { open: boolean; onToggle: () => 
                   <button
                     key={m.id}
                     type="button"
-                    disabled={save.isPending}
+                    /* A model whose provider has no key is offered but not selectable: hiding
+                       it would make the owner wonder where it went, and selecting it would
+                       fail on the first question instead of here. */
+                    disabled={save.isPending || !m.configured}
+                    title={m.configured ? undefined : `No ${PROVIDER_LABEL[m.provider]} credential`}
                     onClick={() => save.mutate({ model: m.id })}
-                    className={`rounded-lg border px-3 py-2 text-body transition-colors disabled:opacity-50 ${
+                    className={`rounded-lg border px-3 py-2 text-left text-body transition-colors disabled:opacity-40 ${
                       settings.model === m.id ? 'border-sage bg-sage/10 text-ink' : 'border-line-2 text-muted hover:bg-well'
                     }`}
                   >
-                    {m.label}
+                    <span className="block">{m.label}</span>
+                    <span className="block text-note text-muted-2">
+                      {PROVIDER_LABEL[m.provider]}
+                      {m.configured ? '' : ' · no key'}
+                    </span>
                   </button>
                 ))}
               </div>
             </div>
 
+            {selected && (
+              <div className="rounded-lg border border-line-2 bg-rail p-3">
+                <div className="text-note text-muted">
+                  {formatTokens(selected.context_window)} context · {formatTokens(selected.max_output_tokens)} max output
+                </div>
+                {/* What caching this model gets, and what it costs, BEFORE it is picked. */}
+                <p className="mt-1.5 text-note leading-relaxed text-muted-2">{selected.caching_note}</p>
+              </div>
+            )}
+
             <div>
               <div className="mb-1.5 text-body font-medium text-ink">Reasoning effort</div>
-              <div className="flex gap-2">
-                {settings.available.efforts.map((e) => (
-                  <button
-                    key={e}
-                    type="button"
-                    disabled={save.isPending}
-                    onClick={() => save.mutate({ effort: e })}
-                    className={`rounded-lg border px-3 py-2 text-body capitalize transition-colors disabled:opacity-50 ${
-                      settings.effort === e ? 'border-sage bg-sage/10 text-ink' : 'border-line-2 text-muted hover:bg-well'
-                    }`}
-                  >
-                    {e}
-                  </button>
+              {efforts.length === 0 ? (
+                <p className="text-note text-muted-2">
+                  {modelLabel} takes no reasoning-effort level, so there is nothing to set here.
+                </p>
+              ) : (
+                <>
+                  <div className="flex flex-wrap gap-2">
+                    {efforts.map((e) => (
+                      <button
+                        key={e}
+                        type="button"
+                        disabled={save.isPending}
+                        onClick={() => save.mutate({ effort: e })}
+                        className={`rounded-lg border px-3 py-2 text-body capitalize transition-colors disabled:opacity-50 ${
+                          settings.effort === e ? 'border-sage bg-sage/10 text-ink' : 'border-line-2 text-muted hover:bg-well'
+                        }`}
+                      >
+                        {e}
+                      </button>
+                    ))}
+                  </div>
+                  <p className="mt-1.5 text-note text-muted-2">
+                    Higher effort reasons more before answering, at more tokens and latency.
+                    {efforts.length < 5 && ' This model’s ladder has fewer rungs than the others; only the ones it accepts are shown.'}
+                  </p>
+                </>
+              )}
+            </div>
+
+            <div>
+              <div className="mb-1.5 text-body font-medium text-ink">Provider keys</div>
+              <div className="space-y-2">
+                {settings.available.providers.map((p) => (
+                  <ProviderKeyRow key={p.id} status={p} />
                 ))}
               </div>
-              <p className="mt-1.5 text-note text-muted-2">Higher effort reasons more before answering, at more tokens and latency.</p>
+            </div>
+
+            <div>
+              <div className="mb-1.5 text-body font-medium text-ink">Background jobs</div>
+              <p className="mb-2 text-note text-muted-2">
+                Fixed-purpose work does not have to use the advisor’s model or its provider. A cheap
+                classifier on one and a reasoning model on another is a reasonable thing to want.
+              </p>
+              <div className="space-y-3">
+                {settings.jobs.map((job) => (
+                  <div key={job.job}>
+                    <div className="mb-1 text-note capitalize text-muted">{job.job.replace(/_/g, ' ')}</div>
+                    {/* Marked the same way the model picker above marks them, because the
+                        consequence here is worse: this job runs unattended, and one pointed at
+                        a keyless provider skips before it writes a run row, so nothing else on
+                        any screen would ever say so. The server refuses the save outright; the
+                        suffix is what stops the attempt reading as an arbitrary rejection.
+                        `clearable` is off because a job always has a model: the empty option
+                        submitted '' and was refused, which is a knob that only ever failed. */}
+                    <Select
+                      value={job.model}
+                      clearable={false}
+                      onChange={(value) => save.mutate({ jobs: { [job.job]: value } })}
+                      placeholder="Pick a model"
+                      options={job.available.map((m) => ({
+                        value: m.id,
+                        label: `${m.label} · ${PROVIDER_LABEL[m.provider]}${m.configured ? '' : ' · no key'}`,
+                      }))}
+                    />
+                    {/* A saved assignment can go stale later: the key it needed was removed
+                        after the fact. The stored choice is deliberately not rewritten, so this
+                        line is the only place that state is visible. */}
+                    {!job.configured && (
+                      <p className="mt-1 text-note leading-relaxed text-warning">
+                        No {PROVIDER_LABEL[job.provider]} credential. This job skips every run without
+                        recording one, so nothing will reach the digest until a key is added below.
+                      </p>
+                    )}
+                  </div>
+                ))}
+              </div>
             </div>
           </div>
         </ExpandedPanel>
@@ -557,7 +750,7 @@ export function Settings() {
             sub={
               aiContext?.configured
                 ? `Conversational chat enabled · ${CREDENTIAL_SOURCE_LABEL[aiContext.credential_source ?? 'none']}`
-                : 'Set ANTHROPIC_API_KEY or ANTHROPIC_AUTH_TOKEN, or sign in with `ant auth login` · optional'
+                : 'Add a provider key under Model & effort, set ANTHROPIC_API_KEY, or sign in with `ant auth login` · optional'
             }
             trailing={
               aiContext?.configured ? <span className="text-sage-deep">Set</span> : <span className="text-muted-2">Not set</span>

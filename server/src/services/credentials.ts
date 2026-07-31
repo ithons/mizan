@@ -18,9 +18,23 @@ export interface CoinbaseCredentials {
   privateKey: string;
 }
 
+/**
+ * API keys for the LLM providers, keyed by `AiProviderId`.
+ *
+ * Deliberately the same file and the same AES-256-GCM envelope as the bank credentials: a
+ * provider key is a secret of exactly the same class, and a second store would be a second
+ * thing to get wrong. `.env` still wins, matching the Coinbase precedent (`getCredentials`).
+ */
+export interface AiProviderKeys {
+  anthropic?: string;
+  openai?: string;
+  gemini?: string;
+}
+
 export interface CredentialsStore {
   coinbase?: CoinbaseCredentials;
   simplefin?: { setupToken?: string; accessUrl?: string };
+  ai?: AiProviderKeys;
 }
 
 let _key: Buffer | null = null;
@@ -177,6 +191,25 @@ export function removeSimplefin(): void {
 export function removeCoinbaseCredentials(): void {
   const store = loadCredentials();
   delete store.coinbase;
+  saveCredentials(store);
+}
+
+/** The stored key for one provider, or undefined. Never reads `.env`; see aiProviders/credentials.ts. */
+export function getStoredAiKey(provider: keyof AiProviderKeys): string | undefined {
+  const key = loadCredentials().ai?.[provider];
+  return key && key.trim() ? key : undefined;
+}
+
+export function updateAiKey(provider: keyof AiProviderKeys, apiKey: string): void {
+  const store = loadCredentials();
+  store.ai = { ...store.ai, [provider]: apiKey };
+  saveCredentials(store);
+}
+
+export function removeAiKey(provider: keyof AiProviderKeys): void {
+  const store = loadCredentials();
+  if (!store.ai) return;
+  delete store.ai[provider];
   saveCredentials(store);
 }
 

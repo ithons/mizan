@@ -1,6 +1,6 @@
-import { getAnthropicClient, readModelText } from './anthropicClient';
-import { JOB_MODELS, buildModelRequestShape } from './advisorSettings';
 import type Database from 'better-sqlite3';
+import { getJobModel } from './advisorSettings';
+import { providerForModel } from './aiProviders';
 
 export interface CategorySuggestion {
   merchant: string;
@@ -10,8 +10,8 @@ export interface CategorySuggestion {
 
 // Bulk merchant classification is high-volume and near-lookup, so it takes the cheapest
 // capable model rather than the (configurable) conversational advisor model. The assignment
-// lives in JOB_MODELS so every job's model choice reads from one table.
-const SUGGEST_JOB = JOB_MODELS.bulk_categorization;
+// lives in JOB_MODELS so every job's model choice reads from one table, and since Phase 10
+// the owner may point it at a different provider than the advisor uses.
 
 // Caps the blast radius of one request: the prompt lists every merchant, and the reply lists one
 // object per merchant, so an unbounded list would blow past max_tokens and truncate the JSON.
@@ -33,8 +33,9 @@ export async function suggestCategoriesForMerchants(
   db: Database.Database,
   merchants: string[]
 ): Promise<CategorySuggestion[]> {
-  const anthropic = getAnthropicClient();
-  if (!anthropic) return [];
+  const assignment = getJobModel(db, 'bulk_categorization');
+  const provider = providerForModel(assignment.model);
+  if (!provider.isConfigured()) return [];
 
   const unique = [...new Set(merchants.map((m) => m.trim()).filter(Boolean))].slice(0, MAX_SUGGEST_MERCHANTS);
   if (unique.length === 0) return [];
@@ -61,28 +62,24 @@ Rules:
 Valid categories:
 ${categories.map((c) => `- id: "${c.id}", name: "${c.parent_name ? `${c.parent_name} / ` : ''}${c.name}"`).join('\n')}`;
 
-  const response = await anthropic.messages.create({
-    model: SUGGEST_JOB.model,
-    max_tokens: 4096,
-    system: systemPrompt,
-    // No sampling parameter: temperature/top_p/top_k are a 400 on every 4.7+ model, and this
-    // call site only survived one because it happened to name a model that still accepts them.
-    // Derived rather than hardcoded so the request can never carry a parameter this model rejects.
-    ...buildModelRequestShape(SUGGEST_JOB.model, { effort: SUGGEST_JOB.effort }),
-    messages: [
-      {
-        role: 'user',
-        content: `Categorize these merchants:\n${unique.map((m) => `- ${m}`).join('\n')}`,
-      },
-    ],
+  const response = await provider.generateText({
+    model: assignment.model,
+    effort: assignment.effort,
+    systemText: systemPrompt,
+    userText: `Categorize these merchants:\n${unique.map((m) => `- ${m}`).join('\n')}`,
+    maxOutputTokens: 4096,
+    timeoutMs: 300_000,
+    // The SDK default on two of the three providers, and the only retry Gemini gets at all:
+    // @google/genai makes exactly one attempt unless retryOptions is supplied.
+    maxRetries: 2,
   });
 
-  if (response.stop_reason === 'max_tokens') {
-    console.warn('[ai-suggest] Response hit max_tokens; some suggestions may be missing.');
+  if (response.truncated) {
+    console.warn('[ai-suggest] Response hit its output cap; some suggestions may be missing.');
   }
 
   // Instructed to return raw JSON, but strip a fence defensively.
-  const text = readModelText(response).trim().replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/, '').trim();
+  const text = response.text.replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/, '').trim();
   let parsed: unknown;
   try {
     parsed = JSON.parse(text);

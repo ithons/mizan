@@ -16,7 +16,7 @@ import {
 } from '../server/src/services/aiJobs';
 import { collectorFor, jobsForTrigger } from '../server/src/services/aiScheduler';
 import {
-  WORKER_DRAFTS_FORMAT,
+  WORKER_DRAFTS_SCHEMA,
   buildBackgroundReviewPrompt,
   collectBackgroundReview,
   newDetections,
@@ -33,9 +33,10 @@ import { migratedTestDb, insertTransaction } from './helpers/schema';
 // nothing to do, and what it does when there is no key to call anything with.
 
 // ─── Credentials, deterministically ──────────────────────────────────────────
-// `hasAnthropicCredentials()` also reads an `ant auth login` profile off disk, so a developer
-// machine with one would make the no-credentials case pass for the wrong reason, and one without
-// would make every other case skip. Both are pinned per test.
+// The gate is now per provider, checked against the model the job actually runs. Anthropic's
+// resolution also reads an `ant auth login` profile off disk, so a developer machine with one
+// would make the no-credentials case pass for the wrong reason, and one without would make
+// every other case skip. Both are pinned per test.
 
 interface EnvGuard {
   restore: () => void;
@@ -240,6 +241,35 @@ test('a job does not restate its model: it reads the one assignment table', () =
   }
 });
 
+test('the run row records the model the pass will actually call, not the declared default', async (t) => {
+  const db = migratedTestDb();
+  const env = withCredentials();
+  t.after(() => { db.close(); env.restore(); });
+
+  // The owner retiers background_review. `runAiJob` gates credentials on the retiered model and
+  // hands it to the collector, so a row written from `job.model` would name a model this pass
+  // never called: the exact divergence migration 051 added this column to make visible.
+  db.prepare(
+    `INSERT INTO app_preferences (key, value, created_at, updated_at) VALUES (?, ?, '2026-07-31', '2026-07-31')
+     ON CONFLICT(key) DO UPDATE SET value = excluded.value`
+  ).run('ai_job_model_background_review', JSON.stringify('claude-opus-5'));
+
+  const seen: string[] = [];
+  await runAiJob(
+    job({ model: 'claude-sonnet-5' }),
+    async ({ assignment }) => {
+      seen.push(assignment.model);
+      return { status: 'collected', proposals: [], malformed: 0, usage: null };
+    },
+    { db, trigger: 'after_sync' }
+  );
+
+  const [row] = runRows(db);
+  assert.equal(row.model, 'claude-opus-5', 'the row names the declaration, not the pass');
+  assert.equal(row.effort, 'medium', 'and the effort the retiered model was clamped to');
+  assert.deepEqual(seen, ['claude-opus-5'], 'the collector was handed the same resolution');
+});
+
 test('a job invoked from its own call site may not declare writes', () => {
   // The rule with teeth. `writes` is only enforced by runAiJob, so a draft-writing job that does
   // not go through the framework would carry a declaration nothing checks.
@@ -266,15 +296,18 @@ test('every after-sync job has something the scheduler can actually run', () => 
 
 test("the worker's output schema offers a payload for every kind its job declares", () => {
   // A kind declared but absent from the schema is one the model can name and never fill in.
-  const schema = WORKER_DRAFTS_FORMAT.schema as {
+  // `kind` inside each payload variant is a single-member `enum`, not `const`: `const` is
+  // undocumented on OpenAI and silently ignored by Gemini, which would delete the
+  // discriminator with no error anywhere.
+  const schema = WORKER_DRAFTS_SCHEMA as unknown as {
     properties: {
-      drafts: { items: { properties: { kind: { enum: string[] }; payload: { anyOf: Array<{ properties: { kind: { const: string } } }> } } } };
+      drafts: { items: { properties: { kind: { enum: string[] }; payload: { anyOf: Array<{ properties: { kind: { enum: string[] } } }> } } } };
     };
   };
   const items = schema.properties.drafts.items.properties;
   const declared = [...AI_JOBS.background_review.writes].sort();
   assert.deepEqual([...items.kind.enum].sort(), declared);
-  assert.deepEqual(items.payload.anyOf.map((v) => v.properties.kind.const).sort(), declared);
+  assert.deepEqual(items.payload.anyOf.map((v) => v.properties.kind.enum[0]).sort(), declared);
 });
 
 // ─── The prompt body ─────────────────────────────────────────────────────────

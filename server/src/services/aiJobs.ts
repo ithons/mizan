@@ -11,10 +11,11 @@ import type {
 } from '../../../shared/types';
 import { confirmAdvisorDraft } from './advisorDrafts';
 import { isAutonomousDraftKind } from './draftAutonomy';
-import { JOB_MODELS, type AiJobName } from './advisorSettings';
+import { JOB_MODELS, type AiJobName, type JobModel } from './advisorSettings';
 import { runGuardedCategoryBatch, type GuardedBatchReport } from './aiGuards';
 import { DraftRefusedError } from './aiWriteGuards';
-import { hasAnthropicCredentials } from './anthropicClient';
+import { getJobModel } from './advisorSettings';
+import { providerForModel } from './aiProviders';
 
 /**
  * What the model does, when, with which model, and under which invariants, as DATA.
@@ -27,7 +28,10 @@ import { hasAnthropicCredentials } from './anthropicClient';
  * and `invariants` (evaluated against the rows the pass actually produced, after it produced them).
  *
  * `model` and `effort` are not restated here. They are read from JOB_MODELS, so the per-job model
- * assignment stays one table and a retiering cannot leave two lists disagreeing.
+ * assignment stays one table and a retiering cannot leave two lists disagreeing. What a declaration
+ * carries is the DEFAULT; what a given pass runs at is `getJobModel(db, name)`, which honours the
+ * owner's stored override. Every consumer inside one pass reads the same resolution: `runAiJob`
+ * resolves it once, gates credentials on it, writes it to `ai_runs`, and hands it to the collector.
  */
 
 /** How a pass gets started. There is no clock trigger; see aiScheduler.ts for why. */
@@ -169,6 +173,12 @@ export type AiJobCollectResult =
 
 export interface AiJobRunContext {
   db: Database.Database;
+  /**
+   * The model and effort THIS pass runs at, resolved once from the owner's stored per-job
+   * preference. Handed to the collector rather than re-derived by it, so the model the pass
+   * calls and the model `ai_runs` records cannot be two different answers to one question.
+   */
+  assignment: JobModel;
   /** ISO timestamp the pass started, so everything a pass writes carries one clock. */
   startedAt: string;
   /**
@@ -271,9 +281,21 @@ export function evaluateAiJobInvariants(
 
 // ─── The run row ─────────────────────────────────────────────────────────────
 
+/**
+ * Opens this pass's row.
+ *
+ * `assignment` is the RESOLVED model, not `job.model`. The declaration carries the
+ * compile-time default out of JOB_MODELS, which is the right thing for a registry and the
+ * wrong thing for an audit row: since Phase 10 the owner can retier a job to another model
+ * and another provider entirely, and the credential gate and the collector both honour that.
+ * Recording the default here would put a model in the history that the pass never called, on
+ * the one column migration 051 added "so a retiering is visible in the history rather than
+ * only in the diff that caused it".
+ */
 function startRunRow(
   db: Database.Database,
   job: AiJobDeclaration,
+  assignment: JobModel,
   options: AiJobRunOptions,
   startedAt: string
 ): string {
@@ -288,8 +310,8 @@ function startRunRow(
     job.name,
     options.trigger,
     options.syncRunId ?? null,
-    job.model,
-    job.effort ?? null,
+    assignment.model,
+    assignment.effort ?? null,
     job.digestSection,
     startedAt,
     startedAt
@@ -611,19 +633,27 @@ export async function runAiJob(
   collect: AiJobCollect,
   options: AiJobRunOptions
 ): Promise<AiJobOutcome> {
-  if (!hasAnthropicCredentials()) {
-    console.log(`[ai:${job.name}] Skipped: no Anthropic credentials configured.`);
+  const db = options.db;
+
+  // Resolved ONCE, here, and then carried: the credential gate, the run row and the
+  // collector all have to be talking about the same model. Checked against the provider that
+  // model actually belongs to, which the owner may have retiered; gating on one provider's
+  // credentials while the job calls another is how a pass gets skipped forever with a
+  // perfectly good key sitting in the store.
+  const assignment = getJobModel(db, job.name);
+  const provider = providerForModel(assignment.model);
+  if (!provider.isConfigured()) {
+    console.log(`[ai:${job.name}] Skipped: no ${provider.id} credentials configured.`);
     return { status: 'skipped', reason: 'no_credentials', runId: null };
   }
 
-  const db = options.db;
   const clock = options.now ?? (() => new Date());
   const startedAt = clock().toISOString();
 
   if (running.has(job.name)) {
     // Recorded rather than dropped: a trigger skipped because the previous pass is still in flight
     // is the first thing worth seeing when the model appears to have stopped working.
-    const runId = startRunRow(db, job, options, startedAt);
+    const runId = startRunRow(db, job, assignment, options, startedAt);
     closeRunRow(db, runId, clock().toISOString(), { status: 'skipped', skippedReason: 'already_running' });
     console.log(`[ai:${job.name}] Skipped: a pass is already running.`);
     return { status: 'skipped', reason: 'already_running', runId };
@@ -631,7 +661,7 @@ export async function runAiJob(
 
   running.add(job.name);
   try {
-    return await runOnePass(job, collect, options, startedAt, clock);
+    return await runOnePass(job, assignment, collect, options, startedAt, clock);
   } finally {
     running.delete(job.name);
   }
@@ -640,16 +670,17 @@ export async function runAiJob(
 /** The body of a pass, with the re-entrancy latch already held by `runAiJob`. */
 async function runOnePass(
   job: AiJobDeclaration,
+  assignment: JobModel,
   collect: AiJobCollect,
   options: AiJobRunOptions,
   startedAt: string,
   clock: () => Date
 ): Promise<AiJobOutcome> {
   const db = options.db;
-  const runId = startRunRow(db, job, options, startedAt);
+  const runId = startRunRow(db, job, assignment, options, startedAt);
 
   try {
-    const collected = await collect({ db, startedAt, runId });
+    const collected = await collect({ db, assignment, startedAt, runId });
 
     if (collected.status === 'nothing_to_do') {
       closeRunRow(db, runId, clock().toISOString(), {

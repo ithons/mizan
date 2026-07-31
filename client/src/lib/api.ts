@@ -8,6 +8,8 @@ import type {
   AdvisorDraftAction,
   AdvisorSettings,
   AdvisorSettingsUpdate,
+  AdvisorProviderStatus,
+  AiProviderId,
   AiDigest,
   AiDigestRevertResult,
   AiMemory,
@@ -823,6 +825,23 @@ export const aiApi = {
     apiFetch<AdvisorSettings>('/api/ai/settings', {
       method: 'PUT',
       body: JSON.stringify(update),
+    }),
+
+  /* Per-provider credentials. Keys go into the same AES-256-GCM store as the bank
+     credentials, and nothing here ever reads one back: the response says which source is in
+     use and whether one exists, which is all a settings screen needs to render. A key
+     supplied through `.env` is not deletable from the UI, and the server says so rather than
+     reporting success on a deletion the owner cannot see the effect of. */
+  listProviders: () =>
+    apiFetch<{ providers: AdvisorProviderStatus[] }>('/api/ai/providers'),
+  saveProviderKey: (provider: AiProviderId, apiKey: string) =>
+    apiFetch<{ providers: AdvisorProviderStatus[] }>(`/api/ai/providers/${provider}/key`, {
+      method: 'PUT',
+      body: JSON.stringify({ api_key: apiKey }),
+    }),
+  clearProviderKey: (provider: AiProviderId) =>
+    apiFetch<{ providers: AdvisorProviderStatus[] }>(`/api/ai/providers/${provider}/key`, {
+      method: 'DELETE',
     }),
   listConversations: () =>
     apiFetch<Array<{ id: string; title: string; updated_at: string; message_count: number }>>(
