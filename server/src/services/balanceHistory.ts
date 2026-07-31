@@ -175,7 +175,7 @@ export function getLedgerBalanceHistory(
     start_date: null,
     start_reason: reason,
     measurements: [],
-    transaction_count: 0,
+    drawn_transaction_count: 0,
   });
 
   const account = db.prepare(
@@ -197,8 +197,11 @@ export function getLedgerBalanceHistory(
   if (startDate === null || startDate > end) return empty(start.reason);
 
   const isLiability = account.is_liability === 1;
-  // Counted over the window the series actually draws, so the count the screen prints is the count
-  // the line is built from rather than everything the account has ever held.
+  // Counted over the window the series actually draws, and named `drawn_` for it. The two are equal
+  // whenever the window is the whole ledger, which is every request the app makes today, and that
+  // coincidence is exactly what made "this account's N transactions" readable as a lifetime total. A
+  // `to` earlier than today, or a `from` later than the first row, moves this number without moving
+  // `start_reason`, so the field name is what stops a caption inheriting the wrong noun.
   const drawnCount = (db.prepare(`
     SELECT COUNT(*) AS n FROM transactions
     WHERE account_id = ? AND pending = 0 AND date >= ? AND date <= ?
@@ -225,7 +228,7 @@ export function getLedgerBalanceHistory(
     start_date: startDate,
     start_reason: start.reason,
     measurements: readMeasurements(db, accountId, isLiability, startDate, end),
-    transaction_count: drawnCount,
+    drawn_transaction_count: drawnCount,
   };
 }
 
@@ -280,6 +283,7 @@ export function getSnapshotBalanceHistory(
     start_reason: points.length > 0 ? 'snapshot_series' : 'no_ledger',
     // The measurements ARE the line here, so marking them again would draw a dot on every point.
     measurements: [],
-    transaction_count: 0,
+    // Zero because no transaction built this line, not because the account has none.
+    drawn_transaction_count: 0,
   };
 }

@@ -476,3 +476,73 @@ test('among the owner rules the more specific pattern wins the overlap, not the 
   assert.equal(row.category_id, streaming);
   db.close();
 });
+
+// ─── The refusal is read by a person ──────────────────────────────────────────
+
+test('the refusal names the owner rule\'s category, never its row id', () => {
+  const db = migratedTestDb();
+  const subscriptions = insertCategory(db, { id: 'cat_test_subs', name: 'Subscriptions' });
+  const softwareLeaf = insertCategory(db, {
+    id: 'cat_test_sub_software',
+    name: 'Software & AI Tools',
+    parent_id: subscriptions,
+  });
+  const entertainment = insertCategory(db, { id: 'cat_test_ent', name: 'Entertainment' });
+
+  upsertMerchantRule(db, 'BACKBLAZE INC', softwareLeaf, TEST_NOW, { source: 'human' });
+
+  const refused = checkRuleDoesNotContradictOwnerRule(db, 'Backblaze', entertainment);
+  assert.equal(refused.ok, false);
+  const detail = refused.ok === false ? refused.detail : '';
+  assert.equal(
+    detail,
+    '"Backblaze" contends with your own rule "BACKBLAZE INC", which points at Subscriptions / Software & AI Tools.'
+  );
+  assert.ok(!detail.includes('cat_test_sub_software'), 'a row id must not reach the owner');
+});
+
+test('a root category is named without a phantom parent, and a deleted one says so', () => {
+  const db = migratedTestDb();
+  const root = insertCategory(db, { id: 'cat_test_root', name: 'Travel' });
+  const other = insertCategory(db, { id: 'cat_test_other', name: 'Transport' });
+  upsertMerchantRule(db, 'DELTA AIR LINES', root, TEST_NOW, { source: 'human' });
+
+  const refused = checkRuleDoesNotContradictOwnerRule(db, 'Delta Air', other);
+  assert.equal(
+    refused.ok === false ? refused.detail : '',
+    '"Delta Air" contends with your own rule "DELTA AIR LINES", which points at Travel.'
+  );
+
+  // A rule left pointing at a category that no longer exists has no name to resolve. Saying so beats
+  // inventing one, and the id stays because it is the only handle that still exists.
+  db.prepare('PRAGMA foreign_keys = OFF').run();
+  db.prepare('DELETE FROM categories WHERE id = ?').run(root);
+  const orphaned = checkRuleDoesNotContradictOwnerRule(db, 'Delta Air', other);
+  assert.equal(
+    orphaned.ok === false ? orphaned.detail : '',
+    '"Delta Air" contends with your own rule "DELTA AIR LINES", which points at a category that no longer exists (cat_test_root).'
+  );
+  db.close();
+});
+
+test('nothing in the schema stops two branches holding the same leaf name', () => {
+  // The reason `describeCategory` leads with the parent, checked rather than asserted in prose. Read
+  // off the migrated schema: `categories` carries exactly one index, and it is over `id`.
+  const db = migratedTestDb();
+  const indexes = db
+    .prepare("SELECT name, origin, `unique` FROM pragma_index_list('categories')")
+    .all() as Array<{ name: string; origin: string; unique: number }>;
+  assert.deepEqual(indexes, [{ name: 'sqlite_autoindex_categories_1', origin: 'pk', unique: 1 }]);
+  assert.deepEqual(db.prepare('SELECT name FROM pragma_index_info(?)').all(indexes[0].name), [{ name: 'id' }]);
+
+  // So the same leaf name under two parents is a state the table accepts, not a hypothetical. The
+  // leaf is named for this test because the shipped taxonomy already owns the obvious ones.
+  const travel = insertCategory(db, { id: 'cat_dup_travel', name: 'Trips' });
+  const work = insertCategory(db, { id: 'cat_dup_work', name: 'Contracting' });
+  insertCategory(db, { id: 'cat_dup_travel_leaf', name: 'Kite Repair', parent_id: travel });
+  insertCategory(db, { id: 'cat_dup_work_leaf', name: 'Kite Repair', parent_id: work });
+  const sameName = db.prepare("SELECT COUNT(*) AS n FROM categories WHERE name = 'Kite Repair'").get() as { n: number };
+  assert.equal(sameName.n, 2, 'two leaves, two parents, one name, and the table took it');
+
+  db.close();
+});

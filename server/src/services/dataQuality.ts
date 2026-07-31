@@ -13,11 +13,34 @@ import { getTransactionReviewSummary } from './transactionReview';
 import { getPersonalFinanceInvariantIssues } from './personalFinanceInvariants';
 import type { PersonalFinanceInvariantIssue } from './personalFinanceInvariants';
 
+/**
+ * What the install is doing, apart from its provider connections.
+ *
+ * `sync-empty` is the one row here that can outlive every action its owner is willing to take. An
+ * owner who keeps their accounts by hand has no live connection and never will, so "No live
+ * connections" sits in their panel permanently: the standing finding this panel exists to avoid.
+ * Nothing in the schema records "deliberately manual", so the honest substitute is what the install
+ * is doing. An install whose accounts carry a settled ledger is being used; an install with no
+ * ledger at all has nothing to work from yet, and connecting or importing is genuinely the next
+ * step, which is also the only version of this row that clears itself.
+ *
+ * Hidden accounts count. The row's label ("Nothing to track yet") and its sentence ("No account
+ * holds a settled transaction") are both claims about the whole install, and the query used to skip
+ * `is_hidden = 1`: an owner whose only history sat on a closed card they had archived was told the
+ * install held nothing while `SELECT COUNT(*) FROM transactions WHERE pending = 0` returned five.
+ * Counting what the sentence says can only silence this row, never make it fire somewhere new.
+ */
+export interface LedgerFootprint {
+  /** Accounts, hidden or not, holding at least one settled (`pending = 0`) transaction. */
+  accounts_with_ledger: number;
+}
+
 interface DataQualityInputs {
   syncHealth: SyncHealth;
   reviewSummary: TransactionReviewSummary;
   forecast: RecurringForecast;
   invariantIssues?: PersonalFinanceInvariantIssue[];
+  footprint?: LedgerFootprint;
 }
 
 interface WeightedIssue extends DataQualityIssue {
@@ -122,14 +145,24 @@ function cashFlowReviewIssue(forecast: RecurringForecast): WeightedIssue | null 
   );
 }
 
-function syncIssue(syncHealth: SyncHealth): WeightedIssue | null {
+function syncIssue(syncHealth: SyncHealth, footprint: LedgerFootprint): WeightedIssue | null {
   switch (syncHealth.status) {
     case 'attention':
       return issue('sync-attention', 'Connection needs attention', syncHealth.status_detail, '/accounts', 'critical', 35);
     case 'stale':
       return issue('sync-stale', 'Sync is stale', syncHealth.status_detail, '/accounts', 'warning', 20);
     case 'empty':
-      return issue('sync-empty', 'No live connections', syncHealth.status_detail, '/accounts', 'warning', 30);
+      // A ledger the owner maintains by hand is an install that works, not one waiting to be
+      // connected. See LedgerFootprint for why this is the signal and not a preference.
+      if (footprint.accounts_with_ledger > 0) return null;
+      return issue(
+        'sync-empty',
+        'Nothing to track yet',
+        'No account holds a settled transaction. Connect an institution, import a statement, or add transactions by hand.',
+        '/accounts',
+        'warning',
+        30
+      );
     default:
       return null;
   }
@@ -153,10 +186,13 @@ export function summarizeDataQuality({
   reviewSummary,
   forecast,
   invariantIssues = [],
+  // Defaults to "no ledger", the state in which `sync-empty` is genuinely actionable, so a caller
+  // that cannot measure the footprint keeps the old behaviour rather than silently going quiet.
+  footprint = { accounts_with_ledger: 0 },
 }: DataQualityInputs): DataQualitySummary {
   const issues: WeightedIssue[] = [
     ...invariantIssues,
-    syncIssue(syncHealth),
+    syncIssue(syncHealth, footprint),
     transactionReviewIssue(reviewSummary),
     cashFlowReviewIssue(forecast),
   ].filter((item): item is WeightedIssue => item !== null);
@@ -168,6 +204,15 @@ export function summarizeDataQuality({
   };
 }
 
+export function readLedgerFootprint(db: Database.Database): LedgerFootprint {
+  const row = db.prepare(`
+    SELECT COUNT(*) AS total FROM accounts a
+    WHERE EXISTS (SELECT 1 FROM transactions t WHERE t.account_id = a.id AND t.pending = 0)
+  `).get() as { total: number };
+
+  return { accounts_with_ledger: row.total };
+}
+
 export function getDataQualitySummary(db: Database.Database): DataQualitySummary {
   const now = new Date();
 
@@ -176,5 +221,6 @@ export function getDataQualitySummary(db: Database.Database): DataQualitySummary
     reviewSummary: getTransactionReviewSummary(db),
     forecast: buildRecurringForecast(db, 60),
     invariantIssues: getPersonalFinanceInvariantIssues(db, now),
+    footprint: readLedgerFootprint(db),
   });
 }

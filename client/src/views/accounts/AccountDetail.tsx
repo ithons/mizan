@@ -26,17 +26,33 @@ function plural(count: number, noun: string): string {
  * A chart that begins mid-air is making a claim about everything to the left of it. The ledger can
  * only reach the account's first transaction, or the point where its imported history begins, and
  * saying which is the difference between "nothing happened before this" and "nothing was recorded".
+ *
+ * The count is the drawn window's, so every branch that cites it says "drawn here" rather than
+ * "this account's". The two are the same number only while the window is the whole ledger, and a
+ * requested window is the one case where the count can be zero and the sentence has to change shape
+ * rather than interpolate a nothing.
  */
 export function seriesOrigin(history: AccountBalanceHistory): string | null {
   const from = history.start_date ? formatDate(history.start_date) : '';
-  const count = plural(history.transaction_count, 'transaction');
+  const count = plural(history.drawn_transaction_count, 'transaction');
   switch (history.start_reason) {
     case 'first_transaction':
-      return `Reconstructed from this account's ${count}, back to ${from}, the first one recorded.`;
+      return `Reconstructed from the ${count} drawn here, back to ${from}, the first one recorded on this account.`;
     case 'backfill_floor':
-      return `Reconstructed from this account's ${count}. The ledger begins ${from}; nothing earlier was ever imported, so the line does not go there.`;
+      return `Reconstructed from the ${count} drawn here. The ledger begins ${from}; nothing earlier was ever imported, so the line does not go there.`;
     case 'requested_window':
-      return `Reconstructed from this account's ledger over the window shown, from ${from}.`;
+      // The one branch whose count can legitimately be zero: a window is chosen, not found, so it
+      // can be placed over a stretch the ledger never moved in. "Reconstructed from the 0
+      // transactions drawn here" describes a reconstruction from nothing; the line there is flat at
+      // the balance the account carried in, and that is what it should say. A window that begins
+      // after its own last day draws no line at all, and `start_date` is the only thing that
+      // distinguishes the two.
+      if (history.drawn_transaction_count === 0) {
+        return history.start_date === null
+          ? 'The window shown starts after its last day, so there is no line to draw.'
+          : `No transactions fall in the window shown, from ${from}. The line holds the balance carried into it.`;
+      }
+      return `Reconstructed from the ${count} drawn here, over the window shown, from ${from}.`;
     case 'snapshot_series':
       return 'Drawn from recorded balance sheets rather than this account’s ledger: reversing individual buys and sells cannot reconstruct a price move.';
     case 'no_ledger':

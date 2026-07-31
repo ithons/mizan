@@ -4,7 +4,7 @@ import { format, startOfMonth, endOfMonth, subMonths, startOfYear } from 'date-f
 import { networthApi, reportsApi } from '../lib/api';
 import { readOwedTotal } from '../lib/accountBalance';
 import { ASSET_COLORS } from '../lib/chartColors';
-import { formatWholeCurrency } from '../lib/formatters';
+import { formatCurrency, formatWholeCurrency } from '../lib/formatters';
 import { Screen, ScreenHeader, SectionLabel, Select, TrendChart } from '../components/balance';
 import { QueryState } from '../components/QueryState';
 import type { NetWorthSnapshot, ReportComparisonMode, ReportMetricSummary } from '@shared/types';
@@ -60,13 +60,73 @@ function before(s: NetWorthSnapshot): Buckets {
   const other = Math.max(0, s.total_assets - (liquid + equity + crypto));
   return { liquid, equity, crypto, other, liabilities: s.total_liabilities, netWorth: s.net_worth };
 }
-export function afterPayoff(b: Buckets): Buckets {
-  // Only real debt can be paid off, and only out of cash you hold. With liabilities negative (the
-  // cards net in credit) the old `b.liquid - b.liabilities` drew the After-payoff Cash bar WIDER
-  // than Now by the credit: money the owner does not have, invented on a chart.
-  const payable = Math.max(0, Math.min(b.liabilities, b.liquid));
-  return { ...b, liquid: b.liquid - payable, liabilities: b.liabilities - payable };
+/**
+ * The payoff, decided in the unit the ledger stores.
+ *
+ * These buckets are API dollars, and a dollar is not representable in binary, so every figure this
+ * section prints is settled in cents and divided once on the way out. Only real debt can be paid
+ * off, and only out of cash you hold: with liabilities negative (the cards net in credit) the old
+ * `b.liquid - b.liabilities` drew the After-payoff Cash bar WIDER than Now by the credit, money the
+ * owner does not have, invented on a chart.
+ */
+const cents = (dollars: number): number => Math.round(dollars * 100);
+
+function payableCents(b: Buckets): number {
+  return Math.max(0, Math.min(cents(b.liabilities), cents(b.liquid)));
 }
+
+export function afterPayoff(b: Buckets): Buckets {
+  const paid = payableCents(b);
+  return { ...b, liquid: (cents(b.liquid) - paid) / 100, liabilities: (cents(b.liabilities) - paid) / 100 };
+}
+/**
+ * What a payoff would actually do to this sheet, which decides what the section is allowed to draw.
+ *
+ * `afterPayoff` returns its input whenever there is nothing to pay or nothing to pay it with, and
+ * the section drew both columns regardless: two bar charts, identical bar for bar, leaving the
+ * reader to notice the sameness and guess what it meant. Identical columns are not information.
+ * A debt-free owner is one paid-off month away from that, and the owner's cards are already in
+ * credit often enough for it to be reachable now.
+ *
+ * The second column is drawn only in the `payable` state, where the two sheets genuinely differ.
+ * The section itself always renders: the asset mix is the part that never depended on there being
+ * debt, and hiding it would take a debt-free owner's whole balance sheet off the screen.
+ */
+export type PayoffState =
+  | { kind: 'payable'; payable: number; remaining: number }
+  | { kind: 'no_cash'; owed: number }
+  | { kind: 'no_debt' }
+  | { kind: 'in_credit'; credit: number };
+
+export function payoffState(b: Buckets): PayoffState {
+  const owed = cents(b.liabilities);
+  if (owed < 0) return { kind: 'in_credit', credit: -owed / 100 };
+  if (owed === 0) return { kind: 'no_debt' };
+
+  // `payable` used to be read back off the payoff as `b.liquid - afterPayoff(b).liquid`, and a
+  // subtraction undone by another subtraction does not return its input in float: on a sheet whose
+  // cash covers the debt entirely, `remaining` came back as dust instead of 0, so the "still owed"
+  // clause below fired and rendered "$0 would still be owed, with no cash left to reach it" over a
+  // sheet that had cleared the debt with cash to spare. Holding liquid at the owner's $5,291.49 and
+  // sweeping every whole-cent debt from $0.01 up to it, 73,738 of those 529,149 fully-payable
+  // sheets came back nonzero (13.9%), the largest at 4.5e-13. Subtracting once, in cents, is exact.
+  const paid = payableCents(b);
+  if (paid <= 0) return { kind: 'no_cash', owed: owed / 100 };
+  return { kind: 'payable', payable: paid / 100, remaining: (owed - paid) / 100 };
+}
+
+/**
+ * A payoff figure, printed so it cannot read as nothing.
+ *
+ * Whole dollars are right for the totals on this screen and wrong for the four figures in the
+ * paragraph below, because each of those is the subject of a sentence about itself: a 40 cent
+ * remainder printed as "$0 would still be owed" says the opposite of what was measured. Under a
+ * dollar the figure carries its cents; at a dollar and above it reads like everything else here.
+ */
+export function formatPayoffFigure(amount: number): string {
+  return Math.abs(amount) < 1 ? formatCurrency(amount) : formatWholeCurrency(amount);
+}
+
 const SEGMENTS: Array<{ key: keyof Buckets; label: string; color: string }> = [
   { key: 'liquid', label: 'Cash', color: LIQUID_COLOR },
   { key: 'equity', label: 'Stocks', color: EQUITY_COLOR },
@@ -164,13 +224,13 @@ export function Reports() {
   const trendMonths = TREND_RANGES.find((r) => r.id === trendRange)?.months;
 
   // Category trends and net-worth attribution read a fixed trailing window, independent of the
-  // period selector — a one-month window has no trend and (usually) no second snapshot.
+  // period selector. A one-month window has no trend and (usually) no second snapshot.
   const trailingDates = {
     startDate: format(startOfMonth(subMonths(new Date(), TREND_MONTHS - 1)), 'yyyy-MM-dd'),
     endDate: format(endOfMonth(new Date()), 'yyyy-MM-dd'),
   };
 
-  // Query keys MUST start with a segment listed in queryInvalidation.ts's FINANCIAL_QUERY_KEYS —
+  // Query keys MUST start with a segment listed in queryInvalidation.ts's FINANCIAL_QUERY_KEYS,
   // TanStack matches by array prefix. These used to be ['networth-snapshot'], ['report-summary', …]
   // etc., which matched nothing, so a sync refreshed Accounts and Today but left Reports showing
   // stale numbers: two screens disagreeing about net worth.
@@ -203,7 +263,7 @@ export function Reports() {
 
   const trendPoints = (history ?? []).map((s) => ({ date: s.date, value: s.net_worth, estimated: Boolean(s.is_estimated) }));
   const cashflowMax = Math.max(1, ...(cashflow?.months ?? []).flatMap((m) => [m.income, m.expenses]));
-  // Show every category (previously capped at 8 with no way to see the rest — the user could not
+  // Show every category (previously capped at 8 with no way to see the rest, so the user could not
   // see their own spending breakdown, including the Uncategorized bucket).
   const allSpending = spending?.categories ?? [];
   const topSpending = showAllSpending ? allSpending : allSpending.slice(0, 8);
@@ -235,7 +295,7 @@ export function Reports() {
             )}
             {trendPoints.length >= 2
               ? <TrendChart history={trendPoints} height={140} />
-              : <p className="text-body text-muted-2">Not enough snapshots yet for a trend — they accrue as you sync.</p>}
+              : <p className="text-body text-muted-2">Not enough snapshots yet for a trend; they accrue as you sync.</p>}
           </QueryState>
         </section>
 
@@ -322,7 +382,7 @@ export function Reports() {
               </>
             ) : (
               <p className="text-body text-muted-2">
-                Needs at least two snapshots in this window — they accrue as you sync.
+                Needs at least two snapshots in this window; they accrue as you sync.
               </p>
             )}
           </QueryState>
@@ -489,26 +549,45 @@ export function Reports() {
           const b = before(snapshot);
           const a = afterPayoff(b);
           const scaleMax = Math.max(b.liquid + b.equity + b.crypto + b.other, b.liabilities, 1);
+          const state = payoffState(b);
           return (
             <section>
-              <SectionLabel className="mb-1">Net worth if you paid off debt</SectionLabel>
-              {b.liabilities > 0 && (
-                <p className="mb-4 text-body leading-relaxed text-muted">
-                  Paying off {formatWholeCurrency(b.liabilities)} from cash leaves net worth unchanged at{' '}
-                  <span className="text-ink">{formatWholeCurrency(a.netWorth)}</span> — it reshuffles, not grows.
-                </p>
+              <SectionLabel className="mb-1">
+                {state.kind === 'payable' ? 'Net worth if you paid off debt' : 'Where the money sits'}
+              </SectionLabel>
+              <p className="mb-4 text-body leading-relaxed text-muted">
+                {state.kind === 'payable' && (
+                  <>
+                    Paying off {formatPayoffFigure(state.payable)} from cash leaves net worth unchanged at{' '}
+                    <span className="text-ink">{formatWholeCurrency(a.netWorth)}</span>: it reshuffles, not grows.
+                    {state.remaining > 0 && (
+                      <> {formatPayoffFigure(state.remaining)} would still be owed, with no cash left to reach it.</>
+                    )}
+                  </>
+                )}
+                {state.kind === 'no_cash' && (
+                  <>
+                    {formatPayoffFigure(state.owed)} is owed and there is no cash to pay it from, so there is no
+                    payoff to draw. This is the balance sheet as it stands.
+                  </>
+                )}
+                {state.kind === 'no_debt' && <>No debt to pay off. This is the balance sheet as it stands.</>}
+                {state.kind === 'in_credit' && (
+                  <>
+                    Nothing to pay off: the cards hold{' '}
+                    <span className="text-sage-deep">{formatPayoffFigure(state.credit)}</span> in credit rather than
+                    debt. This is the balance sheet as it stands.
+                  </>
+                )}
+              </p>
+              {state.kind === 'payable' ? (
+                <div className="grid grid-cols-1 gap-10 sm:grid-cols-2">
+                  <div><SectionLabel className="mb-3">Now</SectionLabel><Distribution b={b} scaleMax={scaleMax} /></div>
+                  <div><SectionLabel className="mb-3">After payoff</SectionLabel><Distribution b={a} scaleMax={scaleMax} /></div>
+                </div>
+              ) : (
+                <Distribution b={b} scaleMax={scaleMax} />
               )}
-              {b.liabilities < 0 && (
-                <p className="mb-4 text-body leading-relaxed text-muted">
-                  Nothing to pay off: the cards hold{' '}
-                  <span className="text-sage-deep">{formatWholeCurrency(-b.liabilities)}</span> in credit rather
-                  than debt, so both columns read the same.
-                </p>
-              )}
-              <div className="grid grid-cols-1 gap-10 sm:grid-cols-2">
-                <div><SectionLabel className="mb-3">Now</SectionLabel><Distribution b={b} scaleMax={scaleMax} /></div>
-                <div><SectionLabel className="mb-3">After payoff</SectionLabel><Distribution b={a} scaleMax={scaleMax} /></div>
-              </div>
               <div className="mt-4 flex flex-wrap gap-x-6 gap-y-2 text-note text-muted">
                 {SEGMENTS.map((seg) => (
                   <span key={seg.key} className="flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-sm" style={{ background: seg.color }} />{seg.label}</span>

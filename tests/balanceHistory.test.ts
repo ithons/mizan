@@ -30,7 +30,7 @@ const TODAY = '2026-07-30';
 const ALARM = /differ|discrepan|missing|unaccounted|mismatch|off by|unexplain|error|gap|gone astray/i;
 
 /** Every field the payload has. A comparison quantity cannot reappear without failing here. */
-const PAYLOAD_KEYS = ['basis', 'measurements', 'points', 'start_date', 'start_reason', 'transaction_count'];
+const PAYLOAD_KEYS = ['basis', 'drawn_transaction_count', 'measurements', 'points', 'start_date', 'start_reason'];
 
 function captions(history: AccountBalanceHistory): string[] {
   return [seriesOrigin(history), seriesMeasurements(history)].filter((s): s is string => s !== null);
@@ -142,7 +142,7 @@ test('the line is one point per day from the first transaction, and every point 
   assert.equal(history.points.every((p) => p.source === 'ledger'), true, 'no point changes style mid-series');
   assert.equal(history.start_date, '2025-12-17');
   assert.equal(history.start_reason, 'first_transaction');
-  assert.equal(history.transaction_count, 12);
+  assert.equal(history.drawn_transaction_count, 12);
   // The five estimated snapshots are reconstructions, not balances anyone observed.
   assert.equal(history.measurements.length, 14);
   assertSilent(history, 'Wealthfront');
@@ -319,7 +319,7 @@ test('the series stops at the backfill floor when only the provider reaches belo
   assert.equal(history.points.some((p) => p.date < '2026-06-16'), false);
   // The row below the floor is not part of the line, so it is not counted as building it either,
   // and the measurement from before the floor has no point to sit on.
-  assert.equal(history.transaction_count, 2);
+  assert.equal(history.drawn_transaction_count, 2);
   assert.deepEqual(history.measurements.map((m) => m.date), ['2026-07-19']);
   assert.match(seriesOrigin(history) ?? '', /The ledger begins Jun 16, 2026/);
   assertSilent(history, 'backfill floor');
@@ -335,10 +335,10 @@ test('an account with a single transaction draws from it and says so', () => {
 
   const history = getLedgerBalanceHistory(db, id, { today: TODAY });
 
-  assert.equal(history.transaction_count, 1);
+  assert.equal(history.drawn_transaction_count, 1);
   assert.equal(history.points.length, 21);
   assert.equal(pointOn(history, '2026-07-10'), 25000);
-  assert.match(seriesOrigin(history) ?? '', /1 transaction, back to Jul 10, 2026/);
+  assert.match(seriesOrigin(history) ?? '', /1 transaction drawn here, back to Jul 10, 2026/);
   assert.match(seriesMeasurements(history) ?? '', /^The dot is the one balance recorded/);
   assertSilent(history, 'single transaction');
 
@@ -364,6 +364,53 @@ test('a requested window clamps both ends, and keeps only the dots inside it', (
   assert.equal(pointOn(history, '2026-07-20'), 100000);
   // A dot outside the drawn days has no point to sit on, so it is not served.
   assert.deepEqual(history.measurements.map((m) => m.date), ['2026-07-19']);
+
+  db.close();
+});
+
+// ─── A window is chosen, not found, so it can hold nothing ───────────────────
+//
+// Every other start reason is derived from a row that exists, so its count is at least one. A
+// requested window is placed by the caller and can sit over a stretch the account never moved in:
+// the caption there used to read "Reconstructed from the 0 transactions drawn here", a
+// reconstruction from nothing, describing a line that is in fact perfectly well defined.
+
+test('a window with no transactions in it says so, and says what the flat line is', () => {
+  const db = migratedTestDb();
+  const id = insertAccount(db, { type: 'checking', current_balance: 100000 });
+  insertTransaction(db, { account_id: id, date: '2026-06-10', amount: 20000 });
+  insertTransaction(db, { account_id: id, date: '2026-07-20', amount: 30000 });
+
+  const history = getLedgerBalanceHistory(db, id, { from: '2026-06-20', to: '2026-07-10', today: TODAY });
+
+  assert.equal(history.start_reason, 'requested_window');
+  assert.equal(history.drawn_transaction_count, 0);
+  // The line is flat, and flat at the balance the account carried into the window: $700 after the
+  // June deposit, with the July one rewound because it falls outside.
+  assert.equal(new Set(history.points.map((p) => p.balance)).size, 1);
+  assert.equal(history.points[0].balance, 70000);
+  assert.equal(
+    seriesOrigin(history),
+    'No transactions fall in the window shown, from Jun 20, 2026. The line holds the balance carried into it.'
+  );
+  assertSilent(history, 'empty window');
+
+  db.close();
+});
+
+test('a window that begins after its own last day admits there is no line', () => {
+  const db = migratedTestDb();
+  const id = insertAccount(db, { type: 'checking', current_balance: 100000 });
+  insertTransaction(db, { account_id: id, date: '2026-06-10', amount: 100000 });
+
+  const history = getLedgerBalanceHistory(db, id, { from: '2026-07-29', to: '2026-07-01', today: TODAY });
+
+  assert.equal(history.start_reason, 'requested_window');
+  assert.equal(history.start_date, null);
+  assert.deepEqual(history.points, []);
+  // With no start date there is no date to name, and the old sentence would have ended "from .".
+  assert.equal(seriesOrigin(history), 'The window shown starts after its last day, so there is no line to draw.');
+  assertSilent(history, 'inverted window');
 
   db.close();
 });
@@ -557,3 +604,31 @@ async function fetchHistory(url: string): Promise<AccountBalanceHistory> {
   const body = (await res.json()) as { data: AccountBalanceHistory };
   return body.data;
 }
+
+// ─── The count belongs to the window, and the caption has to say so ───────────
+//
+// `start_reason` does not move when a `to` clamps the window, so the caption for a clamped series
+// is still the `first_transaction` one. Read against a lifetime count that sentence is fine; read
+// against a windowed count it is a claim about the account that the payload never made. Only the
+// field name stops the two being confused, which is why it carries `drawn_`.
+
+test('a clamped window counts only what it draws, and the caption claims only that', () => {
+  const db = migratedTestDb();
+  const id = seedWealthfront(db);
+
+  const whole = getLedgerBalanceHistory(db, id, { today: TODAY });
+  const clamped = getLedgerBalanceHistory(db, id, { today: TODAY, to: '2026-07-05' });
+
+  assert.equal(clamped.start_reason, whole.start_reason, 'the clamp does not move the start reason');
+  assert.equal(whole.drawn_transaction_count, 12);
+  assert.equal(clamped.drawn_transaction_count, 11, 'the row dated after the clamp is not drawn');
+
+  // The whole-ledger caption and the clamped one are the same sentence with a different number, so
+  // the number is the only thing carrying the scope. It says "drawn here", not "this account's".
+  const caption = seriesOrigin(clamped) ?? '';
+  assert.match(caption, /^Reconstructed from the 11 transactions drawn here, back to Dec 17, 2025/);
+  assert.ok(!/this account's 11/.test(caption));
+  assertSilent(clamped, 'clamped window');
+
+  db.close();
+});

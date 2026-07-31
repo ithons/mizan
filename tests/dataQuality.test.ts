@@ -412,3 +412,109 @@ test('a single uncategorized transaction is reported, once, and reads correctly'
   );
   assert.equal(issues[0].route, '/review');
 });
+
+// ─── The manual-only install ──────────────────────────────────────────────────
+//
+// `sync-empty` is the row here that could never be cleared. An owner who keeps their accounts by
+// hand has no live connection and never will, so "No live connections" would sit in their panel
+// forever: the standing finding this panel exists to avoid. The signal is what the install is
+// doing, since nothing in the schema records "deliberately manual".
+
+test('a manual-only install with a real ledger raises nothing about connections', (t) => {
+  const db = migratedTestDb();
+  t.after(() => db.close());
+
+  const groceries = insertCategory(db, { name: 'Groceries' });
+  const checking = insertAccount(db, { account_name: 'Checking', current_balance: 300000 });
+  for (let index = 0; index < 6; index++) {
+    insertTransaction(db, {
+      account_id: checking,
+      date: daysAgo(index + 1),
+      amount: -2500 - index,
+      merchant_name: `Market ${index}`,
+      category_id: groceries,
+      manually_categorized: 1,
+    });
+  }
+
+  const connections = db.prepare('SELECT COUNT(*) AS count FROM simplefin_connections').get() as { count: number };
+  assert.equal(connections.count, 0, 'this case is only meaningful with no connection at all');
+  assert.deepEqual(getDataQualitySummary(db).issues, []);
+});
+
+test('an install with nothing in it is told what to do about it, once', (t) => {
+  const db = migratedTestDb();
+  t.after(() => db.close());
+
+  // An account added by hand and never used is not a ledger: there is still nothing to work from.
+  insertAccount(db, { account_name: 'Checking', current_balance: 0 });
+
+  const issues = getDataQualitySummary(db).issues;
+  assert.deepEqual(issues.map((issue) => issue.id), ['sync-empty']);
+  assert.equal(
+    issues[0].message,
+    'No account holds a settled transaction. Connect an institution, import a statement, or add transactions by hand.'
+  );
+  assert.equal(issues[0].route, '/accounts');
+});
+
+test('a ledger the owner archived is still a ledger, and the row does not claim otherwise', (t) => {
+  const db = migratedTestDb();
+  t.after(() => db.close());
+
+  // The shape the sentence used to lie about: nothing on the visible side of the ledger, and a
+  // closed card, hidden from the accounts screen, still carrying the history it was used for.
+  insertAccount(db, { account_name: 'Checking', current_balance: 0 });
+  const closedCard = insertAccount(db, {
+    account_name: 'Old Card',
+    type: 'credit',
+    is_liability: 1,
+    is_hidden: 1,
+    current_balance: 0,
+  });
+  const groceries = insertCategory(db, { name: 'Groceries' });
+  for (let index = 0; index < 5; index++) {
+    insertTransaction(db, {
+      account_id: closedCard,
+      date: daysAgo(index + 30),
+      amount: -3100 - index,
+      merchant_name: `Market ${index}`,
+      category_id: groceries,
+      manually_categorized: 1,
+    });
+  }
+
+  const settled = db.prepare('SELECT COUNT(*) AS count FROM transactions WHERE pending = 0').get() as { count: number };
+  assert.equal(settled.count, 5, 'the sentence under test is about exactly this count');
+  assert.equal(
+    getDataQualitySummary(db).issues.some((issue) => issue.id === 'sync-empty'),
+    false,
+    'five settled transactions is not "no account holds a settled transaction"'
+  );
+});
+
+test('a pending-only ledger has still settled nothing, so the row stands', (t) => {
+  const db = migratedTestDb();
+  t.after(() => db.close());
+
+  const checking = insertAccount(db, { account_name: 'Checking', current_balance: 0 });
+  insertTransaction(db, { account_id: checking, date: daysAgo(1), amount: -1200, pending: 1 });
+
+  assert.ok(getDataQualitySummary(db).issues.some((issue) => issue.id === 'sync-empty'));
+});
+
+test('a broken connection still reports, ledger or not', (t) => {
+  const db = migratedTestDb();
+  t.after(() => db.close());
+
+  db.prepare(`
+    INSERT INTO simplefin_connections (id, last_synced_at, status, created_at)
+    VALUES ('sf_broken', NULL, 'reauth_required', ?)
+  `).run(TODAY.toISOString());
+  const checking = insertAccount(db, { account_name: 'Checking', current_balance: 100000 });
+  insertTransaction(db, { account_id: checking, date: daysAgo(2), amount: -1500, category_id: insertCategory(db, { name: 'Groceries' }) });
+
+  // Silence about `sync-empty` is about an install with no connection, not about ignoring one that
+  // is failing: a broken connection is actionable and clears when the owner reconnects.
+  assert.deepEqual(getDataQualitySummary(db).issues.map((issue) => issue.id), ['sync-attention']);
+});

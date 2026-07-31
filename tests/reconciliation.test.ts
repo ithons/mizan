@@ -241,3 +241,53 @@ test('fewer than two measured snapshots produces no report rather than a false c
   assert.equal(report.measured_snapshot_count, 1);
   db.close();
 });
+
+// ─── Skipped is not absent ────────────────────────────────────────────────────
+//
+// An account the check never judged used to fall out of the report entirely, which reads exactly
+// like an account that reconciled. Every reader then had to re-derive the difference from
+// `accounts`, and the one that forgot published a clean bill of health over a population it had
+// never looked at.
+
+test('an account absent from every window is reported as skipped, not omitted', () => {
+  const db = migratedTestDb();
+  const checking = insertAccount(db, { type: 'checking', account_name: 'Checking' });
+  const newCard = insertAccount(db, { type: 'credit', is_liability: 1, account_name: 'New Card' });
+  snapshot(db, 's1', '2026-07-01', { [checking]: 100000 });
+  snapshot(db, 's2', '2026-07-15', { [checking]: 95000 });
+  insertTransaction(db, { account_id: checking, date: '2026-07-05', amount: -5000 });
+  // The card was connected after the last balance sheet, so it appears in neither breakdown.
+  insertTransaction(db, { account_id: newCard, date: '2026-07-20', amount: -4000 });
+
+  const report = reconcileAccounts(db);
+  assert.deepEqual(report.accounts.map((a) => a.account_id), [checking]);
+  assert.deepEqual(report.skipped, [
+    { account_id: newCard, account_name: 'New Card', type: 'credit', reason: 'no_measured_window' },
+  ]);
+  db.close();
+});
+
+test('an account present in every window is not reported as skipped', () => {
+  const db = migratedTestDb();
+  const checking = insertAccount(db, { type: 'checking', account_name: 'Checking' });
+  snapshot(db, 's1', '2026-07-01', { [checking]: 100000 });
+  snapshot(db, 's2', '2026-07-15', { [checking]: 95000 });
+  insertTransaction(db, { account_id: checking, date: '2026-07-05', amount: -5000 });
+
+  const report = reconcileAccounts(db);
+  assert.deepEqual(report.skipped, [], 'a judged account must not also read as skipped');
+  db.close();
+});
+
+test('with too few snapshots every visible account is skipped for that reason', () => {
+  const db = migratedTestDb();
+  const account = insertAccount(db, { type: 'checking', account_name: 'Checking' });
+  const hidden = insertAccount(db, { type: 'checking', account_name: 'Old', is_hidden: 1 });
+  snapshot(db, 's1', '2026-07-01', { [account]: 100000, [hidden]: 100 });
+
+  const report = reconcileAccounts(db);
+  assert.deepEqual(report.skipped, [
+    { account_id: account, account_name: 'Checking', type: 'checking', reason: 'check_did_not_run' },
+  ]);
+  db.close();
+});

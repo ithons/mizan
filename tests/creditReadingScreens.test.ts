@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { creditBalancePhrase, readOwedTotal } from '../client/src/lib/accountBalance';
-import { afterPayoff, type Buckets } from '../client/src/views/Reports';
+import { afterPayoff, formatPayoffFigure, payoffState, type Buckets } from '../client/src/views/Reports';
 import {
   buildAccountAdvisorPrompt,
   buildNetWorthEvidenceAdvisorPrompt,
@@ -199,3 +199,99 @@ test('the credit phrase is one string, shared with the server context', () => {
 function round(value: number): number {
   return Math.round(value * 100) / 100;
 }
+
+// ─── The payoff section on a sheet with nothing to pay off ────────────────────
+//
+// `afterPayoff` returns its input in three of the four states below, and the section drew both
+// columns in all four: two bar charts, identical bar for bar, with only the prose distinguishing
+// them. The second column is now drawn only where the two sheets actually differ.
+
+test('the payoff comparison is drawn only when a payoff would move something', () => {
+  assert.deepEqual(payoffState(sheet(7735.16, 4228.68)), {
+    kind: 'payable',
+    payable: 4228.68,
+    remaining: 0,
+  });
+
+  // Debt beyond the cash on hand: still a real comparison, and the sentence has to say what is left.
+  // Exact, not rounded: these are API dollars, but the state is settled in cents, so the figures the
+  // paragraph prints are the figures the sheet holds.
+  const partial = payoffState(sheet(7735.16, 9000));
+  assert.equal(partial.kind, 'payable');
+  assert.equal(partial.kind === 'payable' && partial.payable, 7735.16);
+  assert.equal(partial.kind === 'payable' && partial.remaining, 1264.84);
+
+  // The three states where both columns would have been identical.
+  assert.deepEqual(payoffState(sheet(7735.16, 0)), { kind: 'no_debt' });
+  assert.deepEqual(payoffState(sheet(0, 4228.68)), { kind: 'no_cash', owed: 4228.68 });
+  assert.deepEqual(payoffState(sheet(7735.16, -CREDIT_TOTAL)), { kind: 'in_credit', credit: CREDIT_TOTAL });
+});
+
+test('a state that draws one column is exactly a state afterPayoff leaves alone', () => {
+  // The section's rule and the maths it draws are the same rule, across the whole domain: a second
+  // column appears if and only if the two sheets differ somewhere. Every figure the paragraph reads
+  // off the state is checked here too, exactly: the version of this test that asserted only `kind`
+  // is the one the float defect below walked through.
+  for (const liquid of [0, 0.01, 7735.16]) {
+    for (const liabilities of [-CREDIT_TOTAL, -0.01, 0, 12.5, 4228.68, 9000]) {
+      const now = sheet(liquid, liabilities);
+      const after = afterPayoff(now);
+      const differs = after.liquid !== now.liquid || after.liabilities !== now.liabilities;
+      const state = payoffState(now);
+      assert.equal(
+        state.kind === 'payable',
+        differs,
+        `two columns drawn for liquid ${liquid} / liabilities ${liabilities} that read the same`
+      );
+      if (state.kind === 'payable') {
+        assert.equal(state.payable, liquid - after.liquid, `payable disagrees with the drawn cash bar at ${liquid}/${liabilities}`);
+        assert.equal(state.remaining, after.liabilities, `remaining disagrees with the drawn debt bar at ${liquid}/${liabilities}`);
+      }
+    }
+  }
+});
+
+// ─── The sentence about what is left owed ─────────────────────────────────────
+//
+// `payable` was read back off the payoff as `liquid - afterPayoff(b).liquid`, and undoing a
+// subtraction with another subtraction does not return its input in binary float. On a sheet whose
+// cash covers the debt entirely, `remaining` came back around 1e-13 rather than 0, the `> 0` guard
+// fired, and the paragraph rendered "$0 would still be owed, with no cash left to reach it" over a
+// sheet that had cleared the debt and kept change. Both halves were false.
+
+test('a debt cash covers entirely leaves exactly nothing owed, at every cent of it', () => {
+  // The owner's latest liquid, against every whole-cent debt it can cover. The old expression
+  // returned a nonzero `remaining` on 73,738 of these 529,149 sheets; there is no tolerance here,
+  // because a remainder is a claim and 1e-13 of a dollar is not one.
+  const liquid = 5291.49;
+  for (let owedCents = 1; owedCents <= 529149; owedCents++) {
+    const state = payoffState(sheet(liquid, owedCents / 100));
+    assert.equal(state.kind, 'payable');
+    if (state.kind !== 'payable') return;
+    assert.equal(state.remaining, 0, `debt of ${owedCents} cents is fully covered, so nothing is left owed`);
+    assert.equal(state.payable, owedCents / 100);
+  }
+});
+
+test('a debt cash cannot cover leaves the shortfall, to the cent', () => {
+  // The other side of the same guard: `remaining` has to be the real shortfall, not float dust and
+  // not the whole debt. Cash is held at a cent so the shortfall is the debt minus one cent.
+  for (let owedCents = 2; owedCents <= 20000; owedCents++) {
+    const state = payoffState(sheet(0.01, owedCents / 100));
+    assert.equal(state.kind === 'payable' && state.remaining, (owedCents - 1) / 100);
+  }
+});
+
+test('a figure under a dollar is printed as itself, not as nothing', () => {
+  // Whole dollars are right for a total and wrong for the subject of a sentence: "$0 would still be
+  // owed" is false at a 40 cent shortfall, and the guard that lets it through is the same `> 0`.
+  assert.equal(formatPayoffFigure(0.4), '$0.40');
+  assert.equal(formatPayoffFigure(0.01), '$0.01');
+  assert.equal(formatPayoffFigure(0), '$0.00');
+  // At a dollar and above nothing changes: this screen rounds.
+  assert.equal(formatPayoffFigure(1), '$1');
+  assert.equal(formatPayoffFigure(1264.84), '$1,265');
+
+  const shortfall = payoffState(sheet(0.01, 0.41));
+  assert.equal(shortfall.kind === 'payable' && formatPayoffFigure(shortfall.remaining), '$0.40');
+});

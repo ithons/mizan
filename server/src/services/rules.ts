@@ -38,7 +38,7 @@ export interface CategoryProvenance {
 export const DISMISSED_RULE_SUGGESTIONS_KEY = 'dismissed_rule_suggestions';
 
 // Writing a category_id that no longer exists raises "FOREIGN KEY constraint failed", which
-// aborts the whole auto-categorization sync stage — a single stale mapping taking down the entire
+// aborts the whole auto-categorization sync stage: a single stale mapping takes down the entire
 // pass (observed once in a real sync). Callers resolve the valid ids once and skip unknown ones.
 function knownCategoryIds(db: Database.Database): Set<string> {
   return new Set(

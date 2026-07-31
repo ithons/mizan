@@ -209,6 +209,30 @@ function rulesContend(
 }
 
 /**
+ * How a category is named to the owner.
+ *
+ * This refusal is read by a person: it reaches them through the ReviewInbox skip line and the 409
+ * toast, and it used to end "which points at cat_sub_software". A row id is not a name, and there is
+ * no screen in this app that maps one back to one. The parent goes in front because the owner picks
+ * a category as a path, and because nothing constrains leaf names to be unique: `categories` carries
+ * exactly one index, `sqlite_autoindex_categories_1`, which `pragma_index_info` shows covers `id`,
+ * the TEXT PRIMARY KEY. Nothing indexes `name`, so two branches may hold the same leaf.
+ * `tests/aiWriteGuards.test.ts` reads that pragma against the migrated schema rather than trusting
+ * this sentence; the sentence used to cite `SELECT sql FROM sqlite_master WHERE type='index'`,
+ * which returns that implicit index as a row with a NULL `sql`, not nothing.
+ *
+ * A rule whose category was deleted has no name to resolve, and inventing one would be worse than
+ * the id: the sentence says the category is gone and keeps the id as the only handle that exists.
+ */
+function describeCategory(
+  row: { category_name: string | null; parent_name: string | null },
+  id: string
+): string {
+  if (row.category_name === null) return `a category that no longer exists (${id})`;
+  return row.parent_name === null ? row.category_name : `${row.parent_name} / ${row.category_name}`;
+}
+
+/**
  * A model-authored rule may not contend with a rule the owner wrote.
  *
  * `checkRuleAgreesWithHistory` is not enough on its own: it reads only `transactions`, so an owner
@@ -225,9 +249,18 @@ export function checkRuleDoesNotContradictOwnerRule(
   const proposed = pattern.trim();
   if (!proposed) return ok;
 
-  const ownerRules = db.prepare(
-    "SELECT pattern, category_id FROM merchant_rules WHERE retired_at IS NULL AND source <> 'ai'"
-  ).all() as Array<{ pattern: string; category_id: string }>;
+  const ownerRules = db.prepare(`
+    SELECT r.pattern, r.category_id, c.name AS category_name, p.name AS parent_name
+    FROM merchant_rules r
+    LEFT JOIN categories c ON c.id = r.category_id
+    LEFT JOIN categories p ON p.id = c.parent_id
+    WHERE r.retired_at IS NULL AND r.source <> 'ai'
+  `).all() as Array<{
+    pattern: string;
+    category_id: string;
+    category_name: string | null;
+    parent_name: string | null;
+  }>;
 
   // Scanned once and reused across every owner rule. Matching each owner pattern against the whole
   // ledger instead is ~1.2M fuzzy comparisons on the owner's data, seconds inside a write path.
@@ -242,7 +275,7 @@ export function checkRuleDoesNotContradictOwnerRule(
     if (!rulesContend(proposed, owner.pattern, claimedNames)) continue;
     return reject(
       'contradicts_owner_rule',
-      `"${proposed}" contends with your own rule "${owner.pattern}", which points at ${owner.category_id}.`
+      `"${proposed}" contends with your own rule "${owner.pattern}", which points at ${describeCategory(owner, owner.category_id)}.`
     );
   }
 

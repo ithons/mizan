@@ -90,10 +90,42 @@ export interface AccountReconciliation {
   residual_ratio: number | null;
 }
 
+/** Why an account produced no reconciliation at all. Two states, and they are not the same state. */
+export type ReconciliationSkipReason =
+  /** Fewer than two measured balance sheets exist, so the check could not run for anyone. */
+  | 'check_did_not_run'
+  /**
+   * The check ran, but this account is absent from at least one end of every consecutive pair of
+   * measured balance sheets. That is what a newly connected account looks like.
+   */
+  | 'no_measured_window';
+
+export interface SkippedAccount {
+  account_id: string;
+  account_name: string | null;
+  type: string;
+  reason: ReconciliationSkipReason;
+}
+
 export interface ReconciliationReport {
   accounts: AccountReconciliation[];
   /** Accounts whose cumulative residual exceeds the tolerance below. */
   unreconciled: AccountReconciliation[];
+  /**
+   * Visible accounts the check never judged, and why.
+   *
+   * Skipped and absent used to be the same thing here: an account with no window simply fell out of
+   * `accounts`, so the only way to name one was to re-query the table and diff the id sets. A reader
+   * that forgets reports a clean bill of health over a population it never looked at, which is how
+   * "no account carries an unexplained residual" came to cover a card the check had never reached.
+   * The report now says what it did not judge.
+   *
+   * FOLLOW-UP: `aiContext.ts`'s `pushLedgerIntegrity` still rebuilds this set by re-querying
+   * `accounts` and diffing against `report.accounts`. It produces the same names today, but it is a
+   * second definition of "skipped" living outside the function that decides it, and the two will
+   * drift the first time the skip condition changes. Point that reader at this field.
+   */
+  skipped: SkippedAccount[];
   total_residual: number;
   measured_snapshot_count: number;
 }
@@ -129,7 +161,18 @@ export function reconcileAccounts(
   ).all() as AccountRow[];
 
   if (snapshots.length < 2) {
-    return { accounts: [], unreconciled: [], total_residual: 0, measured_snapshot_count: snapshots.length };
+    return {
+      accounts: [],
+      unreconciled: [],
+      skipped: accounts.map((account) => ({
+        account_id: account.id,
+        account_name: account.account_name,
+        type: account.type,
+        reason: 'check_did_not_run',
+      })),
+      total_residual: 0,
+      measured_snapshot_count: snapshots.length,
+    };
   }
 
   const balancesByDate = snapshots.map((snapshot) => {
@@ -156,6 +199,7 @@ export function reconcileAccounts(
   `);
 
   const results: AccountReconciliation[] = [];
+  const skipped: SkippedAccount[] = [];
 
   for (const account of accounts) {
     const isLiability = account.is_liability === 1;
@@ -201,7 +245,15 @@ export function reconcileAccounts(
       lastDate = current.date;
     }
 
-    if (windows === 0) continue;
+    if (windows === 0) {
+      skipped.push({
+        account_id: account.id,
+        account_name: account.account_name,
+        type: account.type,
+        reason: 'no_measured_window',
+      });
+      continue;
+    }
 
     const residual = observedDelta - explainedDelta;
     const firstDayTotal = firstDate
@@ -259,6 +311,7 @@ export function reconcileAccounts(
   return {
     accounts: results,
     unreconciled,
+    skipped,
     total_residual: results.reduce((sum, account) => sum + account.residual, 0),
     measured_snapshot_count: snapshots.length,
   };
