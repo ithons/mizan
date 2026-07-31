@@ -499,7 +499,7 @@ export function CommandPalette() {
           <input
             ref={inputRef}
             type="text"
-            className="flex-1 border-none bg-transparent p-0 text-sub text-ink placeholder:text-faint focus:outline-none focus:ring-0"
+            className="flex-1 border-none bg-transparent p-0 text-sub text-ink placeholder:text-muted-2 focus:outline-none focus:ring-0"
             placeholder="Search, jump, or ask Mizān…"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
@@ -524,7 +524,7 @@ export function CommandPalette() {
                   }`}
                 >
                   <span>{c.label}</span>
-                  <span className="flex items-center gap-2 text-micro text-faint">
+                  <span className="flex items-center gap-2 text-micro text-muted-2">
                     {c.hint}
                     {i === activeIdx && <CornerDownLeft size={12} />}
                   </span>

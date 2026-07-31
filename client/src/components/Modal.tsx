@@ -25,7 +25,7 @@ export function Modal({ open, onClose, title, children, maxWidth = '480px' }: Mo
   // Rendered through a portal to <body>, NOT in place. `.mz-screen` (the wrapper around every
   // view) keeps a persistent `transform` from its entry animation, and a transformed element
   // becomes the containing block for `position: fixed` descendants. Rendered inline, this
-  // overlay therefore sized itself to the whole page — on a long list that meant an 8984px-tall
+  // overlay therefore sized itself to the whole page: on a long list that meant an 8984px-tall
   // container with the dialog centered ~4400px down, i.e. a blurred screen with nothing on it.
   // The portal puts it outside that ancestor so `fixed` means the viewport again.
   return createPortal(
@@ -38,7 +38,10 @@ export function Modal({ open, onClose, title, children, maxWidth = '480px' }: Mo
       />
       {/* Modal */}
       <div
-        className="relative flex max-h-[calc(100vh-2rem)] w-full flex-col rounded-xl border border-line-2 bg-card shadow-e3"
+        /* e3, matching `Card`: card-alt over the scrim with a line-3 edge. On the dark ground the
+           e3 shadow is nearly invisible against paper at L* 13.0, so the surface and the border
+           are what say this sits above everything else. */
+        className="relative flex max-h-[calc(100vh-2rem)] w-full flex-col rounded-xl border border-line-3 bg-card-alt shadow-e3"
         style={{ maxWidth }}
       >
         {/* Header */}

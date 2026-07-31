@@ -36,11 +36,19 @@ interface ScreenHeaderProps {
   className?: string;
 }
 
+/**
+ * The title is a signpost, not the subject.
+ *
+ * It used to be `text-display` (28px), which made the word "Budget" the largest thing on the
+ * budget screen and left every figure below it at 22px or less. The nav rail already says which
+ * screen this is; what the owner came to see is the number. 19px keeps the title a heading and
+ * gives `Figure`'s 44px subject step somewhere to stand.
+ */
 export function ScreenHeader({ title, sub, actions, className = '' }: ScreenHeaderProps) {
   return (
     <div className={`flex flex-shrink-0 flex-wrap items-baseline justify-between gap-x-6 gap-y-2 ${className}`}>
       <div>
-        <h1 className="font-serif text-display font-normal leading-tight text-ink">{title}</h1>
+        <h1 className="font-serif text-title font-normal leading-tight text-ink">{title}</h1>
         {sub && <div className="mt-1 text-body text-muted">{sub}</div>}
       </div>
       {/* Wrap as a group, never mid-label: at phone widths a non-wrapping row squeezed the actions

@@ -780,7 +780,13 @@ export function ReviewInbox() {
             (summary?.transfer_candidates ?? []).map((p) => (
               <SectionRow
                 key={p.pair_id}
-                title={`${p.from_account_name} → ${p.to_account_name}`}
+                // Direction is the whole content of this row: which account was drained and which
+                // was filled is the thing being confirmed. An en dash between two account names
+                // reads as a range and states nothing. The arrow that used to carry it is U+2192,
+                // which is absent from the glyph table of every vendored woff2 (verified with
+                // fontTools over client/public/fonts/*.woff2), so it cannot be subset in and can
+                // only ever render out of the system fallback face. The words carry it instead.
+                title={`${p.from_account_name} to ${p.to_account_name}`}
                 sub={`${shortDate(p.date)} · looks like a transfer, not spending`}
                 right={formatCurrency(Math.abs(p.amount))}
               >
@@ -868,7 +874,9 @@ export function ReviewInbox() {
                 return (
                   <SectionRow
                     key={`${s.pattern}:${s.category_id}`}
-                    title={`${s.pattern} → always categorize as…`}
+                    // Same directional relation, said with word order rather than a connector: the
+                    // pattern is what gets matched, the category is what it becomes.
+                    title={`Always categorize ${s.pattern} as…`}
                     sub={`applies to ${s.affected_transaction_ids.length} transaction${
                       s.affected_transaction_ids.length === 1 ? '' : 's'
                     } · suggested: ${s.category_name}`}

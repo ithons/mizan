@@ -266,7 +266,7 @@ function AiActionsPanel({ open, onToggle }: { open: boolean; onToggle: () => voi
       <SettingsRow
         title="What the AI has done"
         sub="Every action the AI applied to your data, and the ones you can put back"
-        trailing={<span className="text-muted">{open ? 'Hide' : 'Review →'}</span>}
+        trailing={<span className="text-muted">{open ? 'Hide' : 'Review'}</span>}
         onClick={onToggle}
       />
       {open && (
@@ -314,7 +314,7 @@ function AdvisorContextEditor({ open, onToggle }: { open: boolean; onToggle: () 
       <SettingsRow
         title="Personal context"
         sub="Facts about you the advisor should always assume"
-        trailing={<span className="text-muted">{open ? 'Hide' : 'Edit →'}</span>}
+        trailing={<span className="text-muted">{open ? 'Hide' : 'Edit'}</span>}
         onClick={onToggle}
       />
       {open && (
@@ -371,7 +371,7 @@ function AdvisorModelPanel({ open, onToggle }: { open: boolean; onToggle: () => 
       <SettingsRow
         title="Model & effort"
         sub={settings ? `${modelLabel} · ${settings.effort} effort` : 'Choose the model and how hard it thinks'}
-        trailing={<span className="text-muted">{open ? 'Hide' : 'Configure →'}</span>}
+        trailing={<span className="text-muted">{open ? 'Hide' : 'Configure'}</span>}
         onClick={onToggle}
       />
       {open && settings && (
@@ -466,12 +466,12 @@ export function Settings() {
 
   const toggle = (panel: PanelId) => setOpenPanel((prev) => (prev === panel ? null : panel));
   const statusText = (connected: boolean) =>
-    connected ? <span className="text-sage-deep">Connected</span> : <span className="text-muted">Connect →</span>;
+    connected ? <span className="text-sage-deep">Connected</span> : <span className="text-muted">Connect</span>;
 
   return (
     <Screen size="editorial">
       <div className="mb-8 flex-shrink-0">
-        <h1 className="font-serif text-display font-normal leading-tight text-ink">Settings</h1>
+        <h1 className="font-serif text-title font-normal leading-tight text-ink">Settings</h1>
         <div className="mt-1 text-body text-muted">Connections, the advisor, and your data</div>
       </div>
 
@@ -514,7 +514,7 @@ export function Settings() {
           <SettingsRow
             title="CSV import"
             sub="For accounts not covered above"
-            trailing={<span className="text-muted">Import →</span>}
+            trailing={<span className="text-muted">Import</span>}
             onClick={() => toggle('import')}
             last
           />
@@ -559,7 +559,7 @@ export function Settings() {
                 ? `Durable statements about how you run your money · ${memoryCount} recorded`
                 : 'Durable statements about how you run your money, kept beside the ledger rather than in it'
             }
-            trailing={<span className="text-muted">{openPanel === 'advisor_memory' ? 'Hide' : 'Open →'}</span>}
+            trailing={<span className="text-muted">{openPanel === 'advisor_memory' ? 'Hide' : 'Open'}</span>}
             onClick={() => toggle('advisor_memory')}
           />
           {openPanel === 'advisor_memory' && (
@@ -609,12 +609,12 @@ export function Settings() {
           <SettingsRow
             title="Local backup"
             sub="Full JSON snapshot of the database"
-            trailing={<span className="text-muted">{backup.isPending ? 'Backing up…' : 'Back up now →'}</span>}
+            trailing={<span className="text-muted">{backup.isPending ? 'Backing up…' : 'Back up now'}</span>}
             onClick={() => backup.mutate()}
           />
           <SettingsRow
             title="Export all data"
-            trailing={<span className="text-muted">{exportCsv.isPending ? 'Exporting…' : 'CSV →'}</span>}
+            trailing={<span className="text-muted">{exportCsv.isPending ? 'Exporting…' : 'CSV'}</span>}
             onClick={() => exportCsv.mutate()}
             last
           />

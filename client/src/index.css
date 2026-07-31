@@ -77,9 +77,15 @@
  *
  * The channel form is not cosmetic. Tailwind 3's `withAlphaValue` runs `parseColor()` on the
  * configured value; given a bare `var(--mz-x)` string it returns null and DROPS THE UTILITY
- * ENTIRELY, with no warning. That silently deleted all 16 `/alpha` call sites in this app:
- * every skeleton (`bg-track/60`), both dialog scrims (`bg-ink/25`, `bg-ink/20`), the error
- * banner tint (`bg-clay/5`), the destructive-confirm tint, and two selected states.
+ * ENTIRELY, with no warning. That once deleted every `/alpha` call site in the app at the same
+ * time: the skeletons (`bg-track/60`), both dialog scrims (`bg-ink/25`, `bg-ink/20`), the error
+ * banner tint (`bg-clay/5`), the destructive-confirm tint, and the selected states. Nothing
+ * failed; the utilities simply were not in the built CSS.
+ *
+ * The live inventory is a moving number, so it is not written down here. Read it instead:
+ *   grep -rhoE '\b(bg|text|border|ring|fill|stroke|divide)-[a-z0-9_-]+/[0-9]+' client/src | sort -u
+ * and confirm each one survived into dist/client/assets/*.css after `npx vite build`.
+ * tests/edgeToken.test.ts fails if any base token stops carrying the channel form.
  * Do not collapse these back into single hex declarations.
  *
  * Theming swaps ONLY the channel triplets. The composed `--mz-x` aliases are declared once, in
@@ -196,11 +202,36 @@
 
   --mz-info-c: 77 117 152;
 
+  /* The categorical identity ramp is NOT here. A category colour is persisted user data
+     (`categories.color`, a hex string in SQLite), so the value that renders is always the stored
+     hex and never a token: a token copy could only ever be a second list to keep in sync. It lives
+     once, in CATEGORY_PRESET_COLORS in client/src/views/settings/CategoriesSection.tsx, with the
+     method and the validator report beside it. tests/categoryRamp.test.ts fails if a copy
+     reappears in this file or in tailwind.config.js. */
+
   /* Keyed to ink-soft rather than black: a neutral black shadow over warm paper composites to a
      desaturated grey-beige that reads as smudge, while the paper's own chroma reads as shade. */
   --mz-e1: 0 1px 2px rgb(71 63 50 / 0.07);
   --mz-e2: 0 4px 12px -2px rgb(71 63 50 / 0.12), 0 2px 4px -2px rgb(71 63 50 / 0.07);
   --mz-e3: 0 16px 40px -8px rgb(71 63 50 / 0.20), 0 4px 10px -4px rgb(71 63 50 / 0.11);
+
+  /* The edge that carries elevation when the shadow cannot, which on this theme is nowhere.
+     Deliberately empty on light; the dark blocks below turn it on.
+     A lit top edge only reads where the ground is darker than the edge. Compositing white at the
+     alpha this used to carry (0.35) against each light surface, and measuring the value jump the
+     edge makes against its own surface (WCAG 2.1 contrast, sRGB, both terms from the triplets in
+     this file):
+         over card       (248 243 234) -> rgb(250 247 241)   1.04:1
+         over card-alt   (253 251 245) -> rgb(254 252 249)   1.01:1
+         over paper      (229 219 202) -> rgb(238 232 221)   1.12:1
+         over ink        ( 38  33  25) -> rgb(114 111 106)   3.18:1
+     So on the surfaces it was designed for it is invisible, and the only place it did anything was
+     the one place it damaged: `InkButton` is `bg-ink shadow-e1`, and a 3.18:1 band across the top
+     of a near-black control is a defect, not elevation. On light, `--mz-e*` plus the card/paper
+     value step is the whole mechanism.
+     These four ratios are re-derived from this file at test time by tests/edgeToken.test.ts, which
+     also fails if a light-theme edge is reintroduced above the no-op threshold. */
+  --mz-edge: 0 0 0 0 rgb(0 0 0 / 0);
 
   /* Composed aliases. Declared once for both themes; see the note above. */
   --mz-paper: rgb(var(--mz-paper-c));
@@ -340,10 +371,17 @@
     --mz-info-c: 123 164 201;
 
     /* Near-black at high alpha: an ink-soft shadow is lighter than a dark ground, so the light
-       theme's warm shadow would have glowed instead of shading. */
+       theme's warm shadow would have glowed instead of shading.
+
+       But a dark shadow on a dark ground is also nearly invisible, so on this theme the shadow is
+       no longer the mechanism: it only softens the seat. The elevation that actually reads is the
+       pair below it in `Card` -- a rising surface (card L* 19.3 -> card-alt 21.9) and a
+       brightening border (line 27.9 -> line-2 33.9 -> line-3 40.2) -- plus this lit top edge,
+       which is the one thing a raised object gets on a dark ground that a flat one does not. */
     --mz-e1: 0 1px 2px rgb(0 0 0 / 0.40);
     --mz-e2: 0 4px 12px -2px rgb(0 0 0 / 0.52), 0 2px 4px -2px rgb(0 0 0 / 0.40);
     --mz-e3: 0 16px 40px -8px rgb(0 0 0 / 0.66), 0 4px 10px -4px rgb(0 0 0 / 0.48);
+    --mz-edge: inset 0 1px 0 0 rgb(255 255 255 / 0.07);
   }
 }
 
@@ -398,6 +436,7 @@
   --mz-e1: 0 1px 2px rgb(0 0 0 / 0.40);
   --mz-e2: 0 4px 12px -2px rgb(0 0 0 / 0.52), 0 2px 4px -2px rgb(0 0 0 / 0.40);
   --mz-e3: 0 16px 40px -8px rgb(0 0 0 / 0.66), 0 4px 10px -4px rgb(0 0 0 / 0.48);
+  --mz-edge: inset 0 1px 0 0 rgb(255 255 255 / 0.07);
 }
 
 @layer base {

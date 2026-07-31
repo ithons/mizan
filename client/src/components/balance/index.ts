@@ -1,7 +1,16 @@
 export { Screen, ScreenHeader } from './Screen';
 export { SectionLabel } from './SectionLabel';
-export { Card } from './Card';
-export { ProgressBar, healthTone, type ProgressTone } from './ProgressBar';
+export { Card, type Elevation } from './Card';
+export { Figure, readState, type FigureScale, type FigureStates, type FigureTone } from './Figure';
+export {
+  ProgressBar,
+  healthTone,
+  SignedBar,
+  signedBarScale,
+  bySignedMagnitude,
+  type ProgressTone,
+  type SignedBarScale,
+} from './ProgressBar';
 export { CategoryPill } from './CategoryPill';
 export { BalanceScale } from './BalanceScale';
 export { Row } from './Row';

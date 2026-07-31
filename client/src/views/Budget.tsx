@@ -10,7 +10,10 @@ import { parseDecimalInput } from '../lib/numberInput';
 import { useAppStore } from '../store';
 import { Modal } from '../components/Modal';
 import { QueryErrorBanner } from '../components/QueryErrorBanner';
-import { Screen, ScreenHeader, SectionLabel, ProgressBar, healthTone, InkButton, TextButton, CategoryPicker } from '../components/balance';
+import {
+  Screen, ScreenHeader, SectionLabel, Card, Figure, ProgressBar, healthTone, InkButton,
+  TextButton, CategoryPicker,
+} from '../components/balance';
 
 function BudgetModal({
   open,
@@ -288,19 +291,7 @@ export function Budget() {
     <Screen>
       <ScreenHeader
         title="Budget"
-        sub={
-          allBudgets.length > 0 ? (
-            <>
-              {format(parseISO(`${month}-01`), 'MMMM')} · budgeted <span className="tabular-nums">{formatWholeCurrency(totalBudgeted)}</span> ·
-              spent <span className="tabular-nums">{formatWholeCurrency(totalSpent)}</span> ·{' '}
-              <span className={remaining >= 0 ? 'text-sage-deep' : 'text-clay'}>
-                {formatWholeCurrency(Math.abs(remaining))} {remaining >= 0 ? 'left' : 'over'}
-              </span>
-            </>
-          ) : (
-            'No budgets set for this month'
-          )
-        }
+        sub={allBudgets.length > 0 ? format(parseISO(`${month}-01`), 'MMMM yyyy') : 'No budgets set for this month'}
         actions={
           <>
             <div className="flex items-baseline gap-4 text-body-lg">
@@ -337,6 +328,37 @@ export function Budget() {
         className="mb-6"
       />
       <QueryErrorBanner items={failableQueries} className="mb-5" />
+
+      {/* What is left is the subject; budgeted and spent are the two terms behind it. It was a
+          fragment of the sub-line, set at 13.5px, indistinguishable from the words around it.
+          Its sign is a state rather than a direction, so the word carries it and the numeral is
+          always a magnitude: "over" and "left" are different situations, not one with a minus. */}
+      {allBudgets.length > 0 && (
+        <div className="mb-8 flex-shrink-0 space-y-3 lg:space-y-4">
+          <Card padding="lg" elevation={2}>
+            <Figure
+              scale="subject"
+              label={remaining >= 0 ? 'Left to spend' : 'Over budget'}
+              value={remaining}
+              states={{
+                positive: 'still unspent this month',
+                negative: 'spent past the budgets you set',
+                zero: 'exactly on budget',
+              }}
+            >
+              {formatWholeCurrency(Math.abs(remaining))}
+            </Figure>
+          </Card>
+          <div className="grid gap-3 sm:grid-cols-2 lg:gap-4">
+            <Card padding="lg">
+              <Figure scale="lead" label="Budgeted">{formatWholeCurrency(totalBudgeted)}</Figure>
+            </Card>
+            <Card padding="lg">
+              <Figure scale="lead" label="Spent">{formatWholeCurrency(totalSpent)}</Figure>
+            </Card>
+          </div>
+        </div>
+      )}
 
       <div className="flex-1">
         {grouped.map((section) => (

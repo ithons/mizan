@@ -80,8 +80,8 @@ export function CoinbaseSection() {
               className="text-ink underline underline-offset-2"
             >
               portal.cdp.coinbase.com
-            </a>{' '}
-            → Advanced Trade API with read-only permissions.
+            </a>
+            , under Advanced Trade API, with read-only permissions.
           </p>
           <div>
             <label className="mz-label">Key name</label>

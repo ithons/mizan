@@ -35,10 +35,10 @@ function AssistantMessage({ message, onConfirmDraft, confirming }: {
       />
       <div className="min-w-0 flex-1">
         {message.thinkingActive && (
-          <div className="mb-1.5 animate-pulse text-body italic text-muted">Thinking…</div>
+          <div className="mb-1.5 animate-pulse text-micro font-semibold uppercase tracking-[0.16em] text-muted">Thinking…</div>
         )}
         {message.toolActivity && (
-          <div className="mb-1.5 animate-pulse text-body italic text-muted">{message.toolActivity}</div>
+          <div className="mb-1.5 animate-pulse text-micro font-semibold uppercase tracking-[0.16em] text-muted">{message.toolActivity}</div>
         )}
         {message.thinking && !message.thinkingActive && (
           <details className="mb-1.5">
@@ -181,7 +181,7 @@ export function Advisor() {
     { label: 'Net worth', value: formatWholeCurrency(snapshot?.net_worth ?? 0) },
     {
       label: safeToSpend != null && safeToSpend < 0 ? 'Short this month' : 'Free to spend',
-      value: safeToSpend == null ? '—' : formatCurrency(safeToSpend),
+      value: safeToSpend == null ? '–' : formatCurrency(safeToSpend),
     },
     { label: 'This month spend', value: formatWholeCurrency(Math.abs(monthCF?.expenses ?? 0)) },
     { label: 'Accounts', value: String((accounts ?? []).filter((a) => !a.is_hidden).length) },

@@ -9,11 +9,92 @@ import { PageLoader } from '../../components/LoadingSpinner';
 import { InkButton, SectionLabel, TextButton } from '../../components/balance';
 import type { Category } from '@shared/types';
 
+/**
+ * The eight identity slots, in fixed order, and the ONLY copy of them.
+ *
+ * There used to be a second copy: sixteen `--mz-cat-*` custom properties in client/src/index.css
+ * and eight `cat-1..8` entries in tailwind.config.js. Nothing referenced either, and the ramp
+ * emitted zero utilities into the built CSS, so it was two lists to keep in sync in exchange for
+ * nothing. Both are gone; tests/categoryRamp.test.ts fails if a copy comes back.
+ *
+ * Literal hexes rather than tokens, because a category's colour is written to `categories.color`
+ * in SQLite and a stored hex cannot follow a theme. These eight were therefore solved for the
+ * INTERSECTION of the two lightness bands the dataviz checks impose (light 0.43-0.77, dark
+ * 0.48-0.67 in OKLCH L) at chroma 0.13, hue order designed rather than searched: the Balance
+ * semantics first (sage 145, gold 72, clay 32), then four extensions.
+ *
+ * Verified with the validator against all four grounds (light/dark x paper/card): lightness band
+ * PASS, chroma floor PASS, CVD separation PASS (worst adjacent pair #c68627 vs #207029, 13.0 ΔE
+ * protan, target 8.0), normal-vision floor PASS (worst adjacent #ad4d3c vs #c68627, 15.7 ΔE,
+ * floor 15.0). Contrast against the surfaces lands in the 2.1-3.0 band, which the checks flag as
+ * WARN and which obligates relief rather than forbidding the colour; the relief is structural,
+ * since a swatch never appears without its category name beside it. Do not use these as text.
+ *
+ * Twelve became eight. The twelve were arbitrary: two of them (`#cbb08a`, `#a7bb92` in the sibling
+ * chart palette) were 5.4 ΔE apart, which is indistinguishable to a reader with full colour vision,
+ * let alone under protanopia. Eight that provably separate is a longer list than twelve that do not.
+ */
 const CATEGORY_PRESET_COLORS = [
-  '#c9963a', '#7c8b99', '#b5654a', '#ce8642', '#9b8dee',
-  '#ee8d5b', '#70c4e0', '#e070b8', '#70e07a', '#a0a0b8',
-  '#c4a86e', '#6e8ec4',
+  '#207029', '#c68627', '#ad4d3c', '#02a6ad',
+  '#92417a', '#4c88d3', '#979828', '#6a51a4',
 ];
+
+function isOnRamp(color: string): boolean {
+  return CATEGORY_PRESET_COLORS.some((c) => c.toLowerCase() === color.toLowerCase());
+}
+
+/**
+ * The swatch row.
+ *
+ * Editing CATEGORY_PRESET_COLORS changes what a NEW pick offers and nothing else, because the
+ * colour is persisted per row. That is not hypothetical: every category in the owner's ledger
+ * stores a hex from the retired twelve-colour palette and none stores one from this ramp.
+ *
+ *   sqlite3 .mizan/mizan.db "select sum(case when lower(color) in ('#207029','#c68627','#ad4d3c',
+ *     '#02a6ad','#92417a','#4c88d3','#979828','#6a51a4') then 1 else 0 end) on_ramp, count(*)
+ *     total from categories;"
+ *   -> 0|71
+ *
+ * A picker that rendered only the ramp therefore showed nothing selected on all 71 rows, which
+ * both hid the colour the row actually wears and gave no way to tell an off-ramp colour from an
+ * unset one. The stored colour is shown first, outlined as the current pick, and ringed so it
+ * reads as the odd one out rather than as a ninth slot. Rows are moved onto the ramp by choosing,
+ * not by a migration: overwriting a colour the owner set is not this component's call.
+ */
+function ColorPicker({
+  value,
+  onChange,
+  size,
+}: {
+  value: string;
+  onChange: (color: string) => void;
+  size: 'sm' | 'md';
+}) {
+  const dim = size === 'sm' ? 'h-4 w-4' : 'h-5 w-5';
+  const swatch = (color: string, offRamp: boolean) => (
+    <button
+      key={color}
+      type="button"
+      onClick={() => onChange(color)}
+      className={`${dim} rounded-full transition-transform hover:scale-110 ${
+        offRamp ? 'ring-1 ring-inset ring-ink/30' : ''
+      }`}
+      style={{
+        backgroundColor: color,
+        outline: value.toLowerCase() === color.toLowerCase() ? '2px solid var(--mz-ink)' : '2px solid transparent',
+        outlineOffset: '1px',
+      }}
+      title={offRamp ? `${color} · current colour, not on the ramp` : color}
+    />
+  );
+
+  return (
+    <div className={`flex flex-wrap items-center ${size === 'sm' ? 'gap-1' : 'gap-2'}`}>
+      {!isOnRamp(value) && swatch(value, true)}
+      {CATEGORY_PRESET_COLORS.map((color) => swatch(color, false))}
+    </div>
+  );
+}
 
 export function invalidateCategoryData(queryClient: ReturnType<typeof useQueryClient>): void {
   void queryClient.invalidateQueries({ queryKey: ['categories'] });
@@ -63,7 +144,7 @@ export function CategoryRow({
         className="group flex items-center gap-2 rounded-lg px-2 py-1.5 transition-colors hover:bg-well"
         style={{ paddingLeft: `${8 + depth * 20}px` }}
       >
-        <span className="h-3 w-3 flex-shrink-0 rounded-full" style={{ backgroundColor: category.color || '#7a6c5d' }} />
+        <span className="h-3 w-3 flex-shrink-0 rounded-full" style={{ backgroundColor: category.color || 'var(--mz-dot)' }} />
         {category.icon && !editing && <span className="text-body-lg">{category.icon}</span>}
         {editing ? (
           <div className="flex flex-1 flex-col gap-2 py-1">
@@ -93,22 +174,7 @@ export function CategoryRow({
                 <X size={13} className="text-muted" />
               </button>
             </div>
-            <div className="flex flex-wrap gap-1">
-              {CATEGORY_PRESET_COLORS.map((color) => (
-                <button
-                  key={color}
-                  type="button"
-                  onClick={() => setEditColor(color)}
-                  className="h-4 w-4 rounded-full transition-transform hover:scale-110"
-                  style={{
-                    backgroundColor: color,
-                    outline: editColor === color ? '2px solid var(--mz-ink)' : '2px solid transparent',
-                    outlineOffset: '1px',
-                  }}
-                  title={color}
-                />
-              ))}
-            </div>
+            <ColorPicker value={editColor} onChange={setEditColor} size="sm" />
           </div>
         ) : (
           <>
@@ -281,22 +347,7 @@ export function CategoriesSection() {
           </div>
           <div>
             <label className="mz-label">Color</label>
-            <div className="flex flex-wrap gap-2">
-              {CATEGORY_PRESET_COLORS.map((color) => (
-                <button
-                  key={color}
-                  type="button"
-                  onClick={() => setAddColor(color)}
-                  className="h-5 w-5 rounded-full transition-transform hover:scale-110"
-                  style={{
-                    backgroundColor: color,
-                    outline: addColor === color ? '2px solid var(--mz-ink)' : '2px solid transparent',
-                    outlineOffset: '1px',
-                  }}
-                  title={color}
-                />
-              ))}
-            </div>
+            <ColorPicker value={addColor} onChange={setAddColor} size="md" />
           </div>
           <div className="flex items-center gap-5 pt-1">
             <InkButton onClick={() => addMutation.mutate()} disabled={addMutation.isPending || !addName}>

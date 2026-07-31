@@ -68,6 +68,11 @@ export default {
           text: mz('review-text'),
           active: mz('review-active'),
         },
+        // There is deliberately no `cat-1..8` here. A category's colour is persisted user data, so
+        // what renders is the stored hex read off the row, never a utility class; the eight-entry
+        // ramp these mirrored emitted zero utilities in the built CSS while duplicating a list
+        // that nothing kept in sync. It lives once, in CATEGORY_PRESET_COLORS in
+        // client/src/views/settings/CategoriesSection.tsx. tests/categoryRamp.test.ts guards that.
 
         // Legacy aliases for not-yet-converted components. Same channel rule applies: these are
         // what `bg-negative/10` and `border-negative/30` in ConfirmRemoveModal resolve against.
@@ -124,10 +129,25 @@ export default {
       // Elevation is a var per theme, not a literal. The warm ink-soft shadow that reads as shade
       // over light paper is LIGHTER than the dark ground, so hardcoding it made every dialog and
       // card glow instead of lift once the dark theme existed. Values live in index.css.
+      //
+      // Each step is edge-then-shadow. A dark shadow on a dark ground is very close to invisible,
+      // so on THAT theme the drop shadow alone cannot express a ladder at all and the lit top edge
+      // is what a raised object gets that a flat one does not. On light the edge is a no-op by
+      // construction (see `--mz-edge` in index.css) and the drop shadow is the whole mechanism.
+      // Composed here rather than at the call sites so every `shadow-e*` usage inherits it
+      // unchanged. The count of those call sites is deliberately not written down: it is a moving
+      // number that no test reads, so a figure here could only ever go stale silently. What is
+      // fixed is the shape, and tests/edgeToken.test.ts checks that instead.
+      // `Card` supplies the other two thirds of the mechanism (surface value and border value),
+      // which is what actually does the separating on the dark ground.
+      //
+      // There is deliberately no `e1-alt`. Five call sites used `shadow-e1-alt`, which was never
+      // defined and emitted no CSS at all; they now say `shadow-e1`, which is what they looked
+      // like they were asking for.
       boxShadow: {
-        e1: 'var(--mz-e1)',
-        e2: 'var(--mz-e2)',
-        e3: 'var(--mz-e3)',
+        e1: 'var(--mz-edge), var(--mz-e1)',
+        e2: 'var(--mz-edge), var(--mz-e2)',
+        e3: 'var(--mz-edge), var(--mz-e3)',
       },
       borderRadius: {
         DEFAULT: '8px',

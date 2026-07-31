@@ -1,5 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
+import { Check } from 'lucide-react';
 import { accountsApi, settingsApi, syncApi, transactionsApi } from '../lib/api';
 import { getOnboardingPlan, type OnboardingStep } from '../lib/onboarding';
 import { PageLoader } from '../components/LoadingSpinner';
@@ -28,7 +29,7 @@ function StepRow({ step, index, last, onSelect }: {
           complete ? 'text-sage' : active ? 'text-ink' : 'text-muted-2'
         }`}
       >
-        {complete ? '✓' : index + 1}
+        {complete ? <Check size={14} className="mx-auto" aria-label="done" /> : index + 1}
       </span>
       <span className="min-w-0 flex-1">
         <span className={`block text-body-lg ${complete ? 'text-muted line-through decoration-line-3' : 'text-ink'}`}>
@@ -36,7 +37,7 @@ function StepRow({ step, index, last, onSelect }: {
         </span>
         <span className="mt-0.5 block text-body leading-normal text-muted-2">{step.detail}</span>
       </span>
-      {active && <span className="flex-shrink-0 text-body text-sage-deep">{step.actionLabel} →</span>}
+      {active && <span className="flex-shrink-0 text-body text-sage-deep">{step.actionLabel}</span>}
     </button>
   );
 }
@@ -109,7 +110,7 @@ export function Onboarding() {
 
         <div className="mt-8 flex items-center gap-6">
           <InkButton onClick={() => navigate(current.route)}>{current.actionLabel}</InkButton>
-          <TextButton onClick={() => navigate('/')}>Skip to dashboard →</TextButton>
+          <TextButton onClick={() => navigate('/')}>Skip to dashboard</TextButton>
         </div>
 
         <div className="mt-10 border-t border-line-2 pt-5 text-body text-muted">

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { format, isToday, isYesterday, parseISO, startOfMonth, endOfMonth, subMonths, startOfYear } from 'date-fns';
+import { Search } from 'lucide-react';
 import type { Transaction } from '@shared/types';
 import { categoriesApi, accountsApi, transactionsApi } from '../lib/api';
 import { formatCurrency } from '../lib/formatters';
@@ -217,7 +218,7 @@ function EditTransactionModal({ transaction, onClose }: { transaction: Transacti
           <span className="text-body text-muted">
             {format(parseISO(transaction.date), 'MMM d, yyyy')} · {transaction.account_name}
           </span>
-          <span className={`font-serif text-figure tabular-nums ${transaction.amount > 0 ? 'text-sage-deep' : 'text-ink'}`}>
+          <span className={`font-serif text-hero font-light leading-none tabular-nums ${transaction.amount > 0 ? 'text-sage-deep' : 'text-ink'}`}>
             {formatCurrency(transaction.amount, { showSign: transaction.amount > 0 })}
           </span>
         </div>
@@ -387,7 +388,7 @@ export function Transactions() {
       {/* Controls row */}
       <div className="mb-6 flex flex-shrink-0 flex-wrap items-center gap-5">
         <div className="flex max-w-[420px] flex-1 items-center gap-2.5 border-b border-line-3 px-0.5 py-2">
-          <span className="text-body-lg text-muted-2">⌕</span>
+          <Search size={15} className="flex-shrink-0 text-muted-2" aria-hidden />
           <input
             className="w-full border-none bg-transparent p-0 text-body-lg text-ink placeholder:text-muted-2 focus:outline-none focus:ring-0"
             placeholder="Search merchant, note, or amount"

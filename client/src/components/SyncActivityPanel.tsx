@@ -17,11 +17,18 @@ import { advisorRouteState } from '../lib/advisorRouteState';
 import { buildSyncRunAdvisorPrompt } from '../lib/advisorPrompts';
 import { formatRelativeTime } from '../lib/formatters';
 
+/**
+ * Status colours are tokens, not hexes, for two reasons. The hexes did not follow the theme, so
+ * every one of them was a light-mode value sitting on the dark ground. And `succeeded` was
+ * `#c9963a`, the gold that this palette reserves for caution: a completed sync was rendering in
+ * the warning colour while `partial` -- the state that actually warrants caution -- was a
+ * neighbouring orange 20 degrees away from it.
+ */
 const statusTone = {
-  running: { color: '#7c8b99', icon: RefreshCw, label: 'Running' },
-  succeeded: { color: '#c9963a', icon: CheckCircle2, label: 'Succeeded' },
-  partial: { color: '#ce8642', icon: AlertTriangle, label: 'Partial' },
-  failed: { color: '#b5654a', icon: CircleAlert, label: 'Failed' },
+  running: { color: 'var(--mz-muted)', icon: RefreshCw, label: 'Running' },
+  succeeded: { color: 'var(--mz-sage-deep)', icon: CheckCircle2, label: 'Succeeded' },
+  partial: { color: 'var(--mz-gold)', icon: AlertTriangle, label: 'Partial' },
+  failed: { color: 'var(--mz-clay)', icon: CircleAlert, label: 'Failed' },
 } satisfies Record<SyncRunStatus, { color: string; icon: LucideIcon; label: string }>;
 
 const scopeLabel: Record<SyncRun['scope'], string> = {
@@ -108,7 +115,7 @@ export function SyncActivityPanel({
   };
 
   return (
-    <div className="rounded-xl border border-line-2 bg-card shadow-e1-alt">
+    <div className="rounded-xl border border-line-2 bg-card shadow-e1">
       <div className="px-4 py-3 border-b border-line-2 flex items-center justify-between">
         <div className="flex items-center gap-2">
           <Clock3 size={14} className="text-muted" />
@@ -200,12 +207,12 @@ export function SyncActivityPanel({
                     <p className="text-note font-medium text-ink">Providers</p>
                     {detail.items.map((item) => {
                       const tone = item.status === 'succeeded'
-                        ? '#c9963a'
+                        ? 'var(--mz-sage-deep)'
                         : item.status === 'reauth_required'
-                          ? '#ce8642'
+                          ? 'var(--mz-gold)'
                           : item.status === 'failed'
-                            ? '#b5654a'
-                            : '#7c8b99';
+                            ? 'var(--mz-clay)'
+                            : 'var(--mz-muted)';
                       return (
                         <div key={item.id} className="rounded-lg border border-line-2 bg-card p-3">
                           <div className="flex items-center justify-between gap-3">

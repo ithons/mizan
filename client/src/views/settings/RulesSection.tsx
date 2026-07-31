@@ -171,7 +171,7 @@ export function RulesSection() {
             >
               <div
                 className="h-2.5 w-2.5 flex-shrink-0 rounded-full"
-                style={{ backgroundColor: suggestion.category_color ?? '#7a6c5d' }}
+                style={{ backgroundColor: suggestion.category_color ?? 'var(--mz-dot)' }}
               />
               <div className="min-w-0 flex-1">
                 <p className="truncate text-body-lg text-ink">{suggestion.pattern}</p>
@@ -228,7 +228,7 @@ export function RulesSection() {
           <div key={rule.id} className={`flex items-center gap-3 px-1 py-3 ${i < rules.length - 1 ? 'border-b border-line' : ''}`}>
             <div
               className="h-2.5 w-2.5 flex-shrink-0 rounded-full"
-              style={{ backgroundColor: rule.category_color ?? '#7a6c5d' }}
+              style={{ backgroundColor: rule.category_color ?? 'var(--mz-dot)' }}
             />
             <div className="min-w-0 flex-1">
               <p className="truncate text-body-lg text-ink">{rule.pattern}</p>

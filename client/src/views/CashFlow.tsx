@@ -4,7 +4,16 @@ import { endOfMonth, format, parseISO, startOfMonth, subMonths } from 'date-fns'
 import { reportsApi } from '../lib/api';
 import { formatWholeCurrency } from '../lib/formatters';
 import { QueryErrorBanner } from '../components/QueryErrorBanner';
-import { Screen, ScreenHeader, SectionLabel, ProgressBar } from '../components/balance';
+import {
+  Screen,
+  ScreenHeader,
+  SectionLabel,
+  Card,
+  Figure,
+  SignedBar,
+  signedBarScale,
+  bySignedMagnitude,
+} from '../components/balance';
 
 const RANGES = [
   { id: 'month', label: 'Month', months: 1 },
@@ -58,8 +67,13 @@ export function CashFlow() {
     [series]
   );
 
-  const topCategories = (spending?.categories ?? []).slice(0, 6);
-  const maxCategory = Math.max(1, ...topCategories.map((c) => c.amount));
+  // Ranked, not truncated-then-ranked: a category total is signed now (July 2026 Shopping is
+  // -$1,203.63, because that month's Amazon and REI credits exceed its purchases), and slicing an
+  // amount-descending list to six drops the largest single movement of money off the bottom.
+  const rankedCategories = [...(spending?.categories ?? [])].sort((a, b) => bySignedMagnitude(a.amount, b.amount));
+  const credits = rankedCategories.filter((c) => c.amount < 0);
+  const topCategories = [...rankedCategories.filter((c) => c.amount >= 0).slice(0, 6), ...credits];
+  const categoryScale = signedBarScale(topCategories.map((c) => c.amount));
 
   return (
     <Screen>
@@ -92,18 +106,37 @@ export function CashFlow() {
       />
       <QueryErrorBanner items={failableQueries} className="mb-5" />
 
-      {/* 3-up summary for the selected period */}
-      <div className="mb-6 grid flex-shrink-0 grid-cols-3 gap-3 lg:gap-4">
-        {[
-          { label: 'Income', value: formatWholeCurrency(income), tone: 'text-sage-deep' },
-          { label: 'Expenses', value: formatWholeCurrency(-expenses), tone: 'text-clay' },
-          { label: 'Net saved', value: formatWholeCurrency(net, { showSign: net > 0 }), tone: net >= 0 ? 'text-ink' : 'text-clay' },
-        ].map((s) => (
-          <div key={s.label} className="rounded-xl border border-line-2 bg-card shadow-e1 p-4">
-            <div className="text-note text-muted">{s.label}</div>
-            <div className={`mt-1.5 font-serif text-figure leading-tight tabular-nums ${s.tone}`}>{s.value}</div>
-          </div>
-        ))}
+      {/* The subject gets the band and its two terms sit under it, rather than all three sharing a
+          row as equals. Three tiles of the same width say the three numbers are the same kind of
+          thing; income and expenses are the terms, net is the answer. The full width is also what
+          makes 44px safe: a seven-figure total needs about 290px and a third of this column is
+          326px before padding.
+
+          `net` is signed and the two directions are different states, so the word carries the
+          direction and the numeral carries only the size. */}
+      <div className="mb-8 flex-shrink-0 space-y-3 lg:space-y-4">
+        <Card padding="lg" elevation={2}>
+          <Figure
+            scale="subject"
+            label="Net"
+            value={net}
+            states={{ positive: 'saved over this period', negative: 'spent beyond income', zero: 'exactly level' }}
+          >
+            {formatWholeCurrency(Math.abs(net))}
+          </Figure>
+        </Card>
+        <div className="grid gap-3 sm:grid-cols-2 lg:gap-4">
+          <Card padding="lg">
+            <Figure scale="lead" tone="positive" label="Income">
+              {formatWholeCurrency(income)}
+            </Figure>
+          </Card>
+          <Card padding="lg">
+            <Figure scale="lead" tone="negative" label="Expenses">
+              {formatWholeCurrency(-expenses)}
+            </Figure>
+          </Card>
+        </div>
       </div>
 
       {/* Paired bar chart */}
@@ -158,14 +191,26 @@ export function CashFlow() {
 
       {/* Top spending */}
       <div className="flex-1">
-        <SectionLabel className="mb-2.5">Top spending · {format(new Date(), 'MMMM')}</SectionLabel>
+        <SectionLabel className="mb-2.5">Where it went · {format(new Date(), 'MMMM')}</SectionLabel>
         {topCategories.map((c) => (
           <div key={c.category_id} className="flex items-center gap-5 border-b border-line px-1 py-3">
             <span className="w-[130px] truncate text-body-lg text-ink">{c.category_name}</span>
-            <ProgressBar fraction={c.amount / maxCategory} className="flex-1" />
-            <span className="w-[80px] text-right text-body-lg tabular-nums text-ink">{formatWholeCurrency(c.amount)}</span>
+            <SignedBar value={c.amount} {...categoryScale} className="flex-1" />
+            <span
+              className={`w-[90px] text-right text-body-lg tabular-nums ${c.amount < 0 ? 'text-sage-deep' : 'text-ink'}`}
+            >
+              {formatWholeCurrency(c.amount)}
+            </span>
           </div>
         ))}
+        {/* Said only when the code found one. A category ends up here because its refunds outweigh
+            its purchases, and without the sentence the bar reads as an unexplained backwards mark. */}
+        {credits.length > 0 && (
+          <div className="pt-2.5 text-note text-muted">
+            {credits.length === 1 ? 'One category came back' : `${credits.length} categories came back`} net positive
+            this month: refunds and credits there outweighed the purchases.
+          </div>
+        )}
         {topCategories.length === 0 && <div className="py-3 text-body text-muted-2">No categorized spending yet this month.</div>}
       </div>
     </Screen>

@@ -17,7 +17,7 @@ function goalNote(goal: Goal, insight?: GoalForecastInsight): string {
   const parts: string[] = [];
 
   if (projectedMonthly > 0 && goal.remaining_amount > 0) {
-    parts.push(`≈${formatWholeCurrency(projectedMonthly)} / month`);
+    parts.push(`about ${formatWholeCurrency(projectedMonthly)} a month`);
   }
 
   if (goal.remaining_amount <= 0) {
@@ -246,14 +246,16 @@ export function Goals() {
             >
               <div className="mb-3.5 flex items-baseline justify-between">
                 <div>
-                  <div className="text-sub text-ink">{g.name}</div>
+                  <div className="text-micro font-semibold uppercase tracking-[0.16em] text-muted-2">{g.name}</div>
                   <div className="mt-1 text-note text-muted-2">{goalNote(g, insight)}</div>
                 </div>
                 <span className="text-body text-sage">{pct}%</span>
               </div>
               <ProgressBar fraction={fraction} tone="sage" height={8} className="mb-3" />
               <div className="flex items-baseline justify-between">
-                <span className="font-serif text-figure tabular-nums text-ink">{formatWholeCurrency(g.progress_amount)}</span>
+                <span className="font-serif text-display font-light leading-none tabular-nums text-ink">
+                  {formatWholeCurrency(g.progress_amount)}
+                </span>
                 <span className="text-body tabular-nums text-muted">of {formatWholeCurrency(g.target_amount)}</span>
               </div>
             </div>

@@ -9,7 +9,7 @@ import { parseDecimalInput } from '../lib/numberInput';
 import { useAppStore } from '../store';
 import { Modal } from '../components/Modal';
 import { QueryErrorBanner } from '../components/QueryErrorBanner';
-import { Screen, ScreenHeader, SectionLabel, InkButton, TextButton, CategoryPicker } from '../components/balance';
+import { Screen, ScreenHeader, SectionLabel, Card, Figure, InkButton, TextButton, CategoryPicker } from '../components/balance';
 
 const FREQUENCY_OPTIONS: Array<RecurringPattern['frequency']> = ['weekly', 'biweekly', 'monthly', 'quarterly', 'annual'];
 
@@ -275,12 +275,9 @@ export function Bills() {
 
         {/* Monthly total card */}
         <div className="min-w-0 self-start lg:sticky lg:top-6 lg:flex-1">
-          <div className="rounded-xl border border-line-2 bg-card shadow-e1 p-[22px]">
-            <SectionLabel className="mb-3">Monthly total</SectionLabel>
-            <div className="font-serif text-display-lg font-light leading-tight tabular-nums text-ink">
-              {formatWholeCurrency(monthlyTotal)}
-            </div>
-            <div className="mt-5">
+          <Card padding="lg" elevation={2}>
+            <Figure scale="subject" label="Monthly total">{formatWholeCurrency(monthlyTotal)}</Figure>
+            <div className="mt-6">
               {breakdown.map(([name, amount], i) => (
                 <div
                   key={name}
@@ -292,7 +289,7 @@ export function Bills() {
               ))}
               {breakdown.length === 0 && <div className="py-2 text-body text-muted-2">No recurring charges yet.</div>}
             </div>
-          </div>
+          </Card>
           {forecast && forecast.review_count > 0 && (
             <div className="mt-4 text-body text-muted">
               {forecast.review_count} recurring suggestion{forecast.review_count === 1 ? '' : 's'} waiting in{' '}
