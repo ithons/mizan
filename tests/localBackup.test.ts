@@ -223,6 +223,22 @@ function seedEveryTable(db: Database.Database, tag: string): SeededIds {
     TEST_NOW
   );
 
+  db.prepare(`
+    INSERT INTO ai_incidents (id, batch_name, detected_at, month, start_date, end_date, breaches,
+                              before_headlines, after_headlines, action_ids, revert_status,
+                              reverted_action_ids, reverted_rows, headlines_restored, resolved_at)
+    VALUES (?, 'worker_autonomous_pass', ?, '2026-07', '2026-07-01', '2026-07-31', '[]',
+            '{}', '{}', ?, 'reverted', ?, 1, 1, ?)
+  `).run(`inc_${tag}`, TEST_NOW, JSON.stringify([actionId]), JSON.stringify([actionId]), TEST_NOW);
+
+  db.prepare(`
+    INSERT INTO ai_runs (id, job, trigger_source, sync_run_id, model, effort, digest_section,
+                         status, started_at, completed_at, proposed, applied, queued,
+                         input_tokens, output_tokens, created_at)
+    VALUES (?, 'background_review', 'after_sync', NULL, 'claude-sonnet-5', 'medium', 'review',
+            'completed', ?, ?, 2, 1, 1, 4211, 318, ?)
+  `).run(`airun_${tag}`, TEST_NOW, TEST_NOW, TEST_NOW);
+
   const conversationId = `conv_${tag}`;
   db.prepare('INSERT INTO conversations (id, title, created_at, updated_at) VALUES (?, ?, ?, ?)')
     .run(conversationId, `Chat ${tag}`, TEST_NOW, TEST_NOW);

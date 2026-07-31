@@ -57,6 +57,14 @@ export const LOCAL_BACKUP_TABLES = [
   // and last among the advisor tables, because the closure test only guards tables it can see.
   'ai_feedback',
   'ai_memory',
+  // Also no foreign key (migration 051): `sync_run_id` is a recorded historical value, and the
+  // record of what the model did has to survive a sync run being pruned or a pass fired outside
+  // one. Listed here because the closure test only guards tables it can see.
+  'ai_runs',
+  // Declares no foreign key for the same reason ai_feedback does not (migration 050): an incident is
+  // evidence about advisor_actions rows and has to outlive them, and the batch it describes may have
+  // been reverted out of existence. Grouped with the advisor tables so an omission is visible.
+  'ai_incidents',
   'conversations',
   'messages',
 ] as const;
