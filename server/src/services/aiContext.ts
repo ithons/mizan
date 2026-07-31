@@ -21,6 +21,7 @@ import { buildAdvisorReadTools } from './advisorTools';
 import { getPreference } from './preferences';
 import { estimateNote, readSnapshotBefore, readSnapshots } from './netWorthHistory';
 import { reconcileAccounts } from './reconciliation';
+import { listMemories } from './aiMemory';
 import { MAX_PAIR_DAY_GAP, findFlowConservationViolations } from './flowConservation';
 
 export const ADVISOR_PROFILE_PREFERENCE_KEY = 'advisor_user_profile';
@@ -481,13 +482,28 @@ function pushSpendingTree(
   }
 }
 
+/** A negative total can sit at any depth, and every depth is printed, so every depth is searched. */
+function hasNegativeTotal(nodes: SpendingReport['categories']): boolean {
+  return nodes.some(
+    (node) => node.amount < 0 || (node.children ? hasNegativeTotal(node.children) : false)
+  );
+}
+
 /**
  * A year of category totals, which is also the category vocabulary the owner actually uses.
  *
  * The background worker's whole job is choosing a category, and it had never been shown the set of
  * categories in use or their typical size. No percentages: a category total can be negative when
- * refunds exceed purchases (July 2026 Shopping is -$1,203.63 on the live ledger), and a share of a
- * signed total is not a quantity.
+ * refunds exceed purchases, and a share of a signed total is not a quantity.
+ *
+ * THE GUARD IS RECURSIVE BECAUSE THE PRINTING IS. It used to test the roots only while
+ * pushSpendingTree emits children too, so a negative child reached the model with the sentence that
+ * explains it suppressed. Measured 2026-07-31 against a copy of the live database, walking every
+ * depth of `getSpendingReport(db, { startDate, endDate })`:
+ *   - 2025-07-01 to 2026-06-30 (the window this function reports today): 48 nodes, no negative
+ *     total at any depth, so the note is correctly absent.
+ *   - 2025-04-01 to 2026-03-31 (the same window three months earlier): 45 nodes, no negative root,
+ *     and `Entertainment / Movies` at -1548 cents. The old guard printed that line with no note.
  */
 function pushCategorySpending(db: Database.Database, lines: string[], today: Date): void {
   const start = format(startOfMonth(subMonths(today, 12)), 'yyyy-MM-dd');
@@ -503,7 +519,7 @@ function pushCategorySpending(db: Database.Database, lines: string[], today: Dat
   lines.push(
     `  Totals across the whole window, not per month. Parent totals include their children. Only categories with activity in this window appear, so this is not the full category list. Total: ${fmt(toDollars(report.total))}.`
   );
-  if (roots.some((node) => node.amount < 0)) {
+  if (hasNegativeTotal(roots)) {
     lines.push(
       '  A negative total means refunds and credits in this window exceeded purchases in that category. It is not a saving and not income.'
     );
@@ -514,9 +530,14 @@ function pushCategorySpending(db: Database.Database, lines: string[], today: Dat
 /**
  * Who chose each category.
  *
- * 2,412 of 2,579 rows carry `category_source` NULL on the live ledger, and the model had no way to
- * tell a category the owner set from one it set itself last week. NULL is the dangerous value: it
- * reads as "nobody chose", which would make every one of those rows look free to relabel.
+ * The model had no way to tell a category the owner set from one it set itself last week. NULL is
+ * the dangerous value: it reads as "nobody chose", which would make every one of those rows look
+ * free to relabel.
+ *
+ * Re-measured 2026-07-31 against a copy of the live database, with the query this function runs:
+ * `SELECT COALESCE(category_source, 'unrecorded') AS source, COUNT(*) FROM transactions GROUP BY 1`
+ * returns unrecorded 2412, ai 86, human 62, heuristic 12, rule 7, against
+ * `SELECT COUNT(*) FROM transactions` = 2579. So 2,412 of 2,579 rows still carry NULL.
  */
 function pushProvenance(db: Database.Database, lines: string[]): void {
   const rows = db.prepare(`
@@ -732,6 +753,51 @@ function pushAdvisorHistory(db: Database.Database, lines: string[]): void {
 }
 
 /**
+ * Standing statements about how the owner runs their money (`ai_memory`, migration 049).
+ *
+ * These are the only lines in this whole context that are not read off the ledger, so they are the
+ * only lines that can be wrong without any query disagreeing with them. The section says so in its
+ * own copy rather than relying on the model to infer it from the wording of each statement.
+ *
+ * EVERY LINE IS DATED, AND THAT IS THE WHOLE DEFENCE AGAINST A STALE FIGURE. Nothing refuses a
+ * statement for carrying a number, because no pattern can tell `401(k)` from `$412 a month` without
+ * being wrong in both directions (see services/aiMemory.ts). What holds instead is that the date it
+ * was recorded and the observation count behind it are printed on the same line, and the heading
+ * below tells the model to read each statement as of that date. A figure inside a dated statement
+ * is not a current figure.
+ *
+ * THE EVIDENCE IS NOT PRINTED. Every entry carries the observation that produced it, and that text
+ * is where a figure legitimately lives ("12 of 14 transfers went to the taxable account"). Printing
+ * it would put one day's measurement into every prompt from here on. That is a decision about what
+ * this prompt carries and NOT a containment claim: `ai_memory` is enumerated from sqlite_master by
+ * describe_schema and run_sql_query has no table allowlist, so a model that asks for the column gets
+ * the text. The evidence exists for the owner, who reads it in Settings beside its statement.
+ *
+ * An install with no memories gets nothing: no heading, no count, no note that the store is empty.
+ */
+function pushMemory(db: Database.Database, lines: string[]): void {
+  const memories = listMemories(db);
+  if (memories.length === 0) return;
+
+  lines.push('');
+  lines.push(`### Standing Statements About How The Owner Runs Their Money (${num(memories.length)})`);
+  lines.push(
+    '  Beliefs, not measurements. Nothing here was read off the ledger, so no query confirms or refutes any of it. Each line ends with the date it was recorded and how many observations stand behind it: READ EVERY STATEMENT AS OF THAT DATE. A number inside one is what was believed then, never a current figure, and must be re-measured before you quote it.'
+  );
+  for (const memory of memories) {
+    const tag = memory.subject ? `${memory.kind}, ${memory.subject}` : memory.kind;
+    const notes = [`recorded ${memory.created_at.slice(0, 10)}`, plural(memory.evidence_count, 'observation')];
+    // Only the model's own conclusions are marked. A statement the owner recorded is the owner's
+    // word, and labelling it would invite the model to weigh it as its own guess.
+    if (memory.source === 'ai') notes.push('your own conclusion');
+    if (memory.prior_statements.length > 0) {
+      notes.push(`replaced an earlier statement on ${memory.prior_statements[0].superseded_at.slice(0, 10)}`);
+    }
+    lines.push(`  [${tag}] ${memory.statement} (${notes.join(', ')})`);
+  }
+}
+
+/**
  * PROMPT CACHING. This string is the whole cached prefix in the chat path: `routes/ai.ts` puts one
  * `cache_control` breakpoint at the end of `ADVISOR_SYSTEM_PROMPT + this`, so the cache either hits
  * whole or misses whole, and section ORDER buys nothing. What matters instead is that nothing here
@@ -766,6 +832,17 @@ export function buildFinancialContext(): string {
     lines.push('### About You (personal context you provided)');
     lines.push(profileText);
   }
+
+  // Placed beside the owner's own personal context because they are the same class of information:
+  // statements about the owner that no query can confirm or refute. Both land before the first
+  // number in the prompt, so nothing measured is read in the light of something that was not.
+  //
+  // Position is free here. `routes/ai.ts` sets exactly one cache breakpoint, at the end of
+  // ADVISOR_SYSTEM_PROMPT plus this whole string, so the prefix caches whole or misses whole and no
+  // ordering can protect one section from another's changes. What matters is that this section is
+  // stable across calls, and it is: every value comes from stored rows, and the only clock-derived
+  // text is a date already rendered at day granularity.
+  pushMemory(db, lines);
 
   const syncHealth = getSyncHealth(db);
 

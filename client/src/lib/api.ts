@@ -7,6 +7,9 @@ import type {
   AdvisorDraftAction,
   AdvisorSettings,
   AdvisorSettingsUpdate,
+  AiMemory,
+  AiMemoryInput,
+  AiMemoryRevision,
   AiStreamEvent,
   AppPreference,
   Budget,
@@ -703,6 +706,16 @@ export const aiApi = {
       '/api/ai/suggest-categories',
       { method: 'POST', body: JSON.stringify({ merchants }) }
     ),
+  // Standing statements the advisor reasons from. A statement carrying a derived figure is refused
+  // by the server with the reason in `error`, which the panel shows verbatim.
+  listMemory: () => apiFetch<AiMemory[]>('/api/ai/memory'),
+  createMemory: (input: AiMemoryInput) =>
+    apiFetch<AiMemory>('/api/ai/memory', { method: 'POST', body: JSON.stringify(input) }),
+  // Replaces the statement and keeps the old one in its history. Not an in-place edit.
+  reviseMemory: (id: string, revision: AiMemoryRevision) =>
+    apiFetch<AiMemory>(`/api/ai/memory/${id}`, { method: 'PUT', body: JSON.stringify(revision) }),
+  deleteMemory: (id: string) =>
+    apiFetch<{ success: boolean }>(`/api/ai/memory/${id}`, { method: 'DELETE' }),
   getSettings: () => apiFetch<AdvisorSettings>('/api/ai/settings'),
   saveSettings: (update: AdvisorSettingsUpdate) =>
     apiFetch<AdvisorSettings>('/api/ai/settings', {

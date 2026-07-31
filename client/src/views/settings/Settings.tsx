@@ -11,8 +11,18 @@ import { CoinbaseSection } from './CoinbaseSection';
 import { CategoriesSection } from './CategoriesSection';
 import { RulesSection } from './RulesSection';
 import { DataSection } from './DataSection';
+import { AdvisorMemorySection } from './AdvisorMemorySection';
 
-type PanelId = 'simplefin' | 'coinbase' | 'import' | 'categories' | 'advisor_profile' | 'advisor_model' | 'ai_actions' | null;
+type PanelId =
+  | 'simplefin'
+  | 'coinbase'
+  | 'import'
+  | 'categories'
+  | 'advisor_profile'
+  | 'advisor_memory'
+  | 'advisor_model'
+  | 'ai_actions'
+  | null;
 
 function SettingsRow({
   title,
@@ -305,6 +315,7 @@ export function Settings() {
   const { data: aiContext } = useQuery({ queryKey: ['ai-context'], queryFn: () => aiApi.getContext() });
   const { data: categories } = useQuery({ queryKey: ['categories'], queryFn: () => categoriesApi.list() });
   const { data: rules } = useQuery({ queryKey: ['rules'], queryFn: () => rulesApi.list() });
+  const { data: memories } = useQuery({ queryKey: ['ai-memory'], queryFn: () => aiApi.listMemory() });
   const backup = useMutation({
     mutationFn: () => settingsApi.exportBackupJson(),
     onSuccess: () => addToast({ type: 'success', message: 'Backup downloaded' }),
@@ -320,6 +331,7 @@ export function Settings() {
   const coinbaseAccounts = (accounts ?? []).filter((a) => a.connection_type === 'coinbase').length;
   const categoryCount = flattenCategories(categories ?? []).length;
   const ruleCount = (rules ?? []).length;
+  const memoryCount = (memories ?? []).length;
 
   const toggle = (panel: PanelId) => setOpenPanel((prev) => (prev === panel ? null : panel));
   const statusText = (connected: boolean) =>
@@ -406,6 +418,24 @@ export function Settings() {
             open={openPanel === 'advisor_profile'}
             onToggle={() => toggle('advisor_profile')}
           />
+          {/* Statements, not settings: each one carries the observation behind it and is replaced
+              rather than edited, so the sub-line states what the store is and the count follows it
+              only once there is one. */}
+          <SettingsRow
+            title="What the advisor takes as given"
+            sub={
+              memoryCount > 0
+                ? `Durable statements about how you run your money · ${memoryCount} recorded`
+                : 'Durable statements about how you run your money, kept beside the ledger rather than in it'
+            }
+            trailing={<span className="text-muted">{openPanel === 'advisor_memory' ? 'Hide' : 'Open →'}</span>}
+            onClick={() => toggle('advisor_memory')}
+          />
+          {openPanel === 'advisor_memory' && (
+            <ExpandedPanel>
+              <AdvisorMemorySection />
+            </ExpandedPanel>
+          )}
           {/* What the AI applies unattended is a fixed domain boundary now, not a dial: it
               categorizes and writes merchant rules on its own, and everything that changes a
               target you set waits for you. Stated rather than configured. */}

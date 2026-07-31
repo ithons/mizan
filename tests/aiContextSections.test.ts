@@ -598,6 +598,48 @@ test('a category driven negative by refunds is explained, and an ordinary month 
   refunded.close();
 });
 
+/**
+ * The year-window tree prints children, so the note that explains a negative total has to be
+ * decided over children too. The guard used to read the roots only, which on the live database is
+ * silent today (2025-07-01 to 2026-06-30 has no negative at any depth) and was not three months ago
+ * (2025-04-01 to 2026-03-31 puts Entertainment / Movies at -1548 cents under a positive root).
+ */
+test('a child category driven negative under a positive parent still gets the note', () => {
+  const db = migratedTestDb();
+  _setDbForTesting(db);
+  const account = insertAccount(db, { type: 'checking', current_balance: 100000 });
+  const parent = insertCategory(db, { name: 'Entertainment Test' });
+  const movies = insertCategory(db, { name: 'Movies Test', parent_id: parent });
+  const concerts = insertCategory(db, { name: 'Concerts Test', parent_id: parent });
+  // Inside the 12 complete months this section reports, not the current month.
+  insertTransaction(db, { account_id: account, date: monthsBack(3), amount: -1000, category_id: movies });
+  insertTransaction(db, { account_id: account, date: monthsBack(3, 16), amount: 2548, category_id: movies });
+  insertTransaction(db, { account_id: account, date: monthsBack(3), amount: -50000, category_id: concerts });
+
+  const context = buildFinancialContext();
+  const section = context.split('### Spending By Category')[1] ?? '';
+  assert.match(section, /Entertainment Test: \$484\.52/);
+  assert.match(section, /Movies Test: -\$15\.48/);
+  assert.match(context, /A negative total means refunds and credits in this window exceeded purchases/);
+  db.close();
+});
+
+test('a year of ordinary spending carries no negative-total note', () => {
+  const db = migratedTestDb();
+  _setDbForTesting(db);
+  const account = insertAccount(db, { type: 'checking', current_balance: 100000 });
+  const parent = insertCategory(db, { name: 'Entertainment Test' });
+  const movies = insertCategory(db, { name: 'Movies Test', parent_id: parent });
+  insertTransaction(db, { account_id: account, date: monthsBack(3), amount: -1000, category_id: movies });
+  insertTransaction(db, { account_id: account, date: monthsBack(3, 16), amount: 400, category_id: movies });
+
+  const context = buildFinancialContext();
+  assert.match(context, /### Spending By Category/);
+  assert.match(context, /Movies Test: \$6\.00/);
+  assert.doesNotMatch(context, /A negative total means refunds and credits in this window exceeded purchases/);
+  db.close();
+});
+
 // ── Provenance on the rows the model is most likely to change ──────────────
 
 test('recent transactions carry the provenance of their category', () => {

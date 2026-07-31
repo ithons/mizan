@@ -24,6 +24,7 @@ import {
   undoAdvisorAction,
 } from '../services/advisorDrafts';
 import { analyzeAdvisorQuestion } from '../services/advisorTools';
+import { createMemory, deleteMemory, listMemories, supersedeMemory } from '../services/aiMemory';
 import { ADVISOR_TOOLS, runAdvisorTool } from '../services/advisorChatTools';
 import { buildModelRequestShape, getAdvisorSettings, updateAdvisorSettings } from '../services/advisorSettings';
 import { suggestCategoriesForMerchants } from '../services/aiCategorySuggest';
@@ -201,6 +202,68 @@ router.put('/profile', (req: Request, res: Response, next: NextFunction): void =
     }
     setPreference(getDb(), ADVISOR_PROFILE_PREFERENCE_KEY, profile.trim());
     res.json({ data: { profile: profile.trim() } });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// --- Standing statements the advisor reasons from (ai_memory) ---
+//
+// Every write goes through services/aiMemory.ts, which checks the SHAPE of the row and nothing
+// about the sentence: no statement is refused for carrying a figure, because no pattern separates a
+// disposition from a measurement. Whatever is refused, the reason is returned verbatim so the owner
+// is told what was wrong rather than that "something failed". Nothing here writes source = 'ai':
+// the model has no route into this store in this build.
+
+// GET /api/ai/memory - live statements, each with the ones it replaced
+router.get('/memory', (_req: Request, res: Response, next: NextFunction): void => {
+  try {
+    res.json({ data: listMemories(getDb()) });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// POST /api/ai/memory - record a statement
+router.post('/memory', (req: Request, res: Response, next: NextFunction): void => {
+  try {
+    const result = createMemory(getDb(), req.body, 'owner');
+    if (!result.ok) {
+      res.status(400).json({ error: result.error });
+      return;
+    }
+    res.json({ data: result.memory });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// PUT /api/ai/memory/:id - replace a statement, keeping what it used to say.
+// Not an edit in place: a belief that changed has a history, for the same reason merchant rules
+// and transaction categories keep revision tables.
+router.put('/memory/:id', (req: Request, res: Response, next: NextFunction): void => {
+  try {
+    const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+    const result = supersedeMemory(getDb(), id, req.body, 'owner');
+    if (!result.ok) {
+      res.status(result.not_found ? 404 : 400).json({ error: result.error });
+      return;
+    }
+    res.json({ data: result.memory });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// DELETE /api/ai/memory/:id - strike a statement and the chain behind it
+router.delete('/memory/:id', (req: Request, res: Response, next: NextFunction): void => {
+  try {
+    const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+    if (deleteMemory(getDb(), id).changed === 0) {
+      res.status(404).json({ error: 'Memory not found' });
+      return;
+    }
+    res.json({ data: { success: true } });
   } catch (err) {
     next(err);
   }

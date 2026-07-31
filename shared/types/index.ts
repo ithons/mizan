@@ -88,8 +88,14 @@ export interface AccountBalanceHistory {
    * empty on the `snapshot` basis, where the measurements are already the line itself.
    */
   measurements: BalanceMeasurement[];
-  /** How many transactions built the drawn window, not how many the account has ever held. */
-  transaction_count: number;
+  /**
+   * How many transactions built the drawn window, not how many the account has ever held.
+   *
+   * The name carries the window on purpose. A `from`/`to` clamp changes this count without changing
+   * `start_reason`, so a caption that reads it as "this account's N transactions" is right only
+   * while the window happens to be the whole ledger.
+   */
+  drawn_transaction_count: number;
 }
 
 export interface Transaction {
@@ -876,6 +882,62 @@ export interface AdvisorConfirmResponse {
   changed: number;
   draft: AdvisorDraftAction;
   result?: unknown;
+}
+
+/**
+ * The four kinds a memory may take, all of them dispositional. There is deliberately no
+ * 'observation' or 'fact' member, which says what the store is for; it does not stop a number
+ * appearing inside a statement, and nothing does. What keeps a stale figure harmless is that
+ * aiContext.ts prints every statement with the date it was recorded.
+ */
+export type AiMemoryKind = 'preference' | 'constraint' | 'intent' | 'interpretation';
+
+/** What class of thing a statement is about. 'household' is the owner's finances as a whole. */
+export type AiMemoryScope = 'household' | 'account' | 'category' | 'merchant' | 'goal';
+
+/** A statement this one replaced. Kept so a belief that changed shows what it used to be. */
+export interface AiMemoryPriorStatement {
+  id: string;
+  statement: string;
+  evidence: string;
+  superseded_at: string;
+}
+
+export interface AiMemory {
+  id: string;
+  scope: AiMemoryScope;
+  /** Null exactly when scope is 'household'. */
+  subject: string | null;
+  statement: string;
+  kind: AiMemoryKind;
+  /** What was observed to conclude the statement. Not rendered into the prompt; readable by SQL. */
+  evidence: string;
+  evidence_count: number;
+  source: 'owner' | 'ai';
+  created_at: string;
+  /** Newest first. Empty for a statement that has never been revised. */
+  prior_statements: AiMemoryPriorStatement[];
+}
+
+export interface AiMemoryInput {
+  scope: AiMemoryScope;
+  subject?: string | null;
+  statement: string;
+  kind: AiMemoryKind;
+  evidence: string;
+  evidence_count?: number;
+}
+
+/**
+ * A revision replaces the statement and states fresh evidence for the change. Scope, subject and
+ * kind carry over from the entry being replaced unless given: a belief that changed its subject is
+ * a different belief and belongs in its own entry.
+ */
+export interface AiMemoryRevision {
+  statement: string;
+  evidence: string;
+  kind?: AiMemoryKind;
+  evidence_count?: number;
 }
 
 export interface AdvisorAnalysis {
