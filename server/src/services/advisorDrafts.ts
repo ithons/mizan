@@ -86,13 +86,6 @@ interface RecurringRow {
   transaction_count: number;
 }
 
-interface BudgetGroupRow {
-  id: string;
-  name: string;
-  color: string | null;
-  sort_order: number;
-}
-
 interface HoldingDraftRow {
   id: string;
   security_id: string;
@@ -154,26 +147,6 @@ function assertCategory(db: Database.Database, categoryId: string): CategoryRow 
     | undefined;
   if (!row) throw new Error('Category not found');
   return row;
-}
-
-function budgetGroups(db: Database.Database): BudgetGroupRow[] {
-  return db.prepare(`
-    SELECT id, name, color, sort_order
-    FROM budget_groups
-    ORDER BY length(name) DESC
-  `).all() as BudgetGroupRow[];
-}
-
-function findBudgetGroupMention(db: Database.Database, question: string): BudgetGroupRow | null {
-  const text = normalize(question);
-  return budgetGroups(db).find((group) => text.includes(normalize(group.name))) ?? null;
-}
-
-function nextBudgetGroupSort(db: Database.Database): number {
-  const row = db.prepare('SELECT COALESCE(MAX(sort_order), -1) + 1 AS next_sort FROM budget_groups').get() as
-    | { next_sort: number }
-    | undefined;
-  return row?.next_sort ?? 0;
 }
 
 function holdingRows(db: Database.Database): HoldingDraftRow[] {
@@ -505,116 +478,6 @@ function draftConfirmRecurring(db: Database.Database, question: string): Advisor
   });
 }
 
-function draftCreateBudgetGroup(question: string): AdvisorDraftAction | null {
-  const text = normalize(question);
-  if (!/\b(create|add|new)\b/.test(text) || !text.includes('budget group')) return null;
-
-  const name = quotedName(question)
-    ?? afterKeywordName(question, 'called')
-    ?? afterKeywordName(question, 'named')
-    ?? afterKeywordName(question, 'group');
-  const cleanName = name?.replace(/\bbudget group\b/i, '').trim();
-  if (!cleanName || cleanName.length < 2) return null;
-
-  const payload: AdvisorDraftPayload = {
-    kind: 'create_budget_group',
-    name: cleanName,
-    color: null,
-  };
-
-  return draft({
-    kind: 'create_budget_group',
-    label: `Create ${cleanName} group`,
-    summary: `Create a personal budget rollup group named ${cleanName}. Category budgets remain the source of truth.`,
-    route: '/budget',
-    payload,
-    changes: [
-      { field: 'budget group', before: null, after: cleanName },
-    ],
-    citations: [
-      citation({
-        id: 'budget-groups:new',
-        kind: 'budget',
-        label: 'Budget groups',
-        detail: 'New group draft',
-        route: '/budget',
-      }),
-    ],
-  });
-}
-
-function draftRenameBudgetGroup(db: Database.Database, question: string): AdvisorDraftAction | null {
-  const text = normalize(question);
-  if (!text.includes('rename') || !text.includes('group')) return null;
-
-  const group = findBudgetGroupMention(db, question);
-  const nextName = afterKeywordName(question, 'to') ?? quotedName(question);
-  if (!group || !nextName || normalize(nextName) === normalize(group.name)) return null;
-
-  const payload: AdvisorDraftPayload = {
-    kind: 'rename_budget_group',
-    group_id: group.id,
-    name: nextName,
-  };
-
-  return draft({
-    kind: 'rename_budget_group',
-    label: `Rename ${group.name}`,
-    summary: `Rename the ${group.name} budget group to ${nextName}.`,
-    route: '/budget',
-    payload,
-    changes: [
-      { field: 'name', before: group.name, after: nextName },
-    ],
-    citations: [
-      citation({
-        id: `budget-group:${group.id}`,
-        kind: 'budget',
-        label: group.name,
-        detail: 'Budget group',
-        route: '/budget',
-        record_id: group.id,
-      }),
-    ],
-  });
-}
-
-function draftAssignCategoryToBudgetGroup(db: Database.Database, question: string): AdvisorDraftAction | null {
-  const text = normalize(question);
-  if (!/\b(assign|add|move|group)\b/.test(text) || !text.includes('group')) return null;
-
-  const category = findCategoryMention(db, question);
-  const group = findBudgetGroupMention(db, question);
-  if (!category || !group) return null;
-
-  const payload: AdvisorDraftPayload = {
-    kind: 'assign_category_to_budget_group',
-    group_id: group.id,
-    category_id: category.id,
-  };
-
-  return draft({
-    kind: 'assign_category_to_budget_group',
-    label: `Add ${category.name} to ${group.name}`,
-    summary: `Assign ${category.name} to the ${group.name} budget group. It will be removed from any other group first.`,
-    route: '/budget',
-    payload,
-    changes: [
-      { field: 'category group', before: null, after: group.name },
-    ],
-    citations: [
-      citation({
-        id: `budget-group:${group.id}:${category.id}`,
-        kind: 'budget',
-        label: group.name,
-        detail: `Assign ${category.name}`,
-        route: '/budget',
-        record_id: group.id,
-      }),
-    ],
-  });
-}
-
 function draftRecurringAdjustment(db: Database.Database, question: string): AdvisorDraftAction | null {
   const text = normalize(question);
   if (!/\b(skip|snooze|adjust)\b/.test(text) || !/\b(recurring|bill|subscription|occurrence)\b/.test(text)) {
@@ -772,9 +635,6 @@ export function buildAdvisorDrafts(
     draftUpdateBudget(db, question),
     draftUpdateGoal(db, question),
     draftConfirmRecurring(db, question),
-    draftCreateBudgetGroup(question),
-    draftRenameBudgetGroup(db, question),
-    draftAssignCategoryToBudgetGroup(db, question),
     draftRecurringAdjustment(db, question),
     draftManualCostBasis(db, question),
     draftSectorMetadata(db, question),
@@ -1084,79 +944,6 @@ function confirmRecurring(db: Database.Database, payload: Extract<AdvisorDraftPa
   return { changed: result.changes, result: { recurring_id: payload.recurring_id } };
 }
 
-function confirmCreateBudgetGroup(db: Database.Database, payload: Extract<AdvisorDraftPayload, { kind: 'create_budget_group' }>): {
-  changed: number;
-  result: unknown;
-} {
-  const name = payload.name.trim();
-  if (!name) throw new Error('Budget group name is required');
-
-  const now = new Date().toISOString();
-  const id = uuidv4();
-  db.prepare(`
-    INSERT INTO budget_groups (id, name, color, sort_order, created_at, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?)
-  `).run(id, name, payload.color ?? null, nextBudgetGroupSort(db), now, now);
-
-  return { changed: 1, result: { group_id: id } };
-}
-
-function confirmRenameBudgetGroup(db: Database.Database, payload: Extract<AdvisorDraftPayload, { kind: 'rename_budget_group' }>): {
-  changed: number;
-  result: unknown;
-} {
-  const name = payload.name.trim();
-  if (!name) throw new Error('Budget group name is required');
-
-  const existing = db.prepare('SELECT id FROM budget_groups WHERE id = ?').get(payload.group_id);
-  if (!existing) throw new Error('Budget group not found');
-
-  const result = db.prepare(`
-    UPDATE budget_groups
-    SET name = ?,
-        updated_at = ?
-    WHERE id = ?
-  `).run(name, new Date().toISOString(), payload.group_id);
-
-  return { changed: result.changes, result: { group_id: payload.group_id } };
-}
-
-function confirmAssignCategoryToBudgetGroup(
-  db: Database.Database,
-  payload: Extract<AdvisorDraftPayload, { kind: 'assign_category_to_budget_group' }>
-): {
-  changed: number;
-  result: unknown;
-} {
-  assertCategory(db, payload.category_id);
-  const group = db.prepare('SELECT id FROM budget_groups WHERE id = ?').get(payload.group_id);
-  if (!group) throw new Error('Budget group not found');
-
-  const now = new Date().toISOString();
-  const existing = db.prepare(`
-    SELECT group_id
-    FROM budget_group_members
-    WHERE category_id = ?
-  `).get(payload.category_id) as { group_id: string } | undefined;
-  const sortRow = db.prepare(`
-    SELECT COALESCE(MAX(sort_order), -1) + 1 AS next_sort
-    FROM budget_group_members
-    WHERE group_id = ?
-  `).get(payload.group_id) as { next_sort: number };
-
-  db.prepare('DELETE FROM budget_group_members WHERE category_id = ?').run(payload.category_id);
-  db.prepare(`
-    INSERT INTO budget_group_members (group_id, category_id, sort_order, created_at)
-    VALUES (?, ?, ?, ?)
-  `).run(payload.group_id, payload.category_id, sortRow.next_sort, now);
-  db.prepare('UPDATE budget_groups SET updated_at = ? WHERE id = ?').run(now, payload.group_id);
-
-  return {
-    changed: existing?.group_id === payload.group_id ? 0 : 1,
-    result: { group_id: payload.group_id, category_id: payload.category_id },
-  };
-}
-
 function confirmRecurringAdjustment(
   db: Database.Database,
   payload: Extract<AdvisorDraftPayload, { kind: 'create_recurring_adjustment' }>
@@ -1324,10 +1111,10 @@ interface OpenDraftRow {
 /**
  * The category the model is proposing FOR SOMETHING, or null when the payload names no such thing.
  *
- * Two other kinds carry a `category_id` that is the subject of the change rather than a proposal
- * about it: `update_budget` and `assign_category_to_budget_group` name the category whose budget or
- * grouping is being changed. Filing either into `ai_feedback.proposed_category_id` would record the
- * model as having proposed a categorization it never proposed.
+ * One other kind carries a `category_id` that is the subject of the change rather than a proposal
+ * about it: `update_budget` names the category whose budget is being changed. Filing it into
+ * `ai_feedback.proposed_category_id` would record the model as having proposed a categorization it
+ * never proposed.
  */
 function proposedCategoryOf(payload: AdvisorDraftPayload): string | null {
   switch (payload.kind) {
@@ -1589,12 +1376,6 @@ export function confirmAdvisorDraft(
         result = confirmGoalTarget(db, draftAction.payload); break;
       case 'confirm_recurring':
         result = confirmRecurring(db, draftAction.payload); break;
-      case 'create_budget_group':
-        result = confirmCreateBudgetGroup(db, draftAction.payload); break;
-      case 'rename_budget_group':
-        result = confirmRenameBudgetGroup(db, draftAction.payload); break;
-      case 'assign_category_to_budget_group':
-        result = confirmAssignCategoryToBudgetGroup(db, draftAction.payload); break;
       case 'create_recurring_adjustment':
         result = confirmRecurringAdjustment(db, draftAction.payload); break;
       case 'set_manual_cost_basis':

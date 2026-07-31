@@ -213,24 +213,6 @@ function setupAdvisorDb(): Database.Database {
       updated_at TEXT NOT NULL
     );
 
-    CREATE TABLE budget_groups (
-      id TEXT PRIMARY KEY,
-      name TEXT NOT NULL,
-      color TEXT,
-      sort_order INTEGER NOT NULL DEFAULT 0,
-      created_at TEXT NOT NULL,
-      updated_at TEXT NOT NULL
-    );
-
-    CREATE TABLE budget_group_members (
-      group_id TEXT NOT NULL,
-      category_id TEXT NOT NULL,
-      sort_order INTEGER NOT NULL DEFAULT 0,
-      created_at TEXT NOT NULL,
-      PRIMARY KEY (group_id, category_id),
-      UNIQUE(category_id)
-    );
-
     CREATE TABLE budget_rollover_ledger (
       id TEXT PRIMARY KEY,
       budget_id TEXT NOT NULL,
@@ -378,15 +360,6 @@ function setupAdvisorDb(): Database.Database {
   `).run(TEST_NOW, TEST_NOW);
 
   db.prepare(`
-    INSERT INTO budget_groups (id, name, color, sort_order, created_at, updated_at)
-    VALUES ('group_needs', 'Needs', '#32bfa3', 0, ?, ?)
-  `).run(TEST_NOW, TEST_NOW);
-  db.prepare(`
-    INSERT INTO budget_group_members (group_id, category_id, sort_order, created_at)
-    VALUES ('group_needs', 'cat_food', 0, ?)
-  `).run(TEST_NOW);
-
-  db.prepare(`
     INSERT INTO goals (
       id, name, type, target_amount, current_amount, starting_amount, account_id, target_date, color, is_archived, created_at, updated_at
     )
@@ -430,7 +403,6 @@ test('advisor read tools summarize local availability and attention states', (t)
   assert.equal(byId.get('accounts')?.count, 2);
   assert.equal(byId.get('review')?.status, 'attention');
   assert.equal(byId.get('review')?.count, 1);
-  assert.equal(byId.get('budget_groups')?.count, 1);
   assert.equal(byId.get('investment_quality')?.status, 'attention');
   assert.equal(byId.get('sector_allocation')?.status, 'available');
   assert.equal(byId.get('import_audits')?.status, 'available');
@@ -492,10 +464,8 @@ test('advisor budget analysis uses rollover-adjusted available amount', (t) => {
 
   assert.equal(analysis.intent, 'budget');
   assert.match(analysis.answer, /Food: projected \$100\.00 of \$220\.00, \$120\.00 remaining\./);
-  assert.match(analysis.answer, /Budget groups/);
   assert.match(analysis.answer, /Recent rollover ledger/);
   assert.ok(analysis.citations.some((citation) => citation.id === 'budget:budget_food'));
-  assert.ok(analysis.citations.some((citation) => citation.id === 'budget-group:group_needs'));
   assert.ok(analysis.citations.some((citation) => citation.id.startsWith('rollover-ledger:')));
 });
 
@@ -781,51 +751,6 @@ test('advisor drafts and confirms a suggested merchant rule', (t) => {
   };
   assert.equal(rule.category_id, 'cat_food');
   assert.equal(updated.category_id, 'cat_food');
-});
-
-test('advisor drafts and confirms budget group changes', (t) => {
-  const db = setupAdvisorDb();
-  t.after(() => db.close());
-
-  const createAnalysis = analyzeAdvisorQuestion(
-    db,
-    'Create budget group called Fun',
-    new Date(TEST_NOW)
-  );
-  const createDraft = createAnalysis.drafts.find((item) => item.kind === 'create_budget_group');
-  assert.ok(createDraft);
-  confirmAdvisorDraft(db, createDraft, true);
-
-  const created = db.prepare('SELECT id FROM budget_groups WHERE name = ?').get('Fun') as { id: string };
-  assert.ok(created.id);
-
-  const renameAnalysis = analyzeAdvisorQuestion(
-    db,
-    'Rename Needs group to Essentials',
-    new Date(TEST_NOW)
-  );
-  const renameDraft = renameAnalysis.drafts.find((item) => item.kind === 'rename_budget_group');
-  assert.ok(renameDraft);
-  confirmAdvisorDraft(db, renameDraft, true);
-
-  const renamed = db.prepare('SELECT name FROM budget_groups WHERE id = ?').get('group_needs') as { name: string };
-  assert.equal(renamed.name, 'Essentials');
-
-  const assignAnalysis = analyzeAdvisorQuestion(
-    db,
-    'Add Restaurants to Essentials group',
-    new Date(TEST_NOW)
-  );
-  const assignDraft = assignAnalysis.drafts.find((item) => item.kind === 'assign_category_to_budget_group');
-  assert.ok(assignDraft);
-  confirmAdvisorDraft(db, assignDraft, true);
-
-  const member = db.prepare(`
-    SELECT group_id
-    FROM budget_group_members
-    WHERE category_id = 'cat_food_restaurants'
-  `).get() as { group_id: string };
-  assert.equal(member.group_id, 'group_needs');
 });
 
 test('advisor drafts and confirms recurring occurrence adjustments', (t) => {

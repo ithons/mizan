@@ -3,7 +3,6 @@ import assert from 'node:assert/strict';
 import {
   buildAccountAdvisorPrompt,
   buildBudgetAdvisorPrompt,
-  buildBudgetGroupAdvisorPrompt,
   buildDashboardCardAdvisorPrompt,
   buildGoalAdvisorPrompt,
   buildHoldingAdvisorPrompt,
@@ -22,7 +21,6 @@ import {
 import type {
   Account,
   Budget,
-  BudgetGroup,
   BudgetRolloverLedgerEntry,
   DataImportRun,
   Goal,
@@ -54,36 +52,6 @@ function budget(overrides: Partial<Budget> = {}): Budget {
     projected_spend: overrides.projected_spend ?? 330,
     projected_remaining: overrides.projected_remaining ?? 220,
     forecast_confidence: overrides.forecast_confidence ?? 'likely',
-  };
-}
-
-function budgetGroup(): BudgetGroup {
-  return {
-    id: 'group_needs',
-    name: 'Needs',
-    color: '#32bfa3',
-    sort_order: 0,
-    created_at: '2026-06-01T00:00:00.000Z',
-    updated_at: '2026-06-01T00:00:00.000Z',
-    members: [
-      {
-        group_id: 'group_needs',
-        category_id: 'cat_food',
-        category_name: 'Food',
-        sort_order: 0,
-        created_at: '2026-06-01T00:00:00.000Z',
-      },
-    ],
-    totals: {
-      budget_count: 1,
-      budgeted: 550,
-      spent: 240,
-      rollover_balance: 50,
-      expected_recurring: 90,
-      projected_spend: 330,
-      projected_remaining: 220,
-      forecast_confidence: 'likely',
-    },
   };
 }
 
@@ -634,19 +602,6 @@ test('budget advisor prompt falls back to actual spending without projections', 
   assert.equal(prompt.params?.projectedRemaining, 380);
   assert.match(prompt.prompt, /this category budget for 2026-07/);
   assert.match(prompt.prompt, /none forecast confidence/);
-});
-
-test('budget group advisor prompt captures group rollup context', () => {
-  const prompt = buildBudgetGroupAdvisorPrompt(budgetGroup(), '2026-06');
-
-  assert.equal(prompt.source, 'budget');
-  assert.equal(prompt.recordKind, 'budget_group');
-  assert.equal(prompt.recordId, 'group_needs');
-  assert.equal(prompt.params?.budgetCount, 1);
-  assert.equal(prompt.params?.projectedRemaining, 220);
-  assert.match(prompt.prompt, /Needs budget group for 2026-06/);
-  assert.match(prompt.prompt, /Food/);
-  assert.match(prompt.prompt, /Projected remaining is \$220\.00/);
 });
 
 test('rollover ledger advisor prompt captures ledger math', () => {

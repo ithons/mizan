@@ -35,6 +35,16 @@ export interface TransactionListFilters {
   uncategorized?: boolean;
   reviewStatus?: string;
   type?: 'income' | 'expense';
+  /**
+   * Exactly these rows. The one predicate the ledger cannot write as a column comparison: which
+   * rows the model has a still-live proposal about is decided by `draftLiveness`, in TypeScript,
+   * over five kinds of premise. Re-expressing that rule in SQL here would make it two rules.
+   */
+  ids?: string[];
+  /** `category_source` values to keep. The literal string 'none' selects rows where it is NULL. */
+  categorySources?: string[];
+  duplicateStatus?: string;
+  transferStatus?: string;
 }
 
 export interface TransactionListResult {
@@ -157,6 +167,37 @@ export function listTransactions(db: Database.Database, filters: TransactionList
   } else if (filters.type === 'expense') {
     conditions.push('t.amount < 0');
   }
+  if (filters.ids !== undefined) {
+    // An empty id list means "these zero rows", not "no filter". Collapsing it to no filter would
+    // answer a request for a specific empty set with the whole ledger.
+    if (filters.ids.length === 0) {
+      conditions.push('0 = 1');
+    } else {
+      conditions.push(`t.id IN (${filters.ids.map(() => '?').join(',')})`);
+      params.push(...filters.ids);
+    }
+  }
+  if (filters.categorySources !== undefined && filters.categorySources.length > 0) {
+    // 'none' is the pre-provenance majority (2,412 of 2,588 rows on the live database at
+    // migration 046), and it is a NULL rather than a value, so it cannot ride in the IN list.
+    const named = filters.categorySources.filter((s) => s !== 'none');
+    const wantsNull = filters.categorySources.length !== named.length;
+    const clauses: string[] = [];
+    if (named.length > 0) {
+      clauses.push(`t.category_source IN (${named.map(() => '?').join(',')})`);
+      params.push(...named);
+    }
+    if (wantsNull) clauses.push('t.category_source IS NULL');
+    conditions.push(`(${clauses.join(' OR ')})`);
+  }
+  if (filters.duplicateStatus !== undefined) {
+    conditions.push('t.duplicate_status = ?');
+    params.push(filters.duplicateStatus);
+  }
+  if (filters.transferStatus !== undefined) {
+    conditions.push('t.transfer_status = ?');
+    params.push(filters.transferStatus);
+  }
 
   const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
   const offset = (filters.page - 1) * filters.limit;
@@ -173,6 +214,9 @@ export function listTransactions(db: Database.Database, filters: TransactionList
       c.name AS category_name,
       c.color AS category_color,
       c.icon AS category_icon,
+      -- A positive amount inside an expense category is a refund, not income. Without this the
+      -- screen has no way to tell a $955.19 Amazon credit from a paycheck and paints both green.
+      c.is_income AS category_is_income,
       a.account_name,
       a.institution_name
     FROM transactions t
@@ -193,6 +237,9 @@ export function getTransactionById(db: Database.Database, id: string): Record<st
       c.name AS category_name,
       c.color AS category_color,
       c.icon AS category_icon,
+      -- A positive amount inside an expense category is a refund, not income. Without this the
+      -- screen has no way to tell a $955.19 Amazon credit from a paycheck and paints both green.
+      c.is_income AS category_is_income,
       a.account_name,
       a.institution_name
     FROM transactions t

@@ -1,7 +1,23 @@
+/**
+ * Fill colours, measured against `track` rather than picked to match the text ramp.
+ *
+ * A bar fill is a UI component under WCAG 1.4.11 and needs 3:1 against its adjacent colour, which
+ * here is the track it sits in and not the page. The three tones this shipped with did not have it
+ * on the light theme: `sage` measured 2.64:1 and `clay-scale` 2.20:1 against `track`, so a
+ * low-vision reader could not see where the fill ended and the bar stopped being a measurement.
+ * `SignedBar` below already ran into this and fixed it with `muted`/`sage-deep`; these three never
+ * got the same pass.
+ *
+ * Each tone is now the darkest member of its own family, which is also the one the money numerals
+ * already use, so the bar and the figure beside it agree: sage-deep is what a positive figure is
+ * set in and clay is what a negative one is set in. `gold` stays, it is the only caution token and
+ * it already clears. Ratios are re-derived from the shipped tokens by tests/plan.test.ts, which
+ * reads this map rather than a list of names typed next to it.
+ */
 const tones = {
-  sage: 'bg-sage',
+  sage: 'bg-sage-deep',
   gold: 'bg-gold',
-  clay: 'bg-clay-scale',
+  clay: 'bg-clay',
 } as const;
 
 export type ProgressTone = keyof typeof tones;
@@ -110,8 +126,8 @@ export function SignedBar({ value, extent, diverging, height = 6, className = ''
     /* Colour encodes the exception, not the rule. Every bar in a spending list pointing the same
        accent colour spends colour on nothing; the ordinary direction is structural `muted` and the
        accent is kept for the direction that is unusual, which is money coming back.
-       Measured against `track` in both themes, because a mark needs 3:1 and the tokens the plain
-       bar uses do not have it here: sage is 2.64:1 light, clay-scale 2.20:1 light, and `line-3`
+       Measured against `track` in both themes, because a mark needs 3:1 and the obvious choices do
+       not have it here: `sage` is 2.64:1 light, `clay-scale` 2.20:1 light, and `line-3`
        is 1.04:1, which is a zero rule nobody can see. muted 3.84/4.25, sage-deep 3.33/5.13 and
        ink-soft 5.12/5.70 all clear it. The rule is deliberately the most visible thing in the
        component: it is what makes this a measurement rather than a blob. */

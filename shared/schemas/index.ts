@@ -80,22 +80,6 @@ export const UpsertBudgetSchema = z.object({
   rollover: z.boolean().default(false),
 });
 
-export const CreateBudgetGroupSchema = z.object({
-  name: z.string().min(1),
-  color: z.string().nullable().optional(),
-  sort_order: z.number().int().optional(),
-});
-
-export const UpdateBudgetGroupSchema = z.object({
-  name: z.string().min(1).optional(),
-  color: z.string().nullable().optional(),
-  sort_order: z.number().int().optional(),
-});
-
-export const BudgetGroupMembersSchema = z.object({
-  category_ids: z.array(z.string().min(1)),
-});
-
 export const UpdateRecurringSchema = z.object({
   category_id: z.string().nullable().optional(),
 });
@@ -217,9 +201,6 @@ export const AdvisorDraftPayloadSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('update_budget'), category_id: id, amount: money, period: z.literal('monthly'), rollover: z.boolean() }),
   z.object({ kind: z.literal('update_goal_target'), goal_id: id, target_amount: money }),
   z.object({ kind: z.literal('confirm_recurring'), recurring_id: id }),
-  z.object({ kind: z.literal('create_budget_group'), name: z.string().min(1), color: z.string().nullable().optional() }),
-  z.object({ kind: z.literal('rename_budget_group'), group_id: id, name: z.string().min(1) }),
-  z.object({ kind: z.literal('assign_category_to_budget_group'), group_id: id, category_id: id }),
   z.object({
     kind: z.literal('create_recurring_adjustment'),
     recurring_id: id,

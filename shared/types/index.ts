@@ -119,12 +119,21 @@ export interface Transaction {
   transfer_pair_id?: string | null;
   transfer_status: 'none' | 'candidate' | 'confirmed' | 'dismissed';
   review_status: 'open' | 'reviewed' | 'dismissed';
+  /**
+   * Who decided this row's category (migration 041). NULL means the category was set before
+   * provenance was tracked, which is most of the ledger and is not the same as "nobody".
+   */
+  category_source?: 'human' | 'rule' | 'heuristic' | 'ai' | null;
+  /** The other half of the same question. Read with `category_source`, never instead of it. */
+  manually_categorized?: boolean;
   created_at: string;
   updated_at: string;
   // joined
   category_name?: string | null;
   category_color?: string | null;
   category_icon?: string | null;
+  /** Whether the row's category is an income category, so a refund is not read as income. */
+  category_is_income?: boolean | null;
   account_name?: string | null;
   institution_name?: string | null;
 }
@@ -254,38 +263,6 @@ export interface Budget {
   projected_percent?: number;
   pacing_velocity?: number;
   forecast_confidence?: 'none' | 'confirmed' | 'likely' | 'uncertain';
-}
-
-export interface BudgetGroupTotals {
-  budget_count: number;
-  budgeted: number;
-  spent: number;
-  rollover_balance: number;
-  expected_recurring: number;
-  projected_spend: number;
-  projected_remaining: number;
-  forecast_confidence: NonNullable<Budget['forecast_confidence']>;
-}
-
-export interface BudgetGroupMember {
-  group_id: string;
-  category_id: string;
-  sort_order: number;
-  created_at: string;
-  category_name?: string | null;
-  category_color?: string | null;
-  category_icon?: string | null;
-}
-
-export interface BudgetGroup {
-  id: string;
-  name: string;
-  color?: string | null;
-  sort_order: number;
-  created_at: string;
-  updated_at: string;
-  members: BudgetGroupMember[];
-  totals: BudgetGroupTotals;
 }
 
 export interface BudgetRolloverLedgerEntry {
@@ -788,9 +765,6 @@ export type AdvisorDraftActionKind =
   | 'update_budget'
   | 'update_goal_target'
   | 'confirm_recurring'
-  | 'create_budget_group'
-  | 'rename_budget_group'
-  | 'assign_category_to_budget_group'
   | 'create_recurring_adjustment'
   | 'set_manual_cost_basis'
   | 'set_sector_metadata';
@@ -836,21 +810,6 @@ export type AdvisorDraftPayload =
   | {
       kind: 'confirm_recurring';
       recurring_id: string;
-    }
-  | {
-      kind: 'create_budget_group';
-      name: string;
-      color?: string | null;
-    }
-  | {
-      kind: 'rename_budget_group';
-      group_id: string;
-      name: string;
-    }
-  | {
-      kind: 'assign_category_to_budget_group';
-      group_id: string;
-      category_id: string;
     }
   | {
       kind: 'create_recurring_adjustment';
@@ -1055,6 +1014,12 @@ export interface TransactionFilters {
   type?: string;
   sortBy?: 'date' | 'amount' | 'merchant';
   sortDir?: 'asc' | 'desc';
+  /** Exactly these rows. Capped by the server; see MAX_ID_FILTER in routes/transactions.ts. */
+  ids?: string[];
+  /** `category_source` values to keep. 'none' selects the rows recorded before provenance was. */
+  categorySource?: Array<'human' | 'rule' | 'heuristic' | 'ai' | 'none'>;
+  duplicateStatus?: 'none' | 'candidate' | 'dismissed';
+  transferStatus?: 'none' | 'candidate' | 'confirmed' | 'dismissed';
 }
 
 export interface CashflowReport {

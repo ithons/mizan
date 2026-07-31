@@ -175,27 +175,6 @@ export const DRAFT_KIND_AUTONOMY: Readonly<Record<AdvisorDraftActionKind, DraftA
       + 'the conservation guard treats as invariant, which is the figure the owner plans against.',
   },
 
-  create_budget_group: {
-    autonomy: 'proposal_only',
-    fails: ['observation'],
-    argument:
-      'A budget group is how the owner wants their own budgets arranged. There is no fact in the '
-      + 'ledger that makes one arrangement right.',
-  },
-
-  rename_budget_group: {
-    autonomy: 'proposal_only',
-    fails: ['observation'],
-    argument: 'Renaming the owner\'s own label for their own grouping is not an observation about data.',
-  },
-
-  assign_category_to_budget_group: {
-    autonomy: 'proposal_only',
-    fails: ['observation'],
-    argument:
-      'Moving a category between groups rearranges the owner\'s view of their budgets, and it '
-      + 'silently removes the category from whatever group held it before.',
-  },
 };
 
 /**

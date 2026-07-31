@@ -109,10 +109,6 @@ export const WORKER_DRAFTS_FORMAT: Anthropic.JSONOutputFormat = {
                   goal_id: { type: 'string' },
                   target_amount: { type: 'number' },
                 }),
-                draftPayloadVariant('create_budget_group', {
-                  name: { type: 'string' },
-                  color: nullableString,
-                }),
               ],
             },
             changes: {

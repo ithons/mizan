@@ -9,7 +9,10 @@ function setupDb(): Database.Database {
   const db = new Database(':memory:');
   db.exec(`
     CREATE TABLE accounts (id TEXT PRIMARY KEY, account_name TEXT, institution_name TEXT);
-    CREATE TABLE categories (id TEXT PRIMARY KEY, name TEXT, color TEXT, icon TEXT, parent_id TEXT);
+    -- is_income is joined out on every list query so a positive amount inside an expense
+    -- category can be read as a refund rather than as income. It exists in the real schema and
+    -- was missing here, which is the divergence migratedTestDb() exists to prevent.
+    CREATE TABLE categories (id TEXT PRIMARY KEY, name TEXT, color TEXT, icon TEXT, parent_id TEXT, is_income INTEGER DEFAULT 0);
     CREATE TABLE transactions (
       manually_categorized INTEGER NOT NULL DEFAULT 0,
       id TEXT PRIMARY KEY, account_id TEXT, date TEXT, amount INTEGER,
@@ -20,9 +23,9 @@ function setupDb(): Database.Database {
   `);
   db.prepare('INSERT INTO accounts VALUES (?,?,?)').run('acc_a', 'Checking', 'Bank A');
   db.prepare('INSERT INTO accounts VALUES (?,?,?)').run('acc_b', 'Savings', 'Bank B');
-  db.prepare('INSERT INTO categories VALUES (?,?,?,?,?)').run('cat_food', 'Food', '#f00', '🍔', null);
-  db.prepare('INSERT INTO categories VALUES (?,?,?,?,?)').run('cat_dining', 'Dining', '#f80', '🍽', 'cat_food');
-  db.prepare('INSERT INTO categories VALUES (?,?,?,?,?)').run('cat_income', 'Income', '#0f0', '💰', null);
+  db.prepare('INSERT INTO categories VALUES (?,?,?,?,?,?)').run('cat_food', 'Food', '#f00', '🍔', null, 0);
+  db.prepare('INSERT INTO categories VALUES (?,?,?,?,?,?)').run('cat_dining', 'Dining', '#f80', '🍽', 'cat_food', 0);
+  db.prepare('INSERT INTO categories VALUES (?,?,?,?,?,?)').run('cat_income', 'Income', '#0f0', '💰', null, 1);
 
   const ins = db.prepare(`INSERT INTO transactions
     (id, account_id, date, amount, merchant_name, original_name, category_id, notes, created_at, updated_at)

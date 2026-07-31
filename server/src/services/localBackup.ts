@@ -33,8 +33,6 @@ export const LOCAL_BACKUP_TABLES = [
   'holdings_history',
   'budgets',
   'budget_rollover_ledger',
-  'budget_groups',
-  'budget_group_members',
   'recurring_patterns',
   'recurring_occurrence_adjustments',
   'merchant_rules',

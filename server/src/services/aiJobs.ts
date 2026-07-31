@@ -111,7 +111,6 @@ export const AI_JOBS: Readonly<Record<AiJobName, AiJobDeclaration>> = {
       'create_recurring_adjustment',
       'update_budget',
       'update_goal_target',
-      'create_budget_group',
     ],
     invariants: ['autonomy_boundary', 'human_categories_preserved', 'headline_conservation'],
     digestSection: 'review',
@@ -365,10 +364,6 @@ export function draftTargetKey(payload: AdvisorDraftPayload): string {
     case 'update_budget': return `update_budget:${payload.category_id}`;
     case 'update_goal_target': return `update_goal_target:${payload.goal_id}`;
     case 'confirm_recurring': return `confirm_recurring:${payload.recurring_id}`;
-    case 'create_budget_group': return `create_budget_group:${payload.name}`;
-    case 'rename_budget_group': return `rename_budget_group:${payload.group_id}`;
-    case 'assign_category_to_budget_group':
-      return `assign_category_to_budget_group:${payload.group_id}:${payload.category_id}`;
     case 'create_recurring_adjustment':
       return `create_recurring_adjustment:${payload.recurring_id}:${payload.original_date}`;
     case 'set_manual_cost_basis': return `set_manual_cost_basis:${payload.holding_id}`;

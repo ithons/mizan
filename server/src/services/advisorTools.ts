@@ -6,7 +6,6 @@ import type {
   AdvisorCitationKind,
   AdvisorIntent,
   AdvisorToolStatus,
-  BudgetGroup,
   DataQualityIssue,
   Holding,
   GoalType,
@@ -19,7 +18,6 @@ import {
   computeBudgetRolloverLedger,
   getMonthlyBudgetsWithProjection,
 } from './budgetProjection';
-import { getBudgetGroupsWithTotals } from './budgetGroups';
 import { getReportSummary } from './reporting';
 import { buildRecurringForecast } from './recurringForecast';
 import { getSyncHealth } from './syncHealth';
@@ -76,10 +74,6 @@ function availableBudgetAmount(budget: { amount: number; rollover: boolean; roll
   return budget.amount + (budget.rollover ? budget.rollover_balance : 0);
 }
 
-function budgetGroupLine(group: BudgetGroup): string {
-  return `${group.name}: ${fmt(toDollars(group.totals.projected_spend))} projected against ${fmt(toDollars(group.totals.budgeted))}, ${fmt(toDollars(group.totals.projected_remaining))} remaining across ${group.totals.budget_count} budgets.`;
-}
-
 function count(db: Database.Database, sql: string, ...params: unknown[]): number {
   const row = db.prepare(sql).get(...params) as CountRow | undefined;
   return row?.count ?? 0;
@@ -128,7 +122,6 @@ export function buildAdvisorReadTools(
     endDate
   );
   const goalCount = count(db, 'SELECT COUNT(*) AS count FROM goals WHERE is_archived = 0');
-  const budgetGroupCount = count(db, 'SELECT COUNT(*) AS count FROM budget_groups');
   const recurringAdjustmentCount = count(db, 'SELECT COUNT(*) AS count FROM recurring_occurrence_adjustments');
   const importRunCount = count(db, 'SELECT COUNT(*) AS count FROM data_import_runs');
   const holdingCount = count(db, 'SELECT COUNT(*) AS count FROM holdings');
@@ -158,7 +151,6 @@ export function buildAdvisorReadTools(
     tool('transactions', 'Transactions', transactionCount > 0 ? 'available' : 'empty', transactionCount, '/transactions'),
     tool('reports', 'Reports', hasReportData ? 'available' : 'empty', hasReportData ? 1 : 0, '/reports'),
     tool('budgets', 'Budgets', budgets.length > 0 ? 'available' : 'empty', budgets.length, '/budget'),
-    tool('budget_groups', 'Budget groups', budgetGroupCount > 0 ? 'available' : 'empty', budgetGroupCount, '/budget'),
     tool('rollover_ledger', 'Rollover ledger', rolloverLedger.length > 0 ? 'available' : 'empty', rolloverLedger.length, '/budget'),
     tool('goals', 'Goals', goalCount > 0 ? 'available' : 'empty', goalCount, '/goals'),
     tool('recurring', 'Bills and recurring', forecast.occurrences.length > 0 ? 'available' : 'empty', forecast.occurrences.length, '/bills'),
@@ -267,9 +259,6 @@ function analyzeBudget(
   const monthKey = `${year}-${String(month).padStart(2, '0')}`;
   const budgets = getMonthlyBudgetsWithProjection(db, year, month, now)
     .sort((a, b) => (b.projected_percent ?? 0) - (a.projected_percent ?? 0));
-  const groups = getBudgetGroupsWithTotals(db, year, month, now)
-    .filter((group) => group.totals.budget_count > 0)
-    .sort((a, b) => a.totals.projected_remaining - b.totals.projected_remaining);
   const rolloverRows = computeBudgetRolloverLedger(db, { month: monthKey, months: 3, now }).slice(0, 5);
   if (budgets.length === 0) {
     return {
@@ -291,9 +280,6 @@ function analyzeBudget(
       })
       .join('\n'),
   ];
-  if (groups.length > 0) {
-    lines.push(`Budget groups:\n${groups.slice(0, 4).map(budgetGroupLine).join('\n')}`);
-  }
   if (rolloverRows.length > 0) {
     lines.push(`Recent rollover ledger:\n${rolloverRows.map((row) =>
       `${row.category_name ?? row.category_id} ${row.month}: start ${fmt(toDollars(row.starting_rollover))}, budget ${fmt(toDollars(row.budget_amount))}, spent ${fmt(toDollars(row.actual_spend))}, ending ${fmt(toDollars(row.ending_rollover))}.`
@@ -312,17 +298,6 @@ function analyzeBudget(
           route: '/budget',
           record_id: budget.id,
           amount: toDollarsOpt(budget.projected_spend),
-        })
-      ),
-      ...groups.slice(0, 4).map((group) =>
-        citation({
-          id: `budget-group:${group.id}`,
-          kind: 'budget' as const,
-          label: group.name,
-          detail: `${group.totals.budget_count} budgets, ${fmt(toDollars(group.totals.projected_remaining))} projected remaining`,
-          route: '/budget',
-          record_id: group.id,
-          amount: toDollars(group.totals.projected_spend),
         })
       ),
       ...rolloverRows.map((row) =>

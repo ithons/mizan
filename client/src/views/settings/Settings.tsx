@@ -127,9 +127,6 @@ const AUTONOMY_PHRASE: Record<AdvisorDraftActionKind, string> = {
   confirm_recurring: 'confirming a bill',
   set_sector_metadata: 'setting a security sector',
   create_recurring_adjustment: 'skipping or repricing a bill',
-  create_budget_group: 'creating a budget group',
-  rename_budget_group: 'renaming a budget group',
-  assign_category_to_budget_group: 'moving a category between budget groups',
 };
 
 /**

@@ -16,7 +16,6 @@ import type {
   AiStreamEvent,
   AppPreference,
   Budget,
-  BudgetGroup,
   BudgetRolloverLedgerEntry,
   CashflowReport,
   Category,
@@ -146,8 +145,15 @@ export const transactionsApi = {
     if (params.type) q.set('type', params.type);
     if (params.sortBy) q.set('sortBy', params.sortBy);
     if (params.sortDir) q.set('sortDir', params.sortDir);
+    if (params.duplicateStatus) q.set('duplicateStatus', params.duplicateStatus);
+    if (params.transferStatus) q.set('transferStatus', params.transferStatus);
     params.accountId?.forEach((id) => q.append('accountId', id));
     params.categoryId?.forEach((id) => q.append('categoryId', id));
+    params.categorySource?.forEach((s) => q.append('categorySource', s));
+    // Sent even when empty: `ids: []` asks for those zero rows, and dropping the param would ask
+    // for the whole ledger instead. `undefined` is how a caller says "no id filter".
+    params.ids?.forEach((id) => q.append('id', id));
+    if (params.ids?.length === 0) q.set('id', '');
     return apiFetch<PaginatedResponse<Transaction>>(`/api/transactions?${q.toString()}`);
   },
   review: () => apiFetch<TransactionReviewSummary>('/api/transactions/review'),
@@ -329,25 +335,6 @@ export const budgetsApi = {
     const [year, m] = month.split('-');
     return apiFetch<Budget[]>(`/api/budgets/month/${year}/${parseInt(m, 10)}`);
   },
-  groups: (month: string) =>
-    apiFetch<BudgetGroup[]>(`/api/budgets/groups?month=${encodeURIComponent(month)}`),
-  createGroup: (body: { name: string; color?: string | null; sort_order?: number }) =>
-    apiFetch<BudgetGroup>('/api/budgets/groups', {
-      method: 'POST',
-      body: JSON.stringify(body),
-    }),
-  updateGroup: (id: string, body: { name?: string; color?: string | null; sort_order?: number }) =>
-    apiFetch<BudgetGroup>(`/api/budgets/groups/${id}`, {
-      method: 'PATCH',
-      body: JSON.stringify(body),
-    }),
-  setGroupMembers: (id: string, categoryIds: string[]) =>
-    apiFetch<BudgetGroup>(`/api/budgets/groups/${id}/members`, {
-      method: 'PUT',
-      body: JSON.stringify({ category_ids: categoryIds }),
-    }),
-  deleteGroup: (id: string) =>
-    apiFetch<{ success: boolean }>(`/api/budgets/groups/${id}`, { method: 'DELETE' }),
   rolloverLedger: (params: { budgetId?: string; month?: string; months?: number } = {}) => {
     const q = new URLSearchParams();
     if (params.budgetId) q.set('budgetId', params.budgetId);
@@ -549,6 +536,13 @@ export const networthApi = {
   snapshot: () => apiFetch<NetWorthSnapshot | null>('/api/networth/snapshot'),
   history: (months?: number) =>
     apiFetch<NetWorthSnapshot[]>(`/api/networth/history${months ? `?months=${months}` : ''}`),
+  // A trailing count of months cannot express a closed window ("last month"), and the route has
+  // always accepted an explicit one. Additive rather than a signature change, because `history`
+  // has callers elsewhere.
+  historyBetween: (startDate: string, endDate: string) =>
+    apiFetch<NetWorthSnapshot[]>(
+      `/api/networth/history?${new URLSearchParams({ startDate, endDate }).toString()}`
+    ),
   reconstruction: () => apiFetch<ReconstructionState>('/api/networth/reconstruction'),
   rebuildReconstruction: () =>
     apiFetch<ReconstructionRun>('/api/networth/reconstruction/rebuild', { method: 'POST' }),

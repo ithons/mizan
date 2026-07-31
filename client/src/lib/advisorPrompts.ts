@@ -2,7 +2,6 @@ import type { AdvisorRoutePrompt } from './advisorRouteState';
 import type {
   Account,
   Budget,
-  BudgetGroup,
   BudgetRolloverLedgerEntry,
   DataImportRun,
   Goal,
@@ -556,39 +555,6 @@ export function buildBudgetAdvisorPrompt(budget: Budget, month: string): Advisor
       `Projected spending is ${formatMoneyValue(projectedSpend)}, including ${formatMoneyValue(expectedRecurring)} expected recurring activity.`,
       `Projected remaining is ${formatMoneyValue(projectedRemaining)} with ${confidence} forecast confidence.`,
       'Explain whether I am likely to stay under budget, what is driving the projection, and what I should review next.',
-    ].join(' '),
-  };
-}
-
-export function buildBudgetGroupAdvisorPrompt(group: BudgetGroup, month: string): AdvisorRoutePrompt {
-  const totals = group.totals;
-  const memberNames = group.members.map((member) => member.category_name ?? member.category_id).join(', ') || 'no categories';
-
-  return {
-    source: 'budget',
-    recordKind: 'budget_group',
-    recordId: group.id,
-    params: {
-      groupId: group.id,
-      month,
-      name: group.name,
-      budgetCount: totals.budget_count,
-      budgeted: totals.budgeted,
-      spent: totals.spent,
-      projectedSpend: totals.projected_spend,
-      projectedRemaining: totals.projected_remaining,
-      rolloverBalance: totals.rollover_balance,
-      expectedRecurring: totals.expected_recurring,
-      forecastConfidence: totals.forecast_confidence,
-      members: memberNames,
-    },
-    prompt: [
-      `Analyze my ${group.name} budget group for ${month}.`,
-      `It contains ${totals.budget_count} category budget${totals.budget_count === 1 ? '' : 's'}: ${memberNames}.`,
-      `Budgeted amount is ${formatMoneyValue(totals.budgeted)}, actual spending is ${formatMoneyValue(totals.spent)}, and projected spending is ${formatMoneyValue(totals.projected_spend)}.`,
-      `Projected remaining is ${formatMoneyValue(totals.projected_remaining)}, rollover balance is ${formatMoneyValue(totals.rollover_balance)}, and expected recurring spend is ${formatMoneyValue(totals.expected_recurring)}.`,
-      `Forecast confidence is ${totals.forecast_confidence}.`,
-      'Explain what is driving the group result, whether any member category needs review, and whether the group is useful as a personal rollup.',
     ].join(' '),
   };
 }

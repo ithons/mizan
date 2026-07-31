@@ -221,12 +221,8 @@ test('dismissing a draft whose premise already lapsed is marked stale, not wrong
 });
 
 /** Live targets for the kinds `draftLiveness` has no premise to check. */
-function healthyTargets(db: Database.Database): { groupId: string; recurringId: string; holdingId: string; securityId: string } {
+function healthyTargets(db: Database.Database): { recurringId: string; holdingId: string; securityId: string } {
   const accountId = insertAccount(db);
-  db.prepare(`
-    INSERT INTO budget_groups (id, name, sort_order, created_at, updated_at)
-    VALUES ('grp_fixed', 'Fixed Costs', 0, ?, ?)
-  `).run(TEST_NOW, TEST_NOW);
   db.prepare(`
     INSERT INTO recurring_patterns
       (id, merchant_name, average_amount, frequency, last_seen, next_expected, created_at, updated_at)
@@ -237,7 +233,7 @@ function healthyTargets(db: Database.Database): { groupId: string; recurringId: 
     INSERT INTO holdings (id, account_id, security_id, quantity, institution_price, institution_value, updated_at)
     VALUES ('hold_vt', ?, 'sec_vt', 8, 156.08, 124862, ?)
   `).run(accountId, TEST_NOW);
-  return { groupId: 'grp_fixed', recurringId: 'rec_gym', holdingId: 'hold_vt', securityId: 'sec_vt' };
+  return { recurringId: 'rec_gym', holdingId: 'hold_vt', securityId: 'sec_vt' };
 }
 
 test('dismissing a kind no liveness check covers records stale unknown, not live', (t) => {
@@ -245,15 +241,11 @@ test('dismissing a kind no liveness check covers records stale unknown, not live
   t.after(() => db.close());
 
   // Every target below exists and is healthy, so a NULL here cannot be read as "the target was
-  // gone". It is the honest answer: `draftLiveness` has no premise to check for these six kinds,
+  // gone". It is the honest answer: `draftLiveness` has no premise to check for these three kinds,
   // and migration 047 forbids defaulting an unasked question to 0.
-  const { groupId, recurringId, holdingId, securityId } = healthyTargets(db);
-  const categoryId = insertCategory(db, { name: 'Utilities' });
+  const { recurringId, holdingId, securityId } = healthyTargets(db);
 
   const unjudged: AdvisorDraftPayload[] = [
-    { kind: 'create_budget_group', name: 'Fixed Costs' },
-    { kind: 'rename_budget_group', group_id: groupId, name: 'Essentials' },
-    { kind: 'assign_category_to_budget_group', group_id: groupId, category_id: categoryId },
     { kind: 'create_recurring_adjustment', recurring_id: recurringId, original_date: '2026-08-01', action: 'skip' },
     { kind: 'set_manual_cost_basis', holding_id: holdingId, manual_cost_basis: 1200 },
     { kind: 'set_sector_metadata', security_id: securityId, sector: 'Technology' },
@@ -303,23 +295,18 @@ test('a budget draft records no proposed category: its category_id is the target
   const db = migratedTestDb();
   t.after(() => db.close());
 
-  const { groupId } = healthyTargets(db);
   const categoryId = insertCategory(db, { name: 'Groceries' });
   insertOpenDraft(db, 'draft_budget', {
     kind: 'update_budget', category_id: categoryId, amount: 400, period: 'monthly', rollover: false,
   });
-  insertOpenDraft(db, 'draft_assign', {
-    kind: 'assign_category_to_budget_group', group_id: groupId, category_id: categoryId,
-  });
 
   dismissAdvisorDraft(db, 'draft_budget');
-  dismissAdvisorDraft(db, 'draft_assign');
 
   for (const row of listAiFeedback(db)) {
     assert.equal(
       row.proposed_category_id,
       null,
-      `${row.proposal_kind} proposed a budget or a grouping, not a category for a transaction`
+      `${row.proposal_kind} proposed a budget, not a category for a transaction`
     );
   }
 });

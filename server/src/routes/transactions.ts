@@ -87,14 +87,45 @@ function parseSortDir(value: string | string[] | undefined): TransactionSortDir 
   return raw === 'asc' || raw === 'desc' ? raw : null;
 }
 
-function toStringArray(value: string | string[] | undefined): string[] {
-  if (value === undefined) return [];
-  return Array.isArray(value) ? value : [value];
+/**
+ * Every value a repeated query param can arrive as.
+ *
+ * Express parses the query string with `qs`, and `qs` stops producing an ARRAY for a repeated key
+ * once there are more than `arrayLimit` of them, which defaults to 20. Past that it produces an
+ * index-keyed OBJECT: `{ '0': 'a', '1': 'b', … }`. The previous `Array.isArray(value) ? value :
+ * [value]` therefore wrapped that whole object as a single element, which is a live defect at 21
+ * repeats and not at 201: the ledger's "model suggests" filter sends one id per open proposal, so
+ * a 21st proposal produced a one-element list holding an object, sailed past the id cap, and made
+ * better-sqlite3 throw "Too few parameter values were provided" as a 500.
+ *
+ * Reproduced against the real router on a read-only copy of the live database before the fix.
+ * `accountId` and `categoryId` come through the same function and had the same ceiling.
+ */
+function toStringArray(value: unknown): string[] {
+  if (value === undefined || value === null) return [];
+  if (Array.isArray(value)) return value.map((v) => String(v));
+  if (typeof value === 'object') return Object.values(value as Record<string, unknown>).map((v) => String(v));
+  return [String(value)];
 }
 
 function routeId(value: string | string[] | undefined): string {
   return Array.isArray(value) ? value[0] : value ?? '';
 }
+
+/**
+ * How many ids one request may name.
+ *
+ * The ledger's "model suggests" filter sends the exact rows the review summary judged still live.
+ * Repeated query params are how they travel, and a URL is not an unbounded channel: Node's default
+ * request-line and header ceiling is 16KB, and 200 uuids at 39 bytes each ("id=" plus 36) is about
+ * 7.8KB, which leaves room for the rest of the query. Over the cap the request is refused rather
+ * than truncated, because a silently shortened id list answers a question nobody asked.
+ */
+const MAX_ID_FILTER = 200;
+
+const CATEGORY_SOURCE_VALUES = new Set(['human', 'ai', 'rule', 'heuristic', 'none']);
+const DUPLICATE_STATUS_VALUES = new Set(['none', 'candidate', 'dismissed']);
+const TRANSFER_STATUS_VALUES = new Set(['none', 'candidate', 'confirmed', 'dismissed']);
 
 // GET / - list transactions with filters
 router.get('/', (req: Request, res: Response, next: NextFunction): void => {
@@ -192,6 +223,38 @@ router.get('/', (req: Request, res: Response, next: NextFunction): void => {
         res.status(400).json({ error: 'Invalid type filter' });
         return;
       }
+    }
+    if (query.id !== undefined) {
+      const ids = toStringArray(query.id).filter((id) => id !== '');
+      if (ids.length > MAX_ID_FILTER) {
+        res.status(400).json({ error: `At most ${MAX_ID_FILTER} id filters` });
+        return;
+      }
+      filters.ids = ids;
+    }
+    if (query.categorySource !== undefined) {
+      const sources = toStringArray(query.categorySource).filter((s) => s !== '');
+      if (sources.some((s) => !CATEGORY_SOURCE_VALUES.has(s))) {
+        res.status(400).json({ error: 'Invalid categorySource filter' });
+        return;
+      }
+      if (sources.length > 0) filters.categorySources = sources;
+    }
+    if (query.duplicateStatus !== undefined) {
+      const status = routeId(query.duplicateStatus);
+      if (!DUPLICATE_STATUS_VALUES.has(status)) {
+        res.status(400).json({ error: 'Invalid duplicateStatus filter' });
+        return;
+      }
+      filters.duplicateStatus = status;
+    }
+    if (query.transferStatus !== undefined) {
+      const status = routeId(query.transferStatus);
+      if (!TRANSFER_STATUS_VALUES.has(status)) {
+        res.status(400).json({ error: 'Invalid transferStatus filter' });
+        return;
+      }
+      filters.transferStatus = status;
     }
 
     const { rows, total } = listTransactions(db, filters);

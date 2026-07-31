@@ -69,7 +69,8 @@ interface SeededIds {
  * (holdings_history, advisor_actions, advisor_drafts, conversations, messages, budget_groups,
  * budget_group_members, budget_rollover_ledger, recurring_occurrence_adjustments) were all empty
  * in the old fixtures, which is why nothing failed while the owner's price history was being
- * deleted on every restore.
+ * deleted on every restore. Two of those nine no longer exist: migration 053 dropped the budget
+ * group tables, and they leave the closure with them.
  */
 function seedEveryTable(db: Database.Database, tag: string): SeededIds {
   const accountId = insertAccount(db, { id: `acct_${tag}`, account_name: `Checking ${tag}` });
@@ -112,16 +113,6 @@ function seedEveryTable(db: Database.Database, tag: string): SeededIds {
                                         actual_spend, ending_rollover, calculated_at)
     VALUES (?, ?, '2026-07', 0, 50000, 450, 49550, ?)
   `).run(`roll_${tag}`, budgetId, TEST_NOW);
-
-  const groupId = `grp_${tag}`;
-  db.prepare(`
-    INSERT INTO budget_groups (id, name, sort_order, created_at, updated_at)
-    VALUES (?, ?, 0, ?, ?)
-  `).run(groupId, `Group ${tag}`, TEST_NOW, TEST_NOW);
-  db.prepare(`
-    INSERT INTO budget_group_members (group_id, category_id, sort_order, created_at)
-    VALUES (?, ?, 0, ?)
-  `).run(groupId, categoryId, TEST_NOW);
 
   const recurringId = `rec_${tag}`;
   db.prepare(`
