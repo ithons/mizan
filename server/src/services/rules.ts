@@ -62,9 +62,11 @@ export function dismissRuleSuggestion(db: Database.Database, pattern: string): v
 }
 
 interface MerchantRule {
+  id: string;
   pattern: string;
   category_id: string;
   source: MerchantRuleSource;
+  created_at: string;
 }
 
 interface TransactionRuleCandidate {
@@ -115,6 +117,33 @@ function normalizeMerchantMatchValue(value: string | null | undefined): string {
     .trim();
 }
 
+/**
+ * Whether a merchant name falls under a rule pattern: exact, containment either way once the
+ * shorter side is 4 characters, or a 0.86 bigram similarity.
+ *
+ * The containment clause is deliberately two-directional and deliberately loose, and it is loose
+ * in a way that has a known cost. Provider noise means one merchant arrives under many spellings
+ * (`Spotify P3EFCD4E83 New York NY`, `SPOTIFY 877-778-1161, NY`,
+ * `AMAZON.COM AMZN.COM/BILLWA6B9ALP5O0YJ`), and the owner's rules are typed as whole descriptors
+ * while SimpleFIN also supplies a cleaned short name, so the reverse direction is what connects
+ * `Chipotle` to `CHIPOTLE 1615 CAMBRIDGE MA`. It also connects the bare name `Uber` to any
+ * `UBER *EATS` pattern.
+ *
+ * That looseness was measured over the whole ledger rather than argued about, on the state the
+ * defect was found in (236 live rules, before migration 045 retired two of them): 236 patterns
+ * against 1,297 distinct merchant names give 738 matching pairs, 113 of them reverse-containment
+ * pairs the owner's own settled categories endorse. `Uber` <- `UBER *EATS` scores INSIDE that
+ * endorsed distribution on every similarity measure tried, so a threshold tight enough to exclude
+ * it also excludes endorsed pairs: 61/113 by character coverage, 58/113 by bigram similarity,
+ * 112/113 by added-token count, 59/113 by token count, 19/113 by the shorter side's length. The
+ * cheapest formulations were run end to end: dropping the reverse clause loses 51 endorsed pairs
+ * and changes 22 merchants' winning rule; requiring two tokens on the shorter side loses 37 and
+ * changes 13. Both cost correct matches to buy the one precision win, so neither shipped.
+ *
+ * What separates the pair is not string similarity, it is precedence: the owner's four
+ * `UBER *TRIP ...` rules hold every row named `Uber`, so an eats rule can never take one. That
+ * lives in `rulesOutranking`, and it is why this function stayed as it is.
+ */
 export function merchantMatchesRulePattern(merchantName: string, pattern: string): boolean {
   const merchant = normalizeMerchantMatchValue(merchantName);
   const rule = normalizeMerchantMatchValue(pattern);
@@ -265,35 +294,189 @@ export function retireMerchantRule(
   return true;
 }
 
+/** Where a rule sorts against another one. `id` is null for a pattern with no live rule yet. */
+interface RulePrecedence {
+  source: MerchantRuleSource;
+  patternLength: number;
+  createdAt: string;
+  id: string | null;
+}
+
+function precedenceOf(rule: MerchantRule): RulePrecedence {
+  return {
+    source: rule.source,
+    patternLength: rule.pattern.length,
+    createdAt: rule.created_at,
+    id: rule.id,
+  };
+}
+
+/**
+ * The resolution order, and the only place it is written down. Negative when `a` resolves first.
+ *
+ * It used to be `created_at DESC` alone, which decided nothing: 236 live rules share 41 distinct
+ * timestamps, so ties fell to SQLite's sorter. That is how an AI rule for "Spotify" ->
+ * Subscriptions came to outrank the owner's "SPOTIFY 877-778-1161, NY" -> Streaming on all 32
+ * matching rows. Owner intent outranks a model's, the more specific pattern outranks the vaguer
+ * one, and the id makes the order total so the sorter never decides. 'suggestion' ranks with
+ * 'human': it is written only by approveMerchantRuleSuggestions, which is the owner accepting the
+ * suggestion.
+ *
+ * Pattern length re-ranks the owner's rules against EACH OTHER too, not only against the model's,
+ * and that is the intended policy rather than a side effect of aiming at the AI case: an overlap
+ * between two owner rules used to go to whichever was written last and now goes to whichever says
+ * more about the row. "SPOTIFY 877-778-1161, NY" is a claim about one merchant at one number;
+ * "Spotify" is a claim about anything spelled like Spotify, and the narrower claim should win no
+ * matter which was typed first. Pinned by tests/aiWriteGuards.test.ts.
+ */
+function compareRulePrecedence(a: RulePrecedence, b: RulePrecedence): number {
+  const authorRank = (rule: RulePrecedence): number => (rule.source === 'ai' ? 1 : 0);
+  if (authorRank(a) !== authorRank(b)) return authorRank(a) - authorRank(b);
+  if (a.patternLength !== b.patternLength) return b.patternLength - a.patternLength;
+  if (a.createdAt !== b.createdAt) return a.createdAt < b.createdAt ? 1 : -1;
+  if (a.id === b.id) return 0;
+  // A proposal with no stored row has no id to sort on, so it loses the tie. Withholding a row it
+  // might have won only under-reports; taking one it loses is the write the next whole-ledger pass
+  // silently reverts.
+  if (a.id === null) return 1;
+  if (b.id === null) return -1;
+  return a.id < b.id ? -1 : 1;
+}
+
+/**
+ * Every live rule in the order the application resolves them: the first match wins.
+ *
+ * Sorted in this process rather than by an ORDER BY, so the whole-ledger pass and the single-rule
+ * paths read the order out of `compareRulePrecedence` instead of each restating it. They did not,
+ * and the two disagreed about what the same rule does: see `rulesOutranking`.
+ */
+function loadOrderedMerchantRules(db: Database.Database): MerchantRule[] {
+  const rules = db.prepare(`
+    SELECT id, pattern, category_id, source, created_at
+    FROM merchant_rules
+    WHERE retired_at IS NULL
+  `).all() as MerchantRule[];
+  return rules.sort((a, b) => compareRulePrecedence(precedenceOf(a), precedenceOf(b)));
+}
+
+/**
+ * The rules that beat one pattern under the resolution order above.
+ *
+ * A rule never applies alone. `applyMerchantRulesToExistingTransactions` walks the ordered list
+ * and takes the first match, so a row already spoken for by a higher-precedence rule is not this
+ * rule's to relabel. The single-rule paths ignored that and asked only "does the pattern match",
+ * which made them disagree with the whole-ledger path about the same rule on the same data.
+ *
+ * Measured on the owner's ledger: with `UBER *EATS` -> food delivery installed,
+ * `applyMerchantRulesToExistingTransactions` leaves the 13 rows named "Uber" in
+ * cat_transport_ride, because four owner rules for `UBER *TRIP ...` outrank it. The single-rule
+ * path relabelled all 13 as food delivery, and `countMerchantRuleImpact` reported 13 as the blast
+ * radius the owner would be shown. The matcher's reverse-containment clause is what sweeps the
+ * bare name "Uber" into an eats pattern, and no threshold on it separates that pair from the
+ * correct ones (see the note on `merchantMatchesRulePattern`); precedence separates them without
+ * touching the matcher at all.
+ *
+ * A stored rule for the same pattern IS this rule, mid-upsert, so it never outranks itself.
+ * Everything else is one `compareRulePrecedence` call, over the rank `resolveProposalPrecedence`
+ * gives the proposal. This used to stop after the first two keys and read an equal-length rule as
+ * beaten, on the reasoning that a rule being written now is the newest one there is.
+ * `upsertMerchantRule` never bumps `created_at`, so a re-applied rule is not the newest, and two
+ * owner rules of equal pattern length resolved differently depending on which path asked: the
+ * whole-ledger pass took the newer one, the single-rule apply took whichever it was handed, and
+ * the next re-check reverted the difference. `merchant_rules` is dense in exactly those ties (236
+ * live rules over 41 distinct timestamps, 173 of them sharing one: `SELECT created_at, COUNT(*)
+ * FROM merchant_rules WHERE retired_at IS NULL GROUP BY created_at ORDER BY 2 DESC`).
+ */
+function rulesOutranking(
+  ordered: MerchantRule[],
+  pattern: string,
+  proposal: RulePrecedence
+): MerchantRule[] {
+  const key = pattern.trim().toLowerCase();
+  return ordered.filter((rule) => {
+    if (rule.pattern.trim().toLowerCase() === key) return false;
+    return compareRulePrecedence(precedenceOf(rule), proposal) < 0;
+  });
+}
+
+/** The rule that already holds this transaction, if one outranks the pattern being applied. */
+function higherPrecedenceHolder(
+  outranking: MerchantRule[],
+  merchantName: string
+): MerchantRule | undefined {
+  return outranking.find((rule) => merchantMatchesRulePattern(merchantName, rule.pattern));
+}
+
+/**
+ * Where a pattern sorts, for the single-rule paths: the rank the rule will hold once written.
+ *
+ * The timestamp and the id come from the stored row and are not the caller's to supply.
+ * `upsertMerchantRule` rewrites neither on an existing rule (it touches `updated_at` only), so a
+ * rule being re-applied keeps the instant and the id it was created with. Only a pattern with
+ * nothing stored yet (the blast-radius pre-check, which runs before any write) is ranked as new.
+ *
+ * `source` is the caller's, because it names the write path rather than the row: it decides which
+ * side of the human/ai split the write lands on, and the AI path has to be judged as the model
+ * whether or not the owner happens to hold the same pattern. It falls back to the stored row, then
+ * to `upsertMerchantRule`'s own default.
+ */
+function resolveProposalPrecedence(
+  db: Database.Database,
+  pattern: string,
+  declared: MerchantRuleSource | undefined
+): RulePrecedence {
+  const trimmed = pattern.trim();
+  const stored = db.prepare(
+    'SELECT id, source, created_at FROM merchant_rules WHERE lower(pattern) = lower(?) AND retired_at IS NULL LIMIT 1'
+  ).get(trimmed) as { id: string; source: MerchantRuleSource; created_at: string } | undefined;
+
+  return {
+    source: declared ?? stored?.source ?? 'human',
+    patternLength: trimmed.length,
+    createdAt: stored?.created_at ?? new Date().toISOString(),
+    id: stored?.id ?? null,
+  };
+}
+
+/**
+ * The distinct merchant names a rule would actually claim: the ones it matches and that no
+ * higher-precedence rule has already filed somewhere else.
+ *
+ * This is a rule's real reach, and it is narrower than the set its pattern matches.
+ */
+export function merchantNamesClaimedByRule(
+  db: Database.Database,
+  pattern: string,
+  categoryId: string,
+  source?: MerchantRuleSource
+): string[] {
+  const normalizedPattern = pattern.trim();
+  if (!normalizedPattern) return [];
+
+  const outranking = rulesOutranking(
+    loadOrderedMerchantRules(db),
+    normalizedPattern,
+    resolveProposalPrecedence(db, normalizedPattern, source)
+  );
+  const names = db.prepare(
+    "SELECT DISTINCT COALESCE(NULLIF(merchant_name, ''), original_name) AS name FROM transactions"
+  ).all() as Array<{ name: string }>;
+
+  return names
+    .map((row) => row.name)
+    .filter((name) => merchantMatchesRulePattern(name, normalizedPattern))
+    .filter((name) => {
+      const holder = higherPrecedenceHolder(outranking, name);
+      return holder === undefined || holder.category_id === categoryId;
+    });
+}
+
 export function applyMerchantRulesToExistingTransactions(
   db: Database.Database,
   options: { onlyUncategorized?: boolean; skipManual?: boolean; provenance?: CategoryProvenance } = {}
 ): RuleApplicationResult {
   const onlyUncategorized = options.onlyUncategorized ?? true;
-  // Several rules can match one merchant, and the first match wins, so this ORDER BY is the
-  // resolution policy. It used to be `created_at DESC` alone, which decided nothing: 236 live
-  // rules share 41 distinct timestamps, so ties fell to SQLite's sorter. That is how an AI rule
-  // for "Spotify" -> Subscriptions came to outrank the owner's "SPOTIFY 877-778-1161, NY" ->
-  // Streaming on all 32 matching rows. Owner intent outranks a model's, the more specific pattern
-  // outranks the vaguer one, and `id ASC` makes the order total so the sorter never decides.
-  // 'suggestion' ranks with 'human': it is written only by approveMerchantRuleSuggestions, which
-  // is the owner accepting the suggestion.
-  //
-  // `length(pattern) DESC` re-ranks the owner's rules against EACH OTHER too, not only against the
-  // model's, and that is the intended policy rather than a side effect of aiming at the AI case: an
-  // overlap between two owner rules used to go to whichever was written last and now goes to
-  // whichever says more about the row. "SPOTIFY 877-778-1161, NY" is a claim about one merchant at
-  // one number; "Spotify" is a claim about anything spelled like Spotify, and the narrower claim
-  // should win no matter which was typed first. Pinned by tests/aiWriteGuards.test.ts.
-  const rules = db.prepare(`
-    SELECT pattern, category_id, source
-    FROM merchant_rules
-    WHERE retired_at IS NULL
-    ORDER BY (source = 'ai') ASC,
-             length(pattern) DESC,
-             created_at DESC,
-             id ASC
-  `).all() as MerchantRule[];
+  const rules = loadOrderedMerchantRules(db);
 
   if (rules.length === 0) return { updated: 0 };
 
@@ -415,15 +598,26 @@ export function recategorizeAll(db: Database.Database): RuleApplicationResult {
 }
 
 /**
- * How many rows a rule would actually relabel, computed with the same matcher and the same
- * exclusions as the apply path. Exists so the blast-radius guard can run BEFORE the write rather
- * than reporting the damage afterwards.
+ * How many rows a rule would actually relabel, computed with the same matcher, the same
+ * exclusions and the same precedence as the apply path. Exists so the blast-radius guard can run
+ * BEFORE the write rather than reporting the damage afterwards.
+ *
+ * "Actually" is load-bearing and used not to be. This counted every row the pattern matched, so
+ * for `UBER *EATS` -> food delivery it reported 13 rows the rule could never take, all of them
+ * ride charges held by the owner's own `UBER *TRIP ...` rules. The number a guard refuses on, and
+ * the number the owner is shown, has to be the number of rows that would change.
+ *
+ * Running before the write is also what makes `ruleSource` the caller's job: with no rule stored
+ * for the pattern yet there is nothing to read the author off, and a proposal counted as the
+ * owner's is counted against a shorter outranking set than the one the AI write then resolves
+ * against. That gap put a number in front of the owner that the write disagreed with, in the one
+ * place the owner reads it: `checkBlastRadius` refuses with "would relabel N transactions".
  */
 export function countMerchantRuleImpact(
   db: Database.Database,
   pattern: string,
   categoryId: string,
-  options: { overwrite?: boolean } = {}
+  options: { overwrite?: boolean; ruleSource?: MerchantRuleSource } = {}
 ): number {
   const normalizedPattern = pattern.trim();
   if (!normalizedPattern) return 0;
@@ -438,10 +632,19 @@ export function countMerchantRuleImpact(
     ${scanWhere}
   `).all() as TransactionRuleCandidate[];
 
+  const outranking = rulesOutranking(
+    loadOrderedMerchantRules(db),
+    normalizedPattern,
+    resolveProposalPrecedence(db, normalizedPattern, options.ruleSource)
+  );
+
   let count = 0;
   for (const transaction of transactions) {
-    if (!merchantMatchesRulePattern(transactionMerchantName(transaction), normalizedPattern)) continue;
+    const merchantName = transactionMerchantName(transaction);
+    if (!merchantMatchesRulePattern(merchantName, normalizedPattern)) continue;
     if (transaction.category_id === categoryId) continue;
+    const holder = higherPrecedenceHolder(outranking, merchantName);
+    if (holder && holder.category_id !== categoryId) continue;
     count += 1;
   }
   return count;
@@ -452,7 +655,7 @@ export function applyMerchantRuleToMatchingTransactions(
   pattern: string,
   categoryId: string,
   now = new Date().toISOString(),
-  options: { overwrite?: boolean; provenance?: CategoryProvenance } = {}
+  options: { overwrite?: boolean; provenance?: CategoryProvenance; ruleSource?: MerchantRuleSource } = {}
 ): RuleApplicationResult {
   const normalizedPattern = pattern.trim();
   if (!normalizedPattern) return { updated: 0 };
@@ -471,11 +674,24 @@ export function applyMerchantRuleToMatchingTransactions(
     ${scanWhere}
   `).all() as TransactionRuleCandidate[];
 
+  // Same order the whole-ledger pass resolves by, so applying one rule and re-checking every rule
+  // cannot reach different answers about the same row. Writing a row a higher-precedence rule
+  // holds is a write the next "Re-check all transactions" silently reverts, which is the
+  // self-reverting-repair trap this codebase has been bitten by before.
+  const outranking = rulesOutranking(
+    loadOrderedMerchantRules(db),
+    normalizedPattern,
+    resolveProposalPrecedence(db, normalizedPattern, options.ruleSource)
+  );
+
   const provenance = options.provenance ?? { source: 'rule' as const };
   const writes: CategoryWrite[] = [];
   for (const transaction of transactions) {
-    if (!merchantMatchesRulePattern(transactionMerchantName(transaction), normalizedPattern)) continue;
+    const merchantName = transactionMerchantName(transaction);
+    if (!merchantMatchesRulePattern(merchantName, normalizedPattern)) continue;
     if (transaction.category_id === categoryId) continue; // already correct
+    const holder = higherPrecedenceHolder(outranking, merchantName);
+    if (holder && holder.category_id !== categoryId) continue;
     writes.push({
       transactionId: transaction.id,
       categoryId,

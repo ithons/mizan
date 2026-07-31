@@ -807,13 +807,13 @@ export function buildAdvisorDrafts(
  * respect is not a bound. See aiWriteGuards.ts for why each exists.
  *
  * The single definition of "would this write be refused", and it belongs to the WRITE path only.
- * `isDraftStillActionable` deliberately does not ask it: these guards have false positives, and
- * filtering the queue with them removes a healthy suggestion with no reason shown and no way to see
- * it. `checkRuleDoesNotContradictOwnerRule` refuses 'UBER *EATS' -> food delivery, which 113 of the
- * owner's settled rows agree with, because `merchantMatchesRulePattern` sweeps the bare merchant
- * name "Uber" into both that pattern and the owner's own 'UBER   *TRIP HELP.UBER.COM, CA' rule. A
- * refusal at confirm time is a 409 whose text the owner reads, so the draft is explainable and
- * dismissable instead of silently absent.
+ * `isDraftStillActionable` deliberately does not ask it. Filtering the queue with a guard removes
+ * the suggestion with no reason shown and no way to see it, while a refusal at confirm time is a
+ * 409 whose sentence the owner reads, leaving the draft explainable and dismissable instead of
+ * silently absent. That was the right split when these guards still refused healthy proposals in
+ * bulk (the 'UBER *EATS' -> food delivery case, since fixed by narrowing
+ * `checkRuleDoesNotContradictOwnerRule` to the rows a rule would actually claim), and it stays the
+ * right split now that they refuse fewer: a guard the queue applies silently cannot be argued with.
  */
 function checkMerchantRuleWritable(
   db: Database.Database,
@@ -836,8 +836,17 @@ function checkMerchantRuleWritable(
   // rows, yet still reported changed=1 and wrote an advisor_actions row with an Undo button that
   // could only ever 409. An action either has a real blast radius and a real undo, or it is not
   // an action. `skipManual` keeps hand-made choices out of that radius.
+  //
+  // `ruleSource` is not optional here even though nothing is written yet: this runs before the
+  // upsert, so `countMerchantRuleImpact` has no stored row to read the author off and would rank
+  // the proposal as the owner's. Every owner rule outranks every AI rule, so counting it as the
+  // owner's counts rows this write can never take, and `checkBlastRadius` puts that number in
+  // front of the owner as "would relabel N transactions".
   const impact = payload.apply_existing
-    ? countMerchantRuleImpact(db, payload.pattern, payload.category_id, { overwrite: true })
+    ? countMerchantRuleImpact(db, payload.pattern, payload.category_id, {
+        overwrite: true,
+        ruleSource: 'ai',
+      })
     : 0;
   const blastRadius = checkBlastRadius(impact);
   if (!blastRadius.ok) return blastRadius;

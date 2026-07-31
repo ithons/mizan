@@ -10,6 +10,7 @@ import {
   partitionByAuthorship,
 } from '../server/src/services/aiWriteGuards';
 import {
+  applyMerchantRuleToMatchingTransactions,
   applyMerchantRulesToExistingTransactions,
   merchantMatchesRulePattern,
   retireMerchantRule,
@@ -250,21 +251,151 @@ test('an owner rule with no matching history still blocks a contradicting AI rul
   db.close();
 });
 
-test('two patterns that miss each other still contend when one transaction matches both', () => {
+/**
+ * The healthy case that this guard used to fire on, measured on the owner's real ledger.
+ *
+ * `merchantMatchesRulePattern` sweeps the bare merchant name "Uber" into both `UBER *EATS` and the
+ * owner's `UBER   *TRIP HELP.UBER.COM, CA`, so reading "one transaction matches both patterns" as
+ * contention refused a food-delivery rule the owner's own settled delivery rows agree with. Across
+ * every distinct merchant name on the real ledger (1,297) proposed against the category holding the
+ * plurality of its own categorized rows, that reading produced 20 refusals, and 18 of them were
+ * refused on the shared-row arm alone: nine `UBER *EATS`/`UBER *LIME` spellings through "Uber", two
+ * `GRUBHUB*CHIPOTLE` through "Chipotle", `APPLE STORE #R149 BOSTON MA` through "Apple".
+ *
+ * What makes it a non-fight is precedence, not similarity: every owner rule outranks every AI rule,
+ * so the row named "Uber" was never the eats rule's to take. Both halves are asserted here, because
+ * a guard that allows the write is only correct if the write then leaves the row alone.
+ */
+test('a row the owner rule holds is not contention, and the AI rule cannot take it', () => {
   const db = migratedTestDb();
-  const hotels = insertCategory(db, { name: 'Hotels' });
-  const travel = insertCategory(db, { name: 'Travel' });
+  const ride = insertCategory(db, { name: 'Ride share' });
+  const delivery = insertCategory(db, { name: 'Food delivery' });
+  const account = insertAccount(db);
 
-  upsertMerchantRule(db, 'SILVER CITY MOUNTAIN', hotels, TEST_NOW, { source: 'human' });
-  // Neither pattern matches the other, so pattern overlap alone would let this through.
-  assert.equal(merchantMatchesRulePattern('SILVER CITY MOUNTAIN', 'THREE RIVERS CA'), false);
-  assert.equal(checkRuleDoesNotContradictOwnerRule(db, 'THREE RIVERS CA', travel).ok, true);
+  upsertMerchantRule(db, 'UBER   *TRIP HELP.UBER.COM, CA', ride, TEST_NOW, { source: 'human' });
 
-  insertTransaction(db, { merchant_name: 'SILVER CITY MOUNTAIN RES THREE RIVERS CA' });
+  for (const name of [
+    'UBER   *EATS HELP.UBER.COM, CA',
+    'UBER *EATS HELP.UBER.C 800-5928996, CA',
+    'UBER *EATS HELP.UBER.COMCA',
+  ]) {
+    insertTransaction(db, { account_id: account, merchant_name: name, category_id: delivery });
+  }
+  const rideRow = insertTransaction(db, {
+    account_id: account,
+    merchant_name: 'Uber',
+    category_id: ride,
+    category_source: 'rule',
+  });
 
-  const blocked = checkRuleDoesNotContradictOwnerRule(db, 'THREE RIVERS CA', travel);
-  assert.equal(blocked.ok, false);
-  assert.equal(blocked.ok === false && blocked.reason, 'contradicts_owner_rule');
+  // The matcher still sweeps that row into both patterns. Tightening it is not what fixed this:
+  // every threshold tried lost correct matches, and the measurement is recorded on the matcher.
+  assert.equal(merchantMatchesRulePattern('Uber', 'UBER *EATS'), true);
+  assert.equal(merchantMatchesRulePattern('Uber', 'UBER   *TRIP HELP.UBER.COM, CA'), true);
+
+  assert.equal(checkRuleDoesNotContradictOwnerRule(db, 'UBER *EATS', delivery).ok, true);
+  assert.equal(checkRuleAgreesWithHistory(db, 'UBER *EATS', delivery).ok, true);
+
+  upsertMerchantRule(db, 'UBER *EATS', delivery, TEST_NOW, { source: 'ai' });
+  applyMerchantRuleToMatchingTransactions(db, 'UBER *EATS', delivery, TEST_NOW, { overwrite: true });
+
+  const row = db.prepare('SELECT category_id FROM transactions WHERE id = ?').get(rideRow) as {
+    category_id: string;
+  };
+  assert.equal(row.category_id, ride, 'the owner rule holds the row, so the eats rule cannot take it');
+  db.close();
+});
+
+/**
+ * The other shape the narrowing lifted, 3 of the 18: no bare short name involved, a single provider
+ * descriptor that names both parties. `CLAUDE.AI SUBSCRIPTION ANTHROPIC.COMCA` is matched by the
+ * proposal and by the owner's `Anthropic` rule alike, and the owner's rule holds it.
+ */
+test('a descriptor naming both parties is not contention either, and the owner keeps its row', () => {
+  const db = migratedTestDb();
+  const software = insertCategory(db, { name: 'Software' });
+  const subscriptions = insertCategory(db, { name: 'Subscriptions' });
+  const account = insertAccount(db);
+
+  upsertMerchantRule(db, 'Anthropic', software, TEST_NOW, { source: 'human' });
+  const shared = insertTransaction(db, {
+    account_id: account,
+    merchant_name: 'CLAUDE.AI SUBSCRIPTION ANTHROPIC.COMCA',
+    category_id: software,
+    category_source: 'rule',
+  });
+  const own = insertTransaction(db, { account_id: account, merchant_name: 'Claude.ai Subscription' });
+
+  assert.equal(merchantMatchesRulePattern('CLAUDE.AI SUBSCRIPTION ANTHROPIC.COMCA', 'Anthropic'), true);
+  assert.equal(
+    merchantMatchesRulePattern('CLAUDE.AI SUBSCRIPTION ANTHROPIC.COMCA', 'Claude.ai Subscription'),
+    true
+  );
+  assert.equal(checkRuleDoesNotContradictOwnerRule(db, 'Claude.ai Subscription', subscriptions).ok, true);
+
+  upsertMerchantRule(db, 'Claude.ai Subscription', subscriptions, TEST_NOW, { source: 'ai' });
+  applyMerchantRuleToMatchingTransactions(db, 'Claude.ai Subscription', subscriptions, TEST_NOW, {
+    overwrite: true,
+  });
+
+  const categoryOf = (id: string): string | null =>
+    (db.prepare('SELECT category_id FROM transactions WHERE id = ?').get(id) as {
+      category_id: string | null;
+    }).category_id;
+  assert.equal(categoryOf(shared), software, 'the owner rule outranks the proposal on the row it holds');
+  assert.equal(categoryOf(own), subscriptions);
+  db.close();
+});
+
+test('an AI rule that contradicts an owner rule by pattern is still refused', () => {
+  const db = migratedTestDb();
+  const streaming = insertCategory(db, { name: 'Streaming' });
+  const subscriptions = insertCategory(db, { name: 'Subscriptions' });
+  const software = insertCategory(db, { name: 'Software' });
+
+  // The two rules Phase 5b found outranking the owner's. Both are caught by pattern overlap alone,
+  // which is why narrowing the shared-transaction arm does not reopen them: "Spotify" is contained
+  // in "Spotify USA", "Backblaze" in "BACKBLAZE INC".
+  upsertMerchantRule(db, 'Spotify USA', streaming, TEST_NOW, { source: 'human' });
+  upsertMerchantRule(db, 'BACKBLAZE INC', software, TEST_NOW, { source: 'human' });
+
+  const spotify = checkRuleDoesNotContradictOwnerRule(db, 'Spotify', subscriptions);
+  assert.equal(spotify.ok, false);
+  assert.equal(spotify.ok === false && spotify.reason, 'contradicts_owner_rule');
+
+  const backblaze = checkRuleDoesNotContradictOwnerRule(db, 'Backblaze', subscriptions);
+  assert.equal(backblaze.ok, false);
+  assert.equal(backblaze.ok === false && backblaze.reason, 'contradicts_owner_rule');
+
+  // Not through any transaction: the guard exists to protect rows that do not exist yet, and an AI
+  // rule contradicting an owner rule would activate silently if the owner ever retired theirs.
+  const count = db.prepare('SELECT COUNT(*) AS n FROM transactions').get() as { n: number };
+  assert.equal(count.n, 0);
+  db.close();
+});
+
+test('the owner-rule guard stays silent on ordinary proposals', () => {
+  const db = migratedTestDb();
+  const groceries = insertCategory(db, { name: 'Groceries' });
+  const restaurants = insertCategory(db, { name: 'Restaurants' });
+  const delivery = insertCategory(db, { name: 'Food delivery' });
+  const account = insertAccount(db);
+
+  upsertMerchantRule(db, 'TRADER JOE S #502 CAMBRIDGE MA', groceries, TEST_NOW, { source: 'human' });
+  upsertMerchantRule(db, 'CHIPOTLE 1615 CAMBRIDGE MA', restaurants, TEST_NOW, { source: 'human' });
+  insertTransaction(db, { account_id: account, merchant_name: 'Trader Joe\'s', category_id: groceries });
+  insertTransaction(db, { account_id: account, merchant_name: 'Chipotle', category_id: restaurants });
+
+  // A merchant the owner has never written a rule about.
+  assert.equal(checkRuleDoesNotContradictOwnerRule(db, 'Newmerchant Cafe', restaurants).ok, true);
+  // A proposal agreeing with the owner's own rule.
+  assert.equal(checkRuleDoesNotContradictOwnerRule(db, 'Trader Joe\'s', groceries).ok, true);
+  // A different product line that reaches the owner's merchant only through the bare short name
+  // the owner's own rule already holds. 15 of the 18 refusals the narrowing lifted were this shape.
+  assert.equal(
+    checkRuleDoesNotContradictOwnerRule(db, 'GRUBHUB*CHIPOTLE GRUBHUB.COM NY', delivery).ok,
+    true
+  );
   db.close();
 });
 

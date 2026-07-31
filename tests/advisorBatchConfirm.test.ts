@@ -405,18 +405,20 @@ test('a draft the guards would refuse is still offered, with its refusal explain
 });
 
 /**
- * The false positive that makes hiding refused drafts the wrong cure.
+ * The healthy proposal the owner-rule guard used to mistake for a contradiction.
  *
  * `merchantMatchesRulePattern` matches on containment, so the bare merchant name "Uber" is swept by
- * BOTH "UBER *EATS" and the owner's "UBER   *TRIP HELP.UBER.COM, CA". `rulesContend` reads that one
- * shared row as the two rules fighting, and the owner-rule guard refuses a food-delivery rule that
- * every settled delivery row agrees with. On the owner's ledger that is exactly the shape: eight
- * distinct UBER EATS descriptions filed under food delivery, and one three-letter-stem "Uber" row
- * that drags the ride rule in. Pre-filtering the queue with the guards deleted this suggestion
- * outright. The matcher is a separate, larger defect; what is pinned here is that the suggestion
- * stays visible and the refusal stays readable.
+ * BOTH "UBER *EATS" and the owner's "UBER   *TRIP HELP.UBER.COM, CA". `rulesContend` read that one
+ * shared row as the two rules fighting and refused a food-delivery rule every settled delivery row
+ * agrees with. On the owner's ledger that is exactly the shape: several distinct UBER EATS
+ * descriptions filed under food delivery, and one bare "Uber" row that drags the ride rule in.
+ *
+ * The row was never the eats rule's to take, because every owner rule outranks every AI rule, so
+ * the guard now asks what the proposal would actually CLAIM and this write goes through. What is
+ * pinned here is the whole shape of it landing: the rule is created, the ride row does not move,
+ * and the one thing counted as changed is the rule itself.
  */
-test('a healthy rule the owner-rule guard mistakes for a contradiction is still offered', (t) => {
+test('a healthy rule the owner-rule guard used to refuse is offered and applies', (t) => {
   const db = migratedTestDb();
   t.after(() => db.close());
 
@@ -434,8 +436,8 @@ test('a healthy rule the owner-rule guard mistakes for a contradiction is still 
   ]) {
     insertTransaction(db, { account_id: account, merchant_name: name, category_id: delivery });
   }
-  // The row that makes the guard fire: swept by the proposal and by the owner's ride rule alike.
-  insertTransaction(db, { account_id: account, merchant_name: 'Uber', category_id: ride });
+  // The row that used to make the guard fire: swept by the proposal and by the owner's ride rule.
+  const rideRow = insertTransaction(db, { account_id: account, merchant_name: 'Uber', category_id: ride });
 
   const payload: AdvisorDraftPayload = {
     kind: 'create_merchant_rule',
@@ -448,14 +450,78 @@ test('a healthy rule the owner-rule guard mistakes for a contradiction is still 
   assert.equal(isDraftStillActionable(db, payload), true, 'the owner must be able to see this one');
   assert.deepEqual(getTransactionReviewSummary(db).ai_drafts.map((d) => d.id), ['d_eats']);
 
-  // And when it is clicked, the refusal says which rule it thinks it contends with, so a wrong
-  // refusal is legible instead of silent.
   const outcome = confirmAdvisorDraftsByIds(db, ['d_eats']).outcomes[0];
-  assert.equal(outcome.refused, 'contradicts_owner_rule');
-  assert.match(String(outcome.reason), /contends with your own rule "UBER   \*TRIP HELP\.UBER\.COM, CA"/);
-  assert.doesNotMatch(String(outcome.reason), /^Refused: /, 'the client no longer strips a prefix');
-  assert.equal(actionCount(db), 0);
-  assert.equal(draftStatus(db, 'd_eats'), 'open');
+  assert.equal(outcome.status, 'applied');
+  assert.equal(outcome.refused, undefined);
+  assert.equal(outcome.changed, 1);
+  assert.equal(actionCount(db), 1);
+  assert.equal(draftStatus(db, 'd_eats'), 'confirmed');
+
+  // The 1 is the rule, and nothing else. Every category write appends a revision, so an empty
+  // revisions table is proof no transaction was relabelled: the delivery rows were already filed
+  // there, and the ride row belongs to the owner's rule.
+  const rule = db.prepare(
+    "SELECT category_id, source FROM merchant_rules WHERE pattern = 'UBER *EATS' AND retired_at IS NULL"
+  ).get() as { category_id: string; source: string } | undefined;
+  assert.deepEqual(rule, { category_id: delivery, source: 'ai' });
+  const relabelled = db
+    .prepare('SELECT COUNT(*) AS n FROM transaction_category_revisions')
+    .get() as { n: number };
+  assert.equal(relabelled.n, 0, 'changed: 1 counted the rule creation, not a moved transaction');
+  const held = db.prepare('SELECT category_id FROM transactions WHERE id = ?').get(rideRow) as {
+    category_id: string;
+  };
+  assert.equal(held.category_id, ride, 'the owner rule holds the row, so the eats rule cannot take it');
+});
+
+/**
+ * The blast radius the guard refuses on is the one the write would have.
+ *
+ * `checkMerchantRuleWritable` ran the pre-write count without saying who was writing the rule, and
+ * with no rule stored for the pattern yet there is nothing on disk to read the author off, so the
+ * proposal was counted as the owner's. Every owner rule outranks every AI rule, so rows the owner's
+ * own rule holds were counted into a limit they can never reach, and `checkBlastRadius` reported
+ * that count to the owner verbatim as "would relabel N transactions".
+ */
+test('rows an owner rule holds are not counted into the autonomous blast radius', (t) => {
+  const db = migratedTestDb();
+  t.after(() => db.close());
+
+  const shopping = insertCategory(db, { name: 'Shopping' });
+  const household = insertCategory(db, { name: 'Household' });
+  const account = insertAccount(db);
+
+  // Short enough not to contend with the proposal by pattern, so the owner-rule guard stays out of
+  // this and the blast radius is the only thing left to decide it.
+  upsertMerchantRule(db, 'AMZN.COM', shopping, TEST_NOW, { source: 'human' });
+  const rows: string[] = [];
+  for (let i = 0; i < 201; i += 1) {
+    rows.push(
+      insertTransaction(db, { account_id: account, merchant_name: 'AMAZON MKTPLACE PMTS AMZN.COM/BILL WA' })
+    );
+  }
+
+  insertRuleDraft(db, 'd_amzn', {
+    kind: 'create_merchant_rule',
+    pattern: 'AMAZON MKTPLACE PMTS',
+    category_id: household,
+    apply_existing: true,
+  });
+
+  const outcome = confirmAdvisorDraftsByIds(db, ['d_amzn']).outcomes[0];
+  assert.equal(outcome.refused, undefined, '201 rows the owner rule holds are not this rule to relabel');
+  assert.equal(outcome.status, 'applied');
+  assert.equal(outcome.changed, 1, 'the rule, and not one of the 201 rows');
+  assert.equal(actionCount(db), 1);
+
+  const relabelled = db
+    .prepare('SELECT COUNT(*) AS n FROM transaction_category_revisions')
+    .get() as { n: number };
+  assert.equal(relabelled.n, 0);
+  const stillOpen = db
+    .prepare(`SELECT COUNT(*) AS n FROM transactions WHERE id IN (${rows.map(() => '?').join(',')}) AND category_id IS NULL`)
+    .get(...rows) as { n: number };
+  assert.equal(stillOpen.n, 201);
 });
 
 /**

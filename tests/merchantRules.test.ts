@@ -5,6 +5,7 @@ import {
   applyMerchantRuleToMatchingTransactions,
   applyMerchantRulesToExistingTransactions,
   autoCategorizeTransactions,
+  countMerchantRuleImpact,
   merchantMatchesRulePattern,
   recategorizeAll,
   upsertMerchantRule,
@@ -279,6 +280,254 @@ test('an owner-approved suggestion rule ranks with the owner, not with the model
     category_id: string | null;
   };
   assert.equal(row.category_id, streaming);
+});
+
+/**
+ * The single-rule paths used to answer a different question from the whole-ledger pass.
+ *
+ * `applyMerchantRulesToExistingTransactions` walks the ordered rules and takes the first match, so
+ * a row a higher-precedence rule holds is not this rule's to relabel. `countMerchantRuleImpact` and
+ * `applyMerchantRuleToMatchingTransactions` asked only "does the pattern match", and on the owner's
+ * real ledger the two disagreed: with `UBER *EATS` -> food delivery installed, the whole-ledger
+ * pass left all 13 rows named "Uber" in ride share, while the single-rule path relabelled all 13
+ * and the blast radius shown to the owner read 13.
+ */
+test('a rule does not relabel a row a higher-precedence rule holds', (t) => {
+  const db = migratedTestDb();
+  t.after(() => db.close());
+
+  const ride = insertCategory(db, { name: 'Ride share' });
+  const delivery = insertCategory(db, { name: 'Food delivery' });
+  const account = insertAccount(db);
+
+  upsertMerchantRule(db, 'UBER   *TRIP HELP.UBER.COM, CA', ride, TEST_NOW, { source: 'human' });
+  const held = insertTransaction(db, {
+    account_id: account,
+    merchant_name: 'Uber',
+    category_id: ride,
+    category_source: 'rule',
+  });
+  const free = insertTransaction(db, {
+    account_id: account,
+    merchant_name: 'UBER   *EATS HELP.UBER.COM, CA',
+  });
+
+  // The matcher sweeps the bare name into the eats pattern; precedence is what withholds the row.
+  assert.equal(merchantMatchesRulePattern('Uber', 'UBER *EATS'), true);
+
+  assert.equal(
+    countMerchantRuleImpact(db, 'UBER *EATS', delivery, { overwrite: true, ruleSource: 'ai' }),
+    1,
+    'the eats row, and not the ride row the owner rule holds'
+  );
+
+  upsertMerchantRule(db, 'UBER *EATS', delivery, TEST_NOW, { source: 'ai' });
+  const applied = applyMerchantRuleToMatchingTransactions(db, 'UBER *EATS', delivery, TEST_NOW, {
+    overwrite: true,
+  });
+  assert.equal(applied.updated, 1);
+
+  const categoryOf = (id: string): string | null =>
+    (db.prepare('SELECT category_id FROM transactions WHERE id = ?').get(id) as {
+      category_id: string | null;
+    }).category_id;
+  assert.equal(categoryOf(held), ride);
+  assert.equal(categoryOf(free), delivery);
+
+  // And the whole-ledger pass, run afterwards, changes nothing: the two paths now agree, so the
+  // single-rule write is not one the next "Re-check all transactions" silently reverts.
+  const recheck = applyMerchantRulesToExistingTransactions(db, {
+    onlyUncategorized: false,
+    skipManual: true,
+  });
+  assert.equal(recheck.updated, 0);
+  assert.equal(categoryOf(held), ride);
+  assert.equal(categoryOf(free), delivery);
+});
+
+/**
+ * Precedence must be invisible whenever nothing actually outranks the rule. Every case here is an
+ * ordinary event, and every one of them has to behave exactly as it did before.
+ */
+test('precedence withholds nothing from a rule no other rule outranks', (t) => {
+  const db = migratedTestDb();
+  t.after(() => db.close());
+
+  const coffee = insertCategory(db, { name: 'Coffee' });
+  const groceries = insertCategory(db, { name: 'Groceries' });
+  const account = insertAccount(db);
+
+  // 1. The only rule in the ledger: nothing to outrank it.
+  const alone = insertTransaction(db, { account_id: account, merchant_name: 'BLUE BOTTLE COFFEE BOSTON MA' });
+  upsertMerchantRule(db, 'Blue Bottle Coffee', coffee, TEST_NOW, { source: 'human' });
+  assert.equal(countMerchantRuleImpact(db, 'Blue Bottle Coffee', coffee), 1);
+  assert.equal(
+    applyMerchantRuleToMatchingTransactions(db, 'Blue Bottle Coffee', coffee, TEST_NOW).updated,
+    1
+  );
+
+  // 2. A longer rule written later outranks the shorter one, so it still applies over it.
+  const specific = insertTransaction(db, {
+    account_id: account,
+    merchant_name: 'TRADER JOE S #502 CAMBRIDGE MA',
+    category_id: coffee,
+    category_source: 'rule',
+  });
+  upsertMerchantRule(db, 'Trader', coffee, TEST_NOW, { source: 'human' });
+  upsertMerchantRule(db, 'TRADER JOE S #502 CAMBRIDGE MA', groceries, TEST_NOW, { source: 'human' });
+  assert.equal(
+    applyMerchantRuleToMatchingTransactions(db, 'TRADER JOE S #502 CAMBRIDGE MA', groceries, TEST_NOW, {
+      overwrite: true,
+    }).updated,
+    1
+  );
+
+  // 3. An outranking rule pointing at the SAME category withholds nothing: the row is going there
+  //    either way, so there is no fight to lose.
+  const agreed = insertTransaction(db, { account_id: account, merchant_name: 'TRADER JOE S #502 CAMBRIDGE MA' });
+  assert.equal(countMerchantRuleImpact(db, 'Trader Joe', groceries), 1);
+  assert.equal(
+    applyMerchantRuleToMatchingTransactions(db, 'Trader Joe', groceries, TEST_NOW).updated,
+    1
+  );
+
+  const categoryOf = (id: string): string | null =>
+    (db.prepare('SELECT category_id FROM transactions WHERE id = ?').get(id) as {
+      category_id: string | null;
+    }).category_id;
+  assert.equal(categoryOf(alone), coffee);
+  assert.equal(categoryOf(specific), groceries);
+  assert.equal(categoryOf(agreed), groceries);
+});
+
+/**
+ * The two paths have to separate a tie the same way, or the single-rule apply writes an answer the
+ * next whole-ledger pass reverts.
+ *
+ * The order is `(source = 'ai') ASC, length(pattern) DESC, created_at DESC, id ASC`, and the
+ * single-rule paths used to implement only the first two keys: an equal-length rule was read as
+ * beaten, whatever the timestamp said. Both cases below are ordinary owner rules, not AI ones, and
+ * `merchant_rules` on the real ledger is dense in exactly these ties (236 live rules over 41
+ * distinct `created_at` values, 173 of them sharing one).
+ */
+function categoryOfTransaction(db: Database.Database, id: string): string | null {
+  return (db.prepare('SELECT category_id FROM transactions WHERE id = ?').get(id) as {
+    category_id: string | null;
+  }).category_id;
+}
+
+test('an equal-length owner rule that wins on recency withholds the row from the older one', (t) => {
+  const db = migratedTestDb();
+  t.after(() => db.close());
+
+  const marketplace = insertCategory(db, { name: 'Marketplace' });
+  const prime = insertCategory(db, { name: 'Prime' });
+  const account = insertAccount(db);
+
+  // Same author, same pattern length, different instants: only `created_at` can separate them.
+  upsertMerchantRule(db, 'AMAZON MKTPL', marketplace, '2026-01-01T00:00:00.000Z', { source: 'human' });
+  upsertMerchantRule(db, 'AMAZON PRIME', prime, '2026-06-01T00:00:00.000Z', { source: 'human' });
+
+  const shared = insertTransaction(db, { account_id: account, merchant_name: 'AMAZON MKTPL AMAZON PRIME' });
+  applyMerchantRulesToExistingTransactions(db, { onlyUncategorized: true });
+  assert.equal(categoryOfTransaction(db, shared), prime, 'the newer of two equal-length rules takes it');
+
+  // So the older rule may not take it back, and may not report that it would.
+  assert.equal(countMerchantRuleImpact(db, 'AMAZON MKTPL', marketplace, { overwrite: true }), 0);
+  assert.equal(
+    applyMerchantRuleToMatchingTransactions(db, 'AMAZON MKTPL', marketplace, TEST_NOW, {
+      overwrite: true,
+    }).updated,
+    0
+  );
+  assert.equal(categoryOfTransaction(db, shared), prime);
+
+  // Nothing to revert, which is the property: a re-check is a no-op rather than an undo.
+  assert.equal(recategorizeAll(db).updated, 0);
+  assert.equal(categoryOfTransaction(db, shared), prime);
+
+  // And precedence withholds nothing from the rule that wins the tie.
+  const fresh = insertTransaction(db, { account_id: account, merchant_name: 'AMAZON MKTPL AMAZON PRIME' });
+  assert.equal(applyMerchantRuleToMatchingTransactions(db, 'AMAZON PRIME', prime, TEST_NOW).updated, 1);
+  assert.equal(categoryOfTransaction(db, fresh), prime);
+});
+
+test('an equal-length owner rule that wins on id withholds the row from the other', (t) => {
+  const db = migratedTestDb();
+  t.after(() => db.close());
+
+  const marketplace = insertCategory(db, { name: 'Marketplace' });
+  const prime = insertCategory(db, { name: 'Prime' });
+  const account = insertAccount(db);
+
+  // Written with chosen ids because the id is the only key left: same source, same pattern length,
+  // same instant. That is the live shape, where 173 rules were minted in one pass.
+  const insert = db.prepare(
+    'INSERT INTO merchant_rules (id, pattern, category_id, created_at, source, updated_at) VALUES (?,?,?,?,?,?)'
+  );
+  insert.run('rule_aaa', 'AMAZON PRIME', prime, TEST_NOW, 'human', TEST_NOW);
+  insert.run('rule_zzz', 'AMAZON MKTPL', marketplace, TEST_NOW, 'human', TEST_NOW);
+
+  const shared = insertTransaction(db, { account_id: account, merchant_name: 'AMAZON MKTPL AMAZON PRIME' });
+  applyMerchantRulesToExistingTransactions(db, { onlyUncategorized: true });
+  assert.equal(categoryOfTransaction(db, shared), prime, 'the lower id wins the tie');
+
+  assert.equal(countMerchantRuleImpact(db, 'AMAZON MKTPL', marketplace, { overwrite: true }), 0);
+  assert.equal(
+    applyMerchantRuleToMatchingTransactions(db, 'AMAZON MKTPL', marketplace, TEST_NOW, {
+      overwrite: true,
+    }).updated,
+    0
+  );
+  assert.equal(categoryOfTransaction(db, shared), prime);
+  assert.equal(recategorizeAll(db).updated, 0);
+});
+
+/**
+ * The blast radius shown before the write has to be counted against the write that will happen.
+ *
+ * With no rule stored for the pattern yet, nothing on disk says who is authoring it, so
+ * `countMerchantRuleImpact` fell back to the owner and counted rows an AI write can never take:
+ * every owner rule outranks every AI rule. `checkBlastRadius` refuses with "would relabel N
+ * transactions", so that count is also the one number the owner reads.
+ */
+test('the pre-write blast radius is counted as the source the rule will be written with', (t) => {
+  const db = migratedTestDb();
+  t.after(() => db.close());
+
+  const shopping = insertCategory(db, { name: 'Shopping' });
+  const household = insertCategory(db, { name: 'Household' });
+  const account = insertAccount(db);
+
+  upsertMerchantRule(db, 'Amazon', shopping, TEST_NOW, { source: 'human' });
+  const rows = Array.from({ length: 5 }, () =>
+    insertTransaction(db, { account_id: account, merchant_name: 'AMAZON MKTPLACE PMTS' })
+  );
+
+  assert.equal(
+    countMerchantRuleImpact(db, 'AMAZON MKTPLACE PMTS', household, { overwrite: true }),
+    5,
+    'read as the owner writing it, the longer pattern outranks the shorter one and takes every row'
+  );
+  assert.equal(
+    countMerchantRuleImpact(db, 'AMAZON MKTPLACE PMTS', household, { overwrite: true, ruleSource: 'ai' }),
+    0,
+    'read as the model writing it, the owner rule holds all five'
+  );
+
+  upsertMerchantRule(db, 'AMAZON MKTPLACE PMTS', household, TEST_NOW, { source: 'ai' });
+  assert.equal(
+    applyMerchantRuleToMatchingTransactions(db, 'AMAZON MKTPLACE PMTS', household, TEST_NOW, {
+      overwrite: true,
+    }).updated,
+    0,
+    'and 0 is what the write does, which is what the count had to say'
+  );
+  for (const id of rows) assert.equal(categoryOfTransaction(db, id), null);
+
+  // The owner's rule is what files them, and the AI rule does not fight it on the next pass.
+  applyMerchantRulesToExistingTransactions(db, { onlyUncategorized: true });
+  for (const id of rows) assert.equal(categoryOfTransaction(db, id), shopping);
 });
 
 test('two rules alike in source, length and timestamp are still separated, by id', (t) => {

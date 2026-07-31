@@ -1,5 +1,5 @@
 import type Database from 'better-sqlite3';
-import { merchantMatchesRulePattern } from './rules';
+import { merchantMatchesRulePattern, merchantNamesClaimedByRule } from './rules';
 
 /**
  * Policy for autonomous (model-authored) writes.
@@ -107,9 +107,12 @@ export interface MerchantHistory {
 }
 
 /**
- * What the ledger already says about a merchant pattern. Matches with the same substring-plus-fuzzy
- * rule the application itself uses, so the evidence considered here is exactly the set the rule
- * would sweep.
+ * What the ledger already says about a merchant pattern, over every row the pattern matches.
+ *
+ * Deliberately wider than the rows the rule would actually claim. The question here is what the
+ * owner's ledger says about the merchant, not what this particular rule would win: a row another
+ * rule holds is still evidence about the merchant, and narrowing to the claimed set would let a
+ * proposal contradict settled history simply because some other rule was standing in front of it.
  */
 export function merchantHistoryForPattern(
   db: Database.Database,
@@ -160,32 +163,49 @@ export function checkRuleAgreesWithHistory(
   );
 }
 
-/** The distinct merchant names a pattern would sweep, which is also its whole reach. */
-function namesSweptBy(db: Database.Database, pattern: string): string[] {
-  const rows = db.prepare(
-    'SELECT DISTINCT COALESCE(NULLIF(merchant_name, \'\'), original_name) AS name FROM transactions'
-  ).all() as Array<{ name: string }>;
-  return rows.map((row) => row.name).filter((name) => merchantMatchesRulePattern(name, pattern));
-}
-
 /**
  * Whether two patterns can ever fight over the same row: either the two patterns match each other,
- * or some transaction in the ledger matches both.
+ * or some transaction the proposed rule would actually CLAIM is one the owner's rule also matches.
  *
- * One match call, not one per direction: `merchantMatchesRulePattern` is symmetric by construction.
- * Its substring clause already tests containment both ways, and equality and the bigram similarity
- * are symmetric relations, so swapping the arguments cannot change the answer. The second call was
- * unreachable, and a comment claiming the two directions differ would send the next reader looking
- * for a distinction that does not exist. `tests/aiWriteGuards.test.ts` pins the symmetry, since it
- * is the matcher's property that makes one call enough.
+ * The second arm used to ask a wider question, "does any transaction match both patterns", and it
+ * was the wrong question by exactly the amount that matters. A rule does not get every row its
+ * pattern touches; it gets the rows no higher-precedence rule already holds, and every rule the
+ * owner wrote outranks every rule the model writes. So a row the owner's rule matches was never
+ * the model's to take, and reading it as a fight reports a fight that cannot happen.
+ *
+ * Measured over the owner's ledger, across every distinct merchant name proposed against the
+ * category holding the plurality of its own already-categorized rows: 1,297 proposals, one per name
+ * from `SELECT DISTINCT COALESCE(NULLIF(merchant_name, ''), original_name) FROM transactions`,
+ * evaluated against the 224 live rules with `source <> 'ai'`, no other guard applied and nothing
+ * excluded. The wide question refuses 20 of them, 2 through the first arm and 18 through this arm
+ * alone. Asking what the rule would CLAIM refuses 2, both through the first arm, so those 18 go
+ * from refused to allowed. Each of the 18 files a specific merchant descriptor under the category
+ * its own rows already sit in, and not one can take the row it was blocked through, because the
+ * owner's rule outranks it there. 15 were blocked through a bare short name the matcher attaches to
+ * two unrelated patterns (nine `UBER *EATS ...`/`UBER *LIME ...` spellings through `Uber`, two
+ * `GRUBHUB*CHIPOTLE ...` through `Chipotle`, `APPLE STORE #R149 BOSTON MA` through `Apple`), and 3
+ * through a descriptor naming both parties (`Claude.ai Subscription` reaching the owner's
+ * `Anthropic` rule through `CLAUDE.AI SUBSCRIPTION ANTHROPIC.COMCA`). The 2 that stay refused are
+ * the first arm's: a transfer line against the owner's `Online payment from CHK 8618`, and a
+ * proposal spelled identically to an owner rule pointing somewhere else.
+ *
+ * The first arm stays wide on purpose, because it is about rows that do not exist yet. An AI rule
+ * that contradicts an owner rule is dormant while the owner's rule stands, and would activate
+ * silently if the owner ever retired theirs.
+ *
+ * One match call per arm, not one per direction: `merchantMatchesRulePattern` is symmetric by
+ * construction. Its substring clause already tests containment both ways, and equality and the
+ * bigram similarity are symmetric relations, so swapping the arguments cannot change the answer.
+ * `tests/aiWriteGuards.test.ts` pins the symmetry, since it is the matcher's property that makes
+ * one call enough.
  */
 function rulesContend(
   pattern: string,
   ownerPattern: string,
-  sweptNames: () => string[]
+  claimedNames: () => string[]
 ): boolean {
   if (merchantMatchesRulePattern(pattern, ownerPattern)) return true;
-  return sweptNames().some((name) => merchantMatchesRulePattern(name, ownerPattern));
+  return claimedNames().some((name) => merchantMatchesRulePattern(name, ownerPattern));
 }
 
 /**
@@ -211,12 +231,15 @@ export function checkRuleDoesNotContradictOwnerRule(
 
   // Scanned once and reused across every owner rule. Matching each owner pattern against the whole
   // ledger instead is ~1.2M fuzzy comparisons on the owner's data, seconds inside a write path.
-  let swept: string[] | null = null;
-  const sweptNames = (): string[] => (swept ??= namesSweptBy(db, proposed));
+  // 'ai' is not a guess: this guard runs on the model's path only, which is what `source <> 'ai'`
+  // above already assumes.
+  let claimed: string[] | null = null;
+  const claimedNames = (): string[] =>
+    (claimed ??= merchantNamesClaimedByRule(db, proposed, categoryId, 'ai'));
 
   for (const owner of ownerRules) {
     if (owner.category_id === categoryId) continue;
-    if (!rulesContend(proposed, owner.pattern, sweptNames)) continue;
+    if (!rulesContend(proposed, owner.pattern, claimedNames)) continue;
     return reject(
       'contradicts_owner_rule',
       `"${proposed}" contends with your own rule "${owner.pattern}", which points at ${owner.category_id}.`
