@@ -404,22 +404,22 @@ Carried from the token work, still open:
 
 ## Phase 8 — Screen consolidation, 12 items to 6
 
-- [ ] **`/` the instrument** absorbs Today, Cash Flow and Reports. Reports and Cash Flow become a
+- [x] **`/` the instrument** absorbs Today, Cash Flow and Reports. Reports and Cash Flow become a
       *time window* on one surface, not separate screens: one selector reshapes the same query set.
       Removes ~660 lines of duplicated view code and the possibility of two screens disagreeing about
       net worth, which `Reports.tsx` already carries a comment about having shipped once.
-- [ ] **`/ledger`** absorbs Transactions, Review and Bills. Bills dies for a structural reason: a
+- [x] **`/ledger`** absorbs Transactions, Review and Bills. Bills dies for a structural reason: a
       bill is a transaction that has not happened yet, and giving future money its own screen is the
       mechanism by which forecasts get read as facts. The 30-day forecast sits at the top of the
       ledger, above today's rule, on the same date spine, in estimate ink. Review dies as a filter
       because it is a filter. Row flags include `category_source`, recorded per row and rendered
       nowhere.
-- [ ] **`/accounts`** absorbs AccountDetail.
-- [ ] **`/investments`** stays its own screen (owner's decision, 2026-07-30).
-- [ ] **`/plan`** absorbs Budget and Goals.
-- [ ] **`/settings`** absorbs Onboarding, an orphan route nothing links to in an always-logged-in
+- [x] **`/accounts`** absorbs AccountDetail.
+- [x] **`/investments`** stays its own screen (owner's decision, 2026-07-30).
+- [x] **`/plan`** absorbs Budget and Goals.
+- [x] **`/settings`** absorbs Onboarding, an orphan route nothing links to in an always-logged-in
       single-owner app.
-- [ ] **Advisor stops being a tab, and the nav holds at six.** Owner's direction, 2026-07-31, after
+- [x] **Advisor stops being a tab, and the nav holds at six.** Owner's direction, 2026-07-31, after
       weighing the alternative: if the AI is genuinely integrated everywhere then it does not need a
       tab, and its settings stay in Settings. So `/advisor` is deleted rather than repurposed.
 
@@ -443,17 +443,17 @@ Carried from the token work, still open:
       with nowhere to live, that is the signal the integration is not finished, not the signal to add
       the tab back.
 
-- [ ] **Delete budget groups** end to end: both tables are empty after three weeks in an app with one
+- [x] **Delete budget groups** end to end: both tables are empty after three weeks in an app with one
       budget. 115 lines of service, five routes, a 120-line modal, the memo machinery, four fetchers,
       one test file.
-- [ ] **Delete three dead preference keys**: `dashboard_layout`, `custom_report_views`, and
+- [x] **Delete three dead preference keys**: `dashboard_layout`, `custom_report_views`, and
       `advisor_auto_apply_high_confidence`. The third reads `true`, asserting a confidence-gated
       autonomy policy removed in `f61109b`, and the model can read it through `run_sql_query`.
-- [ ] **Nav**: six words, labelled at every width. Today every label is behind `xl:block`, so under 1280px the entire navigation is
+- [x] **Nav**: six words, labelled at every width. Today every label is behind `xl:block`, so under 1280px the entire navigation is
       twelve identical 7px dots at 1.6:1 contrast. Un-hijack ⌘R and ⌘P, currently `preventDefault`ed
       for Review and Reports, killing reload and print.
-- [ ] **Catch-all route.** There is no `path="*"`, so a typo renders a blank page.
-- [ ] Sub-500px is explicitly out of scope: `localGuard` binds this to loopback, so it is a desktop
+- [x] **Catch-all route.** There is no `path="*"`, so a typo renders a blank page.
+- [x] Sub-500px is explicitly out of scope: `localGuard` binds this to loopback, so it is a desktop
       object. The 1280px break is real; 375px is not.
 
 **Rendering hazards the correctness work created.** These are consequences of making the data honest
@@ -991,3 +991,93 @@ that actually render. A money numeral at **3.91:1** in `Investments.tsx`, failin
 returning a plausible geometry on unsorted input instead of raising. And three comment figures that
 did not reproduce, including one the implementer's own report admitted it could not reproduce and
 shipped anyway.
+
+---
+
+## Phase 8, landed 2026-07-31
+
+Six commits: `9302305`, `9c2c4b5`, `51a4a9b`, `e008514`, `1938540`, `f28232e`. **1,317 tests pass**,
+both typechecks clean, `vite build` succeeds. Migrations 053 and 054.
+
+Twelve nav items are six: `/`, `/ledger`, `/accounts`, `/investments`, `/plan`, `/settings`.
+**568 lines deleted** across twelve files, and the Advisor tab (290 lines) and Onboarding (139) are
+gone rather than moved.
+
+**`/` the instrument.** The consolidation argument turned out sharper than the plan had it: a window
+is only meaningful for a FLOW. Net worth, held, owed and free are states at an instant, so a period
+selector over them would claim a measurement the app cannot take. The surface splits into the
+standing (windowless) and over this window (one selector). The evidence this is right rather than
+fussy: `Reports.tsx` had already grown two independent range selectors without anyone naming why.
+The 44px subject step went to what is free after every claim, not to net worth: a $4,202.86 net worth
+does not answer "am I alright" and what is free does.
+
+**`/ledger`.** The 30-day forecast sits above today's rule on the same date spine in estimate ink, so
+a forecast reads as a continuation of the ledger rather than a separate promise. Review became a
+filter because it always was one. `category_source` is finally on screen: 2,412 pre-provenance, 86
+ai, 62 human, 12 heuristic, 7 rule, on the one surface where the owner would act on it.
+
+**`/plan`.** Budgets and goals as one claim sheet, because both are money claimed in advance at two
+horizons. Budget groups deleted end to end, including the three draft kinds, which is a type-level
+change now that autonomy is a `Readonly<Record<AdvisorDraftActionKind, ...>>`.
+
+**The nav.** `dot` on `rail` measured 1.70:1 in light, twelve times over. It is six right-aligned
+words at 17px, labelled at every width, with a hairline leader in a fixed gutter pointing at the
+active screen. A rule that points is a statement about position; a dot that changes colour is a
+legend you have to learn.
+
+### A defect found while consolidating, shipping in Reports until today
+
+`getTopMerchantsReport` returns `SUM(ABS(amount))` per merchant and `SUM(-amount)` as its total. Two
+different quantities. On July 2026 Amazon is $1,795.86 gross against a $1,112.99 total, so the share
+rendered as **161%** and the bar drew 161% wide, silently clipped by `overflow-hidden`.
+
+### The keyboard now has one owner, and that is the real outcome
+
+Two separate rounds of verification found the same defect from two directions, and the second one was
+introduced by the fix for the first:
+
+1. `a` and `x` wrote to the ledger while a control had focus, because the guard tested `tagName`
+   against a list and the Balance `Select` renders a `<button role="combobox">`.
+2. The new `g` navigation chord collided with the ledger's `a`, and `preventDefault` is not
+   `stopImmediatePropagation`, so **pressing `g` then `a` on /ledger navigated AND applied the AI
+   categorization under the cursor**.
+3. The ⌘K sheet did not neutralise the screen underneath. In digest mode focus fell to `<body>`, the
+   ledger's focus test passed, and `a` applied an AI draft while the owner was reading the digest of
+   what the AI had already done.
+
+Three window-level listeners each deciding independently whether a keystroke was theirs is the shape
+that produced all three, and a fourth condition would have produced a fourth. There is now ONE
+dispatcher: it owns what is open (an overlay stack), what has focus (one rule per binding), and whose
+keystroke it is (prefix consumption, then overlay > screen > app). All 12 chords live in one table,
+`assertNoCollisions` runs at module import so a colliding table fails the app at boot, and a test
+walks every file under `client/src` and requires exactly one to hold a global keydown listener.
+
+Two more defects fell out of that audit: one Escape closed EVERY open dialog at once, and the ledger
+had been compensating for the missing layer model with `showAddEntry || showAddScheduled || editing`,
+an enumeration of the overlays it happened to know about, which is exactly why the sheet reached past
+it.
+
+### Seven capabilities were dropped, and the report enumerated two
+
+The brief asked for all ten retired views to be walked. Verification found **seven** fetchers with
+zero callers. Six were re-homed with an argument each, one was deleted with an argument:
+
+- `aiApi.confirmDrafts` re-homed to the ledger's suggested filter. The endpoint answers 200 with a
+  per-draft outcome even when guards refuse, so refusals arrive as a LIST; clicking Accept N times
+  cannot produce that.
+- `transactionsApi.markReview` re-homed as Set aside / Undo. `review_status = 'dismissed'` is read by
+  three server queries and was set by nothing, so those clauses could never fire and the queue had no
+  exit but filing the row. Distribution on the real ledger: open 153, reviewed 2,435, **dismissed 0**.
+- `rulesApi.dismissSuggestion` and `approveSuggestions` re-homed. Approve-only was a one-way door, and
+  a declined suggestion regenerated on every visit.
+- `reportsApi.trends` and `networthAttribution` re-homed to the instrument.
+- `aiApi.suggestCategories` **deleted**: applying its guesses goes through `bulkCategorizeTransactions`,
+  which writes `source: 'human', markManual: true` and mints an owner rule per merchant. It would have
+  stamped the model's guess as the owner's.
+
+### Correction to record
+
+The three dead preference rows are **not yet gone** from the live database. Migration 054 is well
+formed and runs at next server start; `schema_migrations` tops out at 053 and all three rows are still
+live, including `advisor_auto_apply_high_confidence = true`, which the model can read through
+`run_sql_query`. The code half is clean.
