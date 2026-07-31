@@ -1,15 +1,22 @@
 import { createHash } from 'node:crypto';
+import { spawnSync } from 'node:child_process';
 import type Database from 'better-sqlite3';
 import type Anthropic from '@anthropic-ai/sdk';
 import { format, startOfMonth, subMonths } from 'date-fns';
-import { listTransactions, type TransactionListFilters } from './transactions';
-import { getReadOnlyDb } from '../db/index';
+import { getTransactionById, listTransactions, type TransactionListFilters } from './transactions';
+import { getReadOnlyDbPath } from '../db/index';
 import { readSnapshots } from './netWorthHistory';
-import { toDollars } from './money';
+import { dollarizeFields, toDollars, toDollarsOrNull } from './money';
 import { getCashflowReport, getSpendingReport } from './reporting';
 import { buildRecurringForecast } from './recurringForecast';
 import { getMonthlyBudgetsWithProjection } from './budgetProjection';
-import { confirmAdvisorDraft } from './advisorDrafts';
+import { confirmAdvisorDraft, listAdvisorActions } from './advisorDrafts';
+import { revertableRevisionsForAction } from './categoryWrites';
+import { merchantMatchesRulePattern } from './rules';
+import { getHoldingHistory } from './investmentMetadata';
+import { getSyncRunDetail, listSyncRuns } from './syncHistory';
+import { reconcileAccounts } from './reconciliation';
+import { buildSchemaDoc, describeTables, getCategoryProvenance, transactionReportInclusion } from './schemaDoc';
 import type { AdvisorDraftAction, AdvisorDraftPayload } from '../../../shared/types';
 
 /** Stable id per payload, matching advisorDrafts' own scheme, so repeats collapse. */
@@ -98,7 +105,7 @@ export const ADVISOR_TOOLS: Anthropic.Tool[] = [
   {
     name: 'get_upcoming_bills',
     description:
-      'Recurring bills and income expected within the next N days (default 45), soonest first, with scheduled income/bills/net totals for the window. Honors skip, snooze, and amount overrides. Amounts in dollars. Check amount_varies: when true the amount is a median of a variable series (a paycheck, a utility bill), not a known figure, so do not quote it as exact.',
+      'Recurring bills and income expected within the next N days (default 45), soonest first, with scheduled income/bills/net totals for the window. Honors skip, snooze, and amount overrides. Amounts in dollars, signed, so a bill is negative. Check amount_varies: when true the amount is a median of a variable series (a paycheck, a utility bill), not a known figure, so do not quote it as exact. status is "overdue" when the expected date is already past and "upcoming" otherwise, comparing local calendar dates; confirmed = true means the owner accepted the pattern, false means it is only a detection.',
     input_schema: {
       type: 'object',
       properties: {
@@ -109,12 +116,84 @@ export const ADVISOR_TOOLS: Anthropic.Tool[] = [
   {
     name: 'get_net_worth_history',
     description:
-      'Net worth, total assets, and total liabilities per snapshot over the last N months (default 12), oldest first. Amounts in dollars.',
+      'Net worth, total assets, and total liabilities per snapshot over the last N months (default 12), oldest first. Amounts in dollars. estimated = true means the row was RECONSTRUCTED by replaying transactions backwards off current balances rather than measured, so say "estimated" when quoting one and never narrate the join between an estimated and a measured stretch as an event.',
     input_schema: {
       type: 'object',
       properties: {
         months: { type: 'integer', description: 'Number of months back to include (default 12, max 60).' },
       },
+    },
+  },
+  {
+    name: 'get_merchant_rules',
+    description:
+      'The standing merchant-to-category rules, returned in the order that decides which one wins. Several rules can match one merchant and the FIRST match applies, so this order is the policy: the owner\'s rules outrank the model\'s, and a longer, more specific pattern outranks a vaguer one. "precedence" is a rule\'s rank in that full order, so 1 is tested first. Matching is fuzzy, so a short pattern sweeps in merchants it does not name. Pass "merchant" to see which rule actually wins for a given name, resolved with the same matcher the apply path uses: every rule is tested, and only the ones whose pattern matches are listed back. Retired rules are excluded unless you ask for them; a retired rule still applies to nothing.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        merchant: { type: 'string', description: 'Resolve this merchant name against the rules and mark the winner.' },
+        include_retired: { type: 'boolean', description: 'Include retired rules (default false).' },
+        limit: { type: 'integer', description: 'Max rules to LIST (default 100, max 500). Resolution always considers every rule, and the winner is always included.' },
+      },
+    },
+  },
+  {
+    name: 'get_provenance_summary',
+    description:
+      'Who chose the category on each transaction. Read this before proposing any bulk re-categorization. category_source is NULL on most of this ledger because provenance only started being recorded partway through: NULL means nobody recorded who chose, NOT that the count is zero and NOT that the machine did it. Rows the owner chose by hand are never to be overwritten, under either marker. All figures are counted live.',
+    input_schema: { type: 'object', properties: {} },
+  },
+  {
+    name: 'get_transaction_full',
+    description:
+      'Every stored field of one transaction, including the flags that decide whether it counts: transfer_status, duplicate_status, pending, category_source and the AI action that last set the category. Amount is in dollars and negative means money left the account; quantity, when present, is a count of units of a security and is not money. reading.counts_toward_reports answers ONE question, "do the Reports and Cash flow pages include this row", evaluated with the predicates those pages use, and lists the reason whenever they do not. It does not answer it for budgets or reconciliation, which scope rows differently. Use this before making a claim about a specific row.',
+    input_schema: {
+      type: 'object',
+      properties: { transaction_id: { type: 'string', description: 'Transaction id, from list_transactions.' } },
+      required: ['transaction_id'],
+    },
+  },
+  {
+    name: 'get_my_action_history',
+    description:
+      'What the AI has already applied to this ledger, newest first, with how many rows each action can still put back. An action stops being revertable once a later action or a hand edit writes the same row, and it reads 0 for an action that changed no categories at all. This is a record of what was DONE, not of whether it was right: nothing yet records a correction, so an action the owner has since fixed by hand looks identical here. Check this before repeating a suggestion.',
+    input_schema: {
+      type: 'object',
+      properties: { limit: { type: 'integer', description: 'Max actions to return (default 25, max 200).' } },
+    },
+  },
+  {
+    name: 'get_holding_history',
+    description:
+      'Value, quantity and price over time for one holding, oldest first, one point per day the sync recorded it. value and cost_basis are dollars; price is DOLLARS PER UNIT and quantity is a share or coin count, so neither is a total. A NULL cost_basis means the basis is unknown, not zero, so do not present a gain against it.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        holding_id: { type: 'string', description: 'Holding id, as returned in the "id" field by list_holdings.' },
+        days: { type: 'integer', description: 'Lookback window in days (default 90, max 3650).' },
+      },
+      required: ['holding_id'],
+    },
+  },
+  {
+    name: 'get_sync_runs',
+    description:
+      'Recent sync attempts, newest first: when each ran, whether it succeeded, and what it counted. A run with no completed_at never finished, which is different from failing. A steady non-zero transactions_modified every hour means the provider keeps rewriting the same rows and is a symptom worth naming. Pass run_id for the per-provider stages and the row-level changes of one run.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        run_id: { type: 'string', description: 'Expand one run into its stages and row-level changes.' },
+        limit: { type: 'integer', description: 'Max runs to return (default 10, max 100).' },
+      },
+    },
+  },
+  {
+    name: 'get_reconciliation',
+    description:
+      'Does the ledger explain each account\'s balance? Compares measured balance sheets against the transactions between them, cumulatively, in dollars. Read adjusted_residual, not residual: boundary_amount is the part that is an artifact of where the horizon was cut, and it is reported separately rather than hidden. A market-driven account (brokerage, IRA, crypto wallet) moves when prices move with no transaction recording it, so its residual is expected and it is never listed as unreconciled. direction_conflict means the ledger and the balance moved in OPPOSITE directions on an account whose balance only moves when a transaction moves it; it is not a claim that a specific transaction is missing or mis-signed. Every derived field is defined in the "field_meanings" block of the result: read it before quoting one. An empty "unreconciled" list means nothing is unexplained beyond tolerance; it does not mean every number is right.',
+    input_schema: {
+      type: 'object',
+      properties: { since: { type: 'string', description: 'Only use measured snapshots on or after this date, YYYY-MM-DD.' } },
     },
   },
   // ── Write tools ─────────────────────────────────────────────────────────────
@@ -160,13 +239,22 @@ export const ADVISOR_TOOLS: Anthropic.Tool[] = [
   {
     name: 'describe_schema',
     description:
-      'List the database tables and their columns. Call this before run_sql_query to see what you can query. Money columns are stored as INTEGER CENTS (divide by 100 for dollars); dates are TEXT yyyy-MM-dd.',
-    input_schema: { type: 'object', properties: {} },
+      'What the columns MEAN, not just what they are called. Call it with NO arguments first: that returns every table with its purpose and its column names, full per-column units and notes for transactions, accounts and categories, the exact predicate text every spend or income query must apply (generated from the shared filter functions, so it is what the Reports page uses), the meaning of each enum value alongside its live distribution, the sign and unit rules, and which series are reconstructions rather than measurements. Call it AGAIN with tables: ["holdings"] to get the column meanings of any other table; that second form returns only those tables, not the whole dictionary again. A table marked detail = "names_only" has had its notes withheld to keep the answer small, which is NOT a statement that none exist, so expand a table before writing SQL against it. Paste the predicates rather than paraphrasing them. It also supplies today\'s LOCAL date, which SQLite\'s date(\'now\') does not agree with.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        tables: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Table names to expand to full column meanings, e.g. ["holdings", "budgets"].',
+        },
+      },
+    },
   },
   {
     name: 'run_sql_query',
     description:
-      'Run a read-only SQL SELECT against the finance database for anything the other tools do not cover (custom aggregates, joins, cohorts, arbitrary questions). Only SELECT is allowed — the connection is read-only and rejects writes. Call describe_schema first for table/column names. IMPORTANT: money columns (transactions.amount, accounts.current_balance, budgets.amount, net_worth_snapshots.*, holdings.institution_value, etc.) are INTEGER CENTS — divide by 100.0 for dollars. Results are capped at "limit" rows.',
+      'Run a read-only SQL SELECT against the finance database for anything the other tools do not cover (custom aggregates, joins, cohorts, arbitrary questions). Only SELECT is allowed: the connection is read-only and the engine rejects writes. Call describe_schema first, both for names and for the predicates a spend or income query must carry. IMPORTANT: money columns (transactions.amount, accounts.current_balance, budgets.amount, net_worth_snapshots.*, holdings.institution_value) are INTEGER CENTS, so divide by 100.0 for dollars; holdings.institution_price is already dollars per unit and transactions.quantity is a unit count, so neither of those is. Results are capped at "limit" rows, and a query that outruns its wall-clock budget is killed and tells you the budget it exceeded, so you can narrow it and retry.',
     input_schema: {
       type: 'object',
       properties: {
@@ -304,7 +392,7 @@ function listGoalsTool(db: Database.Database): unknown {
 // model a cash sweep is 100% profit and invite it to say so.
 function listHoldingsTool(db: Database.Database): unknown {
   const rows = db.prepare(`
-    SELECT s.ticker, s.name, s.type, h.quantity,
+    SELECT h.id AS holding_id, s.ticker, s.name, s.type, h.quantity,
       h.institution_value AS value_cents,
       COALESCE(h.manual_cost_basis, CASE WHEN h.cost_basis > 0 THEN h.cost_basis END) AS basis_cents,
       a.account_name, a.type AS account_type, a.is_hidden
@@ -313,12 +401,14 @@ function listHoldingsTool(db: Database.Database): unknown {
     LEFT JOIN accounts a ON a.id = h.account_id
     ORDER BY h.institution_value DESC
   `).all() as Array<{
-    ticker: string | null; name: string; type: string; quantity: number;
+    holding_id: string; ticker: string | null; name: string; type: string; quantity: number;
     value_cents: number; basis_cents: number | null;
     account_name: string | null; account_type: string | null; is_hidden: number | null;
   }>;
   return {
     holdings: rows.map((r) => ({
+      // Carried so get_holding_history has something to be called with.
+      id: r.holding_id,
       ticker: r.ticker,
       name: r.name,
       type: r.type,
@@ -381,62 +471,395 @@ function getNetWorthHistoryTool(db: Database.Database, input: ToolInput): unknow
   };
 }
 
-function quoteIdent(name: string): string {
-  return `"${name.replace(/"/g, '""')}"`;
+interface MerchantRuleRow {
+  id: string;
+  pattern: string;
+  category_id: string;
+  category_name: string | null;
+  source: string;
+  created_at: string;
+  retired_at: string | null;
 }
 
-function describeSchemaTool(): unknown {
-  const rodb = getReadOnlyDb();
-  const tables = rodb
-    .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name")
-    .all() as Array<{ name: string }>;
-  const schema: Record<string, string[]> = {};
-  for (const { name } of tables) {
-    const cols = rodb.prepare(`PRAGMA table_info(${quoteIdent(name)})`).all() as Array<{ name: string; type: string }>;
-    schema[name] = cols.map((c) => `${c.name} ${c.type || 'ANY'}`);
-  }
+// The ORDER BY is the resolution policy, and it is the same one
+// `applyMerchantRulesToExistingTransactions` (rules.ts) sorts by before taking the first match:
+// owner rules ahead of the model's, longer pattern ahead of shorter, then created_at, then id so
+// the order is total and SQLite's sorter never decides. Reporting a different order here would tell
+// the model a rule wins that does not.
+//
+// It is duplicated rather than imported because rules.ts keeps its ordered loader private. The
+// duplication is pinned, not trusted: tests/advisorChatTools.test.ts asserts this tool's winner is
+// the category the apply path actually writes, so a change to rules.ts that is not mirrored here
+// fails rather than drifts. If that loader is ever exported, delete this query and call it.
+function getMerchantRulesTool(db: Database.Database, input: ToolInput): unknown {
+  const limit = Math.min(Math.max(Number(input.limit) || 100, 1), 500);
+  const includeRetired = input.include_retired === true;
+  const merchant = str(input.merchant);
+
+  // Every rule, unlimited, because resolution has to see all of them. Resolving over one page and
+  // reporting "no rule matches" would be a claim the query never checked: on the owner's ledger
+  // there are 236 rules and the default page is 100, so the Spotify rule sat off the end and the
+  // tool reported no winner for a merchant that has one. The limit applies to the LIST, after the
+  // winner is known, and the winner is always carried into it.
+  const all = db.prepare(`
+    SELECT mr.id, mr.pattern, mr.category_id, c.name AS category_name,
+           mr.source, mr.created_at, mr.retired_at
+    FROM merchant_rules mr
+    LEFT JOIN categories c ON c.id = mr.category_id
+    ${includeRetired ? '' : 'WHERE mr.retired_at IS NULL'}
+    ORDER BY (mr.source = 'ai') ASC,
+             length(mr.pattern) DESC,
+             mr.created_at DESC,
+             mr.id ASC
+  `).all() as MerchantRuleRow[];
+
+  // Asked about ONE merchant, answer about that merchant. Returning the whole rule book alongside
+  // the winner cost 28,160 bytes of tool result for a one-merchant question, measured as
+  // Buffer.byteLength(JSON.stringify(runAdvisorTool(liveDb, 'get_merchant_rules',
+  // { merchant: 'SPOTIFY 877-778-1161, NY' })), 'utf8') on a copy of the owner's database: 101 of
+  // the 236 rules came back and exactly ONE of them matched the merchant that was asked about. The
+  // same call filtered is 1,136 bytes. Resolution still tests every rule; only the LIST narrows,
+  // and a retired rule is listed when it was asked for but never wins.
+  const patternMatches = merchant ? all.filter((rule) => merchantMatchesRulePattern(merchant, rule.pattern)) : [];
+  const winner = merchant ? patternMatches.find((rule) => rule.retired_at === null) : undefined;
+
+  const shown = merchant ? patternMatches.slice(0, limit) : all.slice(0, limit);
+  if (winner && !shown.includes(winner)) shown.push(winner);
+
   return {
-    schema,
-    note: 'Money columns are INTEGER CENTS (÷100 for dollars). Dates are TEXT yyyy-MM-dd. Query with run_sql_query (read-only SELECT only).',
+    resolution_order: 'Owner rules before AI rules, then longer pattern first, then newest, then id. First match wins.',
+    total_rules: all.length,
+    returned: shown.length,
+    ...(merchant
+      ? {
+          merchant,
+          listing:
+            'Only rules whose pattern matches this merchant are listed, in resolution order, and the first live one is the winner. Every rule in the database was tested against the name; the ones left out cannot match it. Call without "merchant" to page through the whole rule book.',
+          winning_rule: winner
+            ? { id: winner.id, pattern: winner.pattern, category: winner.category_name, source: winner.source }
+            : null,
+        }
+      : {}),
+    rules: shown.map((rule) => ({
+      id: rule.id,
+      // Rank in the full resolution order, not in this list: rule 1 is the first rule tested.
+      precedence: all.indexOf(rule) + 1,
+      pattern: rule.pattern,
+      category: rule.category_name,
+      category_id: rule.category_id,
+      source: rule.source,
+      created_at: rule.created_at,
+      retired: rule.retired_at !== null,
+      ...(merchant
+        ? {
+            matches_merchant: rule.retired_at === null && merchantMatchesRulePattern(merchant, rule.pattern),
+            wins: rule === winner,
+          }
+        : {}),
+    })),
   };
 }
 
-// Executes model-authored SQL on the READ-ONLY connection (never the read-write singleton), so a
-// write can't reach the data. Defense in depth: reject non-reader statements up front, and
-// better-sqlite3 only compiles the first statement so a trailing `;DROP ...` is ignored.
+function getProvenanceSummaryTool(db: Database.Database): unknown {
+  return getCategoryProvenance(db);
+}
+
+// Named for the reports it answers for, because no single boolean answers "does this count" for
+// every surface. Budgets apply excluded_from_totals and pending = 0 but not the category-tree scope
+// (budgetProjection.ts), and reconciliation applies pending = 0 and nothing else
+// (reconciliation.ts), so a row can legitimately count on one screen and not another.
+const COUNTS_TOWARD_REPORTS_DEFINITION =
+  'Whether getSpendingReport (the Reports page) and getCashflowReport count this row: it must survive excluded_from_totals, sit outside the cat_xfer / cat_inv / cat_crypto category trees, have pending = 0, and land on the income or expense side. Evaluated with the same predicate strings describe_schema publishes, so it agrees with those two pages and with nothing else: budgets and reconciliation scope rows differently.';
+
+function getTransactionFullTool(db: Database.Database, input: ToolInput): unknown {
+  const id = str(input.transaction_id);
+  if (!id) return { error: 'Provide a transaction id in "transaction_id".' };
+  const row = getTransactionById(db, id);
+  if (!row) return { error: `No transaction with id ${id}.` };
+
+  const inclusion = transactionReportInclusion(db, id);
+  if (!inclusion) return { error: `Transaction ${id} could not be evaluated against the report predicates.` };
+
+  // `amount` is the only money column on the row. `quantity` is a unit count and stays as stored;
+  // dollarizing it would turn 0.0031964 BTC into three ten-thousandths of a coin.
+  return {
+    transaction: dollarizeFields(row, ['amount']),
+    reading: {
+      amount: 'Dollars. Negative means money left the account. A positive amount in an expense category is a refund, not income.',
+      counts_toward_reports: {
+        spending_and_cashflow: inclusion.counts,
+        side: inclusion.side,
+        excluded_because: inclusion.excluded_because,
+        definition: COUNTS_TOWARD_REPORTS_DEFINITION,
+      },
+      category_source:
+        row.category_source == null
+          ? 'NULL: categorized before provenance was recorded. Nobody knows who chose it.'
+          : `Set by: ${String(row.category_source)}.`,
+    },
+  };
+}
+
+function getMyActionHistoryTool(db: Database.Database, input: ToolInput): unknown {
+  const limit = Math.min(Math.max(Number(input.limit) || 25, 1), 200);
+  const actions = listAdvisorActions(db, limit);
+  return {
+    actions: actions.map((action) => ({
+      ...action,
+      // Counted, not assumed: a later write on the same row buries this action's revision until the
+      // later one is undone, and an action that changed no category has none to begin with.
+      rows_still_revertable: revertableRevisionsForAction(db, action.id).length,
+    })),
+    note: 'Nothing in this database records whether an action was correct, so absence of a complaint is not agreement.',
+  };
+}
+
+function getHoldingHistoryTool(db: Database.Database, input: ToolInput): unknown {
+  const holdingId = str(input.holding_id);
+  if (!holdingId) return { error: 'Provide a holding id in "holding_id".' };
+  const days = Math.min(Math.max(Number(input.days) || 90, 1), 3650);
+
+  let points;
+  try {
+    points = getHoldingHistory(db, holdingId, days);
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : 'Holding not found' };
+  }
+
+  return {
+    holding_id: holdingId,
+    window_days: days,
+    points: points.map((point) => ({
+      date: point.date,
+      quantity: point.quantity,
+      // Per-unit price is REAL dollars in the DB and is NOT cents (services/money.ts).
+      price_per_unit: point.institution_price,
+      value: toDollars(point.institution_value),
+      cost_basis: toDollarsOrNull(point.cost_basis),
+    })),
+  };
+}
+
+function getSyncRunsTool(db: Database.Database, input: ToolInput): unknown {
+  const runId = str(input.run_id);
+  if (runId) {
+    try {
+      return { run: getSyncRunDetail(db, runId) };
+    } catch (err) {
+      return { error: err instanceof Error ? err.message : 'Sync run not found' };
+    }
+  }
+  const limit = Math.min(Math.max(Number(input.limit) || 10, 1), 100);
+  return { runs: listSyncRuns(db, limit) };
+}
+
+const RECONCILIATION_MONEY_FIELDS = [
+  'observed_delta',
+  'explained_delta',
+  'residual',
+  'boundary_amount',
+  'adjusted_residual',
+  'largest_window_residual',
+] as const;
+
+// Every field on an account row is DERIVED, and none of them is a column the model can look up in
+// describe_schema, which documents tables. `direction_conflict` reads true on the owner's data right
+// now, and a true boolean whose meaning the model has to guess is worse than no boolean: it invites
+// a confident wrong sentence. Shipped with the data rather than only in the tool description,
+// because the description is read once and the numbers are read every time.
+const RECONCILIATION_FIELD_MEANINGS: Record<string, string> = {
+  observed_delta:
+    'Dollars the account\'s measured balance actually moved across the whole horizon, expressed as a movement in NET WORTH, so a liability\'s balance movement is negated first.',
+  explained_delta: 'Dollars the transactions in that horizon account for, same net-worth sign convention.',
+  residual: 'observed_delta minus explained_delta. Not the figure to judge: read adjusted_residual.',
+  boundary_amount:
+    'The part of residual that is an artifact of where the horizon was cut. The window is date > previous AND date <= current, so a row dated on the FIRST snapshot is outside explained_delta while its balance effect is inside the horizon. Reported separately rather than netted away.',
+  adjusted_residual: 'residual minus boundary_amount. THIS is the figure judged, and what unreconciled is decided on.',
+  direction_conflict:
+    'The ledger and the balance point OPPOSITE WAYS: observed_delta and the boundary-adjusted ledger movement (explained_delta + boundary_amount) have different signs, both are non-zero, and the ledger side is over $5.00. It says the transactions claim money came IN while the balance went DOWN, or the reverse. Reported for non-market-driven accounts ONLY, because on a brokerage observed_delta is transfers plus market profit and loss and a deposit during a down month produces opposite signs with nothing wrong at all. It is a direction disagreement, NOT a claim that a transaction is missing or mis-signed, and it does not on its own put the account in unreconciled.',
+  largest_window_residual: 'The largest single-window residual, roughly the size of the provider posting lag.',
+  residual_ratio:
+    'adjusted_residual as a share of the transaction volume through the account (a ratio, not dollars). An account is listed in unreconciled when it is not market-driven, its adjusted_residual exceeds $5.00, and either this ratio exceeds 0.02 or it is NULL because no volume moved at all.',
+  is_market_driven:
+    'Brokerage, IRA and crypto-wallet accounts, whose balance moves when prices move with no transaction recording it. Their residual is expected and they are never listed as unreconciled.',
+  window_count: 'How many measured snapshot pairs this account appears in. Estimated snapshots are excluded entirely.',
+  unreconciled:
+    'The subset of accounts whose adjusted_residual is beyond tolerance. Empty means nothing is unexplained beyond tolerance; it does not mean every number is right.',
+};
+
+function getReconciliationTool(db: Database.Database, input: ToolInput): unknown {
+  const report = reconcileAccounts(db, { since: str(input.since) });
+  const dollarize = (account: (typeof report.accounts)[number]): Record<string, unknown> =>
+    dollarizeFields(account as unknown as Record<string, unknown>, RECONCILIATION_MONEY_FIELDS);
+
+  return {
+    measured_snapshot_count: report.measured_snapshot_count,
+    total_residual: toDollars(report.total_residual),
+    unreconciled: report.unreconciled.map(dollarize),
+    accounts: report.accounts.map(dollarize),
+    reading:
+      'adjusted_residual is the figure judged; boundary_amount is the part explained by where the horizon was cut and is reported separately rather than netted away silently. Market-driven accounts are never listed as unreconciled because a price move is not a gap in the ledger.',
+    field_meanings: RECONCILIATION_FIELD_MEANINGS,
+  };
+}
+
+// The curated dictionary, composed with the live column list. PRAGMA alone tells the model that
+// `amount` is an INTEGER; it does not tell it the integer is cents, that a positive one inside an
+// expense category is a refund, or that summing it without excludedFromTotalsSql counts the owner's
+// own transfers as spending. schemaDoc.ts carries that, and generates the predicate text from the
+// real functions so it cannot drift.
+//
+// It reads the connection it was HANDED. It used to call getReadOnlyDb() and so described a
+// different database from every other tool in this file, which is also what forced its test to open
+// the owner's installed .mizan/mizan.db.
+function describeSchemaTool(db: Database.Database, input: ToolInput): unknown {
+  // A single name arrives as a bare string often enough to be worth accepting; ignoring it would
+  // silently answer a narrow question with the whole dictionary.
+  const raw = Array.isArray(input.tables) ? input.tables : typeof input.tables === 'string' ? [input.tables] : [];
+  const requested = [
+    ...new Set(raw.filter((v): v is string => typeof v === 'string' && v.trim().length > 0).map((v) => v.trim())),
+  ];
+  return requested.length > 0 ? describeTables(db, requested) : buildSchemaDoc(db);
+}
+
+/**
+ * Model-authored SQL, run OUT OF PROCESS on a read-only copy of the connection.
+ *
+ * It was already write-proof: the connection is opened `{ readonly: true }`, so the engine itself
+ * rejects a write. It was not TIME-proof, and that is the more likely failure. This app is a single
+ * process that also serves the UI, better-sqlite3 is synchronous, and one unbounded recursive CTE
+ * from the model freezes every screen the owner has open until they kill the server.
+ *
+ * WHY A CHILD PROCESS, having tried the alternatives:
+ *
+ *  - There is no in-process kill. better-sqlite3 binds neither `sqlite3_interrupt` nor
+ *    `sqlite3_progress_handler`, so nothing can cancel a query from the thread that is blocked
+ *    inside `sqlite3_step`.
+ *  - Checking a deadline between rows with `stmt.iterate()` looks like it works and does not. The
+ *    deadline is only reached when a row is PRODUCED, so a runaway that filters everything out, or
+ *    a bare aggregate over a cartesian product, never returns to JS at all.
+ *  - A worker thread does not fix it either. `worker.terminate()` cannot preempt a blocked native
+ *    call; in testing it segfaulted the whole process, and not terminating leaves a thread spinning
+ *    on a core for as long as the query runs, which for an infinite CTE is forever.
+ *  - `spawnSync`'s `timeout` is an OS-level SIGKILL. It always lands, it cannot corrupt anything
+ *    (the child holds a read-only handle), and it keeps the tool call SYNCHRONOUS, which it must be
+ *    because the chat loop calls it inline.
+ *
+ * The cost is one node process per model-authored query, measured at roughly 85 ms, which is noise
+ * beside the model round-trip it sits inside. It buys a hard ceiling on how long the owner's app
+ * can be frozen by a question the model asked badly.
+ */
+const DEFAULT_SQL_QUERY_TIMEOUT_MS = 5000;
+const SQL_QUERY_MAX_OUTPUT_BYTES = 16 * 1024 * 1024;
+
+// Read per call rather than at import, so a test can shorten it and a bigger database can be given
+// more room without a rebuild. A value under 250 ms would start killing honest queries, so it is
+// floored rather than trusted.
+function sqlQueryTimeoutMs(): number {
+  const configured = Number(process.env.MIZAN_SQL_QUERY_TIMEOUT_MS);
+  if (!Number.isFinite(configured) || configured <= 0) return DEFAULT_SQL_QUERY_TIMEOUT_MS;
+  return Math.max(configured, 250);
+}
+
+// Runs in a bare `node -e`. argv[1] is the resolved better-sqlite3 entry point and argv[2] is the
+// database file; the request arrives on stdin so no SQL is ever placed on a command line.
+const SQL_CHILD_SOURCE = `
+const Database = require(process.argv[1]);
+const request = JSON.parse(require('node:fs').readFileSync(0, 'utf8'));
+function emit(payload) { process.stdout.write(JSON.stringify(payload)); }
+let db;
+try {
+  db = new Database(process.argv[2], { readonly: true });
+} catch (err) {
+  emit({ kind: 'error', message: 'Could not open the database read-only: ' + err.message });
+  process.exit(0);
+}
+try {
+  const stmt = db.prepare(request.sql);
+  if (!stmt.reader) {
+    emit({ kind: 'not_reader' });
+    process.exit(0);
+  }
+  const rows = [];
+  let truncated = false;
+  for (const row of stmt.iterate()) {
+    if (rows.length >= request.limit) { truncated = true; break; }
+    rows.push(row);
+  }
+  emit({ kind: 'rows', rows: rows, truncated: truncated });
+} catch (err) {
+  emit({ kind: 'error', message: err.message });
+}
+process.exit(0);
+`;
+
+type SqlChildResult =
+  | { kind: 'rows'; rows: unknown[]; truncated: boolean }
+  | { kind: 'not_reader' }
+  | { kind: 'error'; message: string };
+
 function runSqlQueryTool(input: ToolInput): unknown {
   const sql = str(input.sql);
   if (!sql) return { error: 'Provide a SQL SELECT statement in "sql".' };
   const limit = Math.min(Math.max(Number(input.limit) || 100, 1), 500);
-  const rodb = getReadOnlyDb();
+  const timeoutMs = sqlQueryTimeoutMs();
 
-  let stmt: Database.Statement;
-  try {
-    stmt = rodb.prepare(sql);
-  } catch (err) {
-    return { error: `SQL error: ${(err as Error).message}` };
+  const child = spawnSync(
+    process.execPath,
+    ['-e', SQL_CHILD_SOURCE, '--', require.resolve('better-sqlite3'), getReadOnlyDbPath()],
+    {
+      input: JSON.stringify({ sql, limit }),
+      timeout: timeoutMs,
+      killSignal: 'SIGKILL',
+      maxBuffer: SQL_QUERY_MAX_OUTPUT_BYTES,
+      encoding: 'utf8',
+    }
+  );
+
+  if (child.error) {
+    const code = (child.error as NodeJS.ErrnoException).code;
+    if (code === 'ETIMEDOUT') {
+      return {
+        error: `Query exceeded the ${timeoutMs} ms budget and was killed. No rows were returned and nothing was changed.`,
+        timed_out: true,
+        timeout_ms: timeoutMs,
+        // Say what to do about it, not just that it failed.
+        suggestion:
+          'Narrow it before retrying: add a WHERE clause on a date range or an account_id, aggregate instead of listing rows, avoid joins with no ON condition, and bound any recursive CTE.',
+      };
+    }
+    if (code === 'ENOBUFS') {
+      return {
+        error: 'Query returned more data than can be handled. Lower "limit", select fewer columns, or aggregate.',
+      };
+    }
+    return { error: `Query could not be run: ${child.error.message}` };
   }
-  if (!stmt.reader) {
+
+  if (!child.stdout) {
+    const detail = (child.stderr || '').trim().split('\n').slice(-3).join(' ').slice(0, 400);
+    return { error: `Query failed: ${detail || 'the query process produced no output'}` };
+  }
+
+  let payload: SqlChildResult;
+  try {
+    payload = JSON.parse(child.stdout) as SqlChildResult;
+  } catch {
+    return { error: 'Query failed: the result could not be read back.' };
+  }
+
+  if (payload.kind === 'not_reader') {
     return { error: 'Only read-only SELECT queries are allowed.' };
   }
-
-  try {
-    const rows: unknown[] = [];
-    for (const row of stmt.iterate()) {
-      rows.push(row);
-      if (rows.length > limit) break; // cap memory/time even on a huge cross-join
-    }
-    const truncated = rows.length > limit;
-    if (truncated) rows.length = limit;
-    return {
-      row_count: rows.length,
-      truncated,
-      rows,
-      note: 'Money columns are integer cents — divide by 100 for dollars.',
-    };
-  } catch (err) {
-    return { error: `Query failed: ${(err as Error).message}` };
+  if (payload.kind === 'error') {
+    return { error: `SQL error: ${payload.message}` };
   }
+  return {
+    row_count: payload.rows.length,
+    truncated: payload.truncated,
+    rows: payload.rows,
+    note: 'Money columns are integer cents, so divide by 100 for dollars. holdings.institution_price and transactions.quantity are not cents; see describe_schema.',
+  };
 }
 
 // Both write tools go through confirmAdvisorDraft, the same path a confirmed draft takes, so
@@ -524,7 +947,14 @@ export function runAdvisorTool(db: Database.Database, name: string, input: ToolI
     case 'list_holdings': return listHoldingsTool(db);
     case 'get_upcoming_bills': return getUpcomingBillsTool(db, input);
     case 'get_net_worth_history': return getNetWorthHistoryTool(db, input);
-    case 'describe_schema': return describeSchemaTool();
+    case 'get_merchant_rules': return getMerchantRulesTool(db, input);
+    case 'get_provenance_summary': return getProvenanceSummaryTool(db);
+    case 'get_transaction_full': return getTransactionFullTool(db, input);
+    case 'get_my_action_history': return getMyActionHistoryTool(db, input);
+    case 'get_holding_history': return getHoldingHistoryTool(db, input);
+    case 'get_sync_runs': return getSyncRunsTool(db, input);
+    case 'get_reconciliation': return getReconciliationTool(db, input);
+    case 'describe_schema': return describeSchemaTool(db, input);
     case 'run_sql_query': return runSqlQueryTool(input);
     default: return { error: `Unknown tool: ${name}` };
   }

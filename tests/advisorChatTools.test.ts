@@ -205,3 +205,599 @@ test('get_net_worth_history returns dollarized snapshots', (t) => {
   assert.equal(r.history[0].assets, 5000);
   assert.equal(r.history[0].liabilities, 2000);
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// The typed read tools added for the advisor's structural work.
+//
+// Each one is a thin wrapper over a service, and each test below proves the wrapper returns the
+// SAME figure the service returns rather than a parallel derivation. That is the failure this file
+// already exists to prevent: these tools once ran their own SQL and reported $1,695.00 of spending
+// where Reports reported $75.00 on the same data.
+//
+// These use the REAL migrated schema, not a hand-written one, because they touch provenance,
+// revisions and snapshots, where a missing constraint changes the answer.
+// ─────────────────────────────────────────────────────────────────────────────
+
+import {
+  insertAccount,
+  insertAdvisorAction,
+  insertCategory,
+  insertTransaction,
+  migratedTestDb,
+} from './helpers/schema';
+import {
+  applyMerchantRulesToExistingTransactions,
+  upsertMerchantRule,
+  retireMerchantRule,
+} from '../server/src/services/rules';
+import { listAdvisorActions } from '../server/src/services/advisorDrafts';
+import { revertableRevisionsForAction } from '../server/src/services/categoryWrites';
+import { getHoldingHistory } from '../server/src/services/investmentMetadata';
+import { getSyncRunDetail, listSyncRuns, recordSyncRunItem, startSyncRun } from '../server/src/services/syncHistory';
+import { reconcileAccounts } from '../server/src/services/reconciliation';
+import { getSpendingReport } from '../server/src/services/reporting';
+import { getCategoryProvenance } from '../server/src/services/schemaDoc';
+import { getTransactionById } from '../server/src/services/transactions';
+import { toDollars } from '../server/src/services/money';
+
+// ─── get_merchant_rules ───
+
+test('get_merchant_rules returns the rule that the apply path actually picks', (t) => {
+  const db = migratedTestDb();
+  t.after(() => db.close());
+
+  const streaming = insertCategory(db, { name: 'Streaming' });
+  const subscriptions = insertCategory(db, { name: 'Subscriptions' });
+  const account = insertAccount(db);
+  const txn = insertTransaction(db, {
+    account_id: account,
+    merchant_name: 'SPOTIFY 877-778-1161, NY',
+    category_id: null,
+  });
+
+  // Identical timestamps are the point: 236 live rules share 41 of them, so anything that leans on
+  // created_at alone lets SQLite's sorter decide who wins.
+  const sameInstant = '2026-07-01T00:00:00.000Z';
+  upsertMerchantRule(db, 'SPOTIFY 877-778-1161, NY', streaming, sameInstant, { source: 'human' });
+  upsertMerchantRule(db, 'Spotify USA', streaming, sameInstant, { source: 'human' });
+  upsertMerchantRule(db, 'Spotify', subscriptions, sameInstant, { source: 'ai' });
+
+  const tool = runAdvisorTool(db, 'get_merchant_rules', { merchant: 'SPOTIFY 877-778-1161, NY' }) as {
+    winning_rule: { category: string; source: string } | null;
+    rules: Array<{ pattern: string; source: string; wins: boolean }>;
+  };
+
+  applyMerchantRulesToExistingTransactions(db, { onlyUncategorized: true });
+  const applied = db.prepare('SELECT category_id FROM transactions WHERE id = ?').get(txn) as {
+    category_id: string | null;
+  };
+
+  assert.ok(tool.winning_rule, 'a matching rule must be reported as the winner');
+  assert.equal(tool.winning_rule.source, 'human', 'an owner rule outranks the model on the same merchant');
+  assert.equal(applied.category_id, streaming);
+  assert.equal(
+    tool.rules.find((r) => r.wins)?.pattern,
+    'SPOTIFY 877-778-1161, NY',
+    'the tool must name the rule the apply path used, not a different one'
+  );
+});
+
+test('get_merchant_rules hides retired rules, because a retired rule applies to nothing', (t) => {
+  const db = migratedTestDb();
+  t.after(() => db.close());
+
+  const category = insertCategory(db);
+  const created = upsertMerchantRule(db, 'Backblaze', category, '2026-07-01T00:00:00.000Z', { source: 'ai' });
+  assert.ok(created.ruleId);
+  retireMerchantRule(db, created.ruleId, { source: 'human' });
+
+  const live = runAdvisorTool(db, 'get_merchant_rules', { merchant: 'Backblaze' }) as {
+    winning_rule: unknown;
+    rules: unknown[];
+  };
+  assert.deepEqual(live.rules, []);
+  assert.equal(live.winning_rule, null);
+
+  const all = runAdvisorTool(db, 'get_merchant_rules', { include_retired: true, merchant: 'Backblaze' }) as {
+    winning_rule: unknown;
+    rules: Array<{ retired: boolean; matches_merchant: boolean }>;
+  };
+  assert.equal(all.rules.length, 1);
+  assert.equal(all.rules[0].retired, true);
+  assert.equal(all.rules[0].matches_merchant, false, 'a retired rule must never be shown as matching');
+  assert.equal(all.winning_rule, null);
+});
+
+test('get_merchant_rules on a merchant no rule covers reports no winner, not a wrong one', (t) => {
+  const db = migratedTestDb();
+  t.after(() => db.close());
+
+  const category = insertCategory(db);
+  upsertMerchantRule(db, 'Trader Joes', category, '2026-07-01T00:00:00.000Z', { source: 'human' });
+
+  const result = runAdvisorTool(db, 'get_merchant_rules', { merchant: 'Con Edison' }) as {
+    winning_rule: unknown;
+    total_rules: number;
+    rules: unknown[];
+  };
+  assert.equal(result.winning_rule, null);
+  // The rule that exists cannot match, so it is not listed. It is still counted, so "no winner"
+  // cannot be confused with "no rules were looked at".
+  assert.deepEqual(result.rules, []);
+  assert.equal(result.total_rules, 1);
+});
+
+test('asking about one merchant returns that merchant\'s rules, not the whole rule book', (t) => {
+  const db = migratedTestDb();
+  t.after(() => db.close());
+
+  const streaming = insertCategory(db, { name: 'Streaming' });
+  const noise = insertCategory(db, { name: 'Noise' });
+  for (let i = 0; i < 235; i += 1) {
+    upsertMerchantRule(db, `Filler Merchant Number ${String(i).padStart(4, '0')}`, noise, '2026-07-01T00:00:00.000Z', {
+      source: 'human',
+    });
+  }
+  upsertMerchantRule(db, 'Spotify', streaming, '2026-07-01T00:00:00.000Z', { source: 'human' });
+
+  const focused = runAdvisorTool(db, 'get_merchant_rules', { merchant: 'SPOTIFY 877-778-1161, NY' }) as {
+    total_rules: number;
+    winning_rule: { pattern: string } | null;
+    rules: Array<{ pattern: string; matches_merchant: boolean }>;
+  };
+
+  assert.equal(focused.total_rules, 236, 'every rule is still counted');
+  assert.equal(focused.winning_rule?.pattern, 'Spotify');
+  assert.ok(focused.rules.every((rule) => rule.matches_merchant), 'a listed rule must be one that matches');
+  assert.ok(focused.rules.length <= 5, `listed ${focused.rules.length} rules for a one-merchant question`);
+
+  // Measured on the owner's 236 rules, this call was 28,160 bytes before the filter. The whole
+  // rule book is still one call away for anyone who wants it.
+  const focusedBytes = Buffer.byteLength(JSON.stringify(focused), 'utf8');
+  const everything = Buffer.byteLength(
+    JSON.stringify(runAdvisorTool(db, 'get_merchant_rules', { limit: 500 })),
+    'utf8'
+  );
+  assert.ok(focusedBytes * 10 < everything, `focused ${focusedBytes} b vs full book ${everything} b`);
+});
+
+// ─── get_provenance_summary ───
+
+test('get_provenance_summary returns exactly what the service returns', (t) => {
+  const db = migratedTestDb();
+  t.after(() => db.close());
+
+  const account = insertAccount(db);
+  const category = insertCategory(db);
+  insertTransaction(db, { account_id: account, category_id: category });
+  insertTransaction(db, { account_id: account, category_id: category, category_source: 'human' });
+  insertTransaction(db, { account_id: account, category_id: category, category_source: 'ai' });
+
+  assert.deepEqual(runAdvisorTool(db, 'get_provenance_summary', {}), getCategoryProvenance(db));
+});
+
+// ─── get_transaction_full ───
+
+interface TransactionFullResult {
+  transaction: Record<string, unknown>;
+  reading: {
+    counts_toward_reports: {
+      spending_and_cashflow: boolean;
+      side: 'expense' | 'income' | null;
+      excluded_because: string[];
+      definition: string;
+    };
+    category_source: string;
+  };
+}
+
+function transactionFull(db: ReturnType<typeof migratedTestDb>, id: string): TransactionFullResult {
+  return runAdvisorTool(db, 'get_transaction_full', { transaction_id: id }) as TransactionFullResult;
+}
+
+test('get_transaction_full dollarizes the amount and nothing else', (t) => {
+  const db = migratedTestDb();
+  t.after(() => db.close());
+
+  const account = insertAccount(db);
+  const category = insertCategory(db);
+  const id = insertTransaction(db, { account_id: account, category_id: category, amount: -123456 });
+  db.prepare('UPDATE transactions SET quantity = 0.0031964 WHERE id = ?').run(id);
+
+  const result = transactionFull(db, id);
+  const raw = getTransactionById(db, id) as Record<string, unknown>;
+
+  assert.equal(result.transaction.amount, toDollars(raw.amount as number));
+  assert.equal(result.transaction.amount, -1234.56);
+  assert.equal(result.transaction.quantity, 0.0031964, 'a unit count must never be divided by 100');
+  assert.equal(result.transaction.id, id);
+  assert.equal(result.reading.counts_toward_reports.spending_and_cashflow, true);
+  assert.match(result.reading.category_source, /NULL/);
+});
+
+test('get_transaction_full reads the exclusion flags the way the totals do', (t) => {
+  const db = migratedTestDb();
+  t.after(() => db.close());
+
+  const account = insertAccount(db);
+  const transfer = insertTransaction(db, { account_id: account });
+  const dismissedDuplicate = insertTransaction(db, { account_id: account });
+  db.prepare("UPDATE transactions SET transfer_status = 'confirmed' WHERE id = ?").run(transfer);
+  // A DISMISSED duplicate is the owner saying the row is real. Excluding it would delete money the
+  // owner said was there, so this must read as counting.
+  db.prepare("UPDATE transactions SET duplicate_status = 'dismissed' WHERE id = ?").run(dismissedDuplicate);
+
+  assert.equal(transactionFull(db, transfer).reading.counts_toward_reports.spending_and_cashflow, false);
+  assert.equal(
+    transactionFull(db, dismissedDuplicate).reading.counts_toward_reports.spending_and_cashflow,
+    true
+  );
+});
+
+test('an investment or transfer row does not read as counted just because nobody paired it yet', (t) => {
+  const db = migratedTestDb();
+  t.after(() => db.close());
+
+  // transfer_status stays 'none' until the pairing pass runs, and it is the ORDINARY state of a
+  // freshly synced row. Judging inclusion on that flag alone reported a brokerage contribution and
+  // a card payment as spending, on a month whose Reports total was $80.00.
+  const account = insertAccount(db);
+  const purchase = insertTransaction(db, { account_id: account, date: '2026-07-02', amount: -8000, category_id: 'cat_food' });
+  const contribution = insertTransaction(db, { account_id: account, date: '2026-07-03', amount: -50000, category_id: 'cat_inv_transfer' });
+  const cardPayment = insertTransaction(db, { account_id: account, date: '2026-07-04', amount: -20000, category_id: 'cat_xfer_out' });
+  for (const id of [purchase, contribution, cardPayment]) {
+    const row = db.prepare('SELECT transfer_status FROM transactions WHERE id = ?').get(id) as { transfer_status: string };
+    assert.equal(row.transfer_status, 'none', 'the fixture must be the unpaired state, or it proves nothing');
+  }
+
+  const report = getSpendingReport(db, { startDate: '2026-07-01', endDate: '2026-07-31' });
+  assert.equal(report.total, 8000, 'Reports counts the $80 purchase and neither of the other two');
+
+  const counted = transactionFull(db, purchase).reading.counts_toward_reports;
+  assert.equal(counted.spending_and_cashflow, true);
+  assert.equal(counted.side, 'expense');
+  assert.deepEqual(counted.excluded_because, []);
+
+  for (const id of [contribution, cardPayment]) {
+    const reading = transactionFull(db, id).reading.counts_toward_reports;
+    assert.equal(reading.spending_and_cashflow, false, `${id} must not be reported as counted`);
+    assert.ok(reading.excluded_because.length > 0, `${id} must say WHY it does not count`);
+  }
+});
+
+test('a pending purchase is not reported as counted, and says it is the pending flag', (t) => {
+  const db = migratedTestDb();
+  t.after(() => db.close());
+
+  const account = insertAccount(db);
+  const id = insertTransaction(db, { account_id: account, date: '2026-07-02', amount: -3300, category_id: 'cat_food', pending: 1 });
+
+  const reading = transactionFull(db, id).reading.counts_toward_reports;
+  assert.equal(reading.spending_and_cashflow, false);
+  assert.match(reading.excluded_because.join(' '), /pending = 1/);
+});
+
+test('a refund and a paycheck are counted, on the side their category decides', (t) => {
+  const db = migratedTestDb();
+  t.after(() => db.close());
+
+  const account = insertAccount(db);
+  const salary = insertCategory(db, { name: 'Salary', is_income: 1 });
+  // A refund is a POSITIVE amount inside an EXPENSE category. It counts, on the expense side, and
+  // nets that category down. Deciding the side by the sign would drop it out of both totals.
+  const refund = insertTransaction(db, { account_id: account, date: '2026-07-03', amount: 2500, category_id: 'cat_food' });
+  const paycheck = insertTransaction(db, { account_id: account, date: '2026-07-04', amount: 400000, category_id: salary });
+
+  const refundReading = transactionFull(db, refund).reading.counts_toward_reports;
+  assert.equal(refundReading.spending_and_cashflow, true);
+  assert.equal(refundReading.side, 'expense');
+  assert.deepEqual(refundReading.excluded_because, []);
+
+  const paycheckReading = transactionFull(db, paycheck).reading.counts_toward_reports;
+  assert.equal(paycheckReading.spending_and_cashflow, true);
+  assert.equal(paycheckReading.side, 'income');
+  assert.deepEqual(paycheckReading.excluded_because, []);
+});
+
+test('the inclusion field names the reports it answers for, and the ones it does not', (t) => {
+  const db = migratedTestDb();
+  t.after(() => db.close());
+
+  const account = insertAccount(db);
+  const id = insertTransaction(db, { account_id: account, category_id: 'cat_food' });
+  const definition = transactionFull(db, id).reading.counts_toward_reports.definition;
+
+  assert.match(definition, /getSpendingReport/);
+  assert.match(definition, /getCashflowReport/);
+  assert.match(definition, /budgets and reconciliation scope rows differently/);
+});
+
+test('get_transaction_full on an unknown id says so instead of returning an empty row', (t) => {
+  const db = migratedTestDb();
+  t.after(() => db.close());
+  const result = runAdvisorTool(db, 'get_transaction_full', { transaction_id: 'nope' }) as { error: string };
+  assert.match(result.error, /No transaction with id nope/);
+});
+
+// ─── get_my_action_history ───
+
+test('get_my_action_history matches the service and counts revertable rows honestly', (t) => {
+  const db = migratedTestDb();
+  t.after(() => db.close());
+
+  const account = insertAccount(db);
+  const category = insertCategory(db);
+  const actionId = insertAdvisorAction(db, { kind: 'categorize_transaction' });
+  const txn = insertTransaction(db, { account_id: account, category_id: category, category_source: 'ai' });
+  db.prepare(`
+    INSERT INTO transaction_category_revisions
+      (id, transaction_id, action_id, from_category_id, from_source, to_category_id, to_source, created_at)
+    VALUES ('rev_1', ?, ?, NULL, NULL, ?, 'ai', '2026-07-30T00:00:00.000Z')
+  `).run(txn, actionId, category);
+
+  const result = runAdvisorTool(db, 'get_my_action_history', {}) as {
+    actions: Array<{ id: string; rows_still_revertable: number }>;
+  };
+  const service = listAdvisorActions(db, 25);
+
+  assert.equal(result.actions.length, service.length);
+  assert.equal(result.actions[0].id, service[0].id);
+  assert.equal(result.actions[0].rows_still_revertable, revertableRevisionsForAction(db, actionId).length);
+  assert.equal(result.actions[0].rows_still_revertable, 1);
+});
+
+test('an action that changed no categories reports zero revertable rows, not a failure', (t) => {
+  const db = migratedTestDb();
+  t.after(() => db.close());
+
+  insertAdvisorAction(db, { kind: 'create_merchant_rule' });
+  const result = runAdvisorTool(db, 'get_my_action_history', {}) as {
+    actions: Array<{ kind: string; rows_still_revertable: number }>;
+  };
+  assert.equal(result.actions.length, 1);
+  assert.equal(result.actions[0].rows_still_revertable, 0);
+});
+
+test('get_my_action_history on a clean install is empty, and says nothing else', (t) => {
+  const db = migratedTestDb();
+  t.after(() => db.close());
+  const result = runAdvisorTool(db, 'get_my_action_history', {}) as { actions: unknown[] };
+  assert.deepEqual(result.actions, []);
+});
+
+// ─── get_holding_history ───
+
+test('get_holding_history dollarizes values and leaves the per-unit price alone', (t) => {
+  const db = migratedTestDb();
+  t.after(() => db.close());
+
+  const account = insertAccount(db, { type: 'crypto_wallet' });
+  db.prepare("INSERT INTO securities (id, ticker, name, type) VALUES ('sec_btc','BTC','Bitcoin','crypto')").run();
+  db.prepare(`
+    INSERT INTO holdings (id, account_id, security_id, quantity, institution_price, institution_value, cost_basis, updated_at)
+    VALUES ('hold_1', ?, 'sec_btc', 0.0031964, 61234.56, 19575, NULL, '2026-07-30T00:00:00.000Z')
+  `).run(account);
+  db.prepare(`
+    INSERT INTO holdings_history (id, account_id, security_id, date, quantity, institution_price, institution_value, cost_basis, created_at)
+    VALUES ('hh_1', ?, 'sec_btc', date('now','-2 days'), 0.0031964, 61234.56, 19575, NULL, '2026-07-30T00:00:00.000Z')
+  `).run(account);
+
+  const result = runAdvisorTool(db, 'get_holding_history', { holding_id: 'hold_1' }) as {
+    points: Array<{ price_per_unit: number; value: number; cost_basis: number | null; quantity: number }>;
+  };
+  const service = getHoldingHistory(db, 'hold_1', 90);
+
+  assert.equal(result.points.length, service.length);
+  assert.equal(result.points[0].value, toDollars(service[0].institution_value));
+  assert.equal(result.points[0].value, 195.75);
+  assert.equal(result.points[0].price_per_unit, 61234.56, 'a per-unit price is already dollars');
+  assert.equal(result.points[0].quantity, 0.0031964);
+  assert.equal(result.points[0].cost_basis, null, 'an unknown basis stays unknown, it does not become zero');
+});
+
+test('get_holding_history on an unknown holding reports it rather than throwing', (t) => {
+  const db = migratedTestDb();
+  t.after(() => db.close());
+  const result = runAdvisorTool(db, 'get_holding_history', { holding_id: 'nope' }) as { error: string };
+  assert.match(result.error, /Holding not found/);
+});
+
+// ─── get_sync_runs ───
+
+test('get_sync_runs returns the service list, and expands one run into its stages', (t) => {
+  const db = migratedTestDb();
+  t.after(() => db.close());
+
+  const run = startSyncRun(db, 'full', 'test run');
+  recordSyncRunItem(db, run.id, { provider: 'simplefin', status: 'succeeded', transactions_added: 3 });
+
+  assert.deepEqual(runAdvisorTool(db, 'get_sync_runs', {}), { runs: listSyncRuns(db, 10) });
+  assert.deepEqual(runAdvisorTool(db, 'get_sync_runs', { run_id: run.id }), { run: getSyncRunDetail(db, run.id) });
+});
+
+test('get_sync_runs before the first sync returns an empty list, not an error', (t) => {
+  const db = migratedTestDb();
+  t.after(() => db.close());
+  assert.deepEqual(runAdvisorTool(db, 'get_sync_runs', {}), { runs: [] });
+});
+
+test('get_sync_runs on an unknown run id says so', (t) => {
+  const db = migratedTestDb();
+  t.after(() => db.close());
+  const result = runAdvisorTool(db, 'get_sync_runs', { run_id: 'nope' }) as { error: string };
+  assert.match(result.error, /Sync run not found/);
+});
+
+// ─── get_reconciliation ───
+
+function seedReconciliation(db: ReturnType<typeof migratedTestDb>): { checking: string; brokerage: string } {
+  const checking = insertAccount(db, { account_name: 'Checking', type: 'checking', current_balance: 150000 });
+  const brokerage = insertAccount(db, { account_name: 'Brokerage', type: 'brokerage', current_balance: 900000 });
+  const snapshot = db.prepare(`
+    INSERT INTO net_worth_snapshots
+      (id, date, total_assets, total_liabilities, net_worth, breakdown, is_estimated, created_at)
+    VALUES (?, ?, ?, 0, ?, ?, 0, '2026-07-30T00:00:00.000Z')
+  `);
+  snapshot.run('nw_1', '2026-06-30', 1100000, 1100000, JSON.stringify({ [checking]: 100000, [brokerage]: 1000000 }));
+  snapshot.run('nw_2', '2026-07-30', 1050000, 1050000, JSON.stringify({ [checking]: 150000, [brokerage]: 900000 }));
+  return { checking, brokerage };
+}
+
+test('get_reconciliation reports the service figures, converted to dollars once', (t) => {
+  const db = migratedTestDb();
+  t.after(() => db.close());
+
+  const { checking } = seedReconciliation(db);
+  // The ledger explains the checking movement exactly: +$500 in, and the balance rose $500.
+  insertTransaction(db, { account_id: checking, date: '2026-07-15', amount: 50000 });
+
+  const service = reconcileAccounts(db, {});
+  const tool = runAdvisorTool(db, 'get_reconciliation', {}) as {
+    total_residual: number;
+    unreconciled: unknown[];
+    accounts: Array<{ account_id: string; residual: number; adjusted_residual: number; boundary_amount: number }>;
+  };
+
+  assert.equal(tool.total_residual, toDollars(service.total_residual));
+  assert.equal(tool.accounts.length, service.accounts.length);
+  for (const account of service.accounts) {
+    const reported = tool.accounts.find((a) => a.account_id === account.account_id);
+    assert.ok(reported, `missing account ${account.account_id}`);
+    assert.equal(reported.residual, toDollars(account.residual));
+    assert.equal(reported.adjusted_residual, toDollars(account.adjusted_residual));
+    assert.equal(reported.boundary_amount, toDollars(account.boundary_amount));
+  }
+});
+
+test('every derived reconciliation field the tool emits is defined in the same payload', (t) => {
+  const db = migratedTestDb();
+  t.after(() => db.close());
+
+  const { checking } = seedReconciliation(db);
+  insertTransaction(db, { account_id: checking, date: '2026-07-15', amount: 50000 });
+
+  const tool = runAdvisorTool(db, 'get_reconciliation', {}) as {
+    accounts: Array<Record<string, unknown>>;
+    field_meanings: Record<string, string>;
+  };
+
+  // direction_conflict reads true on the owner's data right now with no definition anywhere the
+  // model can see it. A true boolean whose meaning has to be guessed is worse than no boolean.
+  assert.match(tool.field_meanings.direction_conflict ?? '', /OPPOSITE WAYS/);
+  assert.match(tool.field_meanings.direction_conflict ?? '', /NOT a claim that a transaction is missing/);
+
+  // Nothing self-describing enough to skip: every derived field on an account row needs an entry,
+  // because none of them is a column describe_schema documents.
+  const selfEvident = new Set(['account_id', 'account_name', 'is_liability', 'first_date', 'last_date']);
+  for (const field of Object.keys(tool.accounts[0])) {
+    if (selfEvident.has(field)) continue;
+    assert.ok(tool.field_meanings[field], `${field} is emitted with no definition the model can read`);
+  }
+});
+
+test('a healthy ledger reconciles silently, and a price move is not called a gap', (t) => {
+  const db = migratedTestDb();
+  t.after(() => db.close());
+
+  const { checking } = seedReconciliation(db);
+  insertTransaction(db, { account_id: checking, date: '2026-07-15', amount: 50000 });
+
+  const tool = runAdvisorTool(db, 'get_reconciliation', {}) as {
+    unreconciled: Array<{ account_id: string }>;
+    accounts: Array<{ account_id: string; is_market_driven: boolean; direction_conflict: boolean }>;
+  };
+
+  // The brokerage fell $1,000 with no transaction at all: an ordinary down month. It must not be
+  // reported as unexplained, and it must not raise a direction conflict either.
+  assert.deepEqual(tool.unreconciled, [], 'nothing is unexplained on a ledger that adds up');
+  for (const account of tool.accounts) {
+    assert.equal(account.direction_conflict, false, `${account.account_id} raised a conflict on healthy data`);
+  }
+});
+
+test('a transaction dated on the first snapshot is reported as a boundary artifact, not a gap', (t) => {
+  const db = migratedTestDb();
+  t.after(() => db.close());
+
+  const { checking } = seedReconciliation(db);
+  // The window is `date > first AND date <= last`, so a row on the horizon's own first date sits
+  // outside `explained` while its balance effect sits inside. That is where the horizon was cut,
+  // not a missing transaction, and the tool has to keep the two visible separately.
+  insertTransaction(db, { account_id: checking, date: '2026-06-30', amount: 50000 });
+
+  const tool = runAdvisorTool(db, 'get_reconciliation', {}) as {
+    unreconciled: Array<{ account_id: string }>;
+    accounts: Array<{ account_id: string; residual: number; boundary_amount: number; adjusted_residual: number }>;
+  };
+
+  const account = tool.accounts.find((a) => a.account_id === checking);
+  assert.ok(account);
+  assert.equal(account.residual, 500);
+  assert.equal(account.boundary_amount, 500);
+  assert.equal(account.adjusted_residual, 0);
+  assert.deepEqual(tool.unreconciled, []);
+});
+
+// ─── Weight ───
+//
+// Tool results land uncached inside a loop that runs up to 8 rounds, so the size of an answer is
+// part of whether the answer is usable. Measured on a copy of the owner's database with
+// Buffer.byteLength(JSON.stringify(result), 'utf8'): describe_schema was 34,398 bytes (~8.6k
+// tokens) and get_merchant_rules with a merchant argument was 28,160, so an ordinary two-tool turn
+// spent ~15.6k tokens before answering anything.
+
+test('a two-tool turn stays small enough to answer in', (t) => {
+  const db = migratedTestDb();
+  t.after(() => db.close());
+
+  const category = insertCategory(db, { name: 'Streaming' });
+  for (let i = 0; i < 235; i += 1) {
+    upsertMerchantRule(db, `Filler Merchant Number ${String(i).padStart(4, '0')}`, category, '2026-07-01T00:00:00.000Z', {
+      source: 'human',
+    });
+  }
+  upsertMerchantRule(db, 'Spotify', category, '2026-07-01T00:00:00.000Z', { source: 'human' });
+
+  const bytes = (value: unknown): number => Buffer.byteLength(JSON.stringify(value), 'utf8');
+  const schema = bytes(runAdvisorTool(db, 'describe_schema', {}));
+  const rules = bytes(runAdvisorTool(db, 'get_merchant_rules', { merchant: 'SPOTIFY 877-778-1161, NY' }));
+  const expansion = bytes(runAdvisorTool(db, 'describe_schema', { tables: ['holdings'] }));
+
+  assert.ok(schema < 28_000, `describe_schema returned ${schema} bytes`);
+  assert.ok(rules < 3_000, `get_merchant_rules returned ${rules} bytes for one merchant`);
+  assert.ok(expansion < 3_000, `expanding one table returned ${expansion} bytes`);
+  assert.ok(schema + rules < 32_000, `a two-tool turn cost ${schema + rules} bytes`);
+});
+
+test('get_merchant_rules resolves over every rule, not just the page it returns', (t) => {
+  const db = migratedTestDb();
+  t.after(() => db.close());
+
+  const streaming = insertCategory(db, { name: 'Streaming' });
+  const noise = insertCategory(db, { name: 'Noise' });
+
+  // The real ledger has 236 rules against a default page of 100. The matching rule sat off the end
+  // and the tool reported that nothing matched a merchant that had a rule. Long patterns sort
+  // first, so a short one is pushed past the page boundary.
+  for (let i = 0; i < 120; i += 1) {
+    upsertMerchantRule(db, `Filler Merchant Number ${String(i).padStart(4, '0')}`, noise, '2026-07-01T00:00:00.000Z', {
+      source: 'human',
+    });
+  }
+  upsertMerchantRule(db, 'Hulu', streaming, '2026-07-01T00:00:00.000Z', { source: 'human' });
+
+  const result = runAdvisorTool(db, 'get_merchant_rules', { merchant: 'Hulu', limit: 10 }) as {
+    total_rules: number;
+    winning_rule: { pattern: string; category: string } | null;
+    rules: Array<{ pattern: string; wins: boolean }>;
+  };
+
+  assert.equal(result.total_rules, 121);
+  assert.ok(result.winning_rule, 'a rule that exists must be found regardless of the page size');
+  assert.equal(result.winning_rule.pattern, 'Hulu');
+  assert.equal(result.winning_rule.category, 'Streaming');
+  assert.ok(
+    result.rules.some((rule) => rule.wins && rule.pattern === 'Hulu'),
+    'the winner must be carried into the returned list even when it falls outside the limit'
+  );
+});

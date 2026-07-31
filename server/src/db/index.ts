@@ -13,9 +13,30 @@ fs.mkdirSync(path.join(MIZAN_DIR, 'logs'), { recursive: true });
 
 let _db: Database.Database | null = null;
 let _readonlyDb: Database.Database | null = null;
+let _readonlyDbPath = DB_PATH;
 
 export function _setDbForTesting(testDb: Database.Database) {
   _db = testDb;
+}
+
+/**
+ * The file the read-only connection opens.
+ *
+ * Exported because model-authored SQL does not run on that connection at all: it runs in a short-
+ * lived child process that can be killed on a wall clock (see runSqlQueryTool in
+ * services/advisorChatTools.ts), and the child has to be told which file to open.
+ */
+export function getReadOnlyDbPath(): string {
+  return _readonlyDbPath;
+}
+
+/** Point the read-only connection AND the out-of-process SQL runner at a test database. */
+export function _setReadOnlyDbPathForTesting(dbPath: string): void {
+  if (_readonlyDb) {
+    _readonlyDb.close();
+    _readonlyDb = null;
+  }
+  _readonlyDbPath = dbPath;
 }
 
 export function getDb(): Database.Database {
@@ -29,10 +50,10 @@ export function getDb(): Database.Database {
 
 // A separate connection opened in SQLite readonly mode. The engine rejects ANY write on it,
 // so it's the hard security boundary for executing model-authored SQL (the AI advisor's
-// run_sql_query tool) — a write can never reach the real data even if a guard is bypassed.
+// run_sql_query tool): a write can never reach the real data even if a guard is bypassed.
 export function getReadOnlyDb(): Database.Database {
   if (!_readonlyDb) {
-    _readonlyDb = new Database(DB_PATH, { readonly: true });
+    _readonlyDb = new Database(_readonlyDbPath, { readonly: true });
     _readonlyDb.pragma('foreign_keys = ON');
   }
   return _readonlyDb;
