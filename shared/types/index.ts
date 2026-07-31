@@ -551,7 +551,11 @@ export interface NetWorthSnapshot {
 }
 
 export interface SyncEvent {
-  type: 'sync_start' | 'sync_progress' | 'sync_complete' | 'sync_error';
+  // 'ai_pass_applied' is not a sync stage: a background AI pass runs AFTER the terminal
+  // sync_complete has been emitted and the client has already refreshed, so a pass that
+  // recategorizes rows leaves pre-AI totals on screen until something else invalidates them.
+  // It is emitted only when a pass actually wrote something.
+  type: 'sync_start' | 'sync_progress' | 'sync_complete' | 'sync_error' | 'ai_pass_applied';
   message: string;
   progress?: number;
   completedAt?: string;
@@ -559,6 +563,11 @@ export interface SyncEvent {
   // committed: the run is over and the ledger moved, so the client must refresh on it exactly as
   // it would on a clean run, and say the run had issues.
   status?: 'succeeded' | 'partial';
+  // Set on ai_pass_applied: the AiJobName (server/src/services/aiJobs.ts) whose pass wrote, and
+  // how many actions it applied. Typed as a string rather than importing the job registry's union,
+  // because this file is shared with the client and the registry is server-side.
+  job?: string;
+  applied?: number;
 }
 
 export type SyncHealthStatus = 'empty' | 'healthy' | 'stale' | 'attention';
@@ -1285,4 +1294,161 @@ export interface SafeToSpend {
   allocated_goals: number;
   free: number;
   forecast_days: number;
+}
+
+/* --- What the AI changed (GET /api/ai/digest) --- */
+
+/**
+ * `standing` the AI's category is what the row holds now; `superseded` a later write replaced it;
+ * `reverted` this revision has already been undone.
+ */
+export type AiDigestRowStatus = 'standing' | 'superseded' | 'reverted';
+
+/**
+ * Why a revert-since would leave a row alone. Each is read off the revision log, not guessed.
+ *
+ * `changed_since` means something OUTSIDE this action now stands where this write did.
+ * `replaced_by_same_action` means the action itself wrote the row again later, so undoing it
+ * restores the second write's prior value rather than this one. Folding the second into the first
+ * told the owner someone had changed a row that only the AI's own action had touched.
+ */
+export type AiDigestBlockedReason = 'already_reverted' | 'changed_since' | 'replaced_by_same_action';
+
+/** One transaction the AI recategorized, with the value it displaced. Amounts are DOLLARS. */
+export interface AiDigestRow {
+  revision_id: string;
+  transaction_id: string;
+  date: string;
+  merchant: string;
+  account_name: string | null;
+  /** Negative means money left the account. */
+  amount: number;
+  before_category_id: string | null;
+  /** Null with a non-null id means the category has since been deleted. */
+  before_category_name: string | null;
+  after_category_id: string | null;
+  after_category_name: string | null;
+  status: AiDigestRowStatus;
+  /** True when the revert this digest describes would put this row back. */
+  revertable: boolean;
+  blocked_reason: AiDigestBlockedReason | null;
+  /** `category_source` stamped on the write that now stands where this one did. */
+  changed_since_by_source: string | null;
+  changed_since_by_action_id: string | null;
+}
+
+export interface AiDigestRule {
+  rule_id: string;
+  pattern: string;
+  category_id: string | null;
+  category_name: string | null;
+  source: string;
+  retired_at: string | null;
+}
+
+export interface AiDigestRuleRevision {
+  rule_id: string;
+  pattern: string;
+  operation: 'create' | 'recategorize' | 'rename' | 'retire';
+  from_category_id: string | null;
+  from_category_name: string | null;
+  to_category_id: string | null;
+  to_category_name: string | null;
+  created_at: string;
+}
+
+/** An `ai_feedback` row (migration 047): the owner already answered this action. */
+export interface AiDigestFeedback {
+  signal: string;
+  owner_choice: string;
+  affected_transactions: number;
+  created_at: string;
+}
+
+/**
+ * Why an action has no transaction rows in the revision log, when it has none.
+ *
+ * `rows` the log holds rows for it. `no_rows_changed` the action was applied while the log
+ * existed and wrote no transaction row, so "it changed nothing" is a fact about the action, not a
+ * gap: `create_merchant_rule` is autonomous and a rule matching no settled transaction applies
+ * cleanly. `unrecorded` the action predates the log (or the log's start cannot be read), so what it
+ * changed row by row was never written down and cannot be stated either way.
+ *
+ * The boundary is `schema_migrations.applied_at` for the migration that created the log, read at
+ * digest time. Nothing here asserts WHY a given pre-migration action has no rows.
+ */
+export type AiDigestRecordState = 'rows' | 'no_rows_changed' | 'unrecorded';
+
+/**
+ * `none` means rows exist and every one of them is blocked. The other two are the no-rows cases and
+ * mirror `AiDigestRecordState`: `nothing_to_revert` is an action that changed no rows, `unrecorded`
+ * is an action whose row-level effect was never recorded.
+ */
+export type AiDigestRevertScope = 'full' | 'partial' | 'none' | 'nothing_to_revert' | 'unrecorded';
+
+export interface AiDigestAction {
+  action_id: string;
+  kind: string;
+  label: string;
+  summary: string;
+  source: 'worker_auto' | 'user_confirm';
+  created_at: string;
+  rows: AiDigestRow[];
+  /** The merchant rule this action wrote, as it stands now. Null when no rule points at it. */
+  rule: AiDigestRule | null;
+  rule_revisions: AiDigestRuleRevision[];
+  owner_feedback: AiDigestFeedback[];
+  record_state: AiDigestRecordState;
+  standing_rows: number;
+  revertable_rows: number;
+  blocked_rows: number;
+  revert_scope: AiDigestRevertScope;
+}
+
+export interface AiDigest {
+  since: string | null;
+  generated_at: string;
+  /** The action cap this digest was built with. Echoed so a revert can name the same population. */
+  action_limit: number;
+  /** True when more actions fall in the window than were returned. */
+  truncated: boolean;
+  action_count: number;
+  /** Actions applied while the revision log existed that changed no transaction row. */
+  actions_that_changed_no_rows: number;
+  /** Actions whose row-level effect was never recorded. Not the same fact as the line above. */
+  actions_unrecorded: number;
+  row_count: number;
+  standing_rows: number;
+  revertable_rows: number;
+  /**
+   * Split on purpose. A row the owner already put back and a row someone else has since changed are
+   * both unreachable, and copy that folds them into one number tells the owner their own undo was
+   * somebody else's edit.
+   */
+  already_reverted_rows: number;
+  changed_since_rows: number;
+  replaced_within_action_rows: number;
+  actions: AiDigestAction[];
+}
+
+export interface AiDigestRevertActionOutcome {
+  action_id: string;
+  label: string;
+  planned_rows: number;
+  reverted_rows: number;
+}
+
+export interface AiDigestRevertResult {
+  since: string;
+  /** The action cap the revert planned against. Equal to the digest's `action_limit` when they agree. */
+  action_limit: number;
+  planned_rows: number;
+  reverted_rows: number;
+  /** Rows the plan never claimed, split by why. Restated so the result cannot read as complete. */
+  already_reverted_rows: number;
+  changed_since_rows: number;
+  replaced_within_action_rows: number;
+  actions: AiDigestRevertActionOutcome[];
+  /** Populated when an action restored a different number of rows than the plan expected. */
+  discrepancies: string[];
 }

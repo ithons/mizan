@@ -45,6 +45,16 @@ export function useSyncStatus() {
                 : { type: 'success', message: 'Sync complete' });
               break;
             }
+            case 'ai_pass_applied':
+              // Not a sync: a background pass runs after sync_complete has already refreshed the
+              // caches, so its writes land behind figures the client has just decided are current.
+              // Sync status is deliberately untouched: no sync is in flight.
+              invalidateFinancialData(queryClient);
+              addToast({
+                type: 'info',
+                message: data.message || 'AI review applied changes',
+              });
+              break;
             case 'sync_error':
               setSyncStatus('error');
               // A sync that dies mid-run can already have committed provider writes, so dropping

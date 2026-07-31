@@ -1,9 +1,10 @@
 import type Database from 'better-sqlite3';
 import { v4 as uuidv4 } from 'uuid';
 
-// Durable storage for advisor chat threads. The chat itself still streams statelessly
-// (routes/ai.ts /chat); the client persists each settled exchange here so history
-// survives reloads and past conversations can be reopened.
+// Durable storage for advisor chat threads. The client persists each settled exchange here so
+// history survives reloads and past conversations can be reopened, and `buildChatTurns` below is
+// what `POST /api/ai/chat` reconstructs a turn from, so the thread the model sees is the thread
+// this database holds rather than an array the request supplied.
 
 export interface ConversationSummary {
   id: string;
@@ -82,6 +83,57 @@ export function appendMessages(
   });
   apply();
   return { ok: true };
+}
+
+export interface ChatTurnRequest {
+  /** When set, the prior turns come from this conversation's stored messages. */
+  conversationId?: string | null;
+  /** The turn being asked now. It is not in the store yet: the client persists a settled exchange. */
+  message?: string | null;
+  /** Prior turns supplied by the request. Used only when there is no conversation id. */
+  clientMessages?: readonly ConversationMessage[] | null;
+}
+
+export type ChatTurnsResult =
+  | { ok: true; messages: ConversationMessage[]; history_source: 'conversation' | 'request' }
+  | { ok: false; reason: 'conversation_not_found' | 'no_message' };
+
+/**
+ * The message list a chat turn runs on.
+ *
+ * The conversation id is the authoritative form. The client used to post its whole history array
+ * and the server seeded the model from it, which put the shape of the prompt outside the server's
+ * control: the system block sits behind `cache_control` and an ephemeral cache is only worth
+ * anything if the prefix in front of it is stable and the server can reason about it.
+ *
+ * The request-supplied form is kept, and is not a fallback for a conversation that failed to load.
+ * It is the path for a turn that has no conversation at all, which is a real state: the client
+ * creates the conversation row on a best-effort basis and chat has to keep working when that write
+ * fails. A conversation id that names nothing is an error rather than a silent demotion to the
+ * client's array, because demoting quietly would reintroduce exactly what this function removes.
+ *
+ * The current turn is never read from the store. `appendMessages` runs after the answer settles, so
+ * at the moment a turn starts the store holds every earlier exchange and not this one.
+ */
+export function buildChatTurns(db: Database.Database, request: ChatTurnRequest): ChatTurnsResult {
+  const conversationId = request.conversationId?.trim() || null;
+  const message = request.message?.trim() ?? '';
+
+  if (conversationId) {
+    if (!message) return { ok: false, reason: 'no_message' };
+    const conversation = getConversation(db, conversationId);
+    if (!conversation) return { ok: false, reason: 'conversation_not_found' };
+    return {
+      ok: true,
+      messages: [...conversation.messages, { role: 'user', content: message }],
+      history_source: 'conversation',
+    };
+  }
+
+  const supplied = request.clientMessages ?? [];
+  const messages = [...supplied, ...(message ? [{ role: 'user' as const, content: message }] : [])];
+  if (messages.length === 0) return { ok: false, reason: 'no_message' };
+  return { ok: true, messages, history_source: 'request' };
 }
 
 export function deleteConversation(db: Database.Database, id: string): { changed: number } {

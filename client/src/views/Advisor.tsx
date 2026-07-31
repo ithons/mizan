@@ -280,7 +280,8 @@ export function Advisor() {
             </div>
           ))}
           <div className="mt-4 text-note leading-[1.55] text-muted-2">
-            Anything it changes is listed under Settings → What the AI has done, and can be undone there.
+            Press ⌘K and pick "What the AI changed" to see every row it touched, with what each one
+            was before, and put any of it back.
           </div>
         </div>
       </div>

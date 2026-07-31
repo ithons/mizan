@@ -9,6 +9,7 @@ import {
 import { buildAdvisorContextSnapshot, ADVISOR_SYSTEM_PROMPT, ADVISOR_PROFILE_PREFERENCE_KEY } from '../services/aiContext';
 import { getPreference, setPreference } from '../services/preferences';
 import {
+  buildChatTurns,
   createConversation,
   listConversations,
   getConversation,
@@ -16,6 +17,12 @@ import {
   deleteConversation,
   type ConversationMessage,
 } from '../services/conversations';
+import {
+  buildAiDigest,
+  DEFAULT_DIGEST_ACTION_LIMIT,
+  MAX_REVERT_ACTIONS,
+  revertAiDigestSince,
+} from '../services/aiDigest';
 import {
   confirmAdvisorDraft,
   confirmAdvisorDraftsByIds,
@@ -172,6 +179,106 @@ router.post('/actions/:id/undo', (req: Request, res: Response, next: NextFunctio
       return;
     }
     res.json({ data: result });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// --- What the AI changed ---
+
+/**
+ * ISO-8601 date, or date and time, with an optional zone. `Date.parse` alone is not this check:
+ * it accepts 'Jan 1 2020', and `since` is compared LEXICOGRAPHICALLY against ISO `created_at`
+ * strings, where that form sorts above every real timestamp and silently selects nothing. A revert
+ * then returns ok having planned and reverted zero rows, which reads as success.
+ */
+const ISO_TIMESTAMP = /^\d{4}-\d{2}-\d{2}(?:[T ]\d{2}:\d{2}(?::\d{2}(?:\.\d{1,3})?)?(?:Z|[+-]\d{2}:\d{2})?)?$/;
+
+/**
+ * An ISO timestamp normalized to UTC, or null for "everything on record".
+ *
+ * Normalized rather than passed through, for the same lexicographic reason: '2026-07-01T00:00+02:00'
+ * parses fine and then compares wrongly against `created_at` values stored as `toISOString()` UTC.
+ */
+function parseSince(raw: unknown): { ok: true; since: string | null } | { ok: false; error: string } {
+  if (raw === undefined || raw === null || raw === '') return { ok: true, since: null };
+  if (typeof raw !== 'string' || !ISO_TIMESTAMP.test(raw) || Number.isNaN(Date.parse(raw))) {
+    return { ok: false, error: 'since must be an ISO-8601 timestamp, e.g. 2026-07-01T00:00:00.000Z' };
+  }
+  return { ok: true, since: new Date(raw).toISOString() };
+}
+
+/** Optional positive-integer query/body field, bounded. Absent means "use the default". */
+function parseLimit(
+  raw: unknown,
+  max: number
+): { ok: true; limit: number | null } | { ok: false; error: string } {
+  if (raw === undefined || raw === null || raw === '') return { ok: true, limit: null };
+  const parsed = Number(raw);
+  if (!Number.isInteger(parsed) || parsed < 1 || parsed > max) {
+    return { ok: false, error: `limit must be an integer between 1 and ${max}` };
+  }
+  return { ok: true, limit: parsed };
+}
+
+// GET /api/ai/digest?since=<iso>&limit=<n> - every row the AI touched, grouped by the action that
+// caused it, with what each row was and what it is now.
+router.get('/digest', (req: Request, res: Response, next: NextFunction): void => {
+  try {
+    const since = parseSince(req.query.since);
+    if (!since.ok) {
+      res.status(400).json({ error: since.error });
+      return;
+    }
+
+    const limit = parseLimit(req.query.limit, MAX_REVERT_ACTIONS);
+    if (!limit.ok) {
+      res.status(400).json({ error: limit.error });
+      return;
+    }
+
+    res.json({
+      data: buildAiDigest(getDb(), {
+        since: since.since,
+        limit: limit.limit ?? DEFAULT_DIGEST_ACTION_LIMIT,
+      }),
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// POST /api/ai/digest/revert - put back every row the AI changed since a timestamp, in one gesture.
+// Rows a later write has displaced are reported rather than reverted: the result carries the plan
+// beside the outcome so it cannot read as more complete than it was.
+//
+// `limit` is the caller's own digest page size, so the revert plans over exactly the actions the
+// caller was shown. Omitted, it falls back to the same default GET /digest uses, which is what the
+// client gets when it asks for a digest without a limit.
+router.post('/digest/revert', (req: Request, res: Response, next: NextFunction): void => {
+  try {
+    const parsed = parseSince(req.body?.since);
+    if (!parsed.ok || parsed.since === null) {
+      res.status(400).json({ error: 'since (ISO-8601 timestamp) is required' });
+      return;
+    }
+
+    const limit = parseLimit(req.body?.limit, MAX_REVERT_ACTIONS);
+    if (!limit.ok) {
+      res.status(400).json({ error: limit.error });
+      return;
+    }
+
+    const outcome = revertAiDigestSince(
+      getDb(),
+      parsed.since,
+      limit.limit ?? DEFAULT_DIGEST_ACTION_LIMIT
+    );
+    if (!outcome.ok) {
+      res.status(400).json({ error: outcome.error });
+      return;
+    }
+    res.json({ data: outcome.result });
   } catch (err) {
     next(err);
   }
@@ -387,14 +494,41 @@ router.post('/drafts/:id/dismiss', (req: Request, res: Response, next: NextFunct
   }
 });
 
-// POST /api/ai/chat - streaming chat with financial advisor
+// POST /api/ai/chat - streaming chat with financial advisor.
+//
+// Two accepted shapes, and the first is the one the client uses. `{ conversation_id, message }`
+// makes the server read the thread out of its own tables and append only the new turn, so what sits
+// in front of the cached system block is something the server built. `{ messages }` is the path for
+// a turn with no conversation behind it (the client creates the conversation row best-effort, and
+// chat has to survive that write failing); it is not a fallback for an id that failed to load,
+// which is a 404 instead.
 router.post('/chat', async (req: Request, res: Response, next: NextFunction): Promise<void> => {
-  const { messages } = req.body as { messages: ChatMessage[] };
+  const body = req.body as {
+    messages?: ChatMessage[];
+    conversation_id?: string | null;
+    message?: string | null;
+  };
+  const supplied = Array.isArray(body.messages)
+    ? body.messages.filter(
+        (m): m is ChatMessage =>
+          (m?.role === 'user' || m?.role === 'assistant') && typeof m?.content === 'string'
+      )
+    : null;
 
-  if (!Array.isArray(messages) || messages.length === 0) {
-    res.status(400).json({ error: 'messages array is required' });
+  const turns = buildChatTurns(getDb(), {
+    conversationId: body.conversation_id,
+    message: body.message,
+    clientMessages: supplied,
+  });
+  if (!turns.ok) {
+    if (turns.reason === 'conversation_not_found') {
+      res.status(404).json({ error: 'Conversation not found' });
+      return;
+    }
+    res.status(400).json({ error: 'messages array, or conversation_id with message, is required' });
     return;
   }
+  const messages = turns.messages;
 
   let anthropic: Anthropic;
   try {
@@ -415,7 +549,7 @@ router.post('/chat', async (req: Request, res: Response, next: NextFunction): Pr
   const snapshot = buildAdvisorContextSnapshot();
   const systemText = `${ADVISOR_SYSTEM_PROMPT}\n\n${snapshot.context}`;
 
-  // Seed the conversation from the client turns, then grow it as the model calls tools.
+  // Seed from the reconstructed turns, then grow it as the model calls tools.
   const conversation: Anthropic.MessageParam[] = messages.map((m) => ({ role: m.role, content: m.content }));
 
   // Set once a turn ends with something other than another tool request. If the loop below

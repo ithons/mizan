@@ -29,6 +29,16 @@ const TOOL_LABELS: Record<string, string> = {
 // messages themselves live on the server (services/conversations.ts).
 const ACTIVE_KEY = 'mizan.advisor.activeConversation';
 
+/**
+ * Shown on the screen when an exchange did NOT reach the stored history.
+ *
+ * The next turn is rebuilt server-side from that history, so an exchange that never landed is one
+ * the model will not see. Leaving the transcript looking complete while the model's context is
+ * missing a turn is the disagreement this exists to close; the other half of the fix is that a
+ * stopped answer with real text IS saved, exactly as displayed, and therefore needs no note.
+ */
+const NOT_SAVED_NOTE = '\n\n(Not saved, so the advisor will not see this exchange next turn.)';
+
 function errorMessage(err: unknown, fallback: string) {
   return err instanceof Error && err.message ? err.message : fallback;
 }
@@ -110,14 +120,31 @@ export function useAiChat() {
     abortRef.current = controller;
 
     let assistantAccum = '';
-    const persist = () => {
-      if (!convId || !assistantAccum) return;
-      aiApi
-        .appendMessages(convId, [
+    const updateAssistant = (updater: (m: DisplayMessage) => DisplayMessage) => {
+      setMessages((prev) => prev.map((m) => (m.id === assistantId ? updater(m) : m)));
+    };
+
+    /**
+     * Save the exchange, and say on screen when it could not be saved.
+     *
+     * Awaited by every caller: this used to be fire-and-forget with `finish()` running immediately
+     * after, so a fast follow-up turn could be sent before the append landed and reach the model
+     * without the turn before it.
+     */
+    const persist = async (): Promise<void> => {
+      if (!convId || !assistantAccum) {
+        updateAssistant((m) => ({ ...m, content: m.content + NOT_SAVED_NOTE }));
+        return;
+      }
+      try {
+        await aiApi.appendMessages(convId, [
           { role: 'user', content: userMsg.content },
           { role: 'assistant', content: assistantAccum },
-        ])
-        .catch((err) => console.warn('Failed to persist chat exchange', err));
+        ]);
+      } catch (err) {
+        console.warn('Failed to persist chat exchange', err);
+        updateAssistant((m) => ({ ...m, content: m.content + NOT_SAVED_NOTE }));
+      }
     };
 
     let settled = false;
@@ -126,18 +153,16 @@ export function useAiChat() {
       setIsStreaming(false);
       if (abortRef.current === controller) abortRef.current = null;
     };
+    // Nothing is persisted here: `Error: ...` is this client's status line, not something the model
+    // said, and writing it into the history would put words in the model's mouth next turn.
     const finishWithError = (errMsg: string) => {
-      setMessages((prev) =>
-        prev.map((m) =>
-          m.id === assistantId
-            ? { ...m, content: `Error: ${errMsg}`, streaming: false, thinkingActive: false }
-            : m
-        )
-      );
+      updateAssistant((m) => ({
+        ...m,
+        content: `Error: ${errMsg}${NOT_SAVED_NOTE}`,
+        streaming: false,
+        thinkingActive: false,
+      }));
       finish();
-    };
-    const updateAssistant = (updater: (m: DisplayMessage) => DisplayMessage) => {
-      setMessages((prev) => prev.map((m) => (m.id === assistantId ? updater(m) : m)));
     };
 
     // The heuristic /analyze endpoint is the only source of structured citations/drafts;
@@ -164,7 +189,9 @@ export function useAiChat() {
         (toolName) => updateAssistant((m) => ({
           ...m,
           toolActivity: TOOL_LABELS[toolName] ?? 'Looking things up…',
-        }))
+        })),
+        // The server rebuilds the earlier turns from this conversation; only the new one is sent.
+        convId
       );
 
       const analysis = await analysisPromise;
@@ -175,7 +202,7 @@ export function useAiChat() {
         if (analysis) {
           assistantAccum = analysis.answer;
           updateAssistant((m) => ({ ...m, content: analysis.answer, analysis, streaming: false, thinkingActive: false }));
-          persist();
+          await persist();
           finish();
         } else {
           finishWithError(streamErrorMsg);
@@ -184,15 +211,20 @@ export function useAiChat() {
       }
 
       updateAssistant((m) => ({ ...m, analysis: analysis ?? undefined, streaming: false, thinkingActive: false }));
-      persist();
+      await persist();
       finish();
     } catch (err) {
       const isAbort = err instanceof Error && err.name === 'AbortError';
       if (!isAbort) {
         finishWithError(errorMessage(err, 'AI request failed'));
-      } else {
-        finish();
+        return;
       }
+      // Stop mid-answer. Whatever arrived is a real partial answer and stays on screen, so it is
+      // saved verbatim and the model's next context matches what the owner is looking at. Stopped
+      // before any text, there is no exchange to save and the note says so.
+      updateAssistant((m) => ({ ...m, streaming: false, thinkingActive: false }));
+      await persist();
+      finish();
     } finally {
       if (!settled && abortRef.current === controller) {
         setMessages((prev) =>

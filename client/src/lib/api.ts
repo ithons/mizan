@@ -7,6 +7,8 @@ import type {
   AdvisorDraftAction,
   AdvisorSettings,
   AdvisorSettingsUpdate,
+  AiDigest,
+  AiDigestRevertResult,
   AiMemory,
   AiMemoryInput,
   AiMemoryRevision,
@@ -764,6 +766,23 @@ export const aiApi = {
       body: JSON.stringify({ ids }),
     }),
 
+  // Every row the AI touched since `since`, grouped by the action that caused it.
+  digest: (since: string | null, limit?: number, signal?: AbortSignal) => {
+    const params = new URLSearchParams();
+    if (since) params.set('since', since);
+    if (limit !== undefined) params.set('limit', String(limit));
+    const query = params.toString();
+    return apiFetch<AiDigest>(`/api/ai/digest${query ? `?${query}` : ''}`, { signal });
+  },
+  // One gesture, and the result says what it left alone as well as what it put back.
+  // `limit` is the action cap the caller's digest used: sending the digest's own `action_limit`
+  // back is what keeps the revert's population identical to the one the caller was shown.
+  revertDigestSince: (since: string, limit: number) =>
+    apiFetch<AiDigestRevertResult>('/api/ai/digest/revert', {
+      method: 'POST',
+      body: JSON.stringify({ since, limit }),
+    }),
+
   streamChat: async (
     messages: ChatMessage[],
     onChunk: (text: string) => void,
@@ -773,12 +792,22 @@ export const aiApi = {
     onThinkingStart?: () => void,
     onThinkingChunk?: (text: string) => void,
     onThinkingEnd?: () => void,
-    onToolUse?: (name: string) => void
+    onToolUse?: (name: string) => void,
+    // When the thread is saved, send its id and the new turn only: the server rebuilds the history
+    // from its own tables, so the prefix in front of the cached system block is one it controls.
+    // Without an id (the conversation row failed to create) the array is still sent, unchanged.
+    conversationId?: string | null
   ): Promise<void> => {
+    const latest = messages[messages.length - 1];
+    const body =
+      conversationId && latest?.role === 'user'
+        ? { conversation_id: conversationId, message: latest.content }
+        : { messages };
+
     const res = await fetch('/api/ai/chat', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ messages }),
+      body: JSON.stringify(body),
       signal,
     });
 
