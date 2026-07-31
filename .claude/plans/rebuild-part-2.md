@@ -419,20 +419,40 @@ Carried from the token work, still open:
 - [ ] **`/plan`** absorbs Budget and Goals.
 - [ ] **`/settings`** absorbs Onboarding, an orphan route nothing links to in an always-logged-in
       single-owner app.
-- [ ] **Advisor stops being a tab.** ⌘K becomes the only conversational surface, as a sheet over the
-      current screen so an answer arrives beside the data it is about. Drafts attach to the row they
-      are about: a suggested category renders inline in the ledger row in estimate ink with a one-key
-      accept. 251 drafts and 140 applied actions have never once been visible next to the data they
-      modified.
+- [ ] **The advisor stops being a place you go to talk, and becomes a place you go to govern.**
+      Owner's direction, 2026-07-31: AI settings move out of Settings into an AI tab, and the AI
+      becomes reachable from everywhere rather than only from its own screen, **without a sidebar
+      chat** (explicitly rejected).
+
+      Resolution, because those two pull in opposite directions: **conversation is everywhere,
+      governance is one place.** ⌘K is the only conversational surface, as a sheet over the current
+      screen so an answer arrives beside the data it is about, and drafts attach inline to the row
+      they are about, in estimate ink, with a one-key accept. 251 drafts and 140 applied actions have
+      never once been visible next to the data they modified. `/ai` keeps the tab but stops being a
+      chat window: model and effort, the memory the owner can edit, the digest, the action history,
+      the run record and the feedback the owner has given it. That is now real content, which the
+      old Advisor tab (a second chat box duplicating ⌘K) never was.
+
+      **Consequence to flag: the nav goes to 7, not 6.** `/`, `/ledger`, `/accounts`, `/investments`,
+      `/plan`, `/ai`, `/settings`. The alternative is folding `/settings` into `/ai` as one
+      governance surface, which would hold at 6 but puts SimpleFIN credentials next to the model
+      picker. Recommendation is 7; the owner's "consolidate to 6" decision predates the AI tab having
+      anything in it.
+
+      **The anti-sidebar argument, so it does not get lost:** a sidebar chat is a second place to
+      look that competes with the screen for attention and answers next to nothing. A sheet over the
+      current screen inherits the screen's context, and an inline draft answers where the question
+      is. Neither adds a permanent column.
 - [ ] **Delete budget groups** end to end: both tables are empty after three weeks in an app with one
       budget. 115 lines of service, five routes, a 120-line modal, the memo machinery, four fetchers,
       one test file.
 - [ ] **Delete three dead preference keys**: `dashboard_layout`, `custom_report_views`, and
       `advisor_auto_apply_high_confidence`. The third reads `true`, asserting a confidence-gated
       autonomy policy removed in `f61109b`, and the model can read it through `run_sql_query`.
-- [ ] **Nav**: six words, labelled at every width. Today every label is behind `xl:block`, so under
-      1280px the entire navigation is twelve identical 7px dots at 1.6:1 contrast. Un-hijack ⌘R and
-      ⌘P, currently `preventDefault`ed for Review and Reports, killing reload and print.
+- [ ] **Nav**: seven words (see the advisor entry above for why it is seven and not six), labelled at
+      every width. Today every label is behind `xl:block`, so under 1280px the entire navigation is
+      twelve identical 7px dots at 1.6:1 contrast. Un-hijack ⌘R and ⌘P, currently `preventDefault`ed
+      for Review and Reports, killing reload and print.
 - [ ] **Catch-all route.** There is no `path="*"`, so a typo renders a blank page.
 - [ ] Sub-500px is explicitly out of scope: `localGuard` binds this to loopback, so it is a desktop
       object. The 1280px break is real; 375px is not.
@@ -457,7 +477,76 @@ and must be handled, not flattened back into looking tidy.
 
 ---
 
+## Phase 10 — More than one provider
+
+Owner's direction, 2026-07-31: support the major providers, OpenAI and Gemini alongside Anthropic, so
+the model is the owner's choice. This is a real abstraction job rather than a config switch, and the
+reason is worth stating before any of it is built.
+
+**The seam already exists and is the right one.** `MODEL_CAPABILITIES` and `buildModelRequestShape()`
+in `advisorSettings.ts` already derive the request from the model instead of assuming every model
+takes the same shape, and `ADVISOR_MODELS` is derived from that same table so a whitelist cannot drift
+from it. Adding a provider dimension to that table is the shape of the work. There are exactly three
+SDK call sites: the streaming chat with tools (`routes/ai.ts`), the structured-output worker
+(`aiWorker.ts`), and bulk classification (`aiCategorySuggest.ts`).
+
+**What is genuinely Anthropic-shaped here, and must not be quietly dropped.** Each of these has an
+equivalent on the other providers, and none of them is the same shape:
+
+- **Prompt caching.** `cache_control: {type:'ephemeral'}` sits on a system prompt that is currently
+  about 18,000 characters of financial context, re-sent on every turn and every tool round of every
+  conversation. That marker is the only reason the design can afford to send the whole picture rather
+  than a summary, and "send the whole picture" is the thing that made the advisor stop guessing.
+  OpenAI caches automatically on a prefix-match basis and Gemini has explicit context caching with its
+  own lifecycle; neither is a drop-in for a breakpoint marker. **Get this right per provider or the
+  cost model of the entire AI design changes.**
+- **Adaptive thinking**, with `display: 'summarized'`, which is what the SSE `thinking_start` /
+  `thinking` / `thinking_end` contract streams to the client.
+- **`output_config.effort`**, a five-level ladder now exposed in Settings.
+- **`output_config.format` json_schema**, which replaced the worker's fence-strip-and-`JSON.parse`
+  trust boundary. The Zod schema behind it stays regardless, because it carries the cross-field rule
+  the JSON schema cannot express.
+- **The tool loop**, bounded at 8 rounds, whose `tool_use` / `tool_result` block shapes differ per
+  provider.
+
+**Do not build a lowest-common-denominator client.** The honest design is a capability table that says
+per model what it supports, and surfaces that degrade legibly: an effort dial that is not rendered for
+a model that has no effort ladder is better than one that silently does nothing, which is the exact
+defect Phase 6.0 removed for Haiku 4.5. A model that cannot cache a large prefix should say what that
+costs before the owner picks it, not after.
+
+- [ ] Provider abstraction over the three call sites, keeping the derive-from-the-model invariant
+      rather than adding a second source of truth beside it.
+- [ ] Per-provider credentials in `.mizan/credentials.json`, which is already AES-256-GCM encrypted
+      with the key in the OS keychain, so this needs no new secret-handling mechanism. `.env` override
+      per provider, matching the existing Coinbase precedent.
+- [ ] Capability table extended with a provider dimension: caching mechanism, thinking, effort,
+      structured output, tool-call shape, context window, output cap.
+- [ ] Degrade legibly. Every surface that exposes a knob asks the table whether the chosen model has
+      it, and says so when it does not.
+- [ ] The worker and the classifier pick per job, per the tiering already in `JOB_MODELS`. Cross-
+      provider tiering is a feature, not an accident: a cheap classifier on one provider and a
+      reasoning model on another is a reasonable thing for the owner to want.
+- [ ] Tests drive the real SDK for each provider against a local server with the base URL pointed at
+      it, the way `tests/aiRequestShape.test.ts` already does for Anthropic, so the assertions are on
+      the actual outgoing request body rather than on a mock.
+- [ ] **Say what changes.** The financial context is the same for every provider and every figure in
+      it must stay true; nothing about the provider abstraction may weaken the "never a claim the code
+      did not check" rule, which is currently enforced in prose in `aiContext.ts` and in the schema
+      dictionary.
+
+**Ordering note:** this comes after Phase 8 rather than before it, because Phase 8 moves the AI
+settings surface into `/ai`, and building a provider picker into a Settings section that is about to
+move is work done twice.
+
+---
+
 ## Phase 9 — Verification
+
+Numbered 9 and executed last: the order is 7b, 8, 10, 9, because Phase 10 lands a provider picker in
+a settings surface Phase 8 is moving, and verification only means something once nothing else is
+in flight.
+
 
 - [ ] Full suite plus both typechecks.
 - [ ] Run the reconciliation invariant against the real database and record the residuals.
