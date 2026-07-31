@@ -107,7 +107,7 @@ test('goal forecast allows steady progress without a target date', () => {
 });
 
 // `months_until_target` answers "how long until the date I picked". These cover the opposite,
-// forward question: "when does this actually get funded at the rate I'm contributing" — the only
+// forward question: "when does this actually get funded at the rate I'm contributing", the only
 // one that says anything for a goal with no target date.
 test('projects a completion date from the contribution rate', () => {
   // Local-time construction on purpose: a UTC literal lands on Jun 30 west of Greenwich and the

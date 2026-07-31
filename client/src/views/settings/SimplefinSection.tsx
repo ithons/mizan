@@ -56,7 +56,7 @@ export function SimplefinSection() {
   const handleResync = async () => {
     if (
       !confirm(
-        'Re-requests up to 2 years of history from SimpleFIN. Most institutions only expose data from when you connected, so this may not add much — but it doesn\'t hurt to check. Continue?'
+        'Re-requests up to 2 years of history from SimpleFIN. Most institutions only expose data from when you connected, so this may not add much, but it doesn\'t hurt to check. Continue?'
       )
     )
       return;
@@ -66,11 +66,11 @@ export function SimplefinSection() {
       const result = await simplefinApi.resync();
       await fetchConnection();
       if (result.transactionsAdded === 0 && result.transactionsModified === 0) {
-        addToast({ type: 'info', message: 'Resync complete — no additional history was available' });
+        addToast({ type: 'info', message: 'Resync complete: no additional history was available' });
       } else {
         addToast({
           type: 'success',
-          message: `Resync complete — ${result.transactionsAdded} new transaction(s), ${result.transactionsModified} updated`,
+          message: `Resync complete: ${result.transactionsAdded} new transaction(s), ${result.transactionsModified} updated`,
         });
       }
     } catch (e: any) {

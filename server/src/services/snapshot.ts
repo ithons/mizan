@@ -488,7 +488,7 @@ export function backfillSnapshots(): void {
   const db = getDb();
   const now = new Date();
 
-  // Load the full posted-transaction history — the backfill extends as far back as the
+  // Load the full posted-transaction history: the backfill extends as far back as the
   // data goes (post one-time import this can be years), not a fixed window.
   const transactions = db.prepare(`
     SELECT id, account_id, date, amount, category_id
@@ -563,7 +563,7 @@ export function backfillSnapshots(): void {
   }
 
   // 'closed' accounts reconstruct their history through the deposit (else) branch below and
-  // bucket as liquid — they were checking/savings before closure.
+  // bucket as liquid: they were checking/savings before closure.
   const liquidTypes = new Set(['checking', 'savings', 'cash', 'closed']);
   const investmentTypes = new Set(['brokerage', 'ira_traditional', 'ira_roth']);
 
@@ -572,7 +572,7 @@ export function backfillSnapshots(): void {
   // account value, it converts cash to securities). Since transaction data can't
   // reconstruct market moves, we instead reverse only NEW external money entering the
   // account (the user's periodic auto-investing / crypto buys) and hold market value flat.
-  // Result: past value ≈ "what you'd contributed by then" — a flagged estimate, not the
+  // Result: past value ≈ "what you'd contributed by then", a flagged estimate, not the
   // reverse-every-trade nonsense.
   const marketValueTypes = new Set(['brokerage', 'ira_traditional', 'ira_roth', 'crypto_wallet']);
 
@@ -628,10 +628,10 @@ export function backfillSnapshots(): void {
         const cat = txn.category_id ?? '';
         if (cat === 'cat_inv_buy' || cat === 'cat_crypto_buy') {
           // Money spent to acquire assets (negative cash) RAISES value by its magnitude, so
-          // pre-purchase value was lower — undo by subtracting the magnitude.
+          // pre-purchase value was lower. Undo by subtracting the magnitude.
           approxBalances[txn.account_id] -= Math.abs(txn.amount);
         } else if (cat === 'cat_crypto_sell') {
-          // A crypto SELL leg is the mirror of a buy leg — undo by ADDING back its magnitude.
+          // A crypto SELL leg is the mirror of a buy leg. Undo by ADDING back its magnitude.
           // This makes a Coinbase convert (a matched crypto_sell + crypto_buy of equal USD) net
           // to zero in the estimate, instead of the buy leg being counted as a phantom external
           // contribution. (A real crypto→cash sell is treated as an outflow, a fair approximation.
@@ -645,7 +645,7 @@ export function backfillSnapshots(): void {
         }
       } else if (meta?.is_liability) {
         // Liability balances are stored as positive "amount owed" and move OPPOSITE the
-        // sign — a purchase (negative amount) raises what's owed — so undo by adding.
+        // sign: a purchase (negative amount) raises what's owed, so undo by adding.
         approxBalances[txn.account_id] += txn.amount;
       } else {
         // Asset balances move WITH the sign, so undo by subtracting the amount.

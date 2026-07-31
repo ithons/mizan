@@ -17,7 +17,7 @@ export interface GoalForecastInsight {
   months_until_target: number | null;
   /**
    * Forward projection: how long until the goal is funded AT THE CURRENT CONTRIBUTION RATE.
-   * `months_until_target` is the opposite question — time left against a date the user chose. Both
+   * `months_until_target` is the opposite question: time left against a date the user chose. Both
    * matter, and for a goal with no target date this is the only one that says anything.
    * `null` means the projected contribution is zero, so the goal never completes at this rate.
    */

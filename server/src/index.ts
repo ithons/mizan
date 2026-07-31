@@ -49,14 +49,14 @@ async function main() {
   try {
     runMigrations();
   } catch (err) {
-    console.error('[fatal] Database migrations failed — the server cannot start.');
+    console.error('[fatal] Database migrations failed. The server cannot start.');
     console.error('[fatal] Your data was not modified; migrations run in a transaction.');
     throw err;
   }
 
   // Backlog passes for older data (transactions left uncategorized, account types frozen
-  // by a weaker classifier). Gated behind a cheap COUNT so a clean DB — the common case
-  // after the first boot, and every tsx-watch restart in dev — skips the work entirely.
+  // by a weaker classifier). Gated behind a cheap COUNT so a clean DB (the common case
+  // after the first boot, and every tsx-watch restart in dev) skips the work entirely.
   const startupDb = getDb();
   try {
     const uncategorized = (startupDb.prepare(
@@ -77,7 +77,7 @@ async function main() {
   }
 
   // 2. Load credentials (pre-warm cache). Decryption depends on the OS keychain, which can fail
-  // (locked keychain, moved .mizan dir) — surface that clearly rather than dying anonymously.
+  // (locked keychain, moved .mizan dir). Surface that clearly rather than dying anonymously.
   try {
     loadCredentials();
   } catch (err) {
@@ -96,7 +96,7 @@ async function main() {
 
   // Security. Helmet's default CSP (script-src 'self') blocks Vite's inline
   // HMR preamble script, so dev mode can never render in a real browser with
-  // it on — disable CSP in dev, keep helmet's full defaults in production.
+  // it on: disable CSP in dev, keep helmet's full defaults in production.
   app.use(helmet(IS_PROD ? undefined : { contentSecurityPolicy: false }));
   app.use(
     cors({
@@ -109,9 +109,9 @@ async function main() {
 
   if (IS_PROD) {
     if (process.env.CORS_ORIGIN) {
-      console.log(`[startup] CORS_ORIGIN=${process.env.CORS_ORIGIN} — cross-origin requests allowed. The app has no auth middleware, so anything reachable at this origin can read/write your financial data.`);
+      console.log(`[startup] CORS_ORIGIN=${process.env.CORS_ORIGIN}: cross-origin requests allowed. The app has no auth middleware, so anything reachable at this origin can read/write your financial data.`);
     } else {
-      console.log('[startup] CORS_ORIGIN not set — cross-origin API requests will be rejected. Fine if this process also serves the client (the default). Set CORS_ORIGIN if the client is hosted elsewhere.');
+      console.log('[startup] CORS_ORIGIN not set: cross-origin API requests will be rejected. Fine if this process also serves the client (the default). Set CORS_ORIGIN if the client is hosted elsewhere.');
     }
   }
 
@@ -161,7 +161,7 @@ async function main() {
 
   const announce = () => console.log(`\n  Mizān  →  http://localhost:${PORT}\n`);
   if (IS_PROD && !HOST_IS_LOOPBACK) {
-    console.log(`[startup] MIZAN_HOST=${HOST} — binding beyond loopback. The app has no auth middleware, so anything that can reach this host/port can read/write your financial data.`);
+    console.log(`[startup] MIZAN_HOST=${HOST}: binding beyond loopback. The app has no auth middleware, so anything that can reach this host/port can read/write your financial data.`);
   }
   const server = IS_PROD
     ? app.listen(PORT, HOST, announce)
@@ -228,7 +228,7 @@ async function main() {
     };
 
     const forceExit = setTimeout(() => {
-      console.warn('[server] Connections still open (SSE clients) — closing anyway.');
+      console.warn('[server] Connections still open (SSE clients). Closing anyway.');
       finish();
     }, 2000);
     forceExit.unref();

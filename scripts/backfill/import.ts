@@ -41,13 +41,13 @@ function main(): void {
     // Every row in a normalized file targets one account by construction.
     const accountNames = new Set(rows.map((r) => r.account_name));
     if (accountNames.size !== 1) {
-      console.error(`✗ ${file}: mixes multiple account names ${[...accountNames].join(', ')} — refusing`);
+      console.error(`✗ ${file}: mixes multiple account names ${[...accountNames].join(', ')}; refusing`);
       refused = true; continue;
     }
     const accountName = [...accountNames][0];
     const account = resolveAccount(db, accountName);
     if (!account) {
-      console.error(`✗ ${file}: account "${accountName}" matches zero or multiple accounts — refusing`);
+      console.error(`✗ ${file}: account "${accountName}" matches zero or multiple accounts; refusing`);
       refused = true; continue;
     }
 
@@ -57,7 +57,7 @@ function main(): void {
     // otherwise read as "at/above the floor" and refuse the whole file.
     const aboveFloor = floor ? rows.filter((r) => !isBelowBackfillFloor(r.date, floor)) : [];
     if (aboveFloor.length > 0) {
-      console.error(`✗ ${file}: ${aboveFloor.length} row(s) at/above floor ${floor} — re-run normalize.ts; refusing`);
+      console.error(`✗ ${file}: ${aboveFloor.length} row(s) at/above floor ${floor}. Re-run normalize.ts; refusing`);
       refused = true; continue;
     }
 
@@ -89,7 +89,7 @@ function main(): void {
 
   console.log(
     `\n${commit ? 'Imported' : 'Would import'} ${totalImported} transaction(s)` +
-    (refused ? ' — SOME FILES REFUSED, resolve above before --commit.' : '.')
+    (refused ? '. SOME FILES REFUSED, resolve above before --commit.' : '.')
   );
   if (commit && !refused) {
     console.log('Next: tsx scripts/backfill/dedup.ts --commit  then  tsx scripts/backfill/rebuild.ts');

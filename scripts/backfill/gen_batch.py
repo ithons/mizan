@@ -4,7 +4,7 @@ only, per user's choice), and Coinbase (buy/sell/reward, routed per wallet). One
 account in data/backfill/raw/; category is emitted as the NAME the importer matches on.
 
 Coinbase Converts / Sends / Receives / Deposits / Withdrawals / Dust are intentionally NOT
-emitted here — they need dedicated multi-wallet handling and are reported as remaining work.
+emitted here: they need dedicated multi-wallet handling and are reported as remaining work.
 Requires the venv with stdlib csv/re only.
 """
 import csv, io, os, re, glob
@@ -20,7 +20,7 @@ def write(slug, rows):
     print(f'  {slug}.csv: {len(rows)} rows' + (f'  {rows[0][1]}..{rows[-1][1]}' if rows else ''))
 
 
-# ── Wealthfront QFX (OFX/SGML) — 3.30% APY savings, cash flows ──────────────────
+# ── Wealthfront QFX (OFX/SGML): 3.30% APY savings, cash flows ──────────────────
 def wealthfront():
     txt = open(glob.glob('data/wealthfront/*.QFX')[0]).read()
     acct = 'Individual 3.30% APY (2495)'
@@ -37,7 +37,7 @@ def wealthfront():
     rows.sort(key=lambda r: r[1]); write('wf-savings', rows)
 
 
-# ── Fidelity — contributions only (Electronic Funds Transfer + Cash Contribution) ─
+# ── Fidelity: contributions only (Electronic Funds Transfer + Cash Contribution) ─
 def fidelity():
     rows = [r for r in csv.reader(open('data/fidelity/Accounts_History.csv'))
             if len(r) >= 13 and r[0][:2].isdigit()]
@@ -55,7 +55,7 @@ def fidelity():
         out.sort(key=lambda x: x[1]); write(slug, out)
 
 
-# ── Coinbase — buy/sell/reward routed to each asset wallet ──────────────────────
+# ── Coinbase: buy/sell/reward routed to each asset wallet ──────────────────────
 def coinbase():
     lines = open(glob.glob('data/coinbase/*.csv')[0]).read().splitlines()
     h = next(i for i, l in enumerate(lines) if l.startswith('ID,'))
@@ -77,7 +77,7 @@ def coinbase():
         elif 'Reward' in t or 'Incentives' in t:
             amt, cat, m = total, 'Crypto Reward', f'{r["Asset"]} reward'
         else:
-            continue  # convert/send/receive/deposit/withdrawal/dust — deferred
+            continue  # convert/send/receive/deposit/withdrawal/dust: deferred
         iso = r['Timestamp'][:10]
         buckets.setdefault(wallet, []).append([wallet, iso, f'{amt:.2f}', m, cat, ''])
     for wallet, out in buckets.items():

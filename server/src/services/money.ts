@@ -6,7 +6,7 @@
 // divided once, at the edge.
 //
 // IMPORTANT: per-unit PRICES (e.g. holdings.institution_price, a token spot price
-// like $0.003) are NOT stored as cents — rounding them to whole cents would destroy
+// like $0.003) are NOT stored as cents: rounding them to whole cents would destroy
 // sub-cent precision. Prices remain REAL dollars.
 
 export function toCents(dollars: number): number {

@@ -11,7 +11,7 @@ interface RowProps {
  * unreachable by keyboard and invisible to assistive tech, which is how every list in this app
  * used to behave.
  *
- * Hover carries two redundant signals — a `well` wash and a sage left rule — because a tone-on-tone
+ * Hover carries two redundant signals (a `well` wash and a sage left rule) because a tone-on-tone
  * tint alone cannot clear 3:1 on this palette.
  */
 export function Row({ children, onClick, className = '' }: RowProps) {

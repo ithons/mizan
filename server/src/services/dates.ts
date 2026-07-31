@@ -5,7 +5,7 @@ import { format } from 'date-fns';
 // owner's own machine in one timezone, and every "today"/"this month" boundary elsewhere
 // (snapshot, reporting, recurring, budgets) is already computed in local time. Storing the
 // transaction day in local time keeps the data and those boundaries consistent, and matches
-// how the owner actually reckons a purchase ("I bought this Tuesday") — a late-night
+// how the owner actually reckons a purchase ("I bought this Tuesday"). A late-night
 // transaction stays on the local day it happened rather than drifting to the next UTC day.
 // (Existing rows dated under the old UTC rule reconcile on the next resync, which re-fetches
 // each transaction's full timestamp.)

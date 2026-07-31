@@ -120,7 +120,7 @@ function stalePendingTransactionsIssue(
 }
 
 // Holdings whose account was deleted are dead weight that inflate the portfolio total and can't
-// be reconciled to any account — a real integrity break, not a soft-data-quality nit.
+// be reconciled to any account: a real integrity break, not a soft-data-quality nit.
 function orphanHoldingsIssue(db: Database.Database): PersonalFinanceInvariantIssue | null {
   const orphans = count(
     db,

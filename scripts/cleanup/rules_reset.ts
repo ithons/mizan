@@ -30,7 +30,7 @@ const FIX: Array<[string, string]> = [
 
 // Delete broad/wrong/redundant rules.
 const DELETE = [
-  'Apple',                              // too broad — swallows Apple Pay tokens + hardware
+  'Apple',                              // too broad: swallows Apple Pay tokens + hardware
   'VENMO CASHOUT PPD ID: 5264681992',   // wrong direction + hard-coded id
   'Caffe Nero Central',                 // subset of 'Caffe Nero'
   'Bluebik Rides',                      // subset of 'Bluebik Ride'

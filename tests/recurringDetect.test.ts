@@ -6,7 +6,7 @@ import { _setDbForTesting } from '../server/src/db/index';
 import { detectRecurring } from '../server/src/services/recurring';
 import { insertAccount, insertTransaction, migratedTestDb } from './helpers/schema';
 
-// detectRecurring() runs on the module singleton and had no direct test — it's one of the
+// detectRecurring() runs on the module singleton and had no direct test: it's one of the
 // riskiest untested services (heuristic grouping + frequency classification + variance gates).
 // These lock its current behavior so a future semi-monthly/cadence improvement has a net.
 //
@@ -167,7 +167,7 @@ test('rejects irregular gaps (high gap variance)', () => {
 test('admits a varying amount when the cadence is rigid, and records the variance', () => {
   const db = setupDb();
   try {
-    // Exactly-monthly cadence (gap CV 0), amounts all over the place — the paycheck shape.
+    // Exactly-monthly cadence (gap CV 0), amounts all over the place: the paycheck shape.
     const amts = [-1000, -9000, -2000, -8000];
     seedDates(db, 'varamt', amts.map((amount, i) => ({
       date: format(subDays(new Date(), 30 * (amts.length - 1 - i)), 'yyyy-MM-dd'),
@@ -395,7 +395,7 @@ test('a weekly bill still steps by the median day-gap', () => {
 
 // The live payroll pattern stored $398.93 (a median over its whole history, still outvoted by a
 // year of smaller stipend checks) while the forecast recomputed $476.91 (a mean over that same
-// history, dragged up by one $1,048.77 bonus) — and the last four checks were all $544.18.
+// history, dragged up by one $1,048.77 bonus), and the last four checks were all $544.18.
 test('the stored amount is a median of recent occurrences, not of the whole history', () => {
   const db = setupDb();
   try {

@@ -16,7 +16,7 @@ data/backfill/normalized/
 data/backfill/backups/
 data/backfill/floors.json
 data/backfill/jobs.json
-# Raw institution exports (statements/CSVs/PDFs with real financial history) — never commit.
+# Raw institution exports (statements/CSVs/PDFs with real financial history). Never commit.
 data/bofa/
 data/chase/
 data/coinbase/

@@ -305,7 +305,7 @@ export function detectRecurring(): void {
   // 1. Load all non-pending transactions from last 13 months.
   //
   // Transfers and confirmed duplicates are excluded for the same reason every other total excludes
-  // them: they are not spending. It also keeps the relaxed amount gate honest — card payments
+  // them: they are not spending. It also keeps the relaxed amount gate honest: card payments
   // ("PAYMENT THANK YOU", "AUTOMATIC PAYMENT") have a rigid monthly cadence and a wildly varying
   // amount, so they would otherwise be admitted as recurring bills and double-count against the
   // spending they are paying off.
@@ -394,7 +394,7 @@ export function detectRecurring(): void {
     const gapVariance = variance(perOccurrenceGaps, medianGap);
     const amountVariance = variance(amounts, medianAmount);
 
-    // An irregular cadence is disqualifying no matter how steady the amounts look — that is what
+    // An irregular cadence is disqualifying no matter how steady the amounts look: that is what
     // separates a subscription from a merchant you simply visit often (Chipotle, MBTA, DoorDash all
     // land here on real data).
     if (gapVariance >= GAP_VARIANCE_MAX) continue;

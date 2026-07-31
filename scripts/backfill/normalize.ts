@@ -58,7 +58,7 @@ function parseAmount(raw: string | undefined): number | null {
   return paren ? -Math.abs(n) : n;
 }
 
-// Pure core — unit-tested without touching the DB or filesystem.
+// Pure core: unit-tested without touching the DB or filesystem.
 export function normalizeGenericCsv(
   rawRows: Array<Record<string, string>>,
   accountName: string,
@@ -139,7 +139,7 @@ function main(): void {
     const adapter = ADAPTERS[job.adapter];
     if (!adapter) { console.error(`✗ unknown adapter "${job.adapter}" for ${job.account_name}`); continue; }
     const floor = floorByName.get(job.account_name);
-    if (!floor) { console.error(`✗ no floor entry for account "${job.account_name}" — run floor-map.ts`); continue; }
+    if (!floor) { console.error(`✗ no floor entry for account "${job.account_name}". Run floor-map.ts`); continue; }
 
     const raw = fs.readFileSync(path.join(BACKFILL_DIR, job.file), 'utf-8');
     const { rows, issues } = adapter(raw, job);

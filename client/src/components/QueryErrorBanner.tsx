@@ -17,7 +17,7 @@ export function summarizeQueryFailures(
   const failed = items.filter((item) => item.query.isError);
   if (failed.length === 0) return null;
 
-  // The first real message is enough — repeating "Failed to fetch" per query is noise, and the
+  // The first real message is enough. Repeating "Failed to fetch" per query is noise, and the
   // labels already say which parts of the screen are missing.
   const detail = failed
     .map((item) => (item.query.error instanceof Error ? item.query.error.message : null))

@@ -1,6 +1,6 @@
 // Durability insurance: export a full local backup (the same JSON the app's
 // backup/restore uses) after the backfill. If the SQLite file is ever lost, this
-// plus the raw sources restores the entire hand-built history — so it never has to
+// plus the raw sources restores the entire hand-built history, so it never has to
 // be done twice.
 //
 //   tsx scripts/backfill/backup.ts

@@ -278,7 +278,7 @@ export const rulesApi = {
       method: 'POST',
       body: JSON.stringify({ pattern }),
     }),
-  // Approves N suggestions in one request. Only patterns travel — the server recomputes which
+  // Approves N suggestions in one request. Only patterns travel: the server recomputes which
   // transactions each one touches, so approving cannot relabel rows the preview didn't show.
   approveSuggestions: (approvals: Array<{ pattern: string; category_id?: string }>) =>
     apiFetch<{
@@ -485,7 +485,7 @@ export const reportsApi = {
     if (params?.limit) q.set('limit', String(params.limit));
     return apiFetch<TopMerchantsReport>(`/api/reports/merchants?${q.toString()}`);
   },
-  // Null when the window holds fewer than two snapshots — there is no movement to attribute.
+  // Null when the window holds fewer than two snapshots: there is no movement to attribute.
   networthAttribution: (params?: ReportParams) => {
     const q = new URLSearchParams();
     if (params?.startDate) q.set('startDate', params.startDate);
@@ -824,7 +824,7 @@ export const aiApi = {
     apiFetch<{ success: boolean }>(`/api/ai/drafts/${id}/dismiss`, {
       method: 'POST',
     }),
-  // Ids only — the server reads each payload back from advisor_drafts. Partial success is normal,
+  // Ids only: the server reads each payload back from advisor_drafts. Partial success is normal,
   // so the per-draft outcomes come back rather than a single success flag.
   confirmDrafts: (ids: string[]) =>
     apiFetch<{

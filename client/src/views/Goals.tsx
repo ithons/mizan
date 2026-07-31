@@ -25,7 +25,7 @@ function goalNote(goal: Goal, insight?: GoalForecastInsight): string {
   } else {
     // The target date is what the user ASKED for; the projection is what the contribution rate
     // actually buys. Showing the target as "full by <date>" claimed the goal would be funded by
-    // then even when the forecast said otherwise — so the two are now labelled separately.
+    // then even when the forecast said otherwise, so the two are now labelled separately.
     if (goal.target_date) {
       parts.push(`target ${format(parseISO(goal.target_date), 'MMM yyyy')}`);
     }

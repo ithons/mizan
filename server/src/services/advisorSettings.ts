@@ -8,8 +8,8 @@ export const ADVISOR_EFFORT_PREFERENCE_KEY = 'advisor_effort';
 
 // There used to be a third setting here: a per-section allowlist controlling how much of the
 // financial snapshot was sent to the model. It existed to limit egress, and it defaulted to
-// sending less than everything. With that constraint retired it was pure cost — a dial whose
-// only effect was to make the advisor answer worse — so the snapshot is always complete now.
+// sending less than everything. With that constraint retired it was pure cost (a dial whose
+// only effect was to make the advisor answer worse), so the snapshot is always complete now.
 
 // ─── Model capabilities ──────────────────────────────────────────────────────
 // Every optional request parameter this app sends is a per-model fact, not a constant.

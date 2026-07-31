@@ -80,7 +80,7 @@ export function formatPercent(value: number, decimals = 1): string {
   return `${value.toFixed(decimals)}%`;
 }
 
-/** "just now" / "2m ago" / "3h ago" / "5d ago" — the rail/meta variant. */
+/** "just now" / "2m ago" / "3h ago" / "5d ago" (the rail/meta variant). */
 export function formatCompactRelative(isoStr: string): string {
   const then = new Date(isoStr).getTime();
   if (Number.isNaN(then)) return '';

@@ -53,7 +53,7 @@ interface SectorAllocationRow {
   count: number;
 }
 
-// fmt() takes dollars, but EVERY money value the analyzer reads is integer cents — both
+// fmt() takes dollars, but EVERY money value the analyzer reads is integer cents: both
 // the inline sectorRows SQL AND every value returned from service functions (reporting,
 // forecast, budgets, goals, subscriptions, holdings). So every argument to fmt() and every
 // citation `amount:` must be wrapped in toDollars() exactly once at its call site.

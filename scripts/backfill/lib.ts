@@ -11,7 +11,7 @@ import type Database from 'better-sqlite3';
 // Fixed column names, one row per transaction. Sign convention matches how the DB
 // stores amounts: NEGATIVE = money out (expense/outflow), POSITIVE = money in.
 // `date` is yyyy-MM-dd local day. `account_name` must match an existing account
-// exactly (import refuses otherwise — no silent fallback). category/notes optional.
+// exactly (import refuses otherwise, with no silent fallback). category/notes optional.
 export const CANONICAL_COLUMNS = [
   'account_name',
   'date',
@@ -106,7 +106,7 @@ export function readCanonicalCsv(filePath: string): CanonicalRow[] {
 }
 
 // Resolve a canonical account_name to exactly one account row. Returns null when
-// zero or multiple match — callers MUST refuse rather than guess (the HTTP importer's
+// zero or multiple match: callers MUST refuse rather than guess (the HTTP importer's
 // "first manual account" fallback is exactly the silent misfiling we avoid here).
 export function resolveAccount(
   db: Database.Database,

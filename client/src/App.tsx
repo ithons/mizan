@@ -33,7 +33,7 @@ function ViewFallback() {
   );
 }
 
-// Each view gets its own boundary so a render throw is contained to that screen — the nav rail
+// Each view gets its own boundary so a render throw is contained to that screen: the nav rail
 // stays usable and the user can navigate away instead of facing a blank page.
 function lazyView(view: ReactNode) {
   return (

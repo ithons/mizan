@@ -22,7 +22,7 @@ interface ReviewCounts {
 // A transaction "needs a category" whenever it has none and the user hasn't explicitly dismissed it.
 // It deliberately does NOT require review_status='open': categorization side-effects set 'reviewed'
 // (rules.ts, bulk categorize, transfer confirm), and a bulk pass once marked 1,735 imported rows
-// 'reviewed' — which made 432 uncategorized rows invisible here while routes/insights.ts still
+// 'reviewed', which made 432 uncategorized rows invisible here while routes/insights.ts still
 // counted them, so the app contradicted itself. This predicate is the single source of truth and
 // must stay in sync with the uncategorized count in routes/insights.ts.
 function getCounts(db: Database.Database): ReviewCounts {
@@ -60,7 +60,7 @@ export function getTransactionReviewSummary(db: Database.Database): TransactionR
   }));
   // transactionIntegrity returns candidate amounts in integer cents. This summary is served
   // straight through to the client (routes/transactions.ts) and its other consumers
-  // (aiContext/advisorTools/dataQuality/aiWorker) read only counts, never these amounts —
+  // (aiContext/advisorTools/dataQuality/aiWorker) read only counts, never these amounts,
   // so dollarizing the candidate `amount` here is the single, safe conversion point.
   const duplicateCandidates = getDuplicateCandidateGroups(db).map((group) => ({
     ...group,
@@ -80,7 +80,7 @@ export function getTransactionReviewSummary(db: Database.Database): TransactionR
       const payload = safeJsonParse<unknown>(row.payload, null, `advisor_draft ${row.id} payload`);
       const changes = safeJsonParse<unknown>(row.changes, null, `advisor_draft ${row.id} changes`);
       const citations = safeJsonParse<unknown>(row.citations, null, `advisor_draft ${row.id} citations`);
-      // A draft with an unreadable payload cannot be applied — drop it rather
+      // A draft with an unreadable payload cannot be applied. Drop it rather
       // than surface a broken card.
       if (payload === null) return null;
       // A draft whose premise no longer holds is not work; showing it as work pins the review
@@ -161,7 +161,7 @@ export function getTransactionReviewSummary(db: Database.Database): TransactionR
   ];
 
   // 'pending' is reported in `queues` (it drives a Transactions filter) but excluded from the
-  // headline total: a pending authorization isn't actionable — it posts on its own — and counting
+  // headline total: a pending authorization isn't actionable (it posts on its own), and counting
   // it produced the "N items to review / nothing to review" mismatch.
   const actionableTotal = queues
     .filter((queue) => queue.id !== 'pending')

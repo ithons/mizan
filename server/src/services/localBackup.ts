@@ -42,7 +42,7 @@ export const LOCAL_BACKUP_TABLES = [
   'goals',
   'coinbase_connections',
   // No longer holds access_url (moved to the credentials store in migration 021), so it's
-  // safe to back up — carries only status/last_synced metadata for the SimpleFIN connection.
+  // safe to back up: it carries only status/last_synced metadata for the SimpleFIN connection.
   'simplefin_connections',
   'net_worth_snapshots',
   'sync_runs',

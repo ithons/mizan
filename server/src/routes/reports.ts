@@ -76,7 +76,7 @@ function summaryToDollars(summary: ReportSummary): ReportSummary {
     income: metricToDollars(summary.income),
     expenses: metricToDollars(summary.expenses),
     net: metricToDollars(summary.net),
-    // savings_rate is a percentage metric, not money — pass through.
+    // savings_rate is a percentage metric, not money. Pass through.
     top_spending: summary.top_spending.map(categoryChangeToDollars),
     top_income: summary.top_income.map(categoryChangeToDollars),
     spending_movers: summary.spending_movers.map(categoryChangeToDollars),
@@ -200,7 +200,7 @@ router.get('/merchants', (req: Request, res: Response, next: NextFunction): void
 });
 
 // GET /networth-attribution?startDate&endDate
-// Returns null when the window holds fewer than two snapshots — nothing moved to attribute.
+// Returns null when the window holds fewer than two snapshots: nothing moved to attribute.
 router.get('/networth-attribution', (req: Request, res: Response, next: NextFunction): void => {
   try {
     const db = getDb();

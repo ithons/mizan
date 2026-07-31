@@ -18,7 +18,7 @@ const SUGGEST_JOB = JOB_MODELS.bulk_categorization;
 export const MAX_SUGGEST_MERCHANTS = 60;
 
 /**
- * Proposes a category for each merchant label. Suggestions are advisory only — nothing is written;
+ * Proposes a category for each merchant label. Suggestions are advisory only. Nothing is written;
  * the user applies them from the review worklist.
  *
  * Any suggestion naming a category id that doesn't exist is dropped rather than returned, so a

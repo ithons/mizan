@@ -56,7 +56,7 @@ function shortHash(input: string): string {
 // Deliberately minimal, and deliberately NOT the aggressive canonicalizer in recurring.ts.
 // This feeds the duplicate-detection key, so it must keep genuinely distinct charges distinct
 // ("starbucks 1234" vs "starbucks 5678" stay separate). recurring.ts strips store numbers and
-// suffixes on purpose — that's correct for grouping a merchant's recurring charges, but here it
+// suffixes on purpose: that's correct for grouping a merchant's recurring charges, but here it
 // would merge separate purchases into false duplicates. The two must not be unified.
 function normalizeMerchant(merchant: string): string {
   return merchant.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
@@ -461,7 +461,7 @@ export type ConfirmDuplicateResult =
  * marked `duplicate_status = 'confirmed'`, which reporting excludes from income/expense totals.
  *
  * Marking rather than deleting is deliberate. Provider rows (SimpleFIN/Coinbase) are re-inserted by
- * the next sync — `deleteTransaction` refuses them for exactly this reason — so a delete would
+ * the next sync (`deleteTransaction` refuses them for exactly this reason), so a delete would
  * silently come back. A flag survives re-sync and is reversible.
  */
 export function confirmDuplicateGroup(

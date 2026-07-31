@@ -8,7 +8,7 @@ import Anthropic from '@anthropic-ai/sdk';
  *
  * Every AI path used to hardcode `new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })`, which
  * silently disabled the advisor, the background worker, and category suggestions for anyone
- * authenticating any other way — the key is only ONE of the credentials the SDK understands.
+ * authenticating any other way: the key is only ONE of the credentials the SDK understands.
  *
  * The SDK resolves credentials itself, first match wins:
  *   1. ANTHROPIC_API_KEY

@@ -62,7 +62,7 @@ router.get('/connection', (_req: Request, res: Response, next: NextFunction): vo
   }
 });
 
-// POST /resync — force a fresh 730-day lookback by nulling last_synced_at, then sync.
+// POST /resync: force a fresh 730-day lookback by nulling last_synced_at, then sync.
 router.post('/resync', async (_req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
     const db = getDb();
@@ -76,14 +76,14 @@ router.post('/resync', async (_req: Request, res: Response, next: NextFunction):
     }
 
     if (isSyncActive()) {
-      res.status(409).json({ error: 'A sync is already running — try again in a moment' });
+      res.status(409).json({ error: 'A sync is already running. Try again in a moment.' });
       return;
     }
 
     db.prepare("UPDATE simplefin_connections SET last_synced_at = NULL WHERE status = 'active'").run();
     await runFullSync();
 
-    // Read the SimpleFIN-specific item, not the run's overall totals — the run total
+    // Read the SimpleFIN-specific item, not the run's overall totals. The run total
     // also sums in unrelated stages (auto-categorization, Coinbase) that would make the
     // "N new transactions" toast misleading about what the deep pull itself found.
     const [latestRun] = listSyncRuns(db, 1);

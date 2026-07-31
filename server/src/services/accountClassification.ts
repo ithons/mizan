@@ -3,7 +3,7 @@ import type { AccountType } from '../../../shared/types';
 
 // Best-effort guess only, run at first insert for a new SimpleFIN account. Institutions
 // don't expose a structured type/subtype, so this is a name/org
-// substring heuristic — it is not the ground truth. A user can always override the
+// substring heuristic. It is not the ground truth. A user can always override the
 // result via PATCH /api/accounts/:id, which marks the account 'manual' so neither this
 // function nor the reclassification backfill below will ever touch it again.
 const BROKERAGE_INSTITUTIONS = [
@@ -39,7 +39,7 @@ export function guessAccountTypeAndLiability(name: string, orgName: string): { t
   if (combined.includes('savings') || combined.includes('apy') || combined.includes('cash account')) {
     // Name-only signal, deliberately not combined with institution: fintechs like
     // Wealthfront offer both a real brokerage and a cash-management/HYSA product, often
-    // both named e.g. "Individual" — institution alone can't distinguish them, but "APY"
+    // both named e.g. "Individual". Institution alone can't distinguish them, but "APY"
     // or "cash account" in the name is a reliable sign this is the cash product, not a
     // taxable brokerage account.
     return { type: 'savings', isLiability: false };
@@ -66,7 +66,7 @@ interface AutoAccountRow {
 
 // One-time (idempotent) pass to fix accounts whose `type` was frozen by an older,
 // weaker version of the heuristic above and never re-derived since (sync only ever
-// classifies at insert time). Only touches rows still marked 'auto' — a manual
+// classifies at insert time). Only touches rows still marked 'auto': a manual
 // override always wins and is never revisited here.
 export function reclassifyAutoAccountTypes(db: Database.Database): { updated: number } {
   const rows = db.prepare(`

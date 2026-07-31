@@ -206,7 +206,7 @@ export const CsvImportMappingSchema = z.object({
 // schemas are the boundary: every draft is validated against them before it is
 // stored or auto-applied, so a malformed or hallucinated payload is rejected
 // rather than best-effort written to the DB. Money fields (amount/target_amount/
-// manual_cost_basis) are DOLLARS here — confirm handlers convert to integer cents.
+// manual_cost_basis) are DOLLARS here; confirm handlers convert to integer cents.
 const id = z.string().min(1);
 const money = z.number().finite();
 

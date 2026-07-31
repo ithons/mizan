@@ -1,7 +1,7 @@
 -- Add a first-class 'closed' account type. SQLite can't alter a CHECK constraint, so recreate
 -- the accounts table (create-new / copy / drop / rename, per 022/014). The new table def must
--- carry EVERY column added after 022 — type_source (015), backfill_floor_date (030), name_source
--- (032) — or they'd be silently dropped. Only the `type` CHECK changes: + 'closed'.
+-- carry EVERY column added after 022, namely type_source (015), backfill_floor_date (030) and
+-- name_source (032), or they'd be silently dropped. Only the `type` CHECK changes: + 'closed'.
 --
 -- Children (transactions/holdings/holdings_history/goals) reference accounts(id); ids are
 -- preserved by the copy, so their FKs stay valid (runMigrations runs with foreign_keys OFF and

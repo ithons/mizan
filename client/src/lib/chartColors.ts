@@ -1,4 +1,4 @@
-// Balance categorical palette — sage anchors the positive/asset side, clay the
+// Balance categorical palette: sage anchors the positive/asset side, clay the
 // negative, gold the caution/crypto slot, then warm tans and muted neighbors
 // for charts with more series. Single source of truth so every chart/legend
 // uses the same category-to-color mapping.

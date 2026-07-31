@@ -8,7 +8,7 @@
 -- The code fix (transferCandidateRows now excludes 'confirmed' too) stops future
 -- clobbering; this migration restores the already-lost confirmations. The selector
 -- is surgical: only rows that are genuine transfer-pair members (paired + a
--- cat_xfer_in/out category) AND carry review_status='reviewed' — a combination that
+-- cat_xfer_in/out category) AND carry review_status='reviewed', a combination that
 -- can only originate from confirmTransferPair(). On a fresh DB this matches nothing.
 UPDATE transactions
 SET transfer_status = 'confirmed'

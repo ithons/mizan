@@ -5,7 +5,7 @@ import { SkeletonRows } from './SkeletonLoader';
  * Wraps a section that reads from a query so a FAILED request never renders as an EMPTY one.
  *
  * Before this existed, no view in the app checked `isError`, so a dead server or a 500 showed up
- * as "All caught up." / "No spending in this period." / a permanent "Loading…" — the user could
+ * as "All caught up." / "No spending in this period." / a permanent "Loading…". The user could
  * not tell "you have no data" from "the request failed".
  *
  * Usage: wrap only the part of the section that depends on the query; keep headings outside so

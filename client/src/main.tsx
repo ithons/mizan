@@ -20,7 +20,7 @@ const queryClient = new QueryClient({
       const message = error instanceof Error && error.message ? error.message : 'Request failed';
       useAppStore.getState().addToast({
         type: 'error',
-        message: message === 'Failed to fetch' ? "Can't reach the Mizān server — is it running?" : message,
+        message: message === 'Failed to fetch' ? "Can't reach the Mizān server. Is it running?" : message,
       });
     },
   }),

@@ -5,8 +5,8 @@ window. Designed to be run once and never repeated.
 
 ## The core idea: a per-account floor
 
-SimpleFIN/Coinbase only serve recent data and dedup **only** on their own provider IDs
-— they have no idea imported rows exist, so overlapping history would silently
+SimpleFIN/Coinbase only serve recent data and dedup **only** on their own provider IDs.
+They have no idea imported rows exist, so overlapping history would silently
 duplicate. Instead of overlap+dedup, each account gets a `backfill_floor_date`:
 
 - Manual/imported history covers strictly **below** the floor.
@@ -14,15 +14,15 @@ duplicate. Instead of overlap+dedup, each account gets a `backfill_floor_date`:
 
 Migration `030` adds the column; `server/src/services/backfillFloor.ts` is the guard,
 enforced inside `syncSimplefin` and the Coinbase sync. Once the floor is set, **no
-future sync — including a 730-day force resync — can reach into or duplicate the
+future sync (including a 730-day force resync) can reach into or duplicate the
 imported zone.** That is what makes this last indefinitely.
 
 ## Files (all git-ignored except this README + jobs.example.json)
 
-    raw/           # your original bank/brokerage exports (CSV/OFX/PDF) — the source of truth
+    raw/           # your original bank/brokerage exports (CSV/OFX/PDF): the source of truth
     normalized/    # canonical CSVs produced by normalize.ts, one per account, for review
     backups/       # localBackup JSON snapshots written by backup.ts
-    floors.json    # per-account floor map (floor-map.ts) — review/edit before --apply
+    floors.json    # per-account floor map (floor-map.ts): review/edit before --apply
     jobs.json      # your real normalize jobs (copy from jobs.example.json)
 
 Raw statements and backups hold real financial data, so they never enter git. Keep
@@ -61,7 +61,7 @@ debit/credit pair). For OFX/QFX or bank-specific PDF layouts, add an entry to th
 `ADAPTERS` registry in `normalize.ts` that returns canonical rows; everything
 downstream is format-agnostic.
 
-## Manual (cash) accounts — decide before importing
+## Manual (cash) accounts: decide before importing
 
 Importing into a **manual** account moves its `current_balance` (provider accounts are
 untouched). Either set the manual account's true present balance and import history so

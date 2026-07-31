@@ -432,7 +432,7 @@ router.post('/suggest-categories', async (req: Request, res: Response, next: Nex
     }
     const merchants = raw.filter((m: unknown): m is string => typeof m === 'string');
     if (!hasAnthropicCredentials()) {
-      res.status(503).json({ error: 'No Anthropic credentials configured — AI suggestions are unavailable' });
+      res.status(503).json({ error: 'No Anthropic credentials configured: AI suggestions are unavailable' });
       return;
     }
     res.json({ data: await suggestCategoriesForMerchants(getDb(), merchants) });

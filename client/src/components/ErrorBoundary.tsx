@@ -28,7 +28,7 @@ export class ErrorBoundary extends Component<
       <div className="mx-auto max-w-[560px] px-6 py-16">
         <h1 className="font-serif text-figure text-ink">Something broke on this screen.</h1>
         <p className="mt-2 text-body leading-relaxed text-muted">
-          Your data is safe — this is a display error. Try again, or reload the page.
+          Your data is safe. This is a display error. Try again, or reload the page.
         </p>
         <pre className="mt-4 max-h-40 overflow-auto whitespace-pre-wrap rounded-lg border border-line-2 bg-rail p-3 font-mono text-note text-ink">
           {error.message}

@@ -104,7 +104,7 @@ export function updateAccount(db: Database.Database, id: string, input: UpdateAc
   }
 
   // institution_name/currency are provider-sourced and only editable on manual accounts.
-  // type/is_liability are editable on any account — a synced account's type is only ever a
+  // type/is_liability are editable on any account: a synced account's type is only ever a
   // sync-time guess (see accountClassification.ts), and correcting it is the intended
   // escape hatch for a misclassified account.
   const manualOnlyFields = [input.institution_name, input.currency];

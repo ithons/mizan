@@ -548,7 +548,7 @@ export async function syncSimplefin(): Promise<SimplefinSyncResult> {
     // Balances are stored and reported as USD everywhere. A non-USD account would be
     // mislabeled/unconverted, so surface it rather than silently treating it as dollars.
     if (currency !== 'USD') {
-      const msg = `Account "${acct.name}" is in ${currency}, but Mizān treats balances as USD — its value may be misstated.`;
+      const msg = `Account "${acct.name}" is in ${currency}, but Mizān treats balances as USD. Its value may be misstated.`;
       errors.push(msg);
       console.warn(`[simplefin] ${msg}`);
     }

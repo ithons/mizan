@@ -1134,7 +1134,7 @@ export function getNetWorthAttribution(
     FROM net_worth_snapshots ${measuredWhere}
   `).get(...params) as { first_date: string | null; last_date: string | null; count: number };
 
-  // One snapshot is a point, not a movement — there is nothing to attribute.
+  // One snapshot is a point, not a movement. There is nothing to attribute.
   if (bounds.count < 2 || !bounds.first_date || !bounds.last_date) return null;
 
   const snapshotAt = (date: string) => db.prepare(`
@@ -1193,8 +1193,8 @@ export function getNetWorthAttribution(
         end_balance: endBalance,
         // Contribution to NET WORTH, not the raw balance change. `breakdown` stores a liability as
         // a positive amount owed, so a credit-card balance growing by $100 moves net worth DOWN by
-        // $100. Negating here is what makes these deltas sum to the headline net-worth delta —
-        // without it a rising card balance rendered as a green gain.
+        // $100. Negating here is what makes these deltas sum to the headline net-worth delta.
+        // Without it a rising card balance rendered as a green gain.
         delta: resolved ? (isLiability ? -balanceDelta : balanceDelta) : balanceDelta,
         resolved,
       };

@@ -18,7 +18,7 @@ import { Screen, ScreenHeader, CategoryPicker } from './balance';
 import { QueryState } from './QueryState';
 
 // Page size for the uncategorized backlog, matching the server's `limit` cap. Pages are merged
-// before grouping so a merchant's cluster is never split across page boundaries — grouping one
+// before grouping so a merchant's cluster is never split across page boundaries. Grouping one
 // page at a time would show "5 Klarna" on page 1 and "4 Klarna" on page 2 and defeat the point.
 const BACKLOG_LIMIT = 500;
 
@@ -86,8 +86,8 @@ function findCategoryName(categories: Category[], id: string): string | null {
 
 /**
  * Rewrites a `categorize_transaction` draft to the category the user actually picked.
- * The server applies the client-supplied payload, so overriding `category_id` changes the outcome —
- * the label and change record are rewritten too so the AI audit trail doesn't claim something else.
+ * The server applies the client-supplied payload, so overriding `category_id` changes the outcome.
+ * The label and change record are rewritten too so the AI audit trail doesn't claim something else.
  */
 function withCategoryOverride(
   draft: AdvisorDraftAction,
@@ -147,7 +147,7 @@ function groupByMerchant(transactions: Transaction[]): MerchantGroup[] {
       });
     }
   }
-  // Biggest clusters first — that's where the backlog collapses fastest.
+  // Biggest clusters first: that's where the backlog collapses fastest.
   return [...map.values()].sort(
     (a, b) => b.ids.length - a.ids.length || (a.latestDate < b.latestDate ? 1 : -1)
   );
@@ -271,7 +271,7 @@ export function ReviewInbox() {
     },
     onError,
   });
-  // Applies to exactly the ids in the group — and `bulkCategorizeTransactions` already upserts a
+  // Applies to exactly the ids in the group, and `bulkCategorizeTransactions` already upserts a
   // merchant rule per distinct merchant, so future transactions are covered too.
   //
   // Deliberately NOT rulesApi.create(apply_existing): rule matching is substring + fuzzy, so a rule
@@ -294,7 +294,7 @@ export function ReviewInbox() {
     onSuccess: invalidate,
     onError,
   });
-  // Asks the model to propose a category per merchant. Nothing is written — the result only
+  // Asks the model to propose a category per merchant. Nothing is written: the result only
   // pre-fills each row so a suggestion can be accepted with one click or overridden.
   //
   // Runs the whole backlog in sequential batches (the endpoint caps each request, since the prompt
@@ -329,7 +329,7 @@ export function ReviewInbox() {
       if (failure) {
         addToast({
           type: 'error',
-          message: `Stopped after ${suggested} suggestion${suggested === 1 ? '' : 's'} — ${failure.message}`,
+          message: `Stopped after ${suggested} suggestion${suggested === 1 ? '' : 's'}: ${failure.message}`,
         });
         return;
       }
@@ -338,7 +338,7 @@ export function ReviewInbox() {
         type: suggested > 0 ? 'success' : 'info',
         message:
           suggested === 0
-            ? 'No confident suggestions — these merchants are too ambiguous to guess'
+            ? 'No confident suggestions: these merchants are too ambiguous to guess'
             : `Suggested ${suggested} of ${total}${declined > 0 ? ` · ${declined} left blank (unclear)` : ''}`,
       });
     },
@@ -472,7 +472,7 @@ export function ReviewInbox() {
     <Screen>
       <ScreenHeader
         title="Review"
-        sub="Everything waiting on a decision — categorize in bulk, confirm suggestions, resolve duplicates"
+        sub="Everything waiting on a decision: categorize in bulk, confirm suggestions, resolve duplicates"
         className="mb-5"
       />
 
@@ -506,7 +506,7 @@ export function ReviewInbox() {
         {tab === 'category' && (
           <>
             {groups.length > 0 && (() => {
-              // Every merchant that doesn't already have a proposal — the mutation batches them.
+              // Every merchant that doesn't already have a proposal. The mutation batches them.
               const pending = groups.filter((g) => !suggestions[g.label]).map((g) => g.label);
               return (
                 <div className="mb-3 flex flex-wrap items-center gap-3">
@@ -523,7 +523,7 @@ export function ReviewInbox() {
                         : `Suggest categories with AI · ${pending.length}`}
                   </button>
                   <span className="text-note text-muted-2">
-                    Proposals only — nothing is applied until you click one.
+                    Proposals only: nothing is applied until you click one.
                   </span>
                 </div>
               );
@@ -631,7 +631,7 @@ export function ReviewInbox() {
                     </div>
 
                     {/* The exact rows behind the group, so it's clear what's being categorized
-                        together — the raw statement text often differs from the grouped label. */}
+                        together. The raw statement text often differs from the grouped label. */}
                     {isOpen && (
                       <div className="mt-2 border-l border-line-2 pl-3">
                         {group.items.map((t) => (

@@ -16,7 +16,7 @@ UPDATE categories SET name = 'Lodging'      WHERE id = 'cat_travel_hotels';
 
 -- Folds: three redundant/wrongly-flagged buckets merged into their correct twin. Repoint every
 -- reference (transactions, rules, budgets) BEFORE deleting so no foreign key dangles.
---   cat_income_xferin (is_income=1) was a duplicate of the neutral cat_xfer_in — and its
+--   cat_income_xferin (is_income=1) was a duplicate of the neutral cat_xfer_in, and its
 --   is_income flag is exactly what let card payments read as income.
 --   cat_income_dividends folds into the investment-scoped cat_inv_dividend (dividends read as
 --   both income and investment there).

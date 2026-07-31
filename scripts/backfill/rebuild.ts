@@ -22,7 +22,7 @@ function main(): void {
 
   takeSnapshot();
   // backfillSnapshots() skips any month that already has a snapshot, so freshly imported
-  // history would never reach the estimates computed before it existed — the whole point of
+  // history would never reach the estimates computed before it existed, which is the whole point of
   // the backfill. Estimates are pure reverse-replay of the ledger, so dropping them costs
   // nothing; measured snapshots (is_estimated = 0) are real captures and must survive.
   const cleared = db.prepare('DELETE FROM net_worth_snapshots WHERE is_estimated = 1').run().changes;

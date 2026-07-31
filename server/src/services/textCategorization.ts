@@ -8,7 +8,7 @@ interface CategoryRule {
 }
 
 const RULES: CategoryRule[] = [
-  // Transfers / payments first — a credit-card autopay or account transfer must never fall
+  // Transfers / payments first: a credit-card autopay or account transfer must never fall
   // through to an income or spend bucket (this is the class of bug the audit found).
   { categoryId: 'cat_xfer_cc', keywords: [
     'automatic payment', 'autopay', 'internet payment', 'payment thank you',
@@ -22,13 +22,13 @@ const RULES: CategoryRule[] = [
   { categoryId: 'cat_inv_dividend', keywords: ['dividend received', 'dividend'] },
   { categoryId: 'cat_income_interest', keywords: ['interest payment', 'interest earned', 'interest paid', 'wealthfront interest'] },
 
-  // Software & AI tools — before the generic Subscriptions bucket.
+  // Software & AI tools: before the generic Subscriptions bucket.
   { categoryId: 'cat_sub_software', keywords: [
     'openai', 'chatgpt', 'anthropic', 'claude.ai', 'cursor', 'google *colab', 'colab', 'github',
     'backblaze', 'porkbun', 'surfshark', 'walter ai', 'vercel', 'digitalocean', 'notion',
   ] },
 
-  // Food-delivery brands first — before restaurants and before the generic "uber"
+  // Food-delivery brands first, before restaurants and before the generic "uber"
   // rideshare rule below (so "uber eats" is delivery, not a ride).
   { categoryId: 'cat_food_delivery', keywords: [
     'uber eats', 'ubereats', 'uber *eats', 'doordash', 'grubhub', 'postmates', 'seamless', 'caviar', 'gopuff',
@@ -64,7 +64,7 @@ const RULES: CategoryRule[] = [
     'timberland', 'garment district', 'koton', 'lc waikiki', 'new balance',
   ] },
 
-  // Transport — bike/car SHARE before rideshare, because the sync labels Bluebikes as
+  // Transport: bike/car SHARE before rideshare, because the sync labels Bluebikes as
   // "BLUEBIK*n RIDE LYFT.COM" (contains 'lyft') and Zipcar trips would otherwise read as rides.
   { categoryId: 'cat_transport_share', keywords: [
     'bluebik', 'blue bike', 'zipcar', 'lime', 'bird', 'capbike', 'baywhee', 'citi bike', 'divvy', 'car share',
@@ -94,7 +94,7 @@ const RULES: CategoryRule[] = [
   ] },
   { categoryId: 'cat_home_internet', keywords: ['comcast', 'xfinity', 'spectrum internet', 'fios'] },
   { categoryId: 'cat_home_phone', keywords: ['verizon wireless', 'at&t', 'att.com', 't-mobile', 'tmobile', 'mint mobile'] },
-  // Parent Home catch-all (after the specific home rules) — campus/coin laundry.
+  // Parent Home catch-all (after the specific home rules): campus/coin laundry.
   { categoryId: 'cat_home', keywords: ['serviceworks', 'csc service', 'laundry', 'laundromat'] },
 
   // Health
@@ -111,7 +111,7 @@ const RULES: CategoryRule[] = [
   { categoryId: 'cat_ent_games', keywords: ['steam', 'playstation', 'xbox', 'nintendo', 'epic games'] },
   { categoryId: 'cat_ent_events', keywords: ['ticketmaster', 'eventbrite', 'stubhub', 'live nation', 'seatgeek', 'tcktweb', 'six flags', 'symphony', 'gogol bordello', 'admit one', 'mit dsl', 'outing club', 'museum', 'aquarium', 'zoo'] },
 
-  // Travel — intercity carriers and car rental before local transit / rideshare above.
+  // Travel: intercity carriers and car rental before local transit / rideshare above.
   { categoryId: 'cat_travel_intercity', keywords: ['wanderu', 'amtrak', 'peter pan bus', 'greyhound', 'megabus', 'flixbus', 'lirr'] },
   { categoryId: 'cat_travel_rental', keywords: ['enterprise rent', 'budget rent', 'hertz', 'avis', 'national car rental', 'budget rent-a-car'] },
   { categoryId: 'cat_travel_flights', keywords: [

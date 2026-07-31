@@ -22,7 +22,7 @@ function buildFloorMap(): FloorEntry[] {
     connection_type: string; type: string; is_manual: number;
   }>;
 
-  // Oldest PROVIDER-served date, ignoring any rows already imported/entered by hand —
+  // Oldest PROVIDER-served date, ignoring any rows already imported/entered by hand:
   // the floor tracks what the aggregator owns, not what we backfill below it.
   const providerStats = db.prepare(`
     SELECT MIN(date) AS oldest, COUNT(*) AS count
@@ -80,7 +80,7 @@ function main(): void {
   for (const e of entries) {
     console.log(
       `${e.provider.padEnd(12)} ${e.account_name.slice(0, 28).padEnd(28)} ` +
-      `${(e.oldest_synced_date ?? '—').padEnd(12)} ${String(e.synced_count).padStart(5)}   ${e.floor ?? '—'}`
+      `${(e.oldest_synced_date ?? '–').padEnd(12)} ${String(e.synced_count).padStart(5)}   ${e.floor ?? '–'}`
     );
   }
   console.log('\nReview/edit floors.json, then arm the guard with:  tsx scripts/backfill/floor-map.ts --apply');

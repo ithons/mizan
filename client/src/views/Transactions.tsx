@@ -298,7 +298,7 @@ export function Transactions() {
       search: debouncedSearch || undefined,
       accountId: accountFilter ? [accountFilter] : undefined,
       categoryId: categoryFilter ? [categoryFilter] : undefined,
-      // "Needs category" means exactly that — no reviewStatus gate. Adding one hid the entire
+      // "Needs category" means exactly that: no reviewStatus gate. Adding one hid the entire
       // imported backlog, because categorization side effects set review_status='reviewed'.
       uncategorized: reviewOnly || undefined,
       limit: 100,
@@ -331,7 +331,7 @@ export function Transactions() {
 
   const transactions = useMemo(() => pages?.pages.flatMap((p) => p.data) ?? [], [pages]);
   const totalCount = pages?.pages[0]?.total ?? 0;
-  // This toggle filters to uncategorized, so it must show the uncategorized count — not the
+  // This toggle filters to uncategorized, so it must show the uncategorized count, not the
   // whole-inbox total, which counts duplicates/transfers/drafts the filter doesn't include.
   const reviewCount = reviewSummary?.queues.find((q) => q.id === 'uncategorized')?.count ?? 0;
 
@@ -422,8 +422,8 @@ export function Transactions() {
           onClick={() => {
             const turningOn = !reviewOnly;
             setReviewOnly(turningOn);
-            // The badge counts uncategorized across ALL time, but the range defaults to this month
-            // — where almost none of the backlog lives. Turning the filter on without widening the
+            // The badge counts uncategorized across ALL time, but the range defaults to this month,
+            // where almost none of the backlog lives. Turning the filter on without widening the
             // range showed "Needs review · 426" above "0 transactions · this month".
             if (turningOn) setRange('all');
           }}

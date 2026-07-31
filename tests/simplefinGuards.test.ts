@@ -172,7 +172,7 @@ test('a real access failure is still classified as reauth', () => {
 test("this app's own data warnings are advisories, not login problems", () => {
   const errors: string[] = [];
   liabilityAdjustedCents(500, true, 'Weird Card', errors);
-  errors.push('Account "Euro Savings" is in EUR, but Mizān treats balances as USD — its value may be misstated.');
+  errors.push('Account "Euro Savings" is in EUR, but Mizān treats balances as USD. Its value may be misstated.');
   errors.push('SimpleFIN returned a non-numeric transaction abc amount: "n/a"');
 
   const triage = triageSimplefinErrors(errors);

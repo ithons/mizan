@@ -72,7 +72,7 @@ test('the snapshot series extracts one account\'s points, skipping what it canno
   ins.run('s1', '2026-01-01', JSON.stringify({ acct: 10000, other: 5000 }));
   ins.run('s2', '2026-02-01', JSON.stringify({ acct: 12000, other: 5000 }));
   ins.run('s3', '2026-03-01', JSON.stringify({ other: 5000 })); // acct not present yet/anymore
-  ins.run('s4', '2026-04-01', 'not json');                      // malformed — skipped
+  ins.run('s4', '2026-04-01', 'not json');                      // malformed, skipped
 
   const hist = getSnapshotBalanceHistory(db, 'acct');
   assert.equal(hist.basis, 'snapshot');
