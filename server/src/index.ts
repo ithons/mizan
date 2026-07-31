@@ -10,6 +10,7 @@ import ViteExpress from 'vite-express';
 import { runMigrations, closeDb, getDb, MIZAN_DIR } from './db/index';
 import { loadCredentials } from './services/credentials';
 import { isSyncStale, runFullSync, startSyncScheduler, stopSyncScheduler } from './services/syncManager';
+import { stopAiScheduler } from './services/aiScheduler';
 import { autoCategorizeTransactions } from './services/rules';
 import { reclassifyAutoAccountTypes } from './services/accountClassification';
 import { errorHandler } from './middleware/errorHandler';
@@ -212,6 +213,10 @@ async function main() {
     shuttingDown = true;
     console.log('\n[server] Shutting down...');
     stopSyncScheduler();
+    // An in-flight sync can finish during the 2-second grace period below and fire an AI pass that
+    // would still be awaiting the model when closeDb() runs, then write into a closed handle.
+    // Stopping the trigger cannot cancel a pass already running; it stops a new one starting.
+    stopAiScheduler();
 
     const finish = () => {
       try {

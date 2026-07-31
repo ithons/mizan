@@ -24,7 +24,7 @@ import {
 } from './liabilitySign';
 import { describeBalanceChange, type AccountBalanceChange } from './balanceChanges';
 import { toCents, toDollars } from './money';
-import { runBackgroundAiReview } from './aiWorker';
+import { triggerAfterSyncAiJobs } from './aiScheduler';
 import { withRetry } from './retry';
 
 // SSE clients registry
@@ -83,6 +83,50 @@ export function terminalSyncEvent(deferredError: Error | null, completedAt: stri
     completedAt,
     status: 'partial',
   };
+}
+
+export interface SyncFinalizeDeps {
+  emit: (event: SyncEvent) => void;
+  triggerAiJobs: (syncRunId: string, emit: (event: SyncEvent) => void) => void;
+  now: () => string;
+}
+
+const defaultFinalizeDeps: SyncFinalizeDeps = {
+  emit: emitSyncEvent,
+  triggerAiJobs: (syncRunId, emit) => triggerAfterSyncAiJobs({ syncRunId, emit }),
+  now: () => new Date().toISOString(),
+};
+
+/**
+ * End a run: tell the client, then fire the AI pass, then let a partial run's failure out.
+ *
+ * The trigger sitting in the `finally` is the whole reason this is a function. It used to sit
+ * after `if (deferredError) throw`, so the one kind of sync that never got a review pass was a
+ * sync where a stage had failed, which is the kind most worth reviewing. Measured on a copy of
+ * .mizan/mizan.db, 2026-07-31: `SELECT status, COUNT(*) FROM sync_runs GROUP BY status` returns
+ * succeeded 98, partial 10, failed 4, running 5, and 'partial' is written only here, so each of
+ * those 10 runs reached the kickoff and stepped over it.
+ *
+ * A run that dies before reaching here (the credential store or the database is unavailable) gets
+ * no pass, deliberately: nothing was written for a pass to review.
+ */
+export function finalizeSyncRun(
+  syncRunId: string,
+  deferredError: Error | null,
+  deps: SyncFinalizeDeps = defaultFinalizeDeps
+): void {
+  try {
+    deps.emit(terminalSyncEvent(deferredError, deps.now()));
+    if (deferredError) throw deferredError;
+  } finally {
+    try {
+      deps.triggerAiJobs(syncRunId, deps.emit);
+    } catch (err) {
+      // A throw from a `finally` replaces whatever the block was already throwing, and what it is
+      // already throwing here is the sync's own failure: the one error the caller must not lose.
+      console.error('[sync] Could not fire the after-sync AI jobs:', err);
+    }
+  }
 }
 
 export interface PostSyncStageFns {
@@ -540,18 +584,7 @@ async function _runFullSyncInternal(): Promise<void> {
     });
     finished = true;
 
-    emitSyncEvent(terminalSyncEvent(deferredError, new Date().toISOString()));
-
-    if (deferredError) {
-      throw deferredError;
-    }
-
-    // Proactive background AI worker
-    setTimeout(() => {
-      runBackgroundAiReview().catch(err => {
-        console.error('[sync] Background AI review failed:', err);
-      });
-    }, 100);
+    finalizeSyncRun(run.id, deferredError);
   } catch (err) {
     const message = (err as Error).message || 'Sync failed';
     // `finished` means the run already recorded its outcome and emitted its terminal event. A

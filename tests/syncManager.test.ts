@@ -5,6 +5,7 @@ import type { Response } from 'express';
 import {
   addSseClient,
   emitSyncEvent,
+  finalizeSyncRun,
   isSyncStale,
   reconcileBalanceChanges,
   removeSseClient,
@@ -347,6 +348,73 @@ test('a clean run ends in the same event marked succeeded', () => {
   assert.equal(event.type, 'sync_complete');
   assert.equal(event.status, 'succeeded');
   assert.equal(event.message, 'Sync complete');
+});
+
+// ── The AI pass a failed stage used to cost ──────────────────────────────────
+// The trigger sat after `if (deferredError) throw`, so a sync where one stage failed never got a
+// review pass. On the owner's own history that is 10 runs: SELECT status, COUNT(*) FROM sync_runs
+// GROUP BY status, on a copy of .mizan/mizan.db, 2026-07-31, returns succeeded 98, partial 10,
+// failed 4, running 5, and a run is marked 'partial' only after it has recorded its outcome.
+
+interface FinalizeSpy {
+  order: string[];
+  events: SyncEvent[];
+  triggered: string[];
+  deps: Parameters<typeof finalizeSyncRun>[2];
+}
+
+function finalizeSpy(): FinalizeSpy {
+  const spy: FinalizeSpy = {
+    order: [],
+    events: [],
+    triggered: [],
+    deps: {
+      emit: () => {},
+      triggerAiJobs: () => {},
+      now: () => '2026-07-30T12:00:00.000Z',
+    },
+  };
+  spy.deps = {
+    emit: (event) => { spy.order.push(`emit:${event.type}`); spy.events.push(event); },
+    triggerAiJobs: (syncRunId) => { spy.order.push('trigger'); spy.triggered.push(syncRunId); },
+    now: () => '2026-07-30T12:00:00.000Z',
+  };
+  return spy;
+}
+
+test('finalizeSyncRun: a partial run still fires the AI pass, and still rethrows', () => {
+  const spy = finalizeSpy();
+
+  assert.throws(
+    () => finalizeSyncRun('run_1', new Error('auto-categorization failed'), spy.deps),
+    /auto-categorization failed/
+  );
+
+  assert.deepEqual(spy.triggered, ['run_1'], 'a stage failing is when a review pass is most useful');
+  assert.equal(spy.events[0].status, 'partial');
+});
+
+test('finalizeSyncRun: a clean run fires it exactly once, after the terminal event', () => {
+  const spy = finalizeSpy();
+
+  finalizeSyncRun('run_1', null, spy.deps);
+
+  // Order is load-bearing: the client drops its caches on sync_complete, so a pass that wrote
+  // before that event would have its writes overwritten on screen by the refresh that follows it.
+  assert.deepEqual(spy.order, ['emit:sync_complete', 'trigger']);
+  assert.deepEqual(spy.triggered, ['run_1']);
+});
+
+test('finalizeSyncRun: a trigger that throws does not replace the run\'s own failure', () => {
+  const spy = finalizeSpy();
+  spy.deps.triggerAiJobs = () => { throw new Error('scheduler exploded'); };
+
+  // A throw out of a `finally` replaces whatever the block was throwing. The real trigger is
+  // written not to throw; this is what happens on the day that stops being true.
+  assert.throws(
+    () => finalizeSyncRun('run_1', new Error('SimpleFIN sync failed'), spy.deps),
+    /SimpleFIN sync failed/
+  );
 });
 
 function fakeSseClient(): { res: Response; frames: string[] } {
