@@ -2,6 +2,7 @@ import type {
   Account,
   AccountBalanceHistory,
   AdvisorAnalysis,
+  AdvisorAutonomyResponse,
   AdvisorConfirmResponse,
   AdvisorContextResponse,
   AdvisorDraftAction,
@@ -680,8 +681,30 @@ export interface BatchConfirmOutcome {
   label?: string;
 }
 
+/**
+ * What a successful `POST /api/ai/actions/:id/undo` carries back.
+ *
+ * `reverted_rules` and `rule_failures` are the halves the screens dropped: an undo of a rule
+ * retirement puts back no transaction at all, and a rule the server could not restore has to be
+ * said out loud or a partial revert reads as a complete one. Both are optional because this shape
+ * is declared here rather than by `undoAdvisorAction` (services/advisorDrafts.ts), so the client
+ * reports them only when the server actually sent them.
+ */
+export interface AiActionUndoResult {
+  ok: boolean;
+  /** Transaction categories put back. */
+  reverted: number;
+  /** Merchant rules un-retired. Counted apart: a rule is not a row of the ledger. */
+  reverted_rules?: number;
+  /** One sentence per rule the undo could not restore, written by the server. */
+  rule_failures?: string[];
+}
+
 export const aiApi = {
   getContext: () => apiFetch<AdvisorContextResponse>('/api/ai/context'),
+  // Which draft kinds apply unattended. Fetched rather than restated: this is the table Settings
+  // derives both its Undo buttons and its statement of the boundary from.
+  getAutonomy: () => apiFetch<AdvisorAutonomyResponse>('/api/ai/autonomy'),
   listActions: () =>
     apiFetch<
       Array<{
@@ -693,10 +716,11 @@ export const aiApi = {
         created_at: string;
       }>
     >('/api/ai/actions'),
-  // Reverses every categorization the action made, restoring each row's prior category. Rows
-  // edited by hand since are skipped, and any rule the action created stays.
+  // Reverses every categorization the action made, restoring each row's prior category, and
+  // un-retires every rule it retired. Rows edited by hand since are skipped, and any rule the
+  // action created stays.
   undoAction: (id: string) =>
-    apiFetch<{ ok: boolean; reverted: number }>(`/api/ai/actions/${id}/undo`, { method: 'POST' }),
+    apiFetch<AiActionUndoResult>(`/api/ai/actions/${id}/undo`, { method: 'POST' }),
   getProfile: () => apiFetch<{ profile: string }>('/api/ai/profile'),
   saveProfile: (profile: string) =>
     apiFetch<{ profile: string }>('/api/ai/profile', {

@@ -5,7 +5,13 @@ import { Search, Loader2, Sparkles, ArrowRight, BrainCircuit, CornerDownLeft, Ch
 import { aiApi, settingsApi, syncApi } from '../lib/api';
 import { formatCurrency, formatDateShort, formatRelativeTime } from '../lib/formatters';
 import { useAppStore } from '../store';
-import type { AdvisorDraftAction, AiDigestAction, AiDigestRow } from '@shared/types';
+import type {
+  AdvisorDraftAction,
+  AiDigest,
+  AiDigestAction,
+  AiDigestRevertResult,
+  AiDigestRow,
+} from '@shared/types';
 
 interface Command {
   id: string;
@@ -69,6 +75,60 @@ function windowSince(win: DigestWindow): string | null {
 function categoryLabel(id: string | null, name: string | null): string {
   if (id === null) return 'Uncategorized';
   return name ?? 'a category since deleted';
+}
+
+/**
+ * What "Put it all back" would restore, or null when there is nothing to offer.
+ *
+ * Gated on rows AND rules. A window whose only AI activity is a rule retirement has zero revertable
+ * rows and something to put back all the same, which is exactly the case the per-action line
+ * already described ("Changed no transactions. The rule above can be put back.") while no button
+ * rendered beside it. `retire_merchant_rule` is autonomous BECAUSE it touches no transaction, so
+ * counting only transactions hides precisely the writes the owner never confirmed.
+ */
+export function revertOffer(digest: AiDigest): string | null {
+  const rows = digest.revertable_rows;
+  const rules = digest.revertable_rules;
+  if (rows === 0 && rules === 0) return null;
+
+  const rowText = `${rows} row${rows === 1 ? '' : 's'}`;
+  const ruleText = `${rules} merchant rule${rules === 1 ? '' : 's'}`;
+  let restores: string;
+  if (rules === 0) restores = `Putting all of it back restores ${rowText}.`;
+  else if (rows === 0) restores = `Putting all of it back restores ${ruleText} and changes no transaction.`;
+  else restores = `Putting all of it back restores ${rowText} and ${ruleText}.`;
+
+  const left =
+    digest.changed_since_rows > 0
+      ? ` ${digest.changed_since_rows} row${digest.changed_since_rows === 1 ? ' was' : 's were'} changed after the AI touched ${digest.changed_since_rows === 1 ? 'it' : 'them'} and ${digest.changed_since_rows === 1 ? 'is' : 'are'} left alone.`
+      : '';
+  const replaced =
+    digest.replaced_within_action_rows > 0
+      ? ` ${digest.replaced_within_action_rows} earlier value${digest.replaced_within_action_rows === 1 ? '' : 's'} the AI overwrote with its own later one ${digest.replaced_within_action_rows === 1 ? 'stays' : 'stay'} as ${digest.replaced_within_action_rows === 1 ? 'it is' : 'they are'}.`
+      : '';
+  return `${restores}${left}${replaced}`;
+}
+
+/**
+ * What the revert actually put back.
+ *
+ * The rules half was dropped entirely, and a plan that reverted fewer rules than it claimed read as
+ * a complete success. Both halves are stated, and the shortfall is named rather than absorbed.
+ */
+export function revertToast(result: AiDigestRevertResult): { type: 'success' | 'info'; message: string } {
+  const rules = result.reverted_rules;
+  const missedRules = result.planned_rules - result.reverted_rules;
+  const left =
+    result.changed_since_rows > 0
+      ? `, ${result.changed_since_rows} left alone because something else changed them since`
+      : '';
+  const ruleClause = rules > 0 ? ` and ${rules} merchant rule(s)` : '';
+  const message = `Put back ${result.reverted_rows} row(s)${ruleClause}${left}.`;
+  if (missedRules <= 0) return { type: 'success', message };
+  return {
+    type: 'info',
+    message: `${message} ${missedRules} rule(s) the plan counted could not be put back.`,
+  };
 }
 
 function DigestRowLine({ row }: { row: AiDigestRow }) {
@@ -144,10 +204,15 @@ function DigestActionBlock({ action }: { action: AiDigestAction }) {
           ))}
         </div>
       )}
-      {/* A complete record of an action that changed nothing. Reads as the fact it is, not a gap. */}
+      {/* A complete record of an action that changed no transaction. Reads as the fact it is, not a
+          gap. It is not the same as "nothing to put back": retiring a rule changes no transaction
+          by design, and undo restores it. */}
       {action.record_state === 'no_rows_changed' && (
         <p className="mt-1 text-note text-muted-2">
-          Changed no transactions{action.rule ? ', so only the rule above is new' : ''}. Nothing to put back.
+          Changed no transactions
+          {action.revertable_rules > 0
+            ? `. The rule above can be put back.`
+            : `${action.rule ? ', so only the rule above changed' : ''}. Nothing to put back.`}
         </p>
       )}
       {action.record_state === 'unrecorded' && (
@@ -180,11 +245,7 @@ function AiDigestPanel({ onBack }: { onBack: () => void }) {
       aiApi.revertDigestSince(args.from, args.limit),
     onSuccess: (result) => {
       void qc.invalidateQueries();
-      const left =
-        result.changed_since_rows > 0
-          ? `, ${result.changed_since_rows} left alone because something else changed them since`
-          : '';
-      addToast({ type: 'success', message: `Put back ${result.reverted_rows} row(s)${left}.` });
+      addToast(revertToast(result));
     },
     onError: (err: Error) => addToast({ type: 'error', message: err.message }),
   });
@@ -192,6 +253,7 @@ function AiDigestPanel({ onBack }: { onBack: () => void }) {
   // "Everything" has no lower bound until the data supplies one: the oldest action on record.
   const oldest = digest && digest.actions.length > 0 ? digest.actions[digest.actions.length - 1].created_at : null;
   const revertFrom = since ?? oldest;
+  const offer = digest ? revertOffer(digest) : null;
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -246,16 +308,9 @@ function AiDigestPanel({ onBack }: { onBack: () => void }) {
               </p>
             )}
 
-            {!digest.truncated && digest.revertable_rows > 0 && revertFrom && (
+            {!digest.truncated && offer && revertFrom && (
               <div className="mb-2 flex items-center justify-between gap-4 rounded-lg bg-well px-3 py-2.5">
-                <p className="text-note leading-relaxed text-muted">
-                  Putting all of it back restores {digest.revertable_rows} row
-                  {digest.revertable_rows === 1 ? '' : 's'}.
-                  {digest.changed_since_rows > 0 &&
-                    ` ${digest.changed_since_rows} row${digest.changed_since_rows === 1 ? ' was' : 's were'} changed after the AI touched ${digest.changed_since_rows === 1 ? 'it' : 'them'} and ${digest.changed_since_rows === 1 ? 'is' : 'are'} left alone.`}
-                  {digest.replaced_within_action_rows > 0 &&
-                    ` ${digest.replaced_within_action_rows} earlier value${digest.replaced_within_action_rows === 1 ? '' : 's'} the AI overwrote with its own later one ${digest.replaced_within_action_rows === 1 ? 'stays' : 'stay'} as ${digest.replaced_within_action_rows === 1 ? 'it is' : 'they are'}.`}
-                </p>
+                <p className="text-note leading-relaxed text-muted">{offer}</p>
                 <button
                   type="button"
                   disabled={revert.isPending}

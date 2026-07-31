@@ -30,12 +30,18 @@ import {
   listAdvisorActions,
   undoAdvisorAction,
 } from '../services/advisorDrafts';
+import { DRAFT_KIND_AUTONOMY } from '../services/draftAutonomy';
 import { analyzeAdvisorQuestion } from '../services/advisorTools';
 import { createMemory, deleteMemory, listMemories, supersedeMemory } from '../services/aiMemory';
 import { ADVISOR_TOOLS, runAdvisorTool } from '../services/advisorChatTools';
 import { buildModelRequestShape, getAdvisorSettings, updateAdvisorSettings } from '../services/advisorSettings';
 import { suggestCategoriesForMerchants } from '../services/aiCategorySuggest';
-import type { AdvisorConfirmRequest, ChatMessage } from '../../../shared/types';
+import type {
+  AdvisorAutonomyEntry,
+  AdvisorConfirmRequest,
+  AdvisorDraftActionKind,
+  ChatMessage,
+} from '../../../shared/types';
 
 const router = Router();
 
@@ -153,6 +159,22 @@ router.delete('/conversations/:id', (req: Request, res: Response, next: NextFunc
 router.get('/actions', (_req: Request, res: Response, next: NextFunction): void => {
   try {
     res.json({ data: listAdvisorActions(getDb()) });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// GET /api/ai/autonomy - which draft kinds apply unattended, straight off DRAFT_KIND_AUTONOMY.
+//
+// Exposed because three owner-facing surfaces need the boundary and the client cannot import a
+// service that opens a database. Only the decision crosses the wire; the argument behind each one
+// stays on the server, and the wording the owner reads is the client's.
+router.get('/autonomy', (_req: Request, res: Response, next: NextFunction): void => {
+  try {
+    const kinds: AdvisorAutonomyEntry[] = (
+      Object.keys(DRAFT_KIND_AUTONOMY) as AdvisorDraftActionKind[]
+    ).map((kind) => ({ kind, autonomy: DRAFT_KIND_AUTONOMY[kind].autonomy }));
+    res.json({ data: { kinds } });
   } catch (err) {
     next(err);
   }

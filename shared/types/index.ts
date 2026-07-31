@@ -783,6 +783,7 @@ export interface AdvisorToolStatus {
 
 export type AdvisorDraftActionKind =
   | 'create_merchant_rule'
+  | 'retire_merchant_rule'
   | 'categorize_transaction'
   | 'update_budget'
   | 'update_goal_target'
@@ -806,6 +807,14 @@ export type AdvisorDraftPayload =
       pattern: string;
       category_id: string;
       apply_existing: boolean;
+    }
+  | {
+      /**
+       * Retire one rule the MODEL wrote. `rule_id`, not a pattern: a pattern would have to be
+       * resolved back to a row, and the resolution is fuzzy in this app by design.
+       */
+      kind: 'retire_merchant_rule';
+      rule_id: string;
     }
   | {
       kind: 'categorize_transaction';
@@ -864,6 +873,27 @@ export type AdvisorDraftPayload =
       sector: string | null;
       sector_source?: string | null;
     };
+
+export type AdvisorAutonomy = 'autonomous' | 'proposal_only';
+
+/**
+ * One kind's autonomy, as the screens see it.
+ *
+ * The decision stays where it is argued: `DRAFT_KIND_AUTONOMY` in
+ * `server/src/services/draftAutonomy.ts`. This is only the wire shape that carries it out, so the
+ * owner-facing surfaces derive the boundary from the same table the model's prompt is generated
+ * from. Settings used to keep its own `new Set([...])` of undoable kinds, which was a copy of the
+ * autonomous set on the day it was written and stopped being one the day a kind was added.
+ */
+export interface AdvisorAutonomyEntry {
+  kind: AdvisorDraftActionKind;
+  autonomy: AdvisorAutonomy;
+}
+
+/** Every declared kind, in the order the table declares them. */
+export interface AdvisorAutonomyResponse {
+  kinds: AdvisorAutonomyEntry[];
+}
 
 export interface AdvisorDraftAction {
   id: string;
@@ -1402,6 +1432,14 @@ export interface AiDigestAction {
   standing_rows: number;
   revertable_rows: number;
   blocked_rows: number;
+  /**
+   * Rule retirements this action made that undo can still take back.
+   *
+   * Separate from `revertable_rows` because it is not a row of the ledger. `retire_merchant_rule`
+   * is autonomous precisely because it changes no transaction, so an action can have zero
+   * revertable rows and still have something to put back.
+   */
+  revertable_rules: number;
   revert_scope: AiDigestRevertScope;
 }
 
@@ -1420,6 +1458,8 @@ export interface AiDigest {
   row_count: number;
   standing_rows: number;
   revertable_rows: number;
+  /** Rule retirements across the window that undo can still take back. */
+  revertable_rules: number;
   /**
    * Split on purpose. A row the owner already put back and a row someone else has since changed are
    * both unreachable, and copy that folds them into one number tells the owner their own undo was
@@ -1436,6 +1476,8 @@ export interface AiDigestRevertActionOutcome {
   label: string;
   planned_rows: number;
   reverted_rows: number;
+  planned_rules: number;
+  reverted_rules: number;
 }
 
 export interface AiDigestRevertResult {
@@ -1444,6 +1486,8 @@ export interface AiDigestRevertResult {
   action_limit: number;
   planned_rows: number;
   reverted_rows: number;
+  planned_rules: number;
+  reverted_rules: number;
   /** Rows the plan never claimed, split by why. Restated so the result cannot read as complete. */
   already_reverted_rows: number;
   changed_since_rows: number;

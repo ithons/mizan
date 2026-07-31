@@ -1,7 +1,17 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useSearchParams } from 'react-router-dom';
-import { accountsApi, aiApi, categoriesApi, flattenCategories, rulesApi, settingsApi, simplefinApi } from '../../lib/api';
+import type { AdvisorAutonomyEntry, AdvisorDraftActionKind } from '@shared/types';
+import {
+  accountsApi,
+  aiApi,
+  categoriesApi,
+  flattenCategories,
+  rulesApi,
+  settingsApi,
+  simplefinApi,
+  type AiActionUndoResult,
+} from '../../lib/api';
 import { formatCompactRelative } from '../../lib/formatters';
 import { useThemePreference, type ThemePreference } from '../../lib/theme';
 import { useAppStore } from '../../store';
@@ -85,7 +95,139 @@ function ThemeToggle() {
   );
 }
 
-const UNDOABLE_AI_KINDS = new Set(['categorize_transaction', 'create_merchant_rule']);
+/**
+ * The autonomy table, fetched once.
+ *
+ * It is a property of the running server rather than of the data, so nothing in a session can
+ * change it and there is nothing to refetch. Two panels read it under the same key, which is what
+ * keeps the Undo buttons and the sentence describing the boundary derived from one answer.
+ */
+const AUTONOMY_QUERY = {
+  queryKey: ['ai-autonomy'],
+  queryFn: () => aiApi.getAutonomy(),
+  staleTime: Infinity,
+};
+
+/**
+ * How the owner says each kind.
+ *
+ * The wording is the only part written here. Which side of the boundary a kind falls on comes from
+ * the server's table, and the `Record` over the whole union means a new kind cannot compile until
+ * it has been worded, the same way `DRAFT_KIND_AUTONOMY` means it cannot compile until it has been
+ * argued.
+ */
+const AUTONOMY_PHRASE: Record<AdvisorDraftActionKind, string> = {
+  categorize_transaction:
+    'categorizing transactions, including ones a rule or the heuristic already filed',
+  create_merchant_rule: 'writing merchant rules',
+  retire_merchant_rule: 'retiring rules it wrote itself that file no transaction',
+  update_budget: 'changing a budget',
+  update_goal_target: 'changing a goal target',
+  set_manual_cost_basis: 'setting a cost basis',
+  confirm_recurring: 'confirming a bill',
+  set_sector_metadata: 'setting a security sector',
+  create_recurring_adjustment: 'skipping or repricing a bill',
+  create_budget_group: 'creating a budget group',
+  rename_budget_group: 'renaming a budget group',
+  assign_category_to_budget_group: 'moving a category between budget groups',
+};
+
+/**
+ * The owner's half of `describeAutonomyForPrompt` (server/src/services/draftAutonomy.ts): the same
+ * table, the same split, generated the same way.
+ *
+ * The sentence this replaces was typed by hand and had gone false twice over: a third kind became
+ * autonomous, and categorization widened past untouched rows. A model that is told the boundary
+ * from the table while the owner is told it from memory is the exact asymmetry this closes.
+ *
+ * Null for an empty table, so a caller that has not loaded it yet says so rather than printing a
+ * boundary with nothing on either side of it.
+ */
+export function describeAutonomyForOwner(entries: readonly AdvisorAutonomyEntry[]): string | null {
+  if (entries.length === 0) return null;
+  // A kind with no wording is named rather than dropped: silence would understate the boundary.
+  const say = (entry: AdvisorAutonomyEntry): string => AUTONOMY_PHRASE[entry.kind] ?? entry.kind;
+  const applies = entries.filter((e) => e.autonomy === 'autonomous').map(say);
+  const queues = entries.filter((e) => e.autonomy === 'proposal_only').map(say);
+  if (applies.length === 0) return `Nothing without you. Waits for you: ${queues.join('; ')}.`;
+  if (queues.length === 0) return `On its own: ${applies.join('; ')}. Nothing waits for you.`;
+  return `On its own: ${applies.join('; ')}. Waits for you: ${queues.join('; ')}.`;
+}
+
+/**
+ * Which actions offer Undo, derived from the same table instead of hand-listed beside it.
+ *
+ * `exact_inverse` is one of the four criteria a write has to meet to be autonomous, so an
+ * autonomous kind is undoable by construction. The set this replaces named two kinds and left
+ * `retire_merchant_rule` with a working, tested server-side undo that no screen could reach.
+ */
+function undoableKinds(entries: readonly AdvisorAutonomyEntry[]): ReadonlySet<string> {
+  return new Set(entries.filter((e) => e.autonomy === 'autonomous').map((e) => e.kind));
+}
+
+/**
+ * What an undo actually did, including the halves this toast used to drop.
+ *
+ * An undone rule retirement puts back no transaction, so reporting only rows read as "Reverted 0
+ * transactions" for a revert that worked. A rule the server could not restore is named, and the
+ * toast stops claiming plain success, because a partial revert that reads as a complete one is the
+ * failure `rule_failures` was added to prevent.
+ */
+export function undoActionToast(result: AiActionUndoResult): { type: 'success' | 'info'; message: string } {
+  const rules = result.reverted_rules ?? 0;
+  const failures = result.rule_failures ?? [];
+  const rowText = `Reverted ${result.reverted} transaction${result.reverted === 1 ? '' : 's'}`;
+  const ruleText = `${rules} merchant rule${rules === 1 ? '' : 's'}`;
+
+  let message: string;
+  if (rules === 0) message = rowText;
+  else if (result.reverted === 0) message = `Put back ${ruleText}`;
+  else message = `${rowText} and put back ${ruleText}`;
+
+  if (failures.length === 0) return { type: 'success', message };
+  return { type: 'info', message: `${message}. ${failures.join(' ')}` };
+}
+
+type AiActionListItem = Awaited<ReturnType<typeof aiApi.listActions>>[number];
+
+export function AiActionRow({
+  action,
+  undoable,
+  undoPending,
+  onUndo,
+}: {
+  action: AiActionListItem;
+  undoable: boolean;
+  undoPending: boolean;
+  onUndo: (id: string) => void;
+}) {
+  return (
+    <div className="flex items-start justify-between gap-3 border-b border-line pb-2.5 last:border-0">
+      <div className="min-w-0">
+        <div className="text-body-lg text-ink">{action.label}</div>
+        <div className="mt-0.5 text-note text-muted-2">{action.summary}</div>
+      </div>
+      <div className="flex flex-shrink-0 items-start gap-3">
+        <div className="text-right text-micro text-muted-2">
+          <div className={action.source === 'worker_auto' ? 'text-warning' : 'text-sage-deep'}>
+            {action.source === 'worker_auto' ? 'auto-applied' : 'you confirmed'}
+          </div>
+          <div>{formatCompactRelative(action.created_at)}</div>
+        </div>
+        {undoable && (
+          <button
+            type="button"
+            disabled={undoPending}
+            onClick={() => onUndo(action.id)}
+            className="mt-0.5 whitespace-nowrap border-b border-line-3 pb-0.5 text-note text-muted transition-colors hover:text-ink disabled:opacity-40"
+          >
+            Undo
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
 
 // The SDK accepts three credential forms, not just an env API key (services/anthropicClient.ts).
 // /api/ai/context already reported which one is in use; nothing displayed it.
@@ -104,14 +246,15 @@ function AiActionsPanel({ open, onToggle }: { open: boolean; onToggle: () => voi
     queryFn: () => aiApi.listActions(),
     enabled: open,
   });
+  const { data: autonomy } = useQuery({ ...AUTONOMY_QUERY, enabled: open });
+  // No table, no Undo: offering to put something back is a promise, and until the boundary has
+  // loaded there is nothing here that knows which actions the server can keep it for.
+  const undoable = undoableKinds(autonomy?.kinds ?? []);
 
   const undo = useMutation({
     mutationFn: (id: string) => aiApi.undoAction(id),
     onSuccess: (res) => {
-      addToast({
-        type: 'success',
-        message: `Reverted ${res.reverted} transaction${res.reverted === 1 ? '' : 's'}`,
-      });
+      addToast(undoActionToast(res));
       // Categories moved, so every derived surface is stale: reports, budgets, review counts.
       qc.invalidateQueries();
     },
@@ -133,30 +276,13 @@ function AiActionsPanel({ open, onToggle }: { open: boolean; onToggle: () => voi
           ) : (
             <div className="space-y-2.5">
               {actions.map((a) => (
-                <div key={a.id} className="flex items-start justify-between gap-3 border-b border-line pb-2.5 last:border-0">
-                  <div className="min-w-0">
-                    <div className="text-body-lg text-ink">{a.label}</div>
-                    <div className="mt-0.5 text-note text-muted-2">{a.summary}</div>
-                  </div>
-                  <div className="flex flex-shrink-0 items-start gap-3">
-                    <div className="text-right text-micro text-muted-2">
-                      <div className={a.source === 'worker_auto' ? 'text-warning' : 'text-sage-deep'}>
-                        {a.source === 'worker_auto' ? 'auto-applied' : 'you confirmed'}
-                      </div>
-                      <div>{formatCompactRelative(a.created_at)}</div>
-                    </div>
-                    {UNDOABLE_AI_KINDS.has(a.kind) && (
-                      <button
-                        type="button"
-                        disabled={undo.isPending}
-                        onClick={() => undo.mutate(a.id)}
-                        className="mt-0.5 whitespace-nowrap border-b border-line-3 pb-0.5 text-note text-muted transition-colors hover:text-ink disabled:opacity-40"
-                      >
-                        Undo
-                      </button>
-                    )}
-                  </div>
-                </div>
+                <AiActionRow
+                  key={a.id}
+                  action={a}
+                  undoable={undoable.has(a.kind)}
+                  undoPending={undo.isPending}
+                  onUndo={(id) => undo.mutate(id)}
+                />
               ))}
             </div>
           )}
@@ -316,6 +442,11 @@ export function Settings() {
   const { data: categories } = useQuery({ queryKey: ['categories'], queryFn: () => categoriesApi.list() });
   const { data: rules } = useQuery({ queryKey: ['rules'], queryFn: () => rulesApi.list() });
   const { data: memories } = useQuery({ queryKey: ['ai-memory'], queryFn: () => aiApi.listMemory() });
+  const autonomyQuery = useQuery(AUTONOMY_QUERY);
+  const autonomySentence = autonomyQuery.data ? describeAutonomyForOwner(autonomyQuery.data.kinds) : null;
+  const autonomyStatus = autonomyQuery.isError
+    ? { sub: 'The boundary could not be read from the server, so nothing here states it.', trailing: 'Unknown' }
+    : { sub: 'Reading the boundary from the server…', trailing: 'Reading' };
   const backup = useMutation({
     mutationFn: () => settingsApi.exportBackupJson(),
     onSuccess: () => addToast({ type: 'success', message: 'Backup downloaded' }),
@@ -436,13 +567,15 @@ export function Settings() {
               <AdvisorMemorySection />
             </ExpandedPanel>
           )}
-          {/* What the AI applies unattended is a fixed domain boundary now, not a dial: it
-              categorizes and writes merchant rules on its own, and everything that changes a
-              target you set waits for you. Stated rather than configured. */}
+          {/* What the AI applies unattended is a fixed domain boundary, not a dial, so this is
+              stated rather than configured. The statement is generated from the server's autonomy
+              table, so it cannot fall behind the boundary it describes. Every state of that fetch
+              is spelled out: a row that claims a boundary it has not read would be worse than one
+              that admits it has not read it. */}
           <SettingsRow
             title="What the AI can do on its own"
-            sub="Categorizes transactions and writes merchant rules · budgets, goals, and bills always wait for you"
-            trailing={<span className="text-muted-2">Always on</span>}
+            sub={autonomySentence ?? autonomyStatus.sub}
+            trailing={<span className="text-muted-2">{autonomySentence ? 'Always on' : autonomyStatus.trailing}</span>}
             last
           />
         </div>
