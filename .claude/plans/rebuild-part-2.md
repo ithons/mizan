@@ -419,38 +419,37 @@ Carried from the token work, still open:
 - [ ] **`/plan`** absorbs Budget and Goals.
 - [ ] **`/settings`** absorbs Onboarding, an orphan route nothing links to in an always-logged-in
       single-owner app.
-- [ ] **The advisor stops being a place you go to talk, and becomes a place you go to govern.**
-      Owner's direction, 2026-07-31: AI settings move out of Settings into an AI tab, and the AI
-      becomes reachable from everywhere rather than only from its own screen, **without a sidebar
-      chat** (explicitly rejected).
+- [ ] **Advisor stops being a tab, and the nav holds at six.** Owner's direction, 2026-07-31, after
+      weighing the alternative: if the AI is genuinely integrated everywhere then it does not need a
+      tab, and its settings stay in Settings. So `/advisor` is deleted rather than repurposed.
 
-      Resolution, because those two pull in opposite directions: **conversation is everywhere,
-      governance is one place.** ⌘K is the only conversational surface, as a sheet over the current
-      screen so an answer arrives beside the data it is about, and drafts attach inline to the row
-      they are about, in estimate ink, with a one-key accept. 251 drafts and 140 applied actions have
-      never once been visible next to the data they modified. `/ai` keeps the tab but stops being a
-      chat window: model and effort, the memory the owner can edit, the digest, the action history,
-      the run record and the feedback the owner has given it. That is now real content, which the
-      old Advisor tab (a second chat box duplicating ⌘K) never was.
+      That works because every piece of it already has a better home than a tab:
 
-      **Consequence to flag: the nav goes to 7, not 6.** `/`, `/ledger`, `/accounts`, `/investments`,
-      `/plan`, `/ai`, `/settings`. The alternative is folding `/settings` into `/ai` as one
-      governance surface, which would hold at 6 but puts SimpleFIN credentials next to the model
-      picker. Recommendation is 7; the owner's "consolidate to 6" decision predates the AI tab having
-      anything in it.
+      | surface | home |
+      |---|---|
+      | conversation | ⌘K, as a sheet over the current screen |
+      | a draft about a row | inline on that row, in estimate ink, one-key accept |
+      | the digest of what it did | ⌘K, where it already renders |
+      | model, effort, memory, action history | Settings, where they already are |
 
-      **The anti-sidebar argument, so it does not get lost:** a sidebar chat is a second place to
-      look that competes with the screen for attention and answers next to nothing. A sheet over the
-      current screen inherits the screen's context, and an inline draft answers where the question
-      is. Neither adds a permanent column.
+      ⌘K is the only conversational surface, and an answer arrives beside the data it is about. 251
+      drafts and 140 applied actions have never once been visible next to the data they modified.
+
+      **The anti-sidebar argument, so it does not get lost:** a sidebar chat is a second place to look
+      that competes with the screen for attention and answers next to nothing. A sheet inherits the
+      screen's context; an inline draft answers where the question is. Neither adds a permanent column.
+
+      **The test of "seamless" is that nothing needs a tab to be reachable.** If any AI surface ends up
+      with nowhere to live, that is the signal the integration is not finished, not the signal to add
+      the tab back.
+
 - [ ] **Delete budget groups** end to end: both tables are empty after three weeks in an app with one
       budget. 115 lines of service, five routes, a 120-line modal, the memo machinery, four fetchers,
       one test file.
 - [ ] **Delete three dead preference keys**: `dashboard_layout`, `custom_report_views`, and
       `advisor_auto_apply_high_confidence`. The third reads `true`, asserting a confidence-gated
       autonomy policy removed in `f61109b`, and the model can read it through `run_sql_query`.
-- [ ] **Nav**: seven words (see the advisor entry above for why it is seven and not six), labelled at
-      every width. Today every label is behind `xl:block`, so under 1280px the entire navigation is
+- [ ] **Nav**: six words, labelled at every width. Today every label is behind `xl:block`, so under 1280px the entire navigation is
       twelve identical 7px dots at 1.6:1 contrast. Un-hijack ⌘R and ⌘P, currently `preventDefault`ed
       for Review and Reports, killing reload and print.
 - [ ] **Catch-all route.** There is no `path="*"`, so a typo renders a blank page.
