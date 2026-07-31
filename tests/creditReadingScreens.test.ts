@@ -1,8 +1,15 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { creditBalancePhrase, readOwedTotal } from '../client/src/lib/accountBalance';
-import { afterPayoff, formatPayoffFigure, payoffState, type Buckets } from '../client/src/views/Reports';
-import { readCardCredit } from '../client/src/views/Today';
+// Reports and Today are gone; both readings live on `/` now, in one module rather than one per
+// screen. The assertions are unchanged, which is the point of moving the logic out of the views.
+import {
+  afterPayoff,
+  formatPayoffFigure,
+  payoffState,
+  readCardCredit,
+  type Buckets,
+} from '../client/src/views/instrumentReadings';
 import {
   buildAccountAdvisorPrompt,
   buildNetWorthEvidenceAdvisorPrompt,
