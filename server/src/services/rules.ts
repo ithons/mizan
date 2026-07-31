@@ -145,8 +145,21 @@ function normalizeMerchantMatchValue(value: string | null | undefined): string {
  * lives in `rulesOutranking`, and it is why this function stayed as it is.
  */
 export function merchantMatchesRulePattern(merchantName: string, pattern: string): boolean {
-  const merchant = normalizeMerchantMatchValue(merchantName);
-  const rule = normalizeMerchantMatchValue(pattern);
+  return normalizedMatch(
+    normalizeMerchantMatchValue(merchantName),
+    normalizeMerchantMatchValue(pattern)
+  );
+}
+
+/**
+ * The predicate itself, over values `normalizeMerchantMatchValue` has already reduced.
+ *
+ * Split out so a caller comparing one name against many patterns normalizes each string once
+ * instead of once per pair. There is still exactly one definition of what matching means; only the
+ * normalization is hoisted. `countTransactionsHeldByRule` is why: normalizing inside the inner loop
+ * was a measurable share of a call that took over a second and a half on the owner's ledger.
+ */
+function normalizedMatch(merchant: string, rule: string): boolean {
   if (!merchant || !rule) return false;
   if (merchant === rule) return true;
   if (rule.length >= 4 && merchant.includes(rule)) return true;
@@ -292,6 +305,109 @@ export function retireMerchantRule(
     VALUES (?, ?, ?, ?, NULL, ?, ?, 'retire', ?)
   `).run(uuidv4(), ruleId, rule.pattern, rule.category_id, options.source ?? 'human', options.actionId ?? null, now);
   return true;
+}
+
+/**
+ * Un-retire a rule, and record that too.
+ *
+ * Returns why it could not, rather than a bare false, because both failures mean different things
+ * to a caller putting an action back. `pattern_taken` is the real one: the partial unique index
+ * `idx_merchant_rules_pattern_live` allows one live rule per pattern, so a replacement written
+ * after the retirement blocks the restore. Reviving it would be a second, unasked change to
+ * whichever rule the owner has now.
+ */
+export type UnretireMerchantRuleResult =
+  | { ok: true }
+  | { ok: false; reason: 'not_found' | 'not_retired' | 'pattern_taken' };
+
+export function unretireMerchantRule(
+  db: Database.Database,
+  ruleId: string,
+  options: { source?: MerchantRuleSource; actionId?: string | null; now?: string } = {}
+): UnretireMerchantRuleResult {
+  const now = options.now ?? new Date().toISOString();
+  const rule = db.prepare(
+    'SELECT id, pattern, category_id, retired_at FROM merchant_rules WHERE id = ?'
+  ).get(ruleId) as { id: string; pattern: string; category_id: string; retired_at: string | null } | undefined;
+  if (!rule) return { ok: false, reason: 'not_found' };
+  if (rule.retired_at === null) return { ok: false, reason: 'not_retired' };
+
+  const live = db.prepare(
+    'SELECT id FROM merchant_rules WHERE lower(pattern) = lower(?) AND retired_at IS NULL LIMIT 1'
+  ).get(rule.pattern) as { id: string } | undefined;
+  if (live) return { ok: false, reason: 'pattern_taken' };
+
+  db.prepare('UPDATE merchant_rules SET retired_at = NULL, updated_at = ? WHERE id = ?').run(now, ruleId);
+  db.prepare(`
+    INSERT INTO merchant_rule_revisions
+      (id, rule_id, pattern, from_category_id, to_category_id, source, action_id, operation, created_at)
+    VALUES (?, ?, ?, NULL, ?, ?, ?, 'unretire', ?)
+  `).run(uuidv4(), ruleId, rule.pattern, rule.category_id, options.source ?? 'human', options.actionId ?? null, now);
+  return { ok: true };
+}
+
+/**
+ * How many transactions this rule currently WINS, under the same resolution order the apply path
+ * uses.
+ *
+ * Not "how many rows its pattern matches". A rule holds the rows no higher-precedence rule already
+ * matched, and every rule the owner wrote outranks every rule the model wrote, so an AI rule's
+ * pattern can touch dozens of rows while the rule itself holds none.
+ *
+ * WHAT A ZERO HERE DOES AND DOES NOT ESTABLISH. It is what `retire_merchant_rule` rests on, and it
+ * carries exactly one claim: no row in the ledger resolves to this rule today, so retiring it
+ * changes no category now. It says nothing about later, and the sentence here used to. A
+ * transaction that arrives afterwards spelled so that ONLY the retired rule would have matched it
+ * was never claimed by anything else, so it lands uncategorized or on the text heuristic instead.
+ * `DRAFT_KIND_AUTONOMY` says the same and bounds that reach the way `create_merchant_rule`'s reach
+ * into rows that do not exist yet is bounded: the rule stays visible and restorable in Settings, and
+ * every change to it is a revision row.
+ *
+ * Returns null when no live rule carries the id, so a caller can tell "holds nothing" apart from
+ * "there is nothing there".
+ *
+ * COST, and why the shape is what it is. This runs inside the write transaction of the single
+ * process that also serves the UI, once per retirement a pass applies, so a slow answer blocks the
+ * event loop. Asking each transaction which rule wins it was O(transactions x rules) with a fuzzy
+ * comparison per pair: measured 2026-07-31 over a copy of .mizan/mizan.db with the pending
+ * migrations applied through 052 (2,579 transactions, 234 live rules), one call cost 1630.2 /
+ * 1675.3 / 1656.3 ms, so a pass proposing three retirements held the loop for about five seconds.
+ *
+ * Two facts make the SAME answer cheap, and neither of them approximates it. A name the target's
+ * own pattern does not match cannot be won by the target, so one match call per DISTINCT name
+ * settles all but a handful of them (1,297 distinct names against 2,579 rows); and the rules that
+ * can beat the target are exactly the ones ahead of it in the resolved order, so each survivor is
+ * checked against that prefix and nothing else. The same call now costs 7.7 / 8.1 / 7.8 ms, and
+ * putting all ten of the ledger's live AI rules through `checkRuleIsRetirableByAi` costs 75.3 /
+ * 70.1 / 71.3 ms. The slowest single live rule is the owner's `Amazon` at 138.9 ms, which no
+ * retirement guard reaches: a short pattern matches many names, and each survivor pays for the
+ * prefix. `tests/aiWriteGuards.test.ts` pins the count against the definition this replaces, on a
+ * ledger built so the two could disagree.
+ */
+export function countTransactionsHeldByRule(db: Database.Database, ruleId: string): number | null {
+  const ordered = loadOrderedMerchantRules(db);
+  const rank = ordered.findIndex((rule) => rule.id === ruleId);
+  if (rank === -1) return null;
+
+  const target = normalizeMerchantMatchValue(ordered[rank].pattern);
+  const outranking = ordered.slice(0, rank).map((rule) => normalizeMerchantMatchValue(rule.pattern));
+
+  // Grouped rather than row by row: matching depends only on the normalized name, so two rows
+  // spelled the same always resolve to the same rule and their counts can be added.
+  const names = db.prepare(`
+    SELECT COALESCE(NULLIF(merchant_name, ''), original_name) AS name, COUNT(*) AS rows_named
+    FROM transactions
+    GROUP BY name
+  `).all() as Array<{ name: string | null; rows_named: number }>;
+
+  let held = 0;
+  for (const row of names) {
+    const merchant = normalizeMerchantMatchValue(row.name);
+    if (!normalizedMatch(merchant, target)) continue;
+    if (outranking.some((pattern) => normalizedMatch(merchant, pattern))) continue;
+    held += row.rows_named;
+  }
+  return held;
 }
 
 /** Where a rule sorts against another one. `id` is null for a pattern with no live rule yet. */

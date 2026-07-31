@@ -11,6 +11,8 @@ import { getCashflowReport, getSpendingReport } from './reporting';
 import { buildRecurringForecast } from './recurringForecast';
 import { getMonthlyBudgetsWithProjection } from './budgetProjection';
 import { confirmAdvisorDraft, listAdvisorActions } from './advisorDrafts';
+import { runGuardedCategoryBatch, type GuardedBatchReport } from './aiGuards';
+import { isAutonomousDraftKind } from './draftAutonomy';
 import { revertableRevisionsForAction } from './categoryWrites';
 import { merchantMatchesRulePattern } from './rules';
 import { getHoldingHistory } from './investmentMetadata';
@@ -197,9 +199,9 @@ export const ADVISOR_TOOLS: Anthropic.Tool[] = [
     },
   },
   // ── Write tools ─────────────────────────────────────────────────────────────
-  // Scoped to the autonomous domain (see AUTONOMOUS_DRAFT_KINDS): categorization and merchant
-  // rules only. Budgets, goals, recurring adjustments, and cost basis stay draft-and-confirm,
-  // because those are targets the owner set rather than observations about existing data.
+  // Scoped to the autonomous domain (see DRAFT_KIND_AUTONOMY in draftAutonomy.ts): categorization
+  // and merchant rules only. Budgets, goals, recurring adjustments, and cost basis stay
+  // draft-and-confirm, because those are targets the owner set rather than observations.
   // These route through the typed service functions, never through run_sql_query: the read-only
   // connection stays the hard boundary for model-authored SQL.
   {
@@ -862,6 +864,30 @@ function runSqlQueryTool(input: ToolInput): unknown {
   };
 }
 
+/**
+ * What a chat-tool write is called in the audit trail.
+ *
+ * IS A CHAT WRITE UNATTENDED? It is neither that nor the opposite, and that is the problem. The
+ * owner is present and asked for it, so it is not the background pass; the owner approved no
+ * individual row, so it is not a confirmation either. `categorize_transactions` applies up to 200 rows from one tool call the
+ * owner saw as a sentence. `advisor_actions.source` holds exactly two values under a CHECK
+ * constraint ('worker_auto', 'user_confirm'), and writing 'user_confirm' here would put a
+ * confirmation in the trail that never happened, so this path keeps 'worker_auto' and says which
+ * surface it came from in the one field left that the trail carries per action. The column wants a
+ * third value; that is a migration, not a rename.
+ */
+export const CHAT_TOOL_ACTION_PREFIX = 'Advisor chat: ';
+
+/** Every kind the chat write tools may emit. Named so the autonomy check below has a list to test. */
+export const CHAT_WRITE_KINDS = ['categorize_transaction', 'create_merchant_rule'] as const;
+
+interface WriteOutcome {
+  applied: boolean;
+  changed?: number;
+  detail?: unknown;
+  error?: string;
+}
+
 // Both write tools go through confirmAdvisorDraft, the same path a confirmed draft takes, so
 // they get the payload validation, the advisor_actions audit row, and the per-row provenance
 // stamp for free. A write that skipped it would be invisible to undo.
@@ -870,14 +896,25 @@ function applyWriteDraft(
   payload: AdvisorDraftPayload,
   label: string,
   summary: string
-): unknown {
+): WriteOutcome {
+  // The third enforcement site for the autonomy boundary, after the two in aiJobs.ts. It cannot
+  // fire on anything shipped today: both kinds in CHAT_WRITE_KINDS are declared autonomous, and a
+  // test pins that. It exists so a third write tool cannot reach a write path this file never
+  // checked, which is exactly how this path came to apply 200 rows outside the framework.
+  if (!isAutonomousDraftKind(payload.kind)) {
+    return {
+      applied: false,
+      error: `'${payload.kind}' is not in the autonomous domain, so it cannot be applied from a conversation. Propose it as a draft instead.`,
+    };
+  }
+
   try {
     const response = confirmAdvisorDraft(
       db,
       {
         id: draftIdFor(payload),
         kind: payload.kind,
-        label,
+        label: `${CHAT_TOOL_ACTION_PREFIX}${label}`,
         summary,
         route: '/transactions',
         payload,
@@ -894,6 +931,60 @@ function applyWriteDraft(
   }
 }
 
+/**
+ * What the model is told when the conservation guard did not come back clean.
+ *
+ * Two outcomes, and they say opposite things about the ledger, so they are never collapsed into one
+ * "something went wrong": a reverted batch is gone and the model must not report it as done, while
+ * a failed revert is still standing and the model must not report it as taken back.
+ */
+interface GuardNote {
+  status: 'reverted' | 'revert_failed';
+  incident_id: string | null;
+  breaches: string[];
+  note: string;
+}
+
+function guardNote(report: GuardedBatchReport<unknown>): GuardNote | null {
+  if (report.status === 'clean') return null;
+  const breaches = report.breaches.map((b) => `${b.headline}: ${b.detail}`);
+  return {
+    status: report.status,
+    incident_id: report.incident_id,
+    breaches,
+    note: report.status === 'reverted'
+      ? `The ledger's headline figures moved by more than these writes account for, so the batch was taken back: ${report.reverted_rows} category write(s) reverted. The revert walks category writes only, so a merchant rule this call created still exists and is listed in Settings. Tell the user what stands and what does not, and do not retry it blind.`
+      : 'The ledger\'s headline figures moved by more than these writes account for AND the revert did not run, so the writes are still applied and an incident is open. Tell the user to check the incident before doing anything else here.',
+  };
+}
+
+/**
+ * Run one chat tool's writes under the same conservation guard the background pass runs under.
+ *
+ * WHY THE CHAT PATH IS GUARDED TOO. The guard does not ask who was present, it asks whether the
+ * ledger's headline figures moved by more than this batch's own category rewrites account for, and
+ * a batch of up to 200 model-authored rewrites can move them whoever asked for it. The owner
+ * watching a conversation is not a reading of the month's spend before and after. The pass and the
+ * tool call are the same shape of write from the same model against the same ledger, and the only
+ * difference was that one of them was measured.
+ *
+ * The batch boundary is the tool call, for the reason `runGuardedPersist` gives for the pass: the
+ * harness reverts whole, and one tool call is one answer to one request. `run` stays synchronous
+ * and opens no transaction of its own, which is what the harness requires to attribute action ids.
+ */
+function guardedChatWrites<T>(
+  db: Database.Database,
+  batchName: string,
+  write: () => T
+): { value: T; guard: GuardNote | null } {
+  const report = runGuardedCategoryBatch(db, { name: batchName, run: () => ({ value: write() }) });
+  const guard = guardNote(report);
+  if (guard) {
+    console.error(`[advisor-chat] ${batchName}: ${guard.note} ${guard.breaches.join(' ')}`);
+  }
+  return { value: report.value, guard };
+}
+
 function categorizeTransactionsTool(db: Database.Database, input: ToolInput): unknown {
   const rawIds = Array.isArray(input.transaction_ids) ? input.transaction_ids : [];
   const ids = rawIds.filter((v): v is string => typeof v === 'string' && v.trim().length > 0).slice(0, 200);
@@ -903,16 +994,22 @@ function categorizeTransactionsTool(db: Database.Database, input: ToolInput): un
 
   // One draft per transaction rather than a bulk update: each row gets its own action id, so
   // the user can undo a single bad call without reverting the whole batch.
-  const outcomes = ids.map((transactionId) =>
-    applyWriteDraft(
-      db,
-      { kind: 'categorize_transaction', transaction_id: transactionId, category_id: categoryId },
-      'Categorize transaction',
-      `Set category ${categoryId} from the advisor conversation.`
+  const { value: outcomes, guard } = guardedChatWrites(db, 'advisor_chat_categorize', () =>
+    ids.map((transactionId) =>
+      applyWriteDraft(
+        db,
+        { kind: 'categorize_transaction', transaction_id: transactionId, category_id: categoryId },
+        'categorize transaction',
+        `Set category ${categoryId} from the advisor conversation.`
+      )
     )
   );
 
-  const applied = outcomes.filter((o) => (o as { applied: boolean }).applied).length;
+  const applied = outcomes.filter((o) => o.applied).length;
+  if (guard?.status === 'reverted') {
+    return { requested: ids.length, applied: 0, failed: ids.length, outcomes, guard };
+  }
+  if (guard) return { requested: ids.length, applied, failed: ids.length - applied, outcomes, guard };
   return { requested: ids.length, applied, failed: ids.length - applied, outcomes };
 }
 
@@ -922,17 +1019,30 @@ function createMerchantRuleTool(db: Database.Database, input: ToolInput): unknow
   if (!pattern) return { error: 'Provide a merchant pattern in "pattern".' };
   if (!categoryId) return { error: 'Provide a category id in "category_id".' };
 
-  return applyWriteDraft(
-    db,
-    {
-      kind: 'create_merchant_rule',
-      pattern,
-      category_id: categoryId,
-      apply_existing: input.apply_existing === undefined ? true : input.apply_existing === true,
-    },
-    `Create rule for ${pattern}`,
-    `Future ${pattern} transactions use category ${categoryId}.`
+  // Guarded for the same reason the categorize tool is: with apply_existing the rule sweeps every
+  // matching row in the ledger, which is a category batch of a size nobody stated up front.
+  const { value: outcome, guard } = guardedChatWrites(db, 'advisor_chat_merchant_rule', () =>
+    applyWriteDraft(
+      db,
+      {
+        kind: 'create_merchant_rule',
+        pattern,
+        category_id: categoryId,
+        apply_existing: input.apply_existing === undefined ? true : input.apply_existing === true,
+      },
+      `create rule for ${pattern}`,
+      `Future ${pattern} transactions use category ${categoryId}.`
+    )
   );
+
+  if (guard?.status === 'reverted') {
+    // Reported as two facts rather than one, because the revert takes back category writes and
+    // nothing else: the rows the rule swept in are back where they were and the merchant_rules row
+    // is still there. Collapsing that into `applied: false` would claim a deletion that never ran.
+    return { rule_created: outcome.applied, rows_applied: 0, detail: outcome.detail, guard };
+  }
+  if (guard) return { ...outcome, guard };
+  return outcome;
 }
 
 export function runAdvisorTool(db: Database.Database, name: string, input: ToolInput): unknown {

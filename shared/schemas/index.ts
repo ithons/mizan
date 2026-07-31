@@ -212,6 +212,7 @@ const money = z.number().finite();
 
 export const AdvisorDraftPayloadSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('create_merchant_rule'), pattern: z.string().min(1), category_id: id, apply_existing: z.boolean() }),
+  z.object({ kind: z.literal('retire_merchant_rule'), rule_id: id }),
   z.object({ kind: z.literal('categorize_transaction'), transaction_id: id, category_id: id }),
   z.object({ kind: z.literal('update_budget'), category_id: id, amount: money, period: z.literal('monthly'), rollover: z.boolean() }),
   z.object({ kind: z.literal('update_goal_target'), goal_id: id, target_amount: money }),
@@ -244,7 +245,7 @@ export const AiWorkerDraftSchema = z
     summary: z.string().min(1),
     route: z.string().optional(),
     // `confidence` was a self-reported 0-1 score that gated auto-apply. It is gone: what applies
-    // unattended is now decided by draft KIND (AUTONOMOUS_DRAFT_KINDS), a boundary the owner
+    // unattended is now decided by draft KIND (DRAFT_KIND_AUTONOMY), a boundary the owner
     // sets. Still accepted-and-ignored so a model that volunteers one is not rejected wholesale.
     confidence: z.number().optional(),
     payload: AdvisorDraftPayloadSchema,

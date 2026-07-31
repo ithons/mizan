@@ -1,7 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import Database from 'better-sqlite3';
-import { runAdvisorTool, ADVISOR_TOOLS } from '../server/src/services/advisorChatTools';
+import {
+  ADVISOR_TOOLS,
+  CHAT_TOOL_ACTION_PREFIX,
+  CHAT_WRITE_KINDS,
+  runAdvisorTool,
+} from '../server/src/services/advisorChatTools';
 
 // The aggregate tools delegate to reporting.ts / budgetProjection.ts / recurringForecast.ts, so
 // this fixture carries the columns those services read: the exclusion flags
@@ -239,6 +244,10 @@ import { getSpendingReport } from '../server/src/services/reporting';
 import { getCategoryProvenance } from '../server/src/services/schemaDoc';
 import { getTransactionById } from '../server/src/services/transactions';
 import { toDollars } from '../server/src/services/money';
+import { confirmAdvisorDraft } from '../server/src/services/advisorDrafts';
+import { listAiIncidents } from '../server/src/services/aiGuards';
+import { isAutonomousDraftKind } from '../server/src/services/draftAutonomy';
+import type { AdvisorDraftAction } from '../shared/types';
 
 // ─── get_merchant_rules ───
 
@@ -800,4 +809,215 @@ test('get_merchant_rules resolves over every rule, not just the page it returns'
     result.rules.some((rule) => rule.wins && rule.pattern === 'Hulu'),
     'the winner must be carried into the returned list even when it falls outside the limit'
   );
+});
+
+
+// ─── The two write tools ─────────────────────────────────────────────────────
+//
+// These apply up to 200 categorizations, plus a merchant rule that sweeps the whole ledger, from
+// one tool call. They used to do it outside every check the background pass runs under: no
+// conservation guard, no ai_runs row, no autonomy check, and an audit row indistinguishable from
+// the pass's own. A chat write is not unattended (the owner asked, in a conversation) and it is not
+// confirmed either (the owner approved no row), so the trail has to be able to tell them apart
+// afterwards and the guard has to measure it the same way.
+
+interface WriteFixture {
+  db: Database.Database;
+  accountId: string;
+}
+
+function writeFixture(): WriteFixture {
+  const db = migratedTestDb();
+  const accountId = insertAccount(db, { current_balance: 500_000, type: 'checking' });
+  return { db, accountId };
+}
+
+function chatTxn(fx: WriteFixture, id: string, merchant: string, categoryId: string | null = null): string {
+  return insertTransaction(fx.db, {
+    id,
+    account_id: fx.accountId,
+    date: '2026-07-10',
+    amount: -1_200,
+    merchant_name: merchant,
+    original_name: merchant,
+    category_id: categoryId,
+  });
+}
+
+function actionRows(db: Database.Database): Array<{ kind: string; label: string; source: string }> {
+  return db.prepare('SELECT kind, label, source FROM advisor_actions ORDER BY created_at')
+    .all() as Array<{ kind: string; label: string; source: string }>;
+}
+
+test('HEALTHY: an ordinary categorize_transactions call applies every row and reports only that', (t) => {
+  const fx = writeFixture();
+  t.after(() => fx.db.close());
+  chatTxn(fx, 'c1', 'Trupanion');
+  chatTxn(fx, 'c2', 'Trupanion');
+
+  const result = runAdvisorTool(fx.db, 'categorize_transactions', {
+    transaction_ids: ['c1', 'c2'],
+    category_id: 'cat_health',
+  }) as { requested: number; applied: number; failed: number; guard?: unknown };
+
+  // Exactly the shape the model saw before the guard was added. A healthy call says nothing about
+  // the guard, because there is nothing to say and a model told about a guard reports it.
+  assert.deepEqual(Object.keys(result).sort(), ['applied', 'failed', 'outcomes', 'requested']);
+  assert.equal(result.requested, 2);
+  assert.equal(result.applied, 2);
+  assert.equal(result.failed, 0);
+
+  const rows = fx.db.prepare("SELECT category_id, category_source FROM transactions ORDER BY id")
+    .all() as Array<{ category_id: string; category_source: string }>;
+  assert.deepEqual(rows, [
+    { category_id: 'cat_health', category_source: 'ai' },
+    { category_id: 'cat_health', category_source: 'ai' },
+  ]);
+  assert.equal(listAiIncidents(fx.db).length, 0, 'the guard is silent on an ordinary call');
+});
+
+test('HEALTHY: an ordinary create_merchant_rule call applies and reports only that', (t) => {
+  const fx = writeFixture();
+  t.after(() => fx.db.close());
+  chatTxn(fx, 'c1', 'Trupanion Pet Insurance');
+
+  const result = runAdvisorTool(fx.db, 'create_merchant_rule', {
+    pattern: 'Trupanion',
+    category_id: 'cat_health',
+  }) as { applied: boolean; changed: number; guard?: unknown };
+
+  assert.equal(result.applied, true);
+  assert.equal(result.changed, 2, 'the rule itself, plus the one existing row it swept in');
+  assert.equal(result.guard, undefined);
+  assert.equal(listAiIncidents(fx.db).length, 0);
+  assert.equal(
+    (fx.db.prepare('SELECT COUNT(*) AS n FROM merchant_rules').get() as { n: number }).n,
+    1
+  );
+});
+
+test('the audit trail can tell a chat write from a background pass write', (t) => {
+  const fx = writeFixture();
+  t.after(() => fx.db.close());
+  chatTxn(fx, 'c1', 'Trupanion');
+  chatTxn(fx, 'c2', 'Sightglass Coffee');
+
+  runAdvisorTool(fx.db, 'categorize_transactions', { transaction_ids: ['c1'], category_id: 'cat_health' });
+
+  // The same write, made by the background pass, through the same function.
+  confirmAdvisorDraft(
+    fx.db,
+    {
+      id: 'draft_worker',
+      kind: 'categorize_transaction',
+      label: 'Categorize Sightglass Coffee',
+      summary: 'Coffee.',
+      route: '/transactions',
+      payload: { kind: 'categorize_transaction', transaction_id: 'c2', category_id: 'cat_food_coffee' },
+      changes: [],
+      citations: [],
+      confirmation_required: true,
+    } as AdvisorDraftAction,
+    true,
+    'worker_auto'
+  );
+
+  const rows = actionRows(fx.db);
+  assert.equal(rows.length, 2);
+  const fromChat = rows.filter((r) => r.label.startsWith(CHAT_TOOL_ACTION_PREFIX));
+  assert.equal(fromChat.length, 1, 'exactly one of the two came from a conversation, and the row says so');
+
+  // `source` cannot carry it: the column has a CHECK constraint listing two values, neither of
+  // which is true of a chat write, and 'user_confirm' would put a confirmation in the trail that
+  // never happened. Both rows therefore still read 'worker_auto', which is what the label is for.
+  assert.deepEqual([...new Set(rows.map((r) => r.source))], ['worker_auto']);
+});
+
+test('every kind the chat write tools may emit is inside the autonomy declaration', () => {
+  // This is the premise that makes the check in applyWriteDraft inert today: it cannot fire on
+  // anything shipped, and it is there so a third write tool cannot land a proposal-only kind from a
+  // conversation. If this fails, the check has started firing on real traffic and the tool, not the
+  // check, is what is wrong.
+  for (const kind of CHAT_WRITE_KINDS) {
+    assert.equal(isAutonomousDraftKind(kind), true, `${kind} is applied from chat and is not declared autonomous`);
+  }
+});
+
+test('the chat write path really does run inside the conservation guard', (t) => {
+  const fx = writeFixture();
+  t.after(() => fx.db.close());
+  chatTxn(fx, 'c1', 'Trupanion');
+
+  // An indirect proof, and the only cheap one: a clean guard leaves no trace by design, so there is
+  // nothing to assert on a healthy call. `runGuardedCategoryBatch` refuses to run inside an open
+  // transaction, because a rolled-back revert would take the incident row with it. If the write
+  // path were outside the guard this would quietly succeed. routes/ai.ts calls the tools outside
+  // any transaction, so this refusal is unreachable in production.
+  assert.throws(
+    () => fx.db.transaction(() => {
+      runAdvisorTool(fx.db, 'categorize_transactions', { transaction_ids: ['c1'], category_id: 'cat_health' });
+    })(),
+    /must not be called inside an open transaction/
+  );
+
+  const row = fx.db.prepare('SELECT category_id FROM transactions WHERE id = ?').get('c1') as
+    { category_id: string | null };
+  assert.equal(row.category_id, null, 'nothing was written');
+});
+
+test('HEALTHY: a chat categorization that pairs a transfer moves the month and is still silent', (t) => {
+  const fx = writeFixture();
+  t.after(() => fx.db.close());
+  const savings = insertAccount(fx.db, { current_balance: 100_000, type: 'savings' });
+
+  // `confirmCategorizeTransaction` re-runs refreshTransactionIntegrity, so an ordinary chat
+  // categorization can pair a transfer as a side effect and legitimately move the month's income:
+  // excludedFromTotalsSql drops a transfer candidate from every total. The guard has to stay silent
+  // on that, or it fires on the owner asking the advisor to file one unrelated coffee.
+  insertTransaction(fx.db, {
+    id: 'leg_out', account_id: fx.accountId, date: '2026-07-12', amount: -50_000,
+    merchant_name: 'AUTOPAY 1234', original_name: 'AUTOMATIC PAYMENT 1234',
+    category_id: 'cat_xfer_cc', category_source: 'heuristic',
+  });
+  insertTransaction(fx.db, {
+    id: 'leg_in', account_id: savings, date: '2026-07-13', amount: 50_000,
+    merchant_name: 'Transfer from checking', original_name: 'ONLINE TRANSFER FROM CHK',
+  });
+  chatTxn(fx, 'c1', 'Trupanion');
+
+  const result = runAdvisorTool(fx.db, 'categorize_transactions', {
+    transaction_ids: ['c1'],
+    category_id: 'cat_health',
+  }) as { applied: number; guard?: unknown };
+
+  assert.equal(result.applied, 1);
+  assert.equal(result.guard, undefined);
+  assert.equal(listAiIncidents(fx.db).length, 0);
+  assert.equal(
+    (fx.db.prepare("SELECT COUNT(*) AS n FROM transactions WHERE transfer_status = 'candidate'").get() as { n: number }).n,
+    2,
+    'the pair really was made, so the silence is about a real movement'
+  );
+});
+
+test('a chat write that names a row the owner categorized by hand changes nothing and says so', (t) => {
+  const fx = writeFixture();
+  t.after(() => fx.db.close());
+  insertTransaction(fx.db, {
+    id: 'c1', account_id: fx.accountId, date: '2026-07-10', amount: -1_200,
+    merchant_name: 'Trupanion', original_name: 'Trupanion',
+    category_id: 'cat_shop', category_source: 'human', manually_categorized: 1,
+  });
+
+  const result = runAdvisorTool(fx.db, 'categorize_transactions', {
+    transaction_ids: ['c1'],
+    category_id: 'cat_health',
+  }) as { requested: number; applied: number; failed: number };
+
+  const row = fx.db.prepare('SELECT category_id, category_source FROM transactions WHERE id = ?').get('c1') as
+    { category_id: string; category_source: string };
+  assert.equal(row.category_id, 'cat_shop', 'the hand-made choice stands');
+  assert.equal(row.category_source, 'human');
+  assert.equal(result.requested, 1);
+  assert.equal(result.applied + result.failed, 1, 'the call reports one outcome for the one row asked about');
 });

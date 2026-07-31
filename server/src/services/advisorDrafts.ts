@@ -10,7 +10,9 @@ import type {
 import {
   applyMerchantRuleToMatchingTransactions,
   countMerchantRuleImpact,
+  retireMerchantRule,
   suggestMerchantRules,
+  unretireMerchantRule,
   upsertMerchantRule,
 } from './rules';
 import type { GuardRejectionReason, GuardResult } from './aiWriteGuards';
@@ -21,6 +23,7 @@ import {
   checkPatternLength,
   checkRuleAgreesWithHistory,
   checkRuleDoesNotContradictOwnerRule,
+  checkRuleIsRetirableByAi,
   partitionByAuthorship,
 } from './aiWriteGuards';
 import { recordBudgetRolloverLedger } from './budgetProjection';
@@ -100,29 +103,6 @@ interface HoldingDraftRow {
   manual_cost_basis: number | null;
   effective_cost_basis: number | null;
   sector: string | null;
-}
-
-/**
- * Draft kinds the AI applies on its own, with no confirmation step.
- *
- * The boundary is drawn by DOMAIN, not by the model's confidence in itself. Categorization and
- * merchant rules are observations about data that already exists: the model is reading a
- * merchant name and saying what it is, and a wrong answer is visible on the row and reversible
- * by action id. Everything else changes a target the owner set (a budget, a goal, a cost basis,
- * whether a recurring charge is real), where the model has no way to know the intent behind the
- * number and being wrong is not obviously visible.
- *
- * This replaces a self-reported `confidence >= 0.9` gate. That number was written by the model,
- * about the model, in the same JSON blob as the change it was proposing, which makes it a
- * boundary the model asserts rather than one the owner set.
- */
-export const AUTONOMOUS_DRAFT_KINDS: ReadonlySet<string> = new Set([
-  'categorize_transaction',
-  'create_merchant_rule',
-]);
-
-export function isAutonomousDraftKind(kind: string): boolean {
-  return AUTONOMOUS_DRAFT_KINDS.has(kind);
 }
 
 function normalize(value: string): string {
@@ -946,6 +926,35 @@ function confirmMerchantRule(
   };
 }
 
+/**
+ * Retire one AI-authored rule that currently files nothing.
+ *
+ * Both bounds are in `checkRuleIsRetirableByAi` and both refuse rather than narrow: this never
+ * quietly retires "the closest thing" to what was asked for. `changed: 1` counts the rule, not
+ * transactions, and that is not the same as `wroteNothing`: the rule row and its revision row are
+ * real writes with a real undo, on a rule whose transaction radius is provably zero.
+ */
+function confirmRetireMerchantRule(
+  db: Database.Database,
+  payload: Extract<AdvisorDraftPayload, { kind: 'retire_merchant_rule' }>,
+  actionId: string
+): DraftApplyResult {
+  assertGuardPassed(checkRuleIsRetirableByAi(db, payload.rule_id));
+
+  const retired = retireMerchantRule(db, payload.rule_id, {
+    source: 'ai',
+    actionId,
+    now: new Date().toISOString(),
+  });
+  // The guard read the same row in the same transaction, so this cannot be false. Thrown rather
+  // than reported as `changed: 0`, which would record an action whose Undo reverts nothing.
+  if (!retired) {
+    throw new DraftRefusedError('rule_not_found', `no live merchant rule carries the id "${payload.rule_id}".`);
+  }
+
+  return { changed: 1, result: { rule_id: payload.rule_id, retired: true } };
+}
+
 function confirmCategorizeTransaction(
   db: Database.Database,
   payload: Extract<AdvisorDraftPayload, { kind: 'categorize_transaction' }>,
@@ -1242,12 +1251,32 @@ export function draftLiveness(
         | { category_id: string | null; manually_categorized: number; category_source: string | null }
         | undefined;
       if (!txn) return 'lapsed';
-      // The draft's premise is "this row is uncategorized". Once it isn't, the draft is a
-      // proposal to overwrite a decision nobody asked it to revisit.
-      if (txn.category_id !== null) return 'lapsed';
+      // The premise used to be "this row is uncategorized", which made every recategorization
+      // lapsed on sight. It is now the narrower thing that was always the actual point: nobody has
+      // made a decision here the model is not allowed to revisit. Two decisions count.
+      //
+      // A HAND EDIT. The owner's, and never the model's to reopen. Same pair of markers
+      // `partitionByAuthorship` reads, because neither is reliable alone.
       if (txn.manually_categorized === 1 || txn.category_source === 'human') return 'lapsed';
+      // THE MODEL'S OWN ANSWER. Re-proposing a row the model already filed is changing its mind
+      // about its own settled write, which is what `allowRecategorize: false` refuses on the rule
+      // path after that path moved the Spotify rule twice in two hours. Nothing here should
+      // oscillate hourly either.
+      if (txn.category_source === 'ai') return 'lapsed';
+      // Already where the draft wants it. Applying would write nothing and record an action whose
+      // Undo reverts nothing.
+      if (txn.category_id === payload.category_id) return 'lapsed';
       return 'live';
     }
+    case 'retire_merchant_rule':
+      // Only that a live rule still carries the id. Whether it is the model's own and whether it
+      // holds rows are the write guards' questions, and asking them here would hide the draft
+      // instead of refusing it with its reason, which is the split `create_merchant_rule` below
+      // already documents.
+      return verdict(
+        db.prepare('SELECT 1 FROM merchant_rules WHERE id = ? AND retired_at IS NULL')
+          .get(payload.rule_id) !== undefined
+      );
     case 'create_merchant_rule':
       // Only the category, deliberately. Asking `checkMerchantRuleWritable` here as well hid every
       // draft the guards would refuse, and the guards refuse healthy proposals (see the note on
@@ -1383,7 +1412,61 @@ export interface AdvisorActionLog {
 export interface UndoAdvisorActionResult {
   ok: boolean;
   reason?: 'not_found' | 'nothing_to_undo';
+  /** Transaction categories put back. */
   reverted: number;
+  /** Merchant rules un-retired. Counted separately: it is not a row of the owner's ledger. */
+  reverted_rules?: number;
+  /**
+   * Rules this action retired that could not be restored, with the reason. Reported rather than
+   * absorbed: a revert that says only what it managed reads as a complete one.
+   */
+  rule_failures?: string[];
+}
+
+interface RuleUndoOutcome {
+  restored: number;
+  failures: string[];
+}
+
+/**
+ * Put back every rule this action retired.
+ *
+ * The stack rule is the same one categories follow: a retirement is restorable only while it is the
+ * NEWEST revision for its rule. If something wrote that rule afterwards, restoring would discard
+ * the newer decision, so it is left alone and named. The one failure the owner can actually act on
+ * is `pattern_taken`, where a replacement rule now holds the pattern; reviving the old one would be
+ * a second, unasked change to whichever rule they have now.
+ */
+function undoRuleRetirements(db: Database.Database, actionId: string, now: string): RuleUndoOutcome {
+  const retirements = db.prepare(`
+    SELECT v.rule_id, v.pattern
+    FROM merchant_rule_revisions v
+    WHERE v.action_id = ?
+      AND v.operation = 'retire'
+      AND v.id = (
+        SELECT v2.id FROM merchant_rule_revisions v2
+        WHERE v2.rule_id = v.rule_id
+        ORDER BY v2.created_at DESC, v2.rowid DESC
+        LIMIT 1
+      )
+    ORDER BY v.rowid
+  `).all(actionId) as Array<{ rule_id: string; pattern: string }>;
+
+  const outcome: RuleUndoOutcome = { restored: 0, failures: [] };
+  for (const retirement of retirements) {
+    const result = unretireMerchantRule(db, retirement.rule_id, { source: 'ai', actionId: null, now });
+    if (result.ok) {
+      outcome.restored += 1;
+    } else if (result.reason === 'pattern_taken') {
+      outcome.failures.push(
+        `"${retirement.pattern}" was not restored: another live rule now holds that pattern.`
+      );
+    } else if (result.reason === 'not_found') {
+      outcome.failures.push(`"${retirement.pattern}" was not restored: the rule row is gone.`);
+    }
+    // 'not_retired' means something already restored it, which is the outcome asked for.
+  }
+  return outcome;
 }
 
 /**
@@ -1418,14 +1501,28 @@ export function undoAdvisorAction(db: Database.Database, actionId: string): Undo
   if (!action) return { ok: false, reason: 'not_found', reverted: 0 };
 
   const undo = db.transaction((): UndoAdvisorActionResult => {
+    const now = new Date().toISOString();
     // The revisions are read before they are consumed, because they carry what the model chose and
     // what it displaced. `revertRevisions` only returns a count.
     const revisions = revertableRevisionsForAction(db, actionId);
-    const reverted = revertRevisions(db, revisions);
-    if (reverted === 0) return { ok: false, reason: 'nothing_to_undo', reverted: 0 };
+    const reverted = revertRevisions(db, revisions, now);
+    // A retirement is the one autonomous write that changes no transaction row, so "nothing to
+    // undo" has to be judged on both halves or `retire_merchant_rule` would be permanently
+    // un-undoable while reporting itself as having nothing to undo.
+    const rules = undoRuleRetirements(db, actionId, now);
 
-    recordUndoFeedback(db, { actionId, revisions, reverted });
-    return { ok: true, reverted };
+    if (reverted === 0 && rules.restored === 0) {
+      return {
+        ok: false,
+        reason: 'nothing_to_undo',
+        reverted: 0,
+        reverted_rules: 0,
+        rule_failures: rules.failures,
+      };
+    }
+
+    if (reverted > 0) recordUndoFeedback(db, { actionId, revisions, reverted });
+    return { ok: true, reverted, reverted_rules: rules.restored, rule_failures: rules.failures };
   });
 
   return undo();
@@ -1482,6 +1579,8 @@ export function confirmAdvisorDraft(
     switch (draftAction.payload.kind) {
       case 'create_merchant_rule':
         result = confirmMerchantRule(db, draftAction.payload, actionId); break;
+      case 'retire_merchant_rule':
+        result = confirmRetireMerchantRule(db, draftAction.payload, actionId); break;
       case 'categorize_transaction':
         result = confirmCategorizeTransaction(db, draftAction.payload, actionId); break;
       case 'update_budget':
@@ -1574,12 +1673,12 @@ export interface BatchConfirmResult {
  * Confirm several persisted background-worker drafts in one request.
  *
  * Takes draft IDS, not payloads. `confirmAdvisorDraft` accepts a client-supplied payload because a
- * chat draft never touches the database — but that makes the payload a trust boundary, and handing
+ * chat draft never touches the database, but that makes the payload a trust boundary, and handing
  * a bulk endpoint N arbitrary payloads multiplies the blast radius. Here every payload is read back
  * from `advisor_drafts`, so a batch can only ever apply work the worker actually proposed.
  *
  * Each draft is applied in its own transaction (inside `confirmAdvisorDraft`). One bad draft is
- * reported and stepped over rather than rolling back the drafts that already succeeded — a partial
+ * reported and stepped over rather than rolling back the drafts that already succeeded: a partial
  * apply the caller can see beats an all-or-nothing failure with no explanation.
  */
 export function confirmAdvisorDraftsByIds(

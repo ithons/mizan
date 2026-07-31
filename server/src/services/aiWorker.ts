@@ -9,6 +9,7 @@ import type { AdvisorCitation, AdvisorDraftChange, AdvisorDraftPayload } from '.
 import { buildRecurringForecast } from './recurringForecast';
 import { toDollars } from './money';
 import { AiWorkerDraftSchema } from '../../../shared/schemas';
+import { describeAutonomyForPrompt } from './draftAutonomy';
 import {
   AI_JOBS,
   runAiJob,
@@ -21,9 +22,12 @@ import {
 // This file is now one job's body: gather the delta, ask the model, hand back proposals. What
 // happens to those proposals belongs to the framework in aiJobs.ts and is the same for every job:
 // the scope check against the job's declared `writes`, supersession, which kinds may apply
-// unattended, the run row, the client event. Which drafts apply unattended is decided there by
-// AUTONOMOUS_DRAFT_KINDS (advisorDrafts.ts): a domain boundary the owner set, not a confidence
-// score the model reported about itself.
+// unattended, the conservation guard around the whole batch, the run row, the client event.
+//
+// Which drafts apply unattended is decided by DRAFT_KIND_AUTONOMY (draftAutonomy.ts): a per-kind
+// declaration with the argument attached, from which the autonomous set is derived. The sentence
+// this prompt tells the model about that boundary is GENERATED from the same table, so the prompt,
+// the structured-output schema and the enforced set cannot say three different things.
 
 const JOB = AI_JOBS.background_review;
 
@@ -83,6 +87,9 @@ export const WORKER_DRAFTS_FORMAT: Anthropic.JSONOutputFormat = {
                   pattern: { type: 'string' },
                   category_id: { type: 'string' },
                   apply_existing: { type: 'boolean' },
+                }),
+                draftPayloadVariant('retire_merchant_rule', {
+                  rule_id: { type: 'string' },
                 }),
                 draftPayloadVariant('create_recurring_adjustment', {
                   recurring_id: { type: 'string' },
@@ -224,6 +231,159 @@ export function newDetections(
     .all(since, since) as DetectedChange[];
 }
 
+/**
+ * A prompt list, or an explicit statement that it is empty.
+ *
+ * An empty section renders as a heading followed by a blank line, which reads as an omission rather
+ * than an absence. The ids in these sections are the ones the model must copy exactly, so a section
+ * that looks truncated is an invitation to invent one.
+ */
+function listOrNone(lines: readonly string[]): string {
+  return lines.length > 0 ? lines.join('\n') : '(none)';
+}
+
+// ─── The prompt ──────────────────────────────────────────────────────────────
+//
+// Section headings are constants because the id rule NAMES them. Written twice, the rule and the
+// section it points at drift, and the failure mode of that drift is the one this whole file guards
+// against: the rule said transaction ids come from "Uncategorized transactions", the section under
+// that heading was empty on the owner's ledger (`SELECT COUNT(*) FROM transactions WHERE
+// category_id IS NULL` is 0, measured on a copy of .mizan/mizan.db at migration 052 on 2026-07-31),
+// and a second list of refilable rows sat below it that the rule did not admit. A model obeying the
+// stated MUST could never refile; a model using the second list broke a MUST in the same prompt.
+
+const SECTION = {
+  categories: 'Valid categories',
+  uncategorized: 'Uncategorized transactions',
+  refilable: 'Already filed by a machine, and open to being refiled',
+  ownRules: 'Merchant rules you wrote yourself',
+  detections: 'System detections new since the last review pass',
+} as const;
+
+/**
+ * The only statement in the prompt about where a transaction id may come from.
+ *
+ * Both lists, named together, in one sentence. Any second sentence that narrows this is a
+ * contradiction rather than an emphasis, because the model cannot obey both.
+ */
+const ID_RULE =
+  `THE ONE RULE ABOUT IDS. A 'categorize_transaction' payload's "transaction_id" MUST be copied exactly from the "id" field of a row listed under "${SECTION.uncategorized}" or under "${SECTION.refilable}" below. Those two lists together are every transaction you may name, and no other sentence here narrows that. Either list can be empty; an empty one reads "(none)", which means there are none, not that some were left out. "payload.category_id" MUST likewise be copied exactly from the "id" field of a row under "${SECTION.categories}", and a 'retire_merchant_rule' payload's "rule_id" from a row under "${SECTION.ownRules}". Never invent an id, and never put a display name where an id belongs: an id that does not match exactly will silently fail to apply.`;
+
+/** A heading and its list, never a heading and a blank line. `note` carries its own leading space. */
+function section(heading: string, note: string, lines: readonly string[]): string {
+  return `${heading}${note}\n${listOrNone(lines)}`;
+}
+
+export interface PromptCategory {
+  id: string;
+  name: string;
+}
+
+export interface PromptTransaction {
+  id: string;
+  merchant_name: string | null;
+  original_name: string;
+  amount: number;
+  date: string;
+}
+
+export interface PromptRefilableTransaction extends PromptTransaction {
+  category_name: string;
+  category_source: string;
+}
+
+export interface PromptRule {
+  id: string;
+  pattern: string;
+  category_name: string | null;
+}
+
+export interface BackgroundReviewPromptInput {
+  context: string;
+  categories: readonly PromptCategory[];
+  uncategorized: readonly PromptTransaction[];
+  refilable: readonly PromptRefilableTransaction[];
+  ownRules: readonly PromptRule[];
+  /** Every uncategorized row, not just the ones listed. */
+  uncategorizedTotal: number;
+  adjustedRecurringCount: number;
+  overdueRecurringCount: number;
+  detections: readonly DetectedChange[];
+}
+
+function transactionLine(t: PromptTransaction): string {
+  return `- id: "${t.id}", date: ${t.date}, amount: ${toDollars(t.amount)}, merchant: "${t.merchant_name || t.original_name}"`;
+}
+
+/**
+ * The system prompt for one background review pass.
+ *
+ * Separated from the pass so it can be asserted on. The prompt is the interface to the model and
+ * every rule in it is enforced by the model reading it rather than by any code here, which makes it
+ * the one surface where two sentences can disagree and nothing fails.
+ */
+export function buildBackgroundReviewPrompt(input: BackgroundReviewPromptInput): string {
+  return `You are Mizān's background AI co-pilot. Your job is to review the user's latest sync delta and generate proactive, actionable 1-click drafts.
+Respond with an object of the form {"drafts": [ ... ]}, one entry per draft.
+If there are no meaningful drafts to generate, return {"drafts": []}.
+
+Allowed 'kind' values: ${DRAFT_KINDS.map((k) => `'${k}'`).join(', ')}.
+
+${ID_RULE}
+
+${describeAutonomyForPrompt(DRAFT_KINDS)} Categorization is reversible in one click and every row records that you set it, so prefer acting to hedging: a wrong category is cheap and visible. If a merchant is genuinely ambiguous, leave it uncategorized rather than guessing, because a wrong rule keeps applying itself to future transactions. 'create_merchant_rule' payloads must include "apply_existing": true.
+
+A 'retire_merchant_rule' draft takes back one of YOUR OWN rules. It is refused unless the rule is yours and currently files zero transactions, so use it for a rule that sits live and inert because one of the user's own rules outranks it everywhere. Never propose retiring a rule to make room for a different one: create the replacement and let precedence decide.
+
+Your context is:
+${input.context}
+
+${section(SECTION.categories, ' (use the "id" value for any category_id field, never the name):', input.categories.map((c) => `- id: "${c.id}", name: "${c.name}"`))}
+
+${section(SECTION.uncategorized, ' (nothing has filed these yet):', input.uncategorized.map(transactionLine))}
+
+${section(
+  SECTION.refilable,
+  ' if the category is plainly wrong. These are NOT uncategorized and most of them are fine: propose a \'categorize_transaction\' only where the merchant clearly contradicts the category it sits in. Rows the user categorized by hand, and rows you have already filed once, are not listed and are not yours to revisit.',
+  input.refilable.map(
+    (t) => `${transactionLine(t)}, currently: "${t.category_name}" (set by ${t.category_source})`
+  )
+)}
+
+${section(SECTION.ownRules, ' (the only ones you may retire; the user\'s own rules are not listed and are refused):', input.ownRules.map((r) => `- id: "${r.id}", pattern: "${r.pattern}", category: "${r.category_name ?? 'a category that no longer exists'}"`))}
+
+Review Summary:
+${input.uncategorizedTotal} total uncategorized transactions (${input.uncategorized.length} shown above).
+${input.adjustedRecurringCount} adjusted recurring items.
+${input.overdueRecurringCount} overdue recurring items.
+
+${section(SECTION.detections, ':', input.detections.map((d) => `- [${d.entity_type}] ${d.description}`))}
+
+Every payload object MUST repeat "kind" inside it, identical to the draft's own top-level "kind". A draft whose payload.kind doesn't match its own kind is silently rejected.
+
+Example format for each kind you're likely to use:
+{
+  "drafts": [
+    {
+      "kind": "categorize_transaction",
+      "label": "Categorize Trupanion",
+      "summary": "Trupanion (-$39.02) is pet insurance.",
+      "route": "/transactions",
+      "payload": { "kind": "categorize_transaction", "transaction_id": "<id copied from the lists above>", "category_id": "<id copied from the lists above>" },
+      "changes": [{ "field": "category", "before": "Uncategorized", "after": "Health" }]
+    },
+    {
+      "kind": "create_merchant_rule",
+      "label": "Always categorize Trupanion as Health",
+      "summary": "Auto-categorize future Trupanion charges as Health.",
+      "route": "/transactions",
+      "payload": { "kind": "create_merchant_rule", "pattern": "Trupanion", "category_id": "<id copied from the lists above>", "apply_existing": true },
+      "changes": []
+    }
+  ]
+}`;
+}
+
 function readUsage(response: Anthropic.Message): AiJobUsage {
   return {
     input_tokens: response.usage?.input_tokens ?? null,
@@ -231,6 +391,57 @@ function readUsage(response: Anthropic.Message): AiJobUsage {
     cache_read_tokens: response.usage?.cache_read_input_tokens ?? null,
     cache_write_tokens: response.usage?.cache_creation_input_tokens ?? null,
   };
+}
+
+/**
+ * Rows a MACHINE filed that the model may refile.
+ *
+ * This is the widening, and its whole safety is in the WHERE clause, so read it before
+ * changing it. Separated from the pass so the exclusions can be asserted without a model call.
+ */
+export function refilableTransactions(db: Database.Database): PromptRefilableTransaction[] {
+  //   category_source IN ('rule','heuristic')  the two machine authors that are not this model.
+  //     NULL is excluded and that is the load-bearing exclusion: migration 041 says NULL means the
+  //     author was never recorded, not that a machine wrote it. On a copy of .mizan/mizan.db,
+  //     2026-07-31, `SELECT COALESCE(category_source,'(null)'), COUNT(*) FROM transactions GROUP BY 1`
+  //     returns (null) 2412, ai 86, human 62, heuristic 12, rule 7 of 2579 rows. Admitting NULL
+  //     would hand the model 2,412 rows it has no evidence about; excluding it leaves 19.
+  //     `SELECT COUNT(*) FROM transactions WHERE category_id IS NULL` is 0 on that same copy, which
+  //     is why this widening exists at all: the uncategorized pool above is empty today.
+  //   'ai' is excluded            the model's own settled answer. Re-proposing it every hour is how
+  //     the rule path moved Spotify twice in two hours before `allowRecategorize: false`.
+  //   'human' and manually_categorized  never, on either marker, since either can be cleared alone.
+  //
+  // ONE ANSWER PER ROW, EVER, which is what the NOT EXISTS below buys. Reading category_source
+  // alone is not enough, because two ordinary owner actions put the model's own answer back into
+  // this pool wearing a machine's label:
+  //   "Re-check all transactions" (recategorizeAll in rules.ts) skips only hand-categorized rows,
+  //     so it rewrites the model's row to the rule's category with category_source = 'rule'.
+  //   Undo (undoAdvisorAction) restores the prior category AND its prior source, which for a
+  //     refiled row is 'rule'.
+  // Under category_source alone both hand the row straight back and the next pass refiles it, so
+  // the owner's deliberate action is reversed within the hour by a write they did not ask for. The
+  // revision log is the durable record that the model has had its say here: once a row carries a
+  // category revision the model wrote, it never re-enters this pool, whatever later moved it. The
+  // owner's re-check wins and keeps winning; the row stays reachable by hand and through chat.
+  // On the owner's ledger today the clause removes nothing: the unlimited pool is 19 rows with it
+  // and 19 without, because no row there carries an AI revision and a machine label at once. It is
+  // a bound on a loop that has not run yet, not a repair of one that has.
+  return db.prepare(`
+    SELECT t.id, t.merchant_name, t.original_name, t.amount, t.date,
+           t.category_id, c.name AS category_name, t.category_source
+    FROM transactions t
+    JOIN categories c ON c.id = t.category_id
+    WHERE t.pending = 0
+      AND t.manually_categorized = 0
+      AND t.category_source IN ('rule', 'heuristic')
+      AND NOT EXISTS (
+        SELECT 1 FROM transaction_category_revisions r
+         WHERE r.transaction_id = t.id AND r.to_source = 'ai'
+      )
+    ORDER BY t.date DESC
+    LIMIT 15
+  `).all() as PromptRefilableTransaction[];
 }
 
 /**
@@ -268,12 +479,27 @@ export const collectBackgroundReview: AiJobCollect = async ({ db, runId, started
     WHERE category_id IS NULL AND pending = 0 AND review_status <> 'dismissed'
     ORDER BY date DESC
     LIMIT 15
-  `).all() as Array<{ id: string; merchant_name: string | null; original_name: string; amount: number; date: string }>;
+  `).all() as PromptTransaction[];
   const uncategorizedCount = reviewSummary.queues.find(q => q.id === 'uncategorized')?.count ?? 0;
+
+  // 1b. Rows a MACHINE filed that the model may refile. See refilableTransactions.
+  const recategorizable = refilableTransactions(db);
+
+  // 1c. The model's OWN live rules, so it can name one to retire. Owner rules are deliberately
+  // absent: `checkRuleIsRetirableByAi` refuses them, and listing what will be refused invites the
+  // proposal it refuses.
+  const ownRules = db.prepare(`
+    SELECT r.id, r.pattern, c.name AS category_name
+    FROM merchant_rules r
+    LEFT JOIN categories c ON c.id = r.category_id
+    WHERE r.retired_at IS NULL AND r.source = 'ai'
+    ORDER BY r.created_at DESC
+    LIMIT 25
+  `).all() as PromptRule[];
 
   const categories = db.prepare(`
     SELECT id, name FROM categories ORDER BY sort_order
-  `).all() as Array<{ id: string; name: string }>;
+  `).all() as PromptCategory[];
 
   // 2. Adjusted or overdue recurring items
   const adjustedRecurring = forecast.occurrences.filter(o => o.adjustment_action != null);
@@ -284,63 +510,31 @@ export const collectBackgroundReview: AiJobCollect = async ({ db, runId, started
   // about a delta a month old.
   const freshDetects = newDetections(db, runId, startedAt);
 
-  if (uncategorizedTransactions.length === 0 && adjustedRecurring.length === 0 && overdueRecurring.length === 0 && freshDetects.length === 0) {
+  if (
+    uncategorizedTransactions.length === 0
+    && recategorizable.length === 0
+    && ownRules.length === 0
+    && adjustedRecurring.length === 0
+    && overdueRecurring.length === 0
+    && freshDetects.length === 0
+  ) {
     return {
       status: 'nothing_to_do',
-      detail: 'no uncategorized transactions, no adjusted or overdue recurring items, no new detections',
+      detail: 'no transactions to file or refile, no rules of its own to review, no adjusted or overdue recurring items, no new detections',
     };
   }
 
-  const systemPrompt = `You are Mizān's background AI co-pilot. Your job is to review the user's latest sync delta and generate proactive, actionable 1-click drafts.
-Respond with an object of the form {"drafts": [ ... ]}, one entry per draft.
-If there are no meaningful drafts to generate, return {"drafts": []}.
-
-Allowed 'kind' values: ${DRAFT_KINDS.map((k) => `'${k}'`).join(', ')}.
-
-For a 'categorize_transaction' draft, "payload.transaction_id" MUST be copied exactly from the "id" field of one of the transactions listed under "Uncategorized transactions" below, and "payload.category_id" MUST be copied exactly from the "id" field of one of the categories listed under "Valid categories" below. Never invent a transaction id or use a category's display name in place of its id. An id that doesn't match exactly will silently fail to apply.
-
-'categorize_transaction' and 'create_merchant_rule' drafts are APPLIED IMMEDIATELY, with no human review. Every other kind waits for the user to confirm it. Categorization is reversible in one click and every row records that you set it, so prefer acting to hedging: a wrong category is cheap and visible. If a merchant is genuinely ambiguous, leave it uncategorized rather than guessing, because a wrong rule keeps applying itself to future transactions. 'create_merchant_rule' payloads must include "apply_existing": true.
-
-Your context is:
-${context}
-
-Valid categories (use the "id" value for any category_id field, never the name):
-${categories.map(c => `- id: "${c.id}", name: "${c.name}"`).join('\n')}
-
-Uncategorized transactions (use the "id" value for any transaction_id field):
-${uncategorizedTransactions.map(t => `- id: "${t.id}", date: ${t.date}, amount: ${toDollars(t.amount)}, merchant: "${t.merchant_name || t.original_name}"`).join('\n')}
-
-Review Summary:
-${uncategorizedCount} total uncategorized transactions (${uncategorizedTransactions.length} shown above).
-${adjustedRecurring.length} adjusted recurring items.
-${overdueRecurring.length} overdue recurring items.
-
-System detections new since the last review pass:
-${freshDetects.map(d => `- [${d.entity_type}] ${d.description}`).join('\n')}
-
-Every payload object MUST repeat "kind" inside it, identical to the draft's own top-level "kind". A draft whose payload.kind doesn't match its own kind is silently rejected.
-
-Example format for each kind you're likely to use:
-{
-  "drafts": [
-    {
-      "kind": "categorize_transaction",
-      "label": "Categorize Trupanion",
-      "summary": "Trupanion (-$39.02) is pet insurance.",
-      "route": "/transactions",
-      "payload": { "kind": "categorize_transaction", "transaction_id": "<id copied from the list above>", "category_id": "<id copied from the list above>" },
-      "changes": [{ "field": "category", "before": "Uncategorized", "after": "Health" }]
-    },
-    {
-      "kind": "create_merchant_rule",
-      "label": "Always categorize Trupanion as Health",
-      "summary": "Auto-categorize future Trupanion charges as Health.",
-      "route": "/transactions",
-      "payload": { "kind": "create_merchant_rule", "pattern": "Trupanion", "category_id": "<id copied from the list above>", "apply_existing": true },
-      "changes": []
-    }
-  ]
-}`;
+  const systemPrompt = buildBackgroundReviewPrompt({
+    context,
+    categories,
+    uncategorized: uncategorizedTransactions,
+    refilable: recategorizable,
+    ownRules,
+    uncategorizedTotal: uncategorizedCount,
+    adjustedRecurringCount: adjustedRecurring.length,
+    overdueRecurringCount: overdueRecurring.length,
+    detections: freshDetects,
+  });
 
   // Deliberately no cache_control on this prompt. Its prefix is unstable by construction:
   // buildFinancialContext() opens with today's date and interpolates the last successful

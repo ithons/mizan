@@ -1,5 +1,9 @@
 import type Database from 'better-sqlite3';
-import { merchantMatchesRulePattern, merchantNamesClaimedByRule } from './rules';
+import {
+  countTransactionsHeldByRule,
+  merchantMatchesRulePattern,
+  merchantNamesClaimedByRule,
+} from './rules';
 
 /**
  * Policy for autonomous (model-authored) writes.
@@ -7,7 +11,8 @@ import { merchantMatchesRulePattern, merchantNamesClaimedByRule } from './rules'
  * The autonomy boundary is by domain, not confidence: a write is autonomous when it is an
  * observation about data that already exists, has an exact mechanical inverse, has a bounded and
  * enumerable blast radius, and does not overwrite a number the owner set. Domain membership is
- * decided by `AUTONOMOUS_DRAFT_KINDS`. This module enforces the other three properties, in code
+ * decided by `DRAFT_KIND_AUTONOMY` (draftAutonomy.ts), which is also where the argument for each
+ * kind is written down. This module enforces the other three properties, in code
  * rather than in a prompt, because a bound the model is merely asked to respect is not a bound.
  *
  * These guards apply to the AI path only. A human writing a three-character rule for REI is making
@@ -46,7 +51,10 @@ export type GuardRejectionReason =
   | 'contradicts_history'
   | 'contradicts_owner_rule'
   | 'rule_exists_with_different_category'
-  | 'human_authored';
+  | 'human_authored'
+  | 'rule_not_found'
+  | 'owner_authored_rule'
+  | 'rule_holds_transactions';
 
 const ok: GuardResult = { ok: true };
 
@@ -276,6 +284,69 @@ export function checkRuleDoesNotContradictOwnerRule(
     return reject(
       'contradicts_owner_rule',
       `"${proposed}" contends with your own rule "${owner.pattern}", which points at ${describeCategory(owner, owner.category_id)}.`
+    );
+  }
+
+  return ok;
+}
+
+/**
+ * Which rules the model may retire unattended, and the two things that bound it.
+ *
+ * FIRST, IT MUST BE THE MODEL'S OWN RULE. Retiring a rule the owner wrote is not an observation, it
+ * is overruling them, and it would silently hand every row that rule holds to whatever matches next.
+ * `source <> 'ai'` covers 'suggestion' as well, which is written only when the owner approves it.
+ *
+ * SECOND, IT MUST CURRENTLY HOLD NOTHING TODAY. A rule that holds rows has a blast radius that
+ * lands LATER, on the next whole-ledger re-check, outside the action that retired it and outside
+ * anything one undo can reach. That is not a bounded radius, it is a deferred one. A rule holding
+ * zero rows has a radius of exactly zero NOW, established before the write by
+ * `countTransactionsHeldByRule` under the same precedence the apply path resolves by. What it does
+ * not establish is anything about rows that do not exist yet; that reach is real, and the note on
+ * `countTransactionsHeldByRule` is where it is written down.
+ *
+ * The case this exists for is real, and the guard is what keeps it narrow. Measured 2026-07-31 by
+ * running `countTransactionsHeldByRule` and this function over a copy of .mizan/mizan.db WITH THE
+ * PENDING MIGRATIONS APPLIED, across every row of `SELECT id, pattern FROM merchant_rules WHERE
+ * retired_at IS NULL AND source = 'ai'`: 10 live AI rules, of which 3 hold zero transactions and
+ * pass ('Trupanion', 'bluebik rides', 'mass inst payroll'), and 7 hold between 1 and 22 and are
+ * refused. The refused set includes the ones whose retirement would be most visible ('bluebik' at
+ * 22 rows, 'Clipper Transit Fare' at 6, 'Chick-fil-A' at 4).
+ *
+ * Applying the migrations first is not a formality. The copy as taken sits at 044, where the same
+ * two queries report 12 live AI rules, 4 of them retirable, and refuse 'Spotify' at 7 rows.
+ * Migration 045 retires the AI 'Spotify' and 'Backblaze' rules and runs at startup, so no running
+ * process ever sees that state and a figure quoted from it describes nothing.
+ */
+export function checkRuleIsRetirableByAi(db: Database.Database, ruleId: string): GuardResult {
+  const rule = db.prepare(`
+    SELECT r.id, r.pattern, r.source, c.name AS category_name, p.name AS parent_name, r.category_id
+    FROM merchant_rules r
+    LEFT JOIN categories c ON c.id = r.category_id
+    LEFT JOIN categories p ON p.id = c.parent_id
+    WHERE r.id = ? AND r.retired_at IS NULL
+  `).get(ruleId) as
+    | { id: string; pattern: string; source: string; category_name: string | null; parent_name: string | null; category_id: string }
+    | undefined;
+
+  if (!rule) {
+    return reject('rule_not_found', `no live merchant rule carries the id "${ruleId}".`);
+  }
+  if (rule.source !== 'ai') {
+    return reject(
+      'owner_authored_rule',
+      `"${rule.pattern}" is your own rule, pointing at ${describeCategory(rule, rule.category_id)}. The advisor only retires rules it wrote itself.`
+    );
+  }
+
+  const held = countTransactionsHeldByRule(db, ruleId);
+  if (held === null) {
+    return reject('rule_not_found', `no live merchant rule carries the id "${ruleId}".`);
+  }
+  if (held > 0) {
+    return reject(
+      'rule_holds_transactions',
+      `"${rule.pattern}" currently files ${held} transaction${held === 1 ? '' : 's'}, so retiring it would change how ${held === 1 ? 'that row is' : 'those rows are'} categorized on the next re-check, after this action is over.`
     );
   }
 

@@ -12,10 +12,12 @@ import {
 import {
   applyMerchantRuleToMatchingTransactions,
   applyMerchantRulesToExistingTransactions,
+  countTransactionsHeldByRule,
   merchantMatchesRulePattern,
   retireMerchantRule,
   upsertMerchantRule,
 } from '../server/src/services/rules';
+import { checkRuleIsRetirableByAi } from '../server/src/services/aiWriteGuards';
 import { isDraftStillActionable } from '../server/src/services/advisorDrafts';
 import {
   revertAction,
@@ -206,7 +208,16 @@ test('a draft whose premise no longer holds is not surfaced as work', () => {
   const taxes = insertCategory(db, { name: 'Taxes' });
 
   const uncategorized = insertTransaction(db, { merchant_name: 'Cafe' });
-  const alreadySettled = insertTransaction(db, { merchant_name: 'Cafe', category_id: taxes });
+  const filedByRule = insertTransaction(db, {
+    merchant_name: 'Cafe',
+    category_id: taxes,
+    category_source: 'rule',
+  });
+  const filedByModel = insertTransaction(db, {
+    merchant_name: 'Cafe',
+    category_id: taxes,
+    category_source: 'ai',
+  });
   const handPicked = insertTransaction(db, {
     merchant_name: 'Cafe',
     category_id: taxes,
@@ -218,10 +229,17 @@ test('a draft whose premise no longer holds is not surfaced as work', () => {
     isDraftStillActionable(db, { kind: 'categorize_transaction', transaction_id, category_id } as never);
 
   assert.equal(draftFor(uncategorized, food), true);
-  // The 14 immortal drafts on the real database were all this shape: the worker only drafts for
-  // uncategorized rows, so once the row has a category the draft is proposing to overwrite a
-  // decision nobody asked it to revisit.
-  assert.equal(draftFor(alreadySettled, food), false);
+  // The premise WIDENED here, and this is the line that records it. It used to be "this row is
+  // uncategorized", which lapsed every recategorization on sight. It is now the narrower thing that
+  // was always the point: nobody has made a decision the model may not revisit.
+  assert.equal(draftFor(filedByRule, food), true, 'a rule filed it, and a rule is not a decision the model must respect');
+  // The 14 immortal drafts on the real database were this shape: a draft proposing the category the
+  // row is already in has nothing to do, and confirming it would write nothing while recording an
+  // action whose Undo reverts nothing.
+  assert.equal(draftFor(filedByRule, taxes), false, 'already there');
+  // The model's own settled answer. Re-proposing it is how the rule path moved Spotify twice in
+  // two hours before allowRecategorize: false.
+  assert.equal(draftFor(filedByModel, food), false);
   assert.equal(draftFor(handPicked, food), false);
   assert.equal(draftFor('missing-transaction', food), false);
   // Three of the real drafts pointed at a category migration 036 deleted.
@@ -474,6 +492,132 @@ test('among the owner rules the more specific pattern wins the overlap, not the 
   // model's. That is a deliberate policy: the narrower claim about a row beats the more recent one.
   // Under the old `created_at DESC` the newer, vaguer rule took it.
   assert.equal(row.category_id, streaming);
+  db.close();
+});
+
+// ─── What a rule holds, and what that does and does not prove ─────────────────
+
+/**
+ * `countTransactionsHeldByRule` no longer asks each transaction which rule wins it; it asks each
+ * DISTINCT merchant name whether the target's pattern reaches it and whether anything ahead of the
+ * target in the resolved order got there first. That took one call on the owner's ledger from
+ * 1630.2 / 1675.3 / 1656.3 ms to 7.7 / 8.1 / 7.8 ms, inside a write transaction on the process that
+ * also serves the UI.
+ *
+ * The count it returns has to be the same one, so this pins it against the resolver itself rather
+ * than against a second copy of the resolution rules: each rule points at its own category, the
+ * whole-ledger pass runs, and the rows it files under a category are the rows that rule holds. The
+ * ledger is built so a wrong answer is reachable, with the bare name "Uber" that the matcher sweeps
+ * into both patterns and that precedence, not similarity, awards to the owner.
+ */
+test('a rule holds exactly the rows the whole-ledger pass files under it', () => {
+  const db = migratedTestDb();
+  const ride = insertCategory(db, { name: 'Ride share' });
+  const delivery = insertCategory(db, { name: 'Food delivery' });
+  const pets = insertCategory(db, { name: 'Pets' });
+  const account = insertAccount(db);
+
+  const owner = upsertMerchantRule(db, 'UBER   *TRIP HELP.UBER.COM, CA', ride, TEST_NOW, { source: 'human' });
+  const eats = upsertMerchantRule(db, 'UBER *EATS', delivery, TEST_NOW, { source: 'ai' });
+  const inert = upsertMerchantRule(db, 'Trupanion', pets, TEST_NOW, { source: 'ai' });
+
+  for (const name of ['Uber', 'Uber', 'Uber']) {
+    insertTransaction(db, { account_id: account, merchant_name: name });
+  }
+  for (const name of ['UBER   *EATS HELP.UBER.COM, CA', 'UBER *EATS HELP.UBER.COMCA']) {
+    insertTransaction(db, { account_id: account, merchant_name: name });
+  }
+
+  const held = {
+    owner: countTransactionsHeldByRule(db, owner.ruleId as string),
+    eats: countTransactionsHeldByRule(db, eats.ruleId as string),
+    inert: countTransactionsHeldByRule(db, inert.ruleId as string),
+  };
+
+  applyMerchantRulesToExistingTransactions(db, { onlyUncategorized: false, skipManual: true });
+  const filedUnder = (categoryId: string): number =>
+    (db.prepare('SELECT COUNT(*) AS n FROM transactions WHERE category_id = ?').get(categoryId) as {
+      n: number;
+    }).n;
+
+  assert.deepEqual(held, { owner: filedUnder(ride), eats: filedUnder(delivery), inert: filedUnder(pets) });
+  // Not vacuous, and not a tie: the bare "Uber" rows match the eats pattern too and go to the owner.
+  assert.equal(merchantMatchesRulePattern('Uber', 'UBER *EATS'), true);
+  assert.equal(held.owner, 3);
+  assert.equal(held.eats, 2);
+  assert.equal(held.inert, 0);
+
+  // And an id with no live rule behind it is "there is nothing there", not "it holds nothing".
+  assert.equal(countTransactionsHeldByRule(db, 'no_such_rule'), null);
+  assert.equal(retireMerchantRule(db, inert.ruleId as string), true);
+  assert.equal(countTransactionsHeldByRule(db, inert.ruleId as string), null);
+  db.close();
+});
+
+/**
+ * The claim the retirement guard is entitled to make, and the one it is not.
+ *
+ * `countTransactionsHeldByRule` returning zero establishes that no row resolves to the rule TODAY,
+ * so retiring it moves no category now. The note on that function used to add "and none later,
+ * because the row it would have taken is already filed by the rule that beat it", which is false for
+ * a row that only the retired rule would ever have matched. Nothing beat it there; it simply is not
+ * there any more.
+ */
+test('an inert rule moves no category now, and retiring it still changes where a later row lands', () => {
+  const db = migratedTestDb();
+  const pets = insertCategory(db, { name: 'Pets' });
+  const groceries = insertCategory(db, { name: 'Groceries' });
+  const account = insertAccount(db);
+
+  const settled = insertTransaction(db, {
+    account_id: account,
+    merchant_name: 'Whole Foods',
+    category_id: groceries,
+    category_source: 'rule',
+  });
+  const rule = upsertMerchantRule(db, 'Trupanion', pets, TEST_NOW, { source: 'ai' });
+
+  assert.equal(countTransactionsHeldByRule(db, rule.ruleId as string), 0);
+  assert.equal(checkRuleIsRetirableByAi(db, rule.ruleId as string).ok, true);
+
+  assert.equal(retireMerchantRule(db, rule.ruleId as string, { source: 'ai' }), true);
+  applyMerchantRulesToExistingTransactions(db, { onlyUncategorized: false, skipManual: true });
+  const after = db.prepare('SELECT category_id FROM transactions WHERE id = ?').get(settled) as {
+    category_id: string | null;
+  };
+  assert.equal(after.category_id, groceries, 'no row that existed at retirement time moved');
+
+  // The row that arrives afterwards is the part "and none later" got wrong: nothing else claims it,
+  // so it lands uncategorized instead of under Pets.
+  const later = insertTransaction(db, { account_id: account, merchant_name: 'Trupanion Pet Insurance' });
+  applyMerchantRulesToExistingTransactions(db, { onlyUncategorized: true });
+  const landed = db.prepare('SELECT category_id FROM transactions WHERE id = ?').get(later) as {
+    category_id: string | null;
+  };
+  assert.equal(landed.category_id, null, 'the retired rule would have filed it, and no rule replaced it');
+  db.close();
+});
+
+test('the retirement guard refuses a rule that still holds rows, and says how many', () => {
+  const db = migratedTestDb();
+  const pets = insertCategory(db, { name: 'Pets' });
+  const account = insertAccount(db);
+  const rule = upsertMerchantRule(db, 'Trupanion', pets, TEST_NOW, { source: 'ai' });
+  for (let i = 0; i < 3; i += 1) {
+    insertTransaction(db, { account_id: account, merchant_name: 'Trupanion Pet Insurance' });
+  }
+
+  assert.equal(countTransactionsHeldByRule(db, rule.ruleId as string), 3);
+  const refused = checkRuleIsRetirableByAi(db, rule.ruleId as string);
+  assert.equal(refused.ok, false);
+  assert.equal(refused.ok === false && refused.reason, 'rule_holds_transactions');
+  assert.match(refused.ok === false ? refused.detail : '', /files 3 transactions/);
+
+  // And an owner rule is out of scope whatever it holds.
+  const ownRule = upsertMerchantRule(db, 'BACKBLAZE INC', pets, TEST_NOW, { source: 'human' });
+  const owned = checkRuleIsRetirableByAi(db, ownRule.ruleId as string);
+  assert.equal(owned.ok, false);
+  assert.equal(owned.ok === false && owned.reason, 'owner_authored_rule');
   db.close();
 });
 
