@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query';
-import { categoriesApi, rulesApi, flattenCategories } from '../../lib/api';
+import { categoriesApi, rulesApi, flattenCategories, type RuleApprovalSkip } from '../../lib/api';
 import { formatCurrency, formatDate } from '../../lib/formatters';
 import { useAppStore } from '../../store';
 import { invalidateFinancialData } from '../../lib/queryInvalidation';
@@ -14,6 +14,9 @@ export function RulesSection() {
   const [pattern, setPattern] = useState('');
   const [categoryId, setCategoryId] = useState('');
   const [applyToAll, setApplyToAll] = useState(false);
+  // What the last batch approval refused, kept on screen rather than in the toast that announced
+  // it: a skip names a pattern, and the owner needs to read which one.
+  const [skipped, setSkipped] = useState<RuleApprovalSkip[]>([]);
 
   const { data: rules = [], isLoading: rulesLoading } = useQuery({
     queryKey: ['rules'],
@@ -68,6 +71,53 @@ export function RulesSection() {
         message: result.applied > 0
           ? `Rule saved and applied to ${result.applied} transactions`
           : 'Rule saved',
+      });
+    },
+    onError: (err: Error) => addToast({ type: 'error', message: err.message }),
+  });
+
+  /**
+   * Refuse a suggestion for good.
+   *
+   * `suggestMerchantRules` recomputes the list on every call, so without this the only way to make
+   * a suggestion stop appearing is to accept it. That is a one-way door: the screen could say yes
+   * and could not say no. `dismissRuleSuggestion` (server/src/services/rules.ts) appends the
+   * normalized merchant key to the `dismissed_rule_suggestions` preference, which the generator
+   * subtracts on every later call.
+   */
+  const dismissMutation = useMutation({
+    mutationFn: (suggestion: MerchantRuleSuggestion) => rulesApi.dismissSuggestion(suggestion.pattern),
+    onMutate: () => setSkipped([]),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['rules', 'suggestions'] });
+      addToast({ type: 'success', message: 'Suggestion dismissed' });
+    },
+    onError: (err: Error) => addToast({ type: 'error', message: err.message }),
+  });
+
+  /**
+   * Accept every suggestion at once.
+   *
+   * Not a loop over `rulesApi.create`: the batch endpoint recomputes each pattern's affected rows
+   * server-side, so a page left open overnight cannot relabel a set that has since changed, and it
+   * answers with a `skipped` list naming every approval it could not honour. A loop of creates has
+   * nowhere to report a partial failure except the last toast that happened to fire.
+   */
+  const approveAllMutation = useMutation({
+    mutationFn: (all: MerchantRuleSuggestion[]) =>
+      rulesApi.approveSuggestions(all.map((s) => ({ pattern: s.pattern, category_id: s.category_id }))),
+    // The skips name patterns from the previous list. Once a new approval starts they are about a
+    // set that no longer exists, so they go before it rather than after it.
+    onMutate: () => setSkipped([]),
+    onSuccess: (result) => {
+      invalidateFinancialData(qc);
+      setSkipped(result.skipped);
+      addToast({
+        type: result.approved > 0 ? 'success' : 'error',
+        message:
+          `${result.approved} rule${result.approved === 1 ? '' : 's'} saved, applied to ${result.applied} ` +
+          `transaction${result.applied === 1 ? '' : 's'}` +
+          (result.skipped.length > 0 ? `, ${result.skipped.length} left alone` : ''),
       });
     },
     onError: (err: Error) => addToast({ type: 'error', message: err.message }),
@@ -163,7 +213,18 @@ export function RulesSection() {
 
       {suggestions.length > 0 && (
         <div className="rounded-xl border border-sage-tint-border bg-sage-tint">
-          <div className="border-b border-sage-tint-border px-4 py-2.5 text-note font-medium text-ink">Suggested rules</div>
+          <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 border-b border-sage-tint-border px-4 py-2.5">
+            <span className="text-note font-medium text-ink">Suggested rules</span>
+            {suggestions.length > 1 && (
+              <TextButton
+                variant="primary"
+                onClick={() => approveAllMutation.mutate(suggestions)}
+                disabled={approveAllMutation.isPending}
+              >
+                {approveAllMutation.isPending ? 'Saving…' : `Accept all ${suggestions.length}`}
+              </TextButton>
+            )}
+          </div>
           {suggestions.map((suggestion, i) => (
             <div
               key={`${suggestion.pattern}:${suggestion.category_id}`}
@@ -197,12 +258,41 @@ export function RulesSection() {
               <TextButton
                 variant="primary"
                 onClick={() => suggestionMutation.mutate(suggestion)}
-                disabled={suggestionMutation.isPending}
+                disabled={suggestionMutation.isPending || approveAllMutation.isPending}
               >
                 Accept
               </TextButton>
+              {/* The other half of the door. Accepting was reachable and refusing was not, and a
+                  suggestion the owner declines is regenerated on every visit until they give in. */}
+              {/* No `hover:!text-clay` here, unlike the Delete button on the rules below: clay on
+                  `sage-tint` reads 4.39:1 in dark, under AA. The default hover stays on ink. */}
+              <TextButton
+                onClick={() => dismissMutation.mutate(suggestion)}
+                disabled={dismissMutation.isPending || approveAllMutation.isPending}
+              >
+                Not a rule
+              </TextButton>
             </div>
           ))}
+          {skipped.length > 0 && (
+            <div className="border-t border-sage-tint-border px-4 py-3">
+              {/* Not `text-clay`: on `sage-tint` it reads 4.39:1 in dark, below AA. `text-ink` is
+                  12.73:1 light and 9.58:1 dark, and the weight carries the emphasis instead. */}
+              <p className="text-note font-medium text-ink">
+                {skipped.length} suggestion{skipped.length === 1 ? ' was' : 's were'} left alone:
+              </p>
+              <ul className="mt-1 space-y-0.5">
+                {skipped.map((skip) => (
+                  <li key={skip.pattern} className="text-note text-muted">
+                    <span className="text-ink">{skip.pattern}</span>
+                    {skip.reason === 'unknown_category'
+                      ? ' names a category that no longer exists.'
+                      : ' is no longer a suggestion mizān makes.'}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
         </div>
       )}
 

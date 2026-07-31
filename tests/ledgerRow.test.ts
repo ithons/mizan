@@ -59,6 +59,8 @@ const noopHandlers: LedgerRowHandlers = {
   keepBoth: () => {},
   confirmTransfer: () => {},
   rejectTransfer: () => {},
+  setAside: () => {},
+  bringBack: () => {},
 };
 
 /** Everything the parent hands every row, built once because `useMemo`/`useState` build it once. */

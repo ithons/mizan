@@ -7,6 +7,8 @@ import { windowRange, type WindowId } from '../../client/src/views/instrumentRea
 import type {
   Account,
   CashflowReport,
+  CategoryTrendReport,
+  NetWorthAttribution,
   NetWorthSnapshot,
   RecurringForecast,
   ReportSummary,
@@ -186,6 +188,87 @@ const FORECAST: RecurringForecast = {
   occurrences: [],
 } as RecurringForecast;
 
+/**
+ * Per-category spend by month, dollars, from `getSpendingTrendsReport(db, {startDate:'2026-05-01',
+ * endDate:'2026-07-31'})` run against a private read-only copy of `.mizan/mizan.db` at migration
+ * `053_drop_budget_groups.sql` on 2026-07-31.
+ *
+ * Amazon is the row this fixture is carried for: [57.34, 2160.83, -1748.00]. July is negative
+ * because that month's returns outweighed its purchases, which is the same hazard the "Where it
+ * went" section handles, seen over time instead of at one instant.
+ */
+export const TRENDS: CategoryTrendReport = {
+  months: ['2026-05', '2026-06', '2026-07'],
+  series: [
+    { category_id: 'c_amazon', category_name: 'Amazon', color: null, values: [57.34, 2160.83, -1748] },
+    { category_id: 'c_pets', category_name: 'Pets', color: null, values: [449.34, 149.02, 140.29] },
+    { category_id: 'c_rest', category_name: 'Restaurants', color: null, values: [143.55, 263.88, 506.81] },
+    { category_id: 'c_ride', category_name: 'Rideshare', color: null, values: [106.37, 87.91, 302.96] },
+    { category_id: 'c_groc', category_name: 'Groceries', color: null, values: [165.2, 354.48, 66.43] },
+    { category_id: 'c_house', category_name: 'Household & Everyday', color: null, values: [78.41, 156.8, 77.16] },
+    { category_id: 'c_soft', category_name: 'Software & AI Tools', color: null, values: [52.08, 89.22, 158.18] },
+    { category_id: 'c_hobby', category_name: 'Hobbies & Collectibles', color: null, values: [67.51, 37.13, 0] },
+  ],
+};
+
+/**
+ * `getNetWorthAttribution(db, {startDate:'2026-07-01', endDate:'2026-07-31'})` on the same copy,
+ * cents converted to dollars the way `routes/reports.ts` does.
+ *
+ * Both cards carry a POSITIVE delta while their stored balances fell, which is the property the
+ * caption has to explain: `breakdown` stores a liability as an amount owed, so the service negates
+ * a liability's balance change to get its effect on net worth.
+ */
+export const ATTRIBUTION: NetWorthAttribution = {
+  start_date: '2026-07-01',
+  end_date: '2026-07-31',
+  start_net_worth: 1079.39,
+  end_net_worth: 4193.18,
+  delta: 3113.79,
+  accounts: [
+    {
+      account_id: 'a_disc',
+      account_name: 'Discover',
+      institution_name: 'Discover Credit Card',
+      type: 'credit',
+      is_liability: true,
+      start_balance: 1055.63,
+      end_balance: -563.26,
+      delta: 1618.89,
+    },
+    {
+      account_id: 'a_flex',
+      account_name: 'Chase Freedom Flex',
+      institution_name: 'Chase Bank',
+      type: 'credit',
+      is_liability: true,
+      start_balance: 1235.95,
+      end_balance: -276.12,
+      delta: 1512.07,
+    },
+    {
+      account_id: 'a_chk',
+      account_name: 'Chase Checking',
+      institution_name: 'Chase Bank',
+      type: 'checking',
+      is_liability: false,
+      start_balance: 5977.87,
+      end_balance: 4653.97,
+      delta: -1323.9,
+    },
+    {
+      account_id: 'a_wf',
+      account_name: 'Wealthfront Cash',
+      institution_name: 'Wealthfront',
+      type: 'savings',
+      is_liability: false,
+      start_balance: 0,
+      end_balance: 1001.7,
+      delta: 1001.7,
+    },
+  ],
+};
+
 const REVIEW: TransactionReviewSummary = {
   total_open: 0,
   queues: [],
@@ -202,6 +285,10 @@ export interface Overrides {
   snapshot?: NetWorthSnapshot | null;
   /** The windowless series behind the beam and the week reading, oldest first. */
   recent?: NetWorthSnapshot[];
+  /** Per-category spend by month. One month, or none, is not a trend and draws no grid. */
+  trends?: CategoryTrendReport;
+  /** Null is the shape the server sends when the window holds fewer than two measured sheets. */
+  attribution?: NetWorthAttribution | null;
 }
 
 export function render(windowId: WindowId, overrides: Overrides = {}): string {
@@ -227,6 +314,11 @@ export function render(windowId: WindowId, overrides: Overrides = {}): string {
   client.setQueryData(['reports', 'cashflow', range], CASHFLOW);
   client.setQueryData(['reports', 'spending', range], overrides.spending ?? SPENDING);
   client.setQueryData(['reports', 'merchants', range], MERCHANTS);
+  client.setQueryData(['reports', 'trends', range], overrides.trends ?? TRENDS);
+  client.setQueryData(
+    ['reports', 'networth-attribution', range],
+    overrides.attribution === undefined ? ATTRIBUTION : overrides.attribution
+  );
 
   // `useLayoutEffect` warns on every server render and says nothing about this screen; anything
   // else React has to say still reaches the runner, because a swallowed warning is how a real

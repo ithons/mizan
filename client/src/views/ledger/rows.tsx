@@ -5,6 +5,7 @@ import { CategoryPicker, CategoryPill } from '../../components/balance';
 import {
   FLAG_LABEL,
   PROVENANCE_LABEL,
+  isSetAside,
   occurrenceAmount,
   occurrenceMeta,
   proposedCategoryId,
@@ -47,8 +48,16 @@ export const LEDGER_COLUMNS = {
   /** Category, on BOTH sides of the rule: it is the one field a forecast and a posting both have. */
   category: 'hidden w-[130px] flex-shrink-0 md:block',
   amount: 'w-[110px] flex-shrink-0 text-right',
-  /** Skip/Undo above the rule, empty below it, so the amount's right edge is the same on both. */
-  action: 'ml-3 w-[52px] flex-shrink-0 text-right',
+  /**
+   * Take it off the list, or put it back. Skip/Undo above the rule, Set aside/Undo below, which is
+   * the same verb at two distances from now. It used to be rendered empty below the rule, which is
+   * what put the two amount columns' right edges apart.
+   *
+   * 72px rather than the 52px that held Skip alone: "Set aside" sets to about 55px at `text-note`
+   * (12.5px), and the buttons carry `whitespace-nowrap` so a too-narrow column would push the
+   * posted row a line taller than the scheduled one instead of overflowing visibly.
+   */
+  action: 'ml-3 w-[72px] flex-shrink-0 text-right',
 } as const;
 
 /** Geometry alone is not alignment: the figures also have to be set in the same face and size. */
@@ -112,6 +121,10 @@ export function LedgerRowInner({
   // are one movement" are things you say about the entry you are looking at.
   const duplicateGroup = transaction.duplicate_group_id ? duplicateGroups.get(transaction.duplicate_group_id) : undefined;
   const transferPair = transaction.transfer_pair_id ? transferPairs.get(transaction.transfer_pair_id) : undefined;
+  const setAside = isSetAside(transaction);
+  // Offered only on a row the queue would otherwise count forever. Setting aside a filed row would
+  // say nothing: `getCounts` only ever counts rows with no category.
+  const canSetAside = !transaction.category_id && !transaction.pending;
 
   return (
     <div
@@ -154,7 +167,16 @@ export function LedgerRowInner({
             {flags.map((flag) => (
               <span
                 key={flag}
-                className="rounded-md border border-review-border bg-review-bg px-1.5 py-px text-rule uppercase tracking-[0.1em] text-review-text"
+                /* An open question is tinted; a decision the owner already made is not. `set_aside`
+                   is the second kind, so it carries the neutral outline rather than the review
+                   tint, which otherwise puts settled work back in the colour of open work.
+                   `text-muted` measures 5.67:1 on light paper, 7.04:1 on light card, 6.95:1 on
+                   dark paper and 5.84:1 on dark card, from the triplets in client/src/index.css. */
+                className={`rounded-md px-1.5 py-px text-rule uppercase tracking-[0.1em] ${
+                  flag === 'set_aside'
+                    ? 'border border-line-3 text-muted'
+                    : 'border border-review-border bg-review-bg text-review-text'
+                }`}
               >
                 {FLAG_LABEL[flag]}
               </span>
@@ -172,7 +194,30 @@ export function LedgerRowInner({
         >
           {formatCurrency(transaction.amount, { showSign: transaction.amount > 0 })}
         </span>
-        <span data-col="action" className={LEDGER_COLUMNS.action} aria-hidden />
+        <span data-col="action" className={LEDGER_COLUMNS.action}>
+          {setAside ? (
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => actions.bringBack(transaction.id)}
+              className="whitespace-nowrap text-note text-muted transition-colors hover:text-ink disabled:opacity-40"
+            >
+              Undo
+            </button>
+          ) : (
+            canSetAside && (
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => actions.setAside(transaction.id)}
+                title="Stop counting this entry in the needs-a-category queue"
+                className="whitespace-nowrap text-note text-muted opacity-0 transition-opacity hover:text-ink focus:opacity-100 group-hover:opacity-100 disabled:opacity-40"
+              >
+                Set aside
+              </button>
+            )
+          )}
+        </span>
       </div>
 
       {draft && (
@@ -356,7 +401,7 @@ export function ScheduledRow({
             type="button"
             onClick={() => onUndoSkip(occurrence)}
             disabled={busy || !occurrence.adjustment_id}
-            className="text-note text-muted transition-colors hover:text-ink disabled:opacity-40"
+            className="whitespace-nowrap text-note text-muted transition-colors hover:text-ink disabled:opacity-40"
           >
             Undo
           </button>
@@ -365,7 +410,7 @@ export function ScheduledRow({
             type="button"
             onClick={() => onSkip(occurrence)}
             disabled={busy}
-            className="text-note text-muted opacity-0 transition-opacity hover:text-ink focus:opacity-100 group-hover:opacity-100 disabled:opacity-40"
+            className="whitespace-nowrap text-note text-muted opacity-0 transition-opacity hover:text-ink focus:opacity-100 group-hover:opacity-100 disabled:opacity-40"
           >
             Skip
           </button>

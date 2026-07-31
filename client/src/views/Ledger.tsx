@@ -14,6 +14,7 @@ import type {
 import { accountsApi, categoriesApi, aiApi, recurringApi, transactionsApi } from '../lib/api';
 import { creditNote, isInCredit } from '../lib/accountBalance';
 import { formatCurrency, formatWholeCurrency } from '../lib/formatters';
+import { chordOf, useShortcuts } from '../lib/keyboard';
 import { invalidateFinancialData } from '../lib/queryInvalidation';
 import { useAppStore } from '../store';
 import { QueryErrorBanner } from '../components/QueryErrorBanner';
@@ -30,13 +31,14 @@ import {
 import { AddEntryModal, AddScheduledModal, EditEntryModal } from './ledger/modals';
 import { LedgerColumnHeader, LedgerRow, ScheduledRow } from './ledger/rows';
 import {
+  MAX_BATCH_CONFIRM,
   MAX_SUGGESTED_IDS,
   SCHEDULE_STATES,
   PROVENANCE_FILTER_OPTIONS,
   buildSpine,
   createLedgerRowActions,
-  keystrokeBelongsToLedger,
-  readFocusedElement,
+  readBatchControl,
+  readBatchOutcomes,
   readProvenanceFilter,
   filterChips,
   indexDrafts,
@@ -61,8 +63,9 @@ import {
  * and transfer candidates are predicates over the transactions table; each of them was a tab.
  * They are chips here, and the decisions they carry happen on the rows they are about.
  *
- * The route this wants is `/ledger`. `/transactions`, `/bills` and `/review` render it today so
- * that nothing breaks before the nav track lands.
+ * This is `/ledger`. `/transactions`, `/bills` and `/review` redirect here; `/transactions` carries
+ * its search string across, because `?uncategorized=1&range=all` is a live deep link this screen
+ * still answers.
  */
 
 const RANGES = [
@@ -260,6 +263,47 @@ export function Ledger() {
     onSuccess: invalidateReview,
     onError,
   });
+  /**
+   * Accept every proposal on screen in one request.
+   *
+   * The reason this exists rather than being "click accept N times" is what happens when a guard
+   * refuses. `POST /api/ai/drafts/confirm` answers 200 with a per-draft outcome even when some
+   * were refused, so the refusals arrive as a list, not as one error. They go into the same
+   * `refusals` map the single-confirm 409 writes to, which puts each sentence on the row it is
+   * about; the toast only says how many landed on each side. Ids only: the server reads every
+   * payload back from `advisor_drafts`, so a batch can apply only what the worker proposed.
+   */
+  const confirmBatch = useMutation({
+    mutationFn: (ids: string[]) => aiApi.confirmDrafts(ids),
+    onMutate: (ids) =>
+      setRefusals((prev) => {
+        const next = { ...prev };
+        for (const id of ids) delete next[id];
+        return next;
+      }),
+    onSuccess: (result) => {
+      const reading = readBatchOutcomes(result.outcomes);
+      setRefusals((prev) => ({ ...prev, ...reading.refusals }));
+      invalidateFinancialData(qc);
+      if (reading.message) {
+        addToast({ type: reading.applied > 0 ? 'success' : 'error', message: reading.message });
+      }
+    },
+    onError,
+  });
+  // `'dismissed'` is the only exit from the needs-a-category queue that is not filing the row, and
+  // `'open'` is the way back. Both invalidate the whole financial set rather than just the review
+  // summary, because the queue count on this screen and the one on `/` read the same summary.
+  const setAside = useMutation({
+    mutationFn: (id: string) => transactionsApi.markReview(id, 'dismissed'),
+    onSuccess: () => invalidateFinancialData(qc),
+    onError,
+  });
+  const bringBack = useMutation({
+    mutationFn: (id: string) => transactionsApi.markReview(id, 'open'),
+    onSuccess: () => invalidateFinancialData(qc),
+    onError,
+  });
   const bulkCategorize = useMutation({
     mutationFn: ({ ids, categoryId }: { ids: string[]; categoryId: string }) =>
       transactionsApi.bulkCategory(ids, categoryId),
@@ -342,6 +386,8 @@ export function Ledger() {
     keepBoth: (groupId: string) => keepBoth.mutate(groupId),
     confirmTransfer: (pairId: string) => confirmTransfer.mutate(pairId),
     rejectTransfer: (pairId: string) => rejectTransfer.mutate(pairId),
+    setAside: (id: string) => setAside.mutate(id),
+    bringBack: (id: string) => bringBack.mutate(id),
   };
   const latestHandlers = useRef(handlers);
   // After every commit, not on a dependency list: the handlers object is new on every render by
@@ -354,29 +400,36 @@ export function Ledger() {
   // identity never changes, so it may not be built on something React is allowed to discard.
   const [rowActions] = useState(() => createLedgerRowActions(latestHandlers));
 
-  // One key to accept. `j`/`k` walk the proposals on screen; `a` applies the one under the cursor
-  // and `x` drops it. Deliberately unmodified keys, which is exactly why the focus test has to be
-  // right: see `keystrokeBelongsToLedger` for the hole a tagName allowlist left open here.
+  /**
+   * One key to accept. `j`/`k` walk the proposals on screen; `a` applies the one under the cursor
+   * and `x` drops it. They are bare unmodified keys that write to the database, so they are the
+   * strictest thing in the shortcut table: `screen` layer, which is dead the instant anything is
+   * open over this view, and `page` focus, which is dead the instant the owner is operating a
+   * control.
+   *
+   * There is deliberately no test here for an open modal or an open sheet. This screen used to
+   * carry `showAddEntry || showAddScheduled || editing`, an enumeration of the overlays it happened
+   * to know about, and the ⌘K sheet was not on the list: with the digest open, focus fell back to
+   * `document.body` and `a` accepted a draft behind the sheet. A list of exceptions cannot cover a
+   * surface that has not been written yet, so the registry answers "is anything covering this" and
+   * this screen no longer has an opinion.
+   */
   const cursorId = suggestedOnScreen[cursor];
-  useEffect(() => {
-    const onKeyDown = (e: KeyboardEvent) => {
-      if (e.metaKey || e.ctrlKey || e.altKey) return;
-      if (showAddEntry || showAddScheduled || editing) return;
-      if (!keystrokeBelongsToLedger(readFocusedElement(e.target))) return;
-      if (suggestedOnScreen.length === 0) return;
-
-      if (e.key === 'j') setCursor((c) => Math.min(suggestedOnScreen.length - 1, c + 1));
-      else if (e.key === 'k') setCursor((c) => Math.max(0, c - 1));
-      else if (e.key === 'a' || e.key === 'x') {
-        const draft = cursorId ? drafts.byTransaction.get(cursorId) : undefined;
-        if (!draft) return;
-        if (e.key === 'a') rowActions.accept(draft);
-        else rowActions.dismissDraft(draft.id);
-      }
-    };
-    window.addEventListener('keydown', onKeyDown);
-    return () => window.removeEventListener('keydown', onKeyDown);
-  }, [suggestedOnScreen, cursorId, drafts.byTransaction, rowActions, showAddEntry, showAddScheduled, editing]);
+  const cursorDraft = cursorId ? drafts.byTransaction.get(cursorId) : undefined;
+  useShortcuts(
+    'ledger',
+    {
+      'ledger.nextSuggestion': () => setCursor((c) => Math.min(suggestedOnScreen.length - 1, c + 1)),
+      'ledger.prevSuggestion': () => setCursor((c) => Math.max(0, c - 1)),
+      'ledger.acceptSuggestion': () => {
+        if (cursorDraft) rowActions.accept(cursorDraft);
+      },
+      'ledger.dismissSuggestion': () => {
+        if (cursorDraft) rowActions.dismissDraft(cursorDraft.id);
+      },
+    },
+    suggestedOnScreen.length > 0
+  );
 
   useEffect(() => {
     if (!cursorId) return;
@@ -395,11 +448,14 @@ export function Ledger() {
   const activeChip = chips.find((c) => c.id === filter);
   const busy =
     confirmDraft.isPending ||
+    confirmBatch.isPending ||
     dismissDraft.isPending ||
     keepCopy.isPending ||
     keepBoth.isPending ||
     confirmTransfer.isPending ||
-    rejectTransfer.isPending;
+    rejectTransfer.isPending ||
+    setAside.isPending ||
+    bringBack.isPending;
   const scheduleBusy = skipOccurrence.isPending || undoSkip.isPending || confirmPattern.isPending || dismissPattern.isPending;
 
   // Patterns still awaiting a verdict that have no occurrence inside the window, so confirming
@@ -410,6 +466,8 @@ export function Ledger() {
   );
 
   const suggestedTruncated = filter === 'suggested' && drafts.transactionIds.length > MAX_SUGGESTED_IDS;
+
+  const batch = readBatchControl(filter, suggestedOnScreen, drafts);
 
   return (
     <Screen size="wide">
@@ -487,8 +545,16 @@ export function Ledger() {
       <p className="mb-5 text-note text-muted-2">
         Each entry carries a mark for who chose its category. No mark means it was set before mizān recorded
         who set it.
+        {/* The letters are read out of the shortcut table, so a rebinding cannot leave this
+            sentence teaching a key the keyboard no longer sends here. */}
         {suggestedOnScreen.length > 0 &&
-          ' Press j and k to move between suggestions, a to accept, x to drop, with nothing else focused.'}
+          ` Press ${chordOf('ledger.nextSuggestion')} and ${chordOf('ledger.prevSuggestion')} to move between` +
+            ` suggestions, ${chordOf('ledger.acceptSuggestion')} to accept, ${chordOf('ledger.dismissSuggestion')}` +
+            ' to drop, with nothing else focused and nothing open over this screen.'}
+        {filter === 'uncategorized' &&
+          ' An entry that will never have a category can be set aside, which stops the count above' +
+            ' from carrying it and stops the advisor proposing about it. It stays on this list,' +
+            ' marked, so setting one aside is never a way of losing it.'}
       </p>
 
       {selectedAccount && (
@@ -531,6 +597,31 @@ export function Ledger() {
           <TextButton onClick={() => setSelectedIds(new Set())} className="ml-auto">
             Clear
           </TextButton>
+        </div>
+      )}
+
+      {/* Whether this is offered at all, and over which drafts, is `readBatchControl`. */}
+      {batch && (
+        <div className="mz-rise-fast mb-4 flex flex-wrap items-center gap-x-5 gap-y-2 rounded-lg bg-rail px-3 py-2">
+          <span className="text-body text-ink">
+            <span className="tabular-nums">{batch.ids.length}</span> proposals on this list
+          </span>
+          <button
+            type="button"
+            disabled={busy}
+            onClick={() => confirmBatch.mutate(batch.ids)}
+            className="border-b border-ink pb-0.5 text-body text-ink transition-opacity hover:opacity-75 disabled:opacity-40"
+          >
+            {confirmBatch.isPending ? 'Applying…' : `Accept all ${batch.ids.length} as proposed`}
+          </button>
+          {/* `text-muted`, not `text-muted-2`: on `rail` the second reads 3.67:1 in light, below
+              AA. `text-muted` on `rail` is 4.60:1 light and 7.60:1 dark, computed from the
+              triplets in client/src/index.css. */}
+          <span className="max-w-[54ch] text-note text-muted">
+            Each is applied on its own. Any the write guards refuse are left exactly as they are, with
+            the reason printed on the entry it is about.
+            {batch.truncated && ` Only the first ${MAX_BATCH_CONFIRM} are sent at a time.`}
+          </span>
         </div>
       )}
 

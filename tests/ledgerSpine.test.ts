@@ -16,7 +16,6 @@ import {
   createLedgerRowActions,
   filterChips,
   indexDrafts,
-  keystrokeBelongsToLedger,
   monthlyAmount,
   occurrenceAmount,
   occurrenceDate,
@@ -25,7 +24,6 @@ import {
   readProvenance,
   readSchedule,
   withCategoryOverride,
-  type FocusedElement,
   type LedgerRowHandlers,
 } from '../client/src/views/ledger/spine';
 
@@ -384,53 +382,10 @@ test('the whole live ledger builds its spine in one pass', () => {
 
 // ─── Whose keystroke it is ────────────────────────────────────────────────────
 
-function focused(o: Partial<FocusedElement> = {}): FocusedElement {
-  return { tagName: 'DIV', role: null, tabIndex: -1, isContentEditable: false, ...o };
-}
-
-test('keys: the ledger only claims a keystroke when nothing is focused', () => {
-  // How focus reads while the owner is reading the list. `document.body` and every plain element
-  // report tabIndex -1, and a keydown that reaches `window` from a page with nothing focused has
-  // the body as its target.
-  assert.equal(keystrokeBelongsToLedger(null), true);
-  assert.equal(keystrokeBelongsToLedger(focused({ tagName: 'BODY' })), true);
-  assert.equal(keystrokeBelongsToLedger(focused({ tagName: 'DIV' })), true);
-});
-
-test('keys: a focused Select does NOT hand `a` to the ledger', () => {
-  // The defect this replaces. `components/balance/Select` renders <button role="combobox">, whose
-  // tagName is BUTTON, so the old ['INPUT','TEXTAREA','SELECT'] allowlist let the key through:
-  // focusing the account filter or the range control and pressing `a` confirmed the AI draft under
-  // the cursor and wrote it to the database, and `x` dismissed it.
-  assert.equal(keystrokeBelongsToLedger(focused({ tagName: 'BUTTON', role: 'combobox', tabIndex: 0 })), false);
-});
-
-test('keys: every other control on this screen keeps its own keystrokes too', () => {
-  // Filter chips, Skip/Undo, the row select circles, and the row's own Accept and Dismiss buttons.
-  // `x` pressed twice used to dismiss a second draft because the first press left focus on the
-  // Dismiss button and the second still reached the window listener.
-  assert.equal(keystrokeBelongsToLedger(focused({ tagName: 'BUTTON', tabIndex: 0 })), false);
-  assert.equal(keystrokeBelongsToLedger(focused({ tagName: 'INPUT', tabIndex: 0 })), false);
-  assert.equal(keystrokeBelongsToLedger(focused({ tagName: 'TEXTAREA', tabIndex: 0 })), false);
-  assert.equal(keystrokeBelongsToLedger(focused({ tagName: 'SELECT', tabIndex: 0 })), false);
-  assert.equal(keystrokeBelongsToLedger(focused({ tagName: 'A', tabIndex: 0 })), false);
-  assert.equal(keystrokeBelongsToLedger(focused({ tagName: 'SUMMARY', tabIndex: 0 })), false);
-  // A widget that is a control by role alone, and one that is a control by tabindex alone.
-  assert.equal(keystrokeBelongsToLedger(focused({ tagName: 'DIV', role: 'textbox' })), false);
-  assert.equal(keystrokeBelongsToLedger(focused({ tagName: 'DIV', role: 'option' })), false);
-  assert.equal(keystrokeBelongsToLedger(focused({ tagName: 'DIV', tabIndex: 0 })), false);
-  // Case and stray whitespace in an attribute must not open the hole again.
-  assert.equal(keystrokeBelongsToLedger(focused({ tagName: 'button' })), false);
-  assert.equal(keystrokeBelongsToLedger(focused({ tagName: 'DIV', role: ' ComboBox ' })), false);
-  // contenteditable is inherited, so a descendant of an editor reports it too.
-  assert.equal(keystrokeBelongsToLedger(focused({ tagName: 'SPAN', isContentEditable: true })), false);
-});
-
-test('keys: a container the page merely scrolls does not count as a control', () => {
-  // tabindex="-1" is "focusable by script, not by the owner". Treating it as a control would make
-  // the shortcuts inert after any programmatic focus, which is the opposite failure.
-  assert.equal(keystrokeBelongsToLedger(focused({ tagName: 'DIV', tabIndex: -1 })), true);
-});
+// That question moved out of this file entirely. It was never about the ledger: the ledger's `a`
+// was one of three window listeners each deciding on its own whether a keystroke was theirs, which
+// is how `g` `a` came to navigate AND accept a draft on one dispatch. `client/src/lib/keyboard.ts`
+// owns it now, and `tests/keyboard.test.ts` drives it.
 
 // ─── The row's handlers ───────────────────────────────────────────────────────
 
@@ -445,6 +400,8 @@ function recordingHandlers(log: string[]): LedgerRowHandlers {
     keepBoth: (g) => log.push(`keepBoth:${g}`),
     confirmTransfer: (p) => log.push(`confirmTransfer:${p}`),
     rejectTransfer: (p) => log.push(`rejectTransfer:${p}`),
+    setAside: (t) => log.push(`setAside:${t}`),
+    bringBack: (t) => log.push(`bringBack:${t}`),
   };
 }
 
@@ -470,6 +427,8 @@ test('actions: the object a row holds never changes, and never goes stale', () =
   actions.keepBoth('g2');
   actions.confirmTransfer('p1');
   actions.rejectTransfer('p2');
+  actions.setAside('t3');
+  actions.bringBack('t4');
 
   // Nothing more reached the first set: every call went to whatever the ref held at call time.
   assert.deepEqual(first, ['accept:d1']);
@@ -482,6 +441,8 @@ test('actions: the object a row holds never changes, and never goes stale', () =
     'keepBoth:g2',
     'confirmTransfer:p1',
     'rejectTransfer:p2',
+    'setAside:t3',
+    'bringBack:t4',
   ]);
 });
 

@@ -91,6 +91,8 @@ function postedProps(overrides: Partial<LedgerRowProps> = {}): LedgerRowProps {
         keepBoth: () => {},
         confirmTransfer: () => {},
         rejectTransfer: () => {},
+        setAside: () => {},
+        bringBack: () => {},
       },
     }),
     ...overrides,

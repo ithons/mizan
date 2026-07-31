@@ -317,13 +317,120 @@ export function proposedCategoryId(draft: AdvisorDraftAction): string | null {
   return draft.payload.kind === 'categorize_transaction' ? draft.payload.category_id : null;
 }
 
+// ─── Accepting several proposals at once ──────────────────────────────────────
+
+/**
+ * The tokens `confirmAdvisorDraftsByIds` emits in place of a sentence, as sentences.
+ *
+ * The server writes these three verbatim rather than prose (services/advisorDrafts.ts), and
+ * everything else it puts in `reason` is already a sentence a guard wrote to be read. Rendering
+ * `unreadable_payload` to the owner would be showing them an enum.
+ */
+const BATCH_SKIP_SENTENCE: Record<string, string> = {
+  not_found_or_resolved: 'this suggestion was already accepted or dropped somewhere else.',
+  unreadable_payload: 'mizān could not read what this suggestion was proposing.',
+  apply_failed: 'applying it failed; the details are in the server log.',
+};
+
+export interface BatchReading {
+  applied: number;
+  skipped: number;
+  /** Draft id to the sentence saying why it was left alone. Empty when nothing was skipped. */
+  refusals: Record<string, string>;
+  /** One line for the toast, or null when there is nothing worth saying out loud. */
+  message: string | null;
+}
+
+/**
+ * What a batch confirm actually did, as something the screen can say.
+ *
+ * Partial success is the normal case: each draft is applied in its own transaction and a guard
+ * refusal steps over one draft rather than rolling back the batch. So the reading has to carry
+ * both halves, and the skipped half has to land on the ROWS rather than in one toast, because the
+ * reason is per draft and a toast can only hold one of them.
+ *
+ * A draft whose skip carries no reason at all still gets a line. Silence about a draft the owner
+ * just asked to apply reads as success.
+ */
+export function readBatchOutcomes(
+  outcomes: ReadonlyArray<{ id: string; status: 'applied' | 'skipped'; reason?: string; label?: string }>
+): BatchReading {
+  const refusals: Record<string, string> = {};
+  let applied = 0;
+
+  for (const outcome of outcomes) {
+    if (outcome.status === 'applied') {
+      applied += 1;
+      continue;
+    }
+    const reason = outcome.reason;
+    refusals[outcome.id] =
+      (reason ? BATCH_SKIP_SENTENCE[reason] : undefined) ??
+      reason ??
+      'mizān gave no reason for leaving this one alone.';
+  }
+
+  const skipped = outcomes.length - applied;
+  const parts: string[] = [];
+  if (applied > 0) parts.push(`Applied ${applied} suggestion${applied === 1 ? '' : 's'}`);
+  if (skipped > 0) parts.push(`left ${skipped} alone, with the reason on each row`);
+
+  return { applied, skipped, refusals, message: parts.length > 0 ? `${parts.join(', ')}.` : null };
+}
+
+/**
+ * The maximum number of drafts one batch confirm may name.
+ *
+ * `confirmAdvisorDraftsByIds` applies each draft in its own SQLite transaction inside one HTTP
+ * request, so the request's cost is linear in this number and nothing streams progress back. The
+ * live database holds 14 open `categorize_transaction` drafts
+ * (`SELECT status, kind, COUNT(*) FROM advisor_drafts GROUP BY 1,2` on a fresh copy at migration
+ * `053_drop_budget_groups.sql`, 2026-07-31), so this is headroom rather than a limit the owner
+ * meets. The screen says when it has been reached instead of quietly sending a prefix.
+ */
+export const MAX_BATCH_CONFIRM = 50;
+
+export interface BatchControl {
+  /** The draft ids the button would send, capped. */
+  ids: string[];
+  /** True when proposals on screen were left out of the batch by the cap. */
+  truncated: boolean;
+}
+
+/**
+ * Whether "accept all" is offered, and over exactly which drafts.
+ *
+ * Offered only under the chip that turns this screen into a worklist. Under "Everything" the
+ * proposals are scattered through a month of entries, so a control reading "accept all 14" over a
+ * list showing three of them would name a set the owner cannot see: the whole reason the retired
+ * inbox's batch button was safe is that its list WAS the batch.
+ *
+ * Built from the rows RENDERED rather than from the whole queue, for the same reason, and from
+ * transaction ids rather than draft ids because that is the order the list is in. A single
+ * proposal gets no batch control: it already has an Accept on its own row.
+ */
+export function readBatchControl(
+  filter: LedgerFilter,
+  onScreen: readonly string[],
+  drafts: DraftIndex
+): BatchControl | null {
+  if (filter !== 'suggested') return null;
+
+  const ids = onScreen
+    .map((transactionId) => drafts.byTransaction.get(transactionId)?.id)
+    .filter((id): id is string => id !== undefined);
+
+  if (ids.length < 2) return null;
+  return { ids: ids.slice(0, MAX_BATCH_CONFIRM), truncated: ids.length > MAX_BATCH_CONFIRM };
+}
+
 // ─── What is flagged on a row ─────────────────────────────────────────────────
 
-export type RowFlag = 'duplicate' | 'transfer' | 'pending' | 'excluded';
+export type RowFlag = 'duplicate' | 'transfer' | 'pending' | 'excluded' | 'set_aside';
 
 export type FlagView = Pick<
   Transaction,
-  'duplicate_status' | 'transfer_status' | 'pending' | 'transfer_pair_id'
+  'duplicate_status' | 'transfer_status' | 'pending' | 'transfer_pair_id' | 'review_status'
 >;
 
 /**
@@ -337,12 +444,22 @@ export type FlagView = Pick<
  * ledger and still has a category, and marking it would make settled work look like open work.
  * Only `excluded` is marked, because a row that stopped counting toward spending while staying
  * visible is a state the owner cannot otherwise see.
+ *
+ * `set_aside` is the same shape of state and has to be marked for a sharper reason. It is
+ * `review_status = 'dismissed'`, which three server queries subtract from the queue
+ * (`getCounts` in services/transactionReview.ts, the worker's uncategorized pull in
+ * services/aiWorker.ts, `draftLiveness` in services/advisorDrafts.ts) while
+ * `listTransactions` does NOT filter on it: `filters.uncategorized` is `category_id IS NULL` and
+ * nothing more (services/transactions.ts). So a set-aside row keeps appearing in the list under
+ * the "Needs a category" chip after it has stopped being counted by it. Marking the row is what
+ * makes that difference readable rather than a count that disagrees with the list beneath it.
  */
 export function readFlags(t: FlagView): RowFlag[] {
   const flags: RowFlag[] = [];
   if (t.pending) flags.push('pending');
   if (t.duplicate_status === 'candidate') flags.push('duplicate');
   if (t.transfer_status === 'candidate') flags.push('transfer');
+  if (t.review_status === 'dismissed') flags.push('set_aside');
   return flags;
 }
 
@@ -351,7 +468,13 @@ export const FLAG_LABEL: Record<RowFlag, string> = {
   transfer: 'possible transfer',
   pending: 'pending',
   excluded: 'not counted',
+  set_aside: 'set aside',
 };
+
+/** True once the owner has said this row will not be filed, so the queue stops counting it. */
+export function isSetAside(t: Pick<Transaction, 'review_status'>): boolean {
+  return t.review_status === 'dismissed';
+}
 
 // ─── The scheduled band ───────────────────────────────────────────────────────
 
@@ -430,96 +553,6 @@ export function occurrenceMeta(o: RecurringForecastOccurrence): string {
   return `${freq} · ${o.confidence_label}${varies}`;
 }
 
-// ─── Whose keystroke it is ────────────────────────────────────────────────────
-
-/**
- * The slice of the focused element the shortcut guard reads, kept as data so it can be driven by
- * a test. `readFocusedElement` is the only thing here that touches the DOM.
- */
-export interface FocusedElement {
-  tagName: string;
-  /** The `role` ATTRIBUTE, not the reflected property: the attribute is what every browser has. */
-  role: string | null;
-  tabIndex: number;
-  isContentEditable: boolean;
-}
-
-/**
- * Tags that are controls whatever else they say about themselves.
- *
- * `OPTION` is here because a listbox option can hold focus in some browsers, and `SUMMARY` and
- * `DETAILS` because they are operable without any role or tabindex.
- */
-const CONTROL_TAGS = new Set([
-  'A',
-  'AREA',
-  'BUTTON',
-  'DETAILS',
-  'INPUT',
-  'OPTION',
-  'SELECT',
-  'SUMMARY',
-  'TEXTAREA',
-]);
-
-/** Roles that mean "the owner is operating this", including every role a custom widget adopts. */
-const CONTROL_ROLES = new Set([
-  'button',
-  'checkbox',
-  'combobox',
-  'link',
-  'listbox',
-  'menu',
-  'menuitem',
-  'menuitemcheckbox',
-  'menuitemradio',
-  'option',
-  'radio',
-  'searchbox',
-  'slider',
-  'spinbutton',
-  'switch',
-  'tab',
-  'textbox',
-  'treeitem',
-]);
-
-/**
- * Whether a bare `j`/`k`/`a`/`x` belongs to the ledger or to whatever has focus.
- *
- * The guard this replaces was a tagName allowlist, `['INPUT','TEXTAREA','SELECT']`, and it had a
- * hole wide enough to write through. `components/balance/Select` renders a `<button
- * role="combobox">`, whose tagName is BUTTON: focusing the account filter or the range control and
- * pressing `a` confirmed the AI draft under the cursor and wrote it, and `x` dismissed it. Every
- * filter chip, every Skip button, every row's select circle and the row's own Accept and Dismiss
- * buttons had the same hole, so `x` pressed twice dismissed a second draft.
- *
- * A tagName list is the wrong shape because the question is not which element it is. It is whether
- * focus rests on a control at all. Anything focusable is something the owner is operating; the
- * ledger's keys mean something only when focus is on the page itself, which is where it sits while
- * the owner is reading the list. Focus lands ON the control rather than inside it, so this needs
- * no ancestor walk, with the one exception of `contenteditable`, which every descendant inherits.
- */
-export function keystrokeBelongsToLedger(el: FocusedElement | null): boolean {
-  if (!el) return true;
-  if (el.isContentEditable) return false;
-  if (CONTROL_TAGS.has(el.tagName.toUpperCase())) return false;
-  if (el.role !== null && CONTROL_ROLES.has(el.role.trim().toLowerCase())) return false;
-  // A deliberate tabindex is the author saying "this is operable". `document.body` and every plain
-  // element report -1, which is how "nothing is focused" reaches here.
-  return el.tabIndex < 0;
-}
-
-export function readFocusedElement(target: EventTarget | null): FocusedElement | null {
-  if (!(target instanceof HTMLElement)) return null;
-  return {
-    tagName: target.tagName,
-    role: target.getAttribute('role'),
-    tabIndex: target.tabIndex,
-    isContentEditable: target.isContentEditable,
-  };
-}
-
 // ─── What a row is handed ─────────────────────────────────────────────────────
 
 /** Everything a ledger row can ask the screen to do. One object, so it can be one prop. */
@@ -533,6 +566,9 @@ export interface LedgerRowHandlers {
   keepBoth: (groupId: string) => void;
   confirmTransfer: (pairId: string) => void;
   rejectTransfer: (pairId: string) => void;
+  /** Stop counting this row in the "needs a category" queue, or start counting it again. */
+  setAside: (transactionId: string) => void;
+  bringBack: (transactionId: string) => void;
 }
 
 /**
@@ -559,6 +595,8 @@ export function createLedgerRowActions(latest: { current: LedgerRowHandlers }): 
     keepBoth: (groupId) => latest.current.keepBoth(groupId),
     confirmTransfer: (pairId) => latest.current.confirmTransfer(pairId),
     rejectTransfer: (pairId) => latest.current.rejectTransfer(pairId),
+    setAside: (transactionId) => latest.current.setAside(transactionId),
+    bringBack: (transactionId) => latest.current.bringBack(transactionId),
   };
 }
 

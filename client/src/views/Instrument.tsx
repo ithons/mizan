@@ -2,7 +2,12 @@ import { useMemo, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { differenceInCalendarDays, format, parseISO } from 'date-fns';
-import type { AdvisorDraftAction, Insight, ReportComparisonMode } from '@shared/types';
+import type {
+  AdvisorDraftAction,
+  CategoryTrendReport,
+  Insight,
+  ReportComparisonMode,
+} from '@shared/types';
 import {
   accountsApi,
   aiApi,
@@ -104,6 +109,7 @@ function BarRow({
   extent,
   diverging,
   tone,
+  showSign = false,
 }: {
   label: string;
   sub?: string;
@@ -111,6 +117,13 @@ function BarRow({
   extent: number;
   diverging: boolean;
   tone?: string;
+  /**
+   * Off everywhere the list is one direction with exceptions, where a `+` on every ordinary row
+   * says nothing. On where the sign IS the reading: in "What moved it" a positive figure and a
+   * negative one are both ordinary, and an unmarked positive next to a marked negative reads as a
+   * magnitude beside a signed value.
+   */
+  showSign?: boolean;
 }) {
   return (
     <div className="grid grid-cols-[minmax(0,1fr)_minmax(72px,140px)_92px] items-center gap-x-5 py-[7px]">
@@ -120,10 +133,88 @@ function BarRow({
       </span>
       <SignedBar value={amount} extent={extent} diverging={diverging} height={8} />
       <span className={`whitespace-nowrap text-right text-body-lg tabular-nums ${tone ?? 'text-ink'}`}>
-        {formatWholeCurrency(amount)}
+        {formatWholeCurrency(amount, { showSign })}
       </span>
     </div>
   );
+}
+
+/**
+ * One category's spend across the window's months, on a scale the whole grid shares.
+ *
+ * Local to this screen rather than added to `components/balance`, because it is not a general
+ * chart: it draws one series whose months are the same months as every other row's, which is
+ * exactly the property that makes the rows comparable and exactly what a reusable sparkline could
+ * not promise. `BarRow` above is horizontal and answers "how big"; this is the same quantity over
+ * time, which is the reading the window's month-by-month section gives net and gives no category.
+ *
+ * The columns are divs on Tailwind grounds rather than an SVG for the same reason `SignedBar` is:
+ * colour has to come from the token layer, and the tokens reach markup through class names.
+ * `extent` is the largest single month in the WHOLE grid, so a tall column means a lot of money
+ * rather than a lot of money for that row. It is stated in the caption, because a bar with no
+ * stated scale is a shape, not a measurement.
+ */
+function MonthStrip({ values, extent, label }: { values: number[]; extent: number; label: string }) {
+  const span = Math.max(1, extent);
+  return (
+    <div className="flex h-[26px] items-end gap-[2px]" role="img" aria-label={label}>
+      {values.map((value, i) => {
+        const height = Math.max(1, Math.round((Math.min(1, Math.abs(value) / span) * 100)));
+        return (
+          <div key={i} className="relative flex h-full min-w-[3px] flex-1 items-end">
+            {/* Money that came back keeps the accent the rest of this screen reserves for it, so a
+                month whose refunds outweighed its purchases is not drawn as ordinary spending.
+                Both columns are marks and need 3:1 against the paper they sit on: `muted` reads
+                5.67:1 light and 6.95:1 dark, `sage-deep` 4.93:1 and 8.38:1, computed from the
+                triplets in client/src/index.css. */}
+            <div
+              className={`w-full rounded-sm ${value < 0 ? 'bg-sage-deep' : 'bg-muted'}`}
+              style={{ height: `${height}%` }}
+            />
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+/**
+ * The window's per-category series, ranked and capped, with the grid's shared scale.
+ *
+ * `getSpendingTrendsReport` already emits one value per entry in `months` for every series, so the
+ * index alignment holds by construction and the `?? 0` is a guard rather than a fix. Ranked by
+ * what the window totals rather than by the last month, because the section it sits under ranks
+ * the same categories the same way and two different orders for one set of rows is a screen
+ * arguing with itself.
+ *
+ * `months` is the months the report FOUND rows in, not the calendar months the window spans, so a
+ * month nothing was filed in is absent rather than a zero column. The caption names the first and
+ * last, and the label counts them, so the grid never implies a month it did not draw.
+ */
+const TREND_ROWS = 6;
+
+function readTrendGrid(report: CategoryTrendReport | undefined) {
+  const months = report?.months ?? [];
+  if (months.length < 2) return null;
+
+  const rows = (report?.series ?? [])
+    .map((s) => ({
+      id: s.category_id,
+      name: s.category_name,
+      values: months.map((_, i) => s.values[i] ?? 0),
+      total: s.values.reduce((sum, v) => sum + v, 0),
+    }))
+    .filter((row) => row.values.some((v) => v !== 0))
+    .sort((a, b) => Math.abs(b.total) - Math.abs(a.total));
+
+  if (rows.length === 0) return null;
+
+  const shown = rows.slice(0, TREND_ROWS);
+  // The extent comes from the rows DRAWN, not from every row the report returned. Taking it from
+  // the full set lets a category below the cut set the scale, which leaves a grid where no column
+  // reaches full height and a caption citing a figure that is not on screen.
+  const extent = Math.max(...shown.flatMap((row) => row.values.map((v) => Math.abs(v))));
+  return { months, rows: shown, extent, hidden: rows.length - shown.length };
 }
 
 /**
@@ -236,6 +327,20 @@ export function Instrument() {
     queryKey: ['reports', 'merchants', range],
     queryFn: () => reportsApi.merchants({ ...range, limit: 10 }),
   });
+  // Per-category spend by month. No `categoryIds`: unfiltered is every category the window holds,
+  // which is the set "Where it went" already ranks, and asking for a subset would mean this screen
+  // deciding twice which categories matter.
+  const trendsQ = useQuery({
+    queryKey: ['reports', 'trends', range],
+    queryFn: () => reportsApi.trends(range),
+  });
+  // Null, not an error, when the window holds fewer than two snapshots: there is no movement to
+  // attribute. `retry: false` because a window with one sheet in it will not grow one on a retry.
+  const attributionQ = useQuery({
+    queryKey: ['reports', 'networth-attribution', range],
+    queryFn: () => reportsApi.networthAttribution(range),
+    retry: false,
+  });
 
   // A dead request must not render as a quiet zero: the banner names what is missing.
   const failableQueries = [
@@ -251,6 +356,8 @@ export function Instrument() {
     { query: cashflowQ, label: 'cash flow' },
     { query: spendingQ, label: 'spending by category' },
     { query: merchantsQ, label: 'merchants' },
+    { query: trendsQ, label: 'spending by month' },
+    { query: attributionQ, label: 'what moved net worth' },
   ];
 
   const snapshot = snapshotQ.data;
@@ -371,6 +478,10 @@ export function Instrument() {
   const spendingScale = signedBarScale([...split.spent, ...split.returned].map((c) => c.amount));
   const merchants = merchantsQ.data?.merchants ?? [];
   const merchantScale = signedBarScale(merchants.map((m) => m.total));
+  const trendGrid = readTrendGrid(trendsQ.data);
+  const attribution = attributionQ.data ?? null;
+  const movers = attribution?.accounts ?? [];
+  const moverScale = signedBarScale(movers.map((a) => a.delta));
 
   const trendPoints = (historyQ.data ?? []).map((s) => ({
     date: s.date,
@@ -524,7 +635,7 @@ export function Instrument() {
             <div className="grid content-start gap-[11px]">
               {oldestOverdue && (
                 <RailRow
-                  to="/bills"
+                  to="/ledger"
                   label={`${oldestOverdue.merchant_name} overdue`}
                   value={formatWholeCurrency(Math.abs(oldestOverdue.adjusted_amount ?? oldestOverdue.amount))}
                   tone="text-clay"
@@ -532,7 +643,7 @@ export function Instrument() {
               )}
               {nextBill && (
                 <RailRow
-                  to="/bills"
+                  to="/ledger"
                   label={`Next ${nextBill.merchant_name}`}
                   value={`${formatWholeCurrency(Math.abs(nextBill.adjusted_amount ?? nextBill.amount))} ${
                     nextBill.days_until <= 0 ? 'today' : `in ${nextBill.days_until}d`
@@ -540,10 +651,10 @@ export function Instrument() {
                 />
               )}
               {topGoal && (
-                <RailRow to="/goals" label={topGoal.name} value={`${formatWholeCurrency(topGoal.remaining_amount)} to go`} />
+                <RailRow to="/plan" label={topGoal.name} value={`${formatWholeCurrency(topGoal.remaining_amount)} to go`} />
               )}
               {reviewCount > 0 && (
-                <RailRow to="/review" label="Uncategorized" value={`${reviewCount}`} tone="text-clay" />
+                <RailRow to="/ledger?uncategorized=1" label="Uncategorized" value={`${reviewCount}`} tone="text-clay" />
               )}
             </div>
 
@@ -720,6 +831,39 @@ export function Instrument() {
             </QueryState>
           </section>
 
+          {/* What moved net worth, account by account. The chart above says the line went there;
+              this says which balances took it. Rendered only where the report had two sheets to
+              difference, which is the same condition it returns null under. */}
+          {attribution && movers.length > 0 && (
+            <section>
+              <SectionLabel
+                className="mb-2"
+                summary={`${formatWholeCurrency(attribution.delta, { showSign: true })} over the window`}
+              >
+                What moved it
+              </SectionLabel>
+              {movers.map((account) => (
+                <BarRow
+                  key={account.account_id}
+                  label={account.account_name ?? 'Unnamed account'}
+                  sub={account.institution_name ?? undefined}
+                  amount={account.delta}
+                  tone={account.delta < 0 ? 'text-clay' : 'text-sage-deep'}
+                  showSign
+                  {...moverScale}
+                />
+              ))}
+              <p className="mt-2.5 max-w-[72ch] text-note leading-relaxed text-muted-2">
+                Two recorded balance sheets differenced account by account,{' '}
+                {format(parseISO(attribution.start_date), 'MMM d')} to{' '}
+                {format(parseISO(attribution.end_date), 'MMM d')}, not the window's own edges: only
+                measured sheets are used as endpoints, so a reconstruction is never one end of this
+                subtraction. Each figure is the account's effect on net worth, so a card whose
+                balance grew reads negative. Accounts that did not move are not listed.
+              </p>
+            </section>
+          )}
+
           {/* Month by month, only where the window holds more than one month to compare */}
           {months.length >= 2 && (
             <section>
@@ -825,6 +969,48 @@ export function Instrument() {
               )}
             </QueryState>
           </section>
+
+          {/* The same categories, over time. "Where it went" answers how big; this answers whether
+              it is usual, which is the only reading that tells a $731 month of groceries from a
+              $731 month of groceries that is double every month before it. Drawn only where the
+              window holds at least two months, because one column is not a trend. */}
+          {trendGrid && (
+            <section>
+              <SectionLabel className="mb-2" summary={`${trendGrid.months.length} months`}>
+                Each category, month by month
+              </SectionLabel>
+              <div className="min-w-0">
+                {trendGrid.rows.map((row) => (
+                  <div
+                    key={row.id}
+                    className="grid grid-cols-[minmax(0,1fr)_minmax(72px,140px)_92px] items-center gap-x-5 py-[7px]"
+                  >
+                    <span className="truncate text-body text-ink">{row.name}</span>
+                    <MonthStrip
+                      values={row.values}
+                      extent={trendGrid.extent}
+                      label={`${row.name}, ${trendGrid.months.length} months to ${trendGrid.months[trendGrid.months.length - 1]}`}
+                    />
+                    <span className="whitespace-nowrap text-right text-body-lg tabular-nums text-ink">
+                      {formatWholeCurrency(row.total)}
+                    </span>
+                  </div>
+                ))}
+              </div>
+              <p className="mt-2.5 max-w-[72ch] text-note leading-relaxed text-muted-2">
+                One column for each month this window has entries in,{' '}
+                {format(parseISO(`${trendGrid.months[0]}-01`), 'MMM yyyy')} to{' '}
+                {format(parseISO(`${trendGrid.months[trendGrid.months.length - 1]}-01`), 'MMM yyyy')}, left
+                to right. Every column in this grid is drawn against the same figure, the largest single
+                month here at {formatWholeCurrency(trendGrid.extent)}, so a taller column is more money
+                and not merely more for that row. The figure on the right is the window's total for the
+                category. A month drawn in the return colour is one whose refunds outweighed its
+                purchases.
+                {trendGrid.hidden > 0 &&
+                  ` ${trendGrid.hidden} smaller categor${trendGrid.hidden === 1 ? 'y is' : 'ies are'} not shown.`}
+              </p>
+            </section>
+          )}
 
           {/* Merchants. A different quantity from the categories above, and it says so. */}
           <section>

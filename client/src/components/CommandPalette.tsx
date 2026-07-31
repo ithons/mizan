@@ -1,12 +1,18 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Search, Loader2, Sparkles, ArrowRight, BrainCircuit, CornerDownLeft, ChevronLeft } from 'lucide-react';
+import { Loader2, Sparkles, ArrowRight, CornerDownLeft, ChevronLeft } from 'lucide-react';
 import { aiApi, settingsApi, syncApi } from '../lib/api';
 import { formatCurrency, formatDateShort, formatRelativeTime } from '../lib/formatters';
+import { useAiChat } from '../hooks/useAiChat';
+import { ASK_EVENT, isAdvisorAsk } from '../lib/askAdvisor';
+import { chordOf, useOverlay, useShortcuts } from '../lib/keyboard';
 import { useAppStore } from '../store';
+import { ALL_NAV_ITEMS } from './NavRail';
+import { AskPanel } from './AskPanel';
 import type {
   AdvisorDraftAction,
+  AdvisorDraftActionKind,
   AiDigest,
   AiDigestAction,
   AiDigestRevertResult,
@@ -21,42 +27,36 @@ interface Command {
   run: () => void;
 }
 
-// Restrict Command Palette drafts to lower-stakes, easily reversible actions (transactions & budgets).
-// High-stakes actions (goals, investments) should be handled via explicit UI or chat.
-const ALLOWED_PALETTE_DRAFTS = new Set([
+/**
+ * Drafts this surface will apply on one click: low stakes, mechanically reversible.
+ *
+ * Typed over the kind union rather than as a `Set<string>`, because the loose version outlived
+ * three of its own entries. `create_budget_group`, `rename_budget_group` and
+ * `assign_category_to_budget_group` stayed on this list after budget groups were dropped in
+ * migration 053, matching nothing and failing nothing. A stale entry is now a compile error.
+ */
+const ALLOWED_PALETTE_DRAFTS: ReadonlySet<AdvisorDraftActionKind> = new Set<AdvisorDraftActionKind>([
   'categorize_transaction',
   'create_merchant_rule',
   'update_budget',
-  'create_budget_group',
-  'rename_budget_group',
-  'assign_category_to_budget_group',
   'confirm_recurring',
   'create_recurring_adjustment',
 ]);
 
-const NAV_TARGETS = [
-  { label: 'Today', route: '/' },
-  { label: 'Review', route: '/review' },
-  { label: 'Accounts', route: '/accounts' },
-  { label: 'Transactions', route: '/transactions' },
-  { label: 'Cash flow', route: '/cash-flow' },
-  { label: 'Reports', route: '/reports' },
-  { label: 'Budget', route: '/budget' },
-  { label: 'Bills', route: '/bills' },
-  { label: 'Goals', route: '/goals' },
-  { label: 'Investments', route: '/investments' },
-  { label: 'Advisor', route: '/advisor' },
-  { label: 'Settings', route: '/settings' },
-];
-
 /**
- * The digest lives here rather than on a screen of its own.
+ * The three things this sheet is, and the one geometry they share.
  *
- * Advisor is a tab today and Phase 8 retires it in favour of this palette, so a panel built into
- * the Advisor view would be built to be deleted. The palette is also the right home on its merits:
- * "what did the AI change" is a question asked from wherever you happen to be standing, and ⌘K
- * answers it over the current screen instead of navigating away from the data it is about.
+ * `search`  jump and act
+ * `ask`     the conversation, which is now the only one there is
+ * `digest`  what the AI changed, row by row, with one gesture to put it back
+ *
+ * All three are anchored to the bottom edge and grow upward, so the input is always the last line
+ * and everything the app says appears above it. That is the arrangement a composer already has,
+ * and giving the launcher the same one means the screen you asked from stays visible above the
+ * sheet instead of behind it. The answer arrives beside the data it is about; that is the whole
+ * argument for a sheet over a sidebar, and it only holds if the data is still on screen.
  */
+type PaletteMode = 'search' | 'ask' | 'digest';
 
 type DigestWindow = '7d' | '30d' | 'all';
 
@@ -256,26 +256,8 @@ function AiDigestPanel({ onBack }: { onBack: () => void }) {
   const offer = digest ? revertOffer(digest) : null;
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col">
-      <div className="flex flex-shrink-0 items-center justify-between gap-4 border-b border-line px-4 py-3">
-        <button type="button" onClick={onBack} className="flex items-center gap-1 text-note text-muted transition-colors hover:text-ink">
-          <ChevronLeft size={14} /> Back
-        </button>
-        <div className="flex items-center gap-3 text-note">
-          {DIGEST_WINDOWS.map((w) => (
-            <button
-              key={w.id}
-              type="button"
-              onClick={() => setWin(w.id)}
-              className={w.id === win ? 'text-ink' : 'text-muted-2 transition-colors hover:text-muted'}
-            >
-              {w.label}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-4">
+    <>
+      <div className="min-h-0 flex-1 overflow-y-auto px-5 pb-4 pt-4">
         {isLoading && <p className="py-6 text-body text-muted">Reading the revision log…</p>}
 
         {digest && digest.action_count === 0 && (
@@ -328,55 +310,134 @@ function AiDigestPanel({ onBack }: { onBack: () => void }) {
           </>
         )}
       </div>
-    </div>
+
+      {/* The control line, in the slot the composer occupies in the other two modes. */}
+      <div className="flex flex-shrink-0 items-center justify-between gap-4 border-t border-line px-5 py-3">
+        <button
+          type="button"
+          onClick={onBack}
+          className="flex items-center gap-1 text-note text-muted transition-colors hover:text-ink"
+        >
+          <ChevronLeft size={14} /> Back
+        </button>
+        <div className="flex items-center gap-4 text-note">
+          {DIGEST_WINDOWS.map((w) => (
+            <button
+              key={w.id}
+              type="button"
+              onClick={() => setWin(w.id)}
+              className={w.id === win ? 'text-ink' : 'text-muted transition-colors hover:text-ink'}
+            >
+              {w.label}
+            </button>
+          ))}
+        </div>
+      </div>
+    </>
   );
 }
 
 export function CommandPalette() {
   const [open, setOpen] = useState(false);
-  const [mode, setMode] = useState<'search' | 'digest'>('search');
+  const [mode, setMode] = useState<PaletteMode>('search');
   const [query, setQuery] = useState('');
   const [debouncedQuery, setDebouncedQuery] = useState('');
   const [activeIdx, setActiveIdx] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
+  const sheetRef = useRef<HTMLDivElement>(null);
   const navigate = useNavigate();
   const { addToast } = useAppStore();
   const qc = useQueryClient();
+
+  /**
+   * The conversation is held here, not in `AskPanel`.
+   *
+   * The sheet unmounts its body every time it closes, so a hook that lived in the panel would drop
+   * the thread whenever the owner closed the sheet to look at the screen underneath it, which is
+   * the exact gesture the sheet exists to support. At this level it survives, and the cost is one
+   * conversation fetch on load when `localStorage` holds an active thread.
+   */
+  const chat = useAiChat();
 
   useEffect(() => {
     const handler = setTimeout(() => setDebouncedQuery(query), 400);
     return () => clearTimeout(handler);
   }, [query]);
 
-  // Global hotkey: Cmd/Ctrl + K, plus the in-app "Search or ask" affordances.
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
-        e.preventDefault();
-        setOpen((o) => !o);
-      }
-      if (e.key === 'Escape' && open) {
-        setOpen(false);
-      }
-    };
-    const handleOpenEvent = () => setOpen(true);
-    document.addEventListener('keydown', handleKeyDown);
-    window.addEventListener('mizan:open-palette', handleOpenEvent);
-    return () => {
-      document.removeEventListener('keydown', handleKeyDown);
-      window.removeEventListener('mizan:open-palette', handleOpenEvent);
-    };
-  }, [open]);
+  /**
+   * The sheet says it is covering the screen, and that is the whole of what it has to do.
+   *
+   * It used to be an overlay in appearance only: the route view stayed mounted, nothing trapped
+   * focus, and in `digest` mode the button that set the mode unmounts, so focus fell back to
+   * `document.body`. The ledger's own listener read that as "nothing is focused, this key is mine"
+   * and `a` applied an AI draft while the owner was reading the record of what the AI had already
+   * done. Declaring the overlay makes every `screen` binding inert for as long as this is open,
+   * without the ledger knowing this sheet exists.
+   */
+  useOverlay('command-palette', open);
+
+  /**
+   * ⌘K is the only modifier chord this app takes, and the audit that left it alone.
+   *
+   * Everything else was already spoken for: ⌘1 to ⌘9 switch browser tabs, ⌘0 resets zoom, ⌘R
+   * reloads, ⌘P prints, ⌘S saves the page. Each was being `preventDefault`ed for a screen. ⌘K is
+   * kept because it is the one gesture the whole design leans on; it is claimed by Chrome's
+   * omnibox and Firefox's web search, unbound in Safari, and interceptable in all three.
+   * Navigation moved to the `g` prefix, which takes nothing from anyone.
+   *
+   * `palette.toggle` sits on the `app` layer so it still closes this sheet from inside it, while
+   * `overlay.close` reaches only the topmost overlay, so an Escape inside a dialog opened over the
+   * sheet closes the dialog and not both at once.
+   */
+  useShortcuts('command-palette', {
+    'palette.toggle': () => setOpen((o) => !o),
+    'overlay.close': () => setOpen(false),
+  });
 
   useEffect(() => {
-    if (open) {
-      setTimeout(() => inputRef.current?.focus(), 50);
-    } else {
-      setQuery('');
-      setDebouncedQuery('');
-      setActiveIdx(0);
-      setMode('search');
+    const handleOpenEvent = () => setOpen(true);
+    // A screen handing the sheet a question: it opens on the conversation with the words already
+    // in the composer, unsent, over the screen that built them.
+    const handleAsk = (event: Event) => {
+      const detail = (event as CustomEvent<unknown>).detail;
+      if (!isAdvisorAsk(detail)) return;
+      setQuery(detail.prompt);
+      setMode('ask');
+      setOpen(true);
+    };
+    window.addEventListener('mizan:open-palette', handleOpenEvent);
+    window.addEventListener(ASK_EVENT, handleAsk);
+    return () => {
+      window.removeEventListener('mizan:open-palette', handleOpenEvent);
+      window.removeEventListener(ASK_EVENT, handleAsk);
+    };
+  }, []);
+
+  /**
+   * Focus is always inside the sheet, in every mode.
+   *
+   * `search` and `ask` each own an input. `digest` has none, and the command button that set the
+   * mode unmounts with the list, so focus was left on `document.body`: outside the sheet, on the
+   * screen the sheet is covering. The container takes it instead, which is also what makes Escape
+   * and the arrow keys arrive from somewhere the sheet controls.
+   */
+  useEffect(() => {
+    if (!open) return;
+    if (mode === 'search') {
+      const t = setTimeout(() => inputRef.current?.focus(), 50);
+      return () => clearTimeout(t);
     }
+    if (mode === 'digest') sheetRef.current?.focus();
+  }, [open, mode]);
+
+  useEffect(() => {
+    if (open) return;
+    // The conversation is deliberately NOT cleared: it belongs to the thread, not to this opening
+    // of the sheet. Only the launcher's own state resets.
+    setQuery('');
+    setDebouncedQuery('');
+    setActiveIdx(0);
+    setMode('search');
   }, [open]);
 
   const { data: analysis, isLoading: isAnalyzing } = useQuery({
@@ -396,18 +457,31 @@ export function CommandPalette() {
     onError: (err: Error) => addToast({ type: 'error', message: err.message }),
   });
 
+  const openAsk = useCallback(() => setMode('ask'), []);
+
   const commands = useMemo<Command[]>(() => {
     const go = (route: string) => () => {
       setOpen(false);
       navigate(route);
     };
     return [
-      ...NAV_TARGETS.map((t) => ({
-        id: `nav:${t.route}`,
-        label: `Go to ${t.label}`,
-        keywords: t.label,
-        run: go(t.route),
+      // The `g` chord is printed as each destination's hint, read out of the shortcut table rather
+      // than spelled again here. It is the one place the chord is taught, and it is taught where
+      // the owner is already looking for the destination.
+      ...ALL_NAV_ITEMS.map((item) => ({
+        id: `nav:${item.to}`,
+        label: `Go to ${item.label}`,
+        hint: chordOf(item.shortcut),
+        keywords: item.label,
+        run: go(item.to),
       })),
+      {
+        id: 'action:ask',
+        label: 'Ask about your money',
+        hint: 'conversation',
+        keywords: 'ask advisor chat question ai',
+        run: openAsk,
+      },
       {
         id: 'action:ai-digest',
         label: 'What the AI changed',
@@ -421,14 +495,13 @@ export function CommandPalette() {
         hint: 'manual entry',
         run: () => {
           setOpen(false);
-          navigate('/transactions');
+          navigate('/ledger');
           setTimeout(() => window.dispatchEvent(new Event('mizan:add-transaction')), 120);
         },
       },
       {
         id: 'action:sync',
         label: 'Sync now',
-        hint: '⌘S',
         run: () => {
           setOpen(false);
           syncApi.run().catch((err: unknown) => {
@@ -447,35 +520,40 @@ export function CommandPalette() {
         },
       },
     ];
-  }, [navigate, addToast]);
+  }, [navigate, addToast, openAsk]);
 
+  /**
+   * The bridge from searching to asking.
+   *
+   * Typed words that match no command are a question, not a failed search, so the list answers with
+   * the question itself rather than with "no matches". This is how the conversational half of ⌘K is
+   * found: by reaching for it. It is always last, so it never displaces a command the owner meant.
+   */
   const filteredCommands = useMemo(() => {
     const q = query.trim().toLowerCase();
     if (!q) return commands;
     const words = q.split(/\s+/);
-    return commands.filter((c) => {
+    const matches = commands.filter((c) => {
       const hay = `${c.label} ${c.keywords ?? ''}`.toLowerCase();
       return words.every((w) => hay.includes(w));
     });
-  }, [commands, query]);
+    if (q.length <= 3) return matches;
+    return [
+      ...matches,
+      {
+        id: 'action:ask-this',
+        label: `Ask: ${query.trim()}`,
+        hint: 'conversation',
+        run: openAsk,
+      },
+    ];
+  }, [commands, query, openAsk]);
 
   useEffect(() => setActiveIdx(0), [query]);
 
   if (!open) return null;
 
-  if (mode === 'digest') {
-    return (
-      <>
-        <div className="fixed inset-0 z-50 bg-ink/20 backdrop-blur-sm transition-opacity" onClick={() => setOpen(false)} />
-        <div className="fixed left-1/2 top-[12%] z-50 flex max-h-[76vh] w-full max-w-3xl -translate-x-1/2 flex-col overflow-hidden rounded-xl border border-line-2 bg-card shadow-e3">
-          <AiDigestPanel onBack={() => setMode('search')} />
-        </div>
-      </>
-    );
-  }
-
   const drafts = (analysis?.drafts || []).filter((draft) => ALLOWED_PALETTE_DRAFTS.has(draft.payload.kind));
-  const showAiEmpty = query.trim().length > 3 && !isAnalyzing && drafts.length === 0 && filteredCommands.length === 0;
 
   const onInputKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'ArrowDown') {
@@ -490,53 +568,15 @@ export function CommandPalette() {
     }
   };
 
-  return (
+  const search = (
     <>
-      <div className="fixed inset-0 z-50 bg-ink/20 backdrop-blur-sm transition-opacity" onClick={() => setOpen(false)} />
-      <div className="fixed left-1/2 top-[18%] z-50 flex max-h-[62vh] w-full max-w-2xl -translate-x-1/2 flex-col overflow-hidden rounded-xl border border-line-2 bg-card shadow-e3">
-        <div className="flex items-center border-b border-line px-4 py-3">
-          <Search size={18} className="mr-3 flex-shrink-0 text-muted" />
-          <input
-            ref={inputRef}
-            type="text"
-            className="flex-1 border-none bg-transparent p-0 text-sub text-ink placeholder:text-muted-2 focus:outline-none focus:ring-0"
-            placeholder="Search, jump, or ask Mizān…"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            onKeyDown={onInputKeyDown}
-          />
-          {isAnalyzing && <Loader2 size={16} className="ml-3 flex-shrink-0 animate-spin text-sage" />}
-        </div>
-
-        <div className="flex-1 overflow-y-auto p-2">
-          {filteredCommands.length > 0 && (
-            <div className="mb-1">
-              {filteredCommands.map((c, i) => (
-                <button
-                  key={c.id}
-                  type="button"
-                  onClick={c.run}
-                  onMouseEnter={() => setActiveIdx(i)}
-                  className={`relative flex w-full items-center justify-between rounded-lg px-3 py-2 text-left text-body-lg transition-colors before:absolute before:inset-y-1.5 before:left-0 before:w-[2px] before:rounded-full ${
-                    i === activeIdx
-                      ? 'bg-well font-medium text-ink before:bg-sage'
-                      : 'text-ink-soft before:bg-transparent'
-                  }`}
-                >
-                  <span>{c.label}</span>
-                  <span className="flex items-center gap-2 text-micro text-muted-2">
-                    {c.hint}
-                    {i === activeIdx && <CornerDownLeft size={12} />}
-                  </span>
-                </button>
-              ))}
+      <div className="min-h-0 flex-1 overflow-y-auto p-2">
+        {drafts.length > 0 && (
+          <div className="mb-1 space-y-1">
+            <div className="px-3 py-1.5 text-rule font-semibold uppercase tracking-wider text-muted">
+              Suggested actions
             </div>
-          )}
-
-          {drafts.length > 0 && (
-            <div className="space-y-1">
-              <div className="px-3 py-1.5 text-rule font-semibold uppercase tracking-wider text-muted-2">Suggested actions</div>
-              {drafts.map((draft: AdvisorDraftAction) => {
+            {drafts.map((draft: AdvisorDraftAction) => {
                 const isApplying = confirmMutation.isPending && confirmMutation.variables?.id === draft.id;
                 return (
                   <div key={draft.id} className="group flex cursor-default flex-col gap-2 rounded-lg border border-transparent p-3 transition-colors hover:bg-well/60">
@@ -572,35 +612,77 @@ export function CommandPalette() {
                     )}
                   </div>
                 );
-              })}
-            </div>
-          )}
+            })}
+          </div>
+        )}
 
-          {showAiEmpty && (
-            <div className="flex flex-col items-center justify-center px-4 py-8 text-center">
-              <BrainCircuit size={24} className="mb-2 text-muted" />
-              <p className="text-body-lg font-medium text-ink">No matches</p>
-              <p className="mt-1 text-note text-muted">Try rephrasing, or take it to the Advisor for a real answer.</p>
-              <button
-                onClick={() => {
-                  setOpen(false);
-                  navigate('/advisor', { state: { advisorPrompt: { source: 'dashboard', prompt: query, recordKind: 'palette' } } });
-                }}
-                className="mt-4 flex items-center gap-1 text-note text-sage-deep hover:underline"
-              >
-                Ask Advisor <ArrowRight size={12} />
-              </button>
-            </div>
-          )}
-        </div>
+        {filteredCommands.map((c, i) => (
+          <button
+            key={c.id}
+            type="button"
+            onClick={c.run}
+            onMouseEnter={() => setActiveIdx(i)}
+            className={`relative flex w-full items-center justify-between gap-4 rounded-lg px-3 py-2 text-left text-body-lg transition-colors before:absolute before:inset-y-1.5 before:left-0 before:w-[2px] before:rounded-full ${
+              i === activeIdx ? 'bg-well font-medium text-ink before:bg-sage' : 'text-ink-soft before:bg-transparent'
+            }`}
+          >
+            <span className="min-w-0 truncate">{c.label}</span>
+            <span className="flex flex-shrink-0 items-center gap-2 text-micro text-muted">
+              {c.hint}
+              {i === activeIdx && <CornerDownLeft size={12} />}
+            </span>
+          </button>
+        ))}
 
-        <div className="flex items-center justify-between border-t border-line bg-card-alt px-4 py-2 text-rule text-muted">
-          <span>
-            <kbd className="mr-1 rounded bg-line px-1.5 py-0.5 font-mono">↑↓</kbd>
-            <kbd className="mr-1 rounded bg-line px-1.5 py-0.5 font-mono">↵</kbd> to jump ·{' '}
-            <kbd className="rounded bg-line px-1.5 py-0.5 font-mono">esc</kbd> to close
-          </span>
-          <span>Drafts require explicit confirmation</span>
+        {/* Under four characters there is no question to offer yet, so this is the one state where
+            the list can be empty. It says what would happen next rather than "no matches". */}
+        {filteredCommands.length === 0 && (
+          <p className="px-3 py-4 text-body text-muted">
+            No command matches. Keep typing and this becomes a question.
+          </p>
+        )}
+      </div>
+
+      <div className="flex flex-shrink-0 items-center gap-3 border-t border-line px-5 py-3.5">
+        <input
+          ref={inputRef}
+          type="text"
+          className="min-w-0 flex-1 border-none bg-transparent p-0 text-sub text-ink placeholder:text-muted focus:outline-none focus:ring-0"
+          placeholder="Search, jump, or ask about your money"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          onKeyDown={onInputKeyDown}
+        />
+        {isAnalyzing && <Loader2 size={16} className="flex-shrink-0 animate-spin text-sage" />}
+        <span className="flex-shrink-0 text-rule text-muted">
+          <kbd className="mr-1 rounded border border-line-3 px-1 py-px font-mono">↑↓</kbd>
+          <kbd className="mr-1 rounded border border-line-3 px-1 py-px font-mono">↵</kbd>
+          <kbd className="rounded border border-line-3 px-1 py-px font-mono">esc</kbd>
+        </span>
+      </div>
+    </>
+  );
+
+  return (
+    <>
+      {/* No blur and a light scrim. The sheet's whole claim is that the answer arrives beside the
+          data it is about, and a screen you cannot read behind it is a screen you have left. */}
+      <div className="fixed inset-0 z-50 bg-ink/10 transition-opacity" onClick={() => setOpen(false)} />
+      <div className="pointer-events-none fixed inset-x-0 bottom-0 z-50 flex justify-center pb-5 pl-6 pr-[calc(var(--mz-rail-w)+24px)]">
+        <div
+          ref={sheetRef}
+          role="dialog"
+          aria-modal="true"
+          aria-label="Command sheet"
+          /* Focusable by script and not by Tab: the digest mode has no input of its own and focus
+             has to land somewhere inside the sheet rather than on the screen behind it. */
+          tabIndex={-1}
+          className="mz-sheet pointer-events-auto flex w-full max-w-3xl flex-col overflow-hidden rounded-xl border border-line-2 bg-card shadow-e3 focus:outline-none"
+          style={{ maxHeight: mode === 'search' ? '52vh' : '74vh' }}
+        >
+          {mode === 'search' && search}
+          {mode === 'ask' && <AskPanel chat={chat} draft={query} onDraftChange={setQuery} />}
+          {mode === 'digest' && <AiDigestPanel onBack={() => setMode('search')} />}
         </div>
       </div>
     </>

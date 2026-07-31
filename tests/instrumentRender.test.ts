@@ -127,3 +127,69 @@ test('the register rule is stated once, so the reader learns which half the sele
     assert.match(body, new RegExp(label));
   }
 });
+
+/**
+ * The two readings the consolidation dropped, back on the surface that replaced the screens they
+ * came from.
+ *
+ * `reportsApi.trends` and `reportsApi.networthAttribution` were called by the retired Today and
+ * Reports views and by nothing afterwards: both fetchers stayed defined, both routes stayed
+ * mounted, and neither answer could reach the owner. Fixtures are the live shapes; see the harness.
+ */
+
+test('each category is drawn over the window months, on one stated scale', () => {
+  const body = text(render('six-months'));
+
+  assert.match(body, /Each category, month by month/);
+  assert.match(body, /3 months/);
+  // The window's own end months are named, so a column has a date rather than a position.
+  assert.match(body, /One column for each month this window has entries in, May 2026 to Jul 2026/);
+  // The scale every column in the grid is drawn against is stated, because a bar without one is a
+  // shape. $2,160.83 is Amazon's June, the largest single month in the fixture.
+  assert.match(body, /largest single month here at \$2,161/);
+  // Ranked by what the window TOTALS, the same order "Where it went" ranks by. Amazon's June is
+  // the tallest column in the grid and Amazon still sits fifth, because May+June+July nets to
+  // $470.17 against Restaurants' $914.24. Ranking by the tallest column would have put a category
+  // the owner barely spent in above one they spent in every month.
+  assert.ok(body.indexOf('Restaurants') < body.indexOf('Amazon'));
+  // Six rows are drawn, and the two below the cut are counted rather than dropped in silence.
+  assert.match(body, /Household & Everyday/);
+  assert.doesNotMatch(body, /Software & AI Tools/);
+  assert.match(body, /2 smaller categories are not shown/);
+  // The stated scale is a column that is actually on screen: $2,160.83 is Amazon's June, and
+  // Amazon is the fifth of the six drawn rows.
+  assert.ok(body.indexOf('Amazon') < body.indexOf('largest single month here'));
+});
+
+test('a window holding one month draws no grid at all, rather than one column', () => {
+  const body = text(
+    render('six-months', {
+      trends: { months: ['2026-07'], series: [{ category_id: 'c', category_name: 'Pets', color: null, values: [140.29] }] },
+    })
+  );
+  assert.doesNotMatch(body, /Each category, month by month/);
+});
+
+test('what moved net worth is attributed to accounts, with the liability sign explained', () => {
+  const body = text(render('six-months'));
+
+  assert.match(body, /What moved it/);
+  assert.match(body, /\+\$3,114 over the window/);
+  // Both cards moved net worth UP while their balances fell. Rendering the raw balance change here
+  // would print these as losses.
+  assert.match(body, /Discover/);
+  assert.match(body, /\+\$1,619/);
+  assert.match(body, /Chase Freedom Flex/);
+  assert.match(body, /\+\$1,512/);
+  assert.match(body, /Chase Checking/);
+  assert.match(body, /−\$1,324/);
+  assert.match(body, /a card whose balance grew reads negative/);
+  // The endpoints are the two measured sheets the service used, not the window's own edges.
+  assert.match(body, /Jul 1 to Jul 31/);
+  assert.match(body, /only\s+measured sheets are used as endpoints/);
+});
+
+test('a window with nothing to attribute says nothing rather than printing a zero move', () => {
+  const body = text(render('six-months', { attribution: null }));
+  assert.doesNotMatch(body, /What moved it/);
+});

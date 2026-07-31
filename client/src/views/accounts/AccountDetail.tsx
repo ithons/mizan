@@ -206,7 +206,7 @@ export function AccountDetail() {
           <SectionLabel underline className="flex-1">
             Recent transactions
           </SectionLabel>
-          <TextButton onClick={() => navigate('/transactions')}>View all</TextButton>
+          <TextButton onClick={() => navigate('/ledger')}>View all</TextButton>
         </div>
         {transactions.length === 0 ? (
           <div className="py-6 text-body text-muted">No transactions for this account yet.</div>

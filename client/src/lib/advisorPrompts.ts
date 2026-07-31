@@ -1,4 +1,4 @@
-import type { AdvisorRoutePrompt } from './advisorRouteState';
+import type { AdvisorRoutePrompt } from './askAdvisor';
 import type {
   Account,
   Budget,

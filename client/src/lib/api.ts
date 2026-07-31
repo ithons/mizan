@@ -168,7 +168,22 @@ export const transactionsApi = {
       method: 'PATCH',
       body: JSON.stringify(body),
     }),
-  markReview: (id: string, status: 'open' | 'reviewed' | 'dismissed') =>
+  /**
+   * Set a row aside, or bring it back. The Ledger's row action column is the only caller.
+   *
+   * The server's `TransactionReviewStatusSchema` also accepts `'reviewed'`, and nothing here sends
+   * it, because nothing needs to: `updateTransaction` and `bulkCategorizeTransactions` already set
+   * `review_status = 'reviewed'` as a side effect of filing a row
+   * (server/src/services/transactions.ts, server/src/services/categoryWrites.ts). Offering it as a
+   * button would be a second way to say what categorizing already says.
+   *
+   * `'dismissed'` is the one state nothing else can reach, and three server queries read it:
+   * `getCounts` in services/transactionReview.ts, the worker's uncategorized pull in
+   * services/aiWorker.ts, and `draftLiveness` in services/advisorDrafts.ts all exclude it. Without
+   * a caller those three clauses can never fire and the "needs a category" queue has no exit but
+   * categorizing.
+   */
+  markReview: (id: string, status: 'open' | 'dismissed') =>
     apiFetch<Transaction>(`/api/transactions/${id}/review`, {
       method: 'PATCH',
       body: JSON.stringify({ status }),
@@ -276,6 +291,19 @@ export const categoriesApi = {
 
 // ─── Rules ──────────────────────────────────────────────────────────────────
 
+/**
+ * One approval the server would not honour, and why.
+ *
+ * Named rather than left inline because the screen has to render it: an approval of N suggestions
+ * that quietly saves N-2 rules is a partial success reported as a whole one. The two reasons are
+ * what `approveMerchantRuleSuggestions` (server/src/services/rules.ts) emits, and both mean the
+ * page was looking at something the database no longer holds.
+ */
+export interface RuleApprovalSkip {
+  pattern: string;
+  reason: 'unknown_pattern' | 'unknown_category';
+}
+
 export const rulesApi = {
   list: () => apiFetch<MerchantRule[]>('/api/rules'),
   suggestions: () => apiFetch<MerchantRuleSuggestion[]>('/api/rules/suggestions'),
@@ -290,7 +318,7 @@ export const rulesApi = {
     apiFetch<{
       approved: number;
       applied: number;
-      skipped: Array<{ pattern: string; reason: 'unknown_pattern' | 'unknown_category' }>;
+      skipped: RuleApprovalSkip[];
     }>('/api/rules/suggestions/approve', {
       method: 'POST',
       body: JSON.stringify({ approvals }),
@@ -696,8 +724,9 @@ export const settingsApi = {
 /**
  * Mirrors `GuardRejectionReason` (server/src/services/aiWriteGuards.ts). Restated rather than
  * imported because the client never imports server modules; it exists so a refusal can be told
- * apart from a fault without parsing the prose that explains it, which is how `ReviewInbox` reads
- * an outcome.
+ * apart from a fault without parsing the prose that explains it. `readBatchOutcomes`
+ * (client/src/views/ledger/spine.ts) is what reads it, and the Ledger row prints the sentence
+ * beside the entry the refusal is about.
  */
 export type DraftRefusalReason =
   | 'pattern_too_short'
@@ -767,11 +796,18 @@ export const aiApi = {
       method: 'PUT',
       body: JSON.stringify({ profile }),
     }),
-  suggestCategories: (merchants: string[]) =>
-    apiFetch<Array<{ merchant: string; category_id: string; category_name: string }>>(
-      '/api/ai/suggest-categories',
-      { method: 'POST', body: JSON.stringify({ merchants }) }
-    ),
+  /* `suggestCategories` used to sit here, calling POST /api/ai/suggest-categories for the retired
+     review inbox. It is gone rather than re-homed, and the reason is provenance, not tidiness.
+     The endpoint hands back a bare merchant -> category map with no draft behind it, so the only
+     way a screen can apply one is `transactionsApi.bulkCategory`, and
+     `bulkCategorizeTransactions` (server/src/services/transactions.ts) writes
+     `source: 'human', markManual: true` AND upserts a human-source merchant rule for every
+     merchant it touches. Applying a model's guess through it would stamp the model's choice as the
+     owner's and mint owner rules from it. The worker's `categorize_transaction` drafts cover the
+     same ground and carry `category_source = 'ai'`, a `category_action_id`, the write guards, and
+     `POST /api/ai/actions/:id/undo`; they are reachable on the Ledger's "Model suggests" chip.
+     The server route still exists: it is outside this change's file set. */
+
   // Standing statements the advisor reasons from. A statement carrying a derived figure is refused
   // by the server with the reason in `error`, which the panel shows verbatim.
   listMemory: () => apiFetch<AiMemory[]>('/api/ai/memory'),

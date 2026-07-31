@@ -43,6 +43,15 @@ function errorMessage(err: unknown, fallback: string) {
   return err instanceof Error && err.message ? err.message : fallback;
 }
 
+/**
+ * The whole chat surface, as one value.
+ *
+ * Named because the sheet holds this hook and passes it down: `useAiChat` lives at the ⌘K root so a
+ * conversation survives closing the sheet and reopening it over a different screen, and `AskPanel`
+ * is a leaf that renders whatever it is handed.
+ */
+export type AiChat = ReturnType<typeof useAiChat>;
+
 export function useAiChat() {
   const [messages, setMessages] = useState<DisplayMessage[]>([]);
   const [isStreaming, setIsStreaming] = useState(false);

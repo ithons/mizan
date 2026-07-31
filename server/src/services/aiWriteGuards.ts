@@ -219,8 +219,11 @@ function rulesContend(
 /**
  * How a category is named to the owner.
  *
- * This refusal is read by a person: it reaches them through the ReviewInbox skip line and the 409
- * toast, and it used to end "which points at cat_sub_software". A row id is not a name, and there is
+ * This refusal is read by a person. It reaches them on the Ledger, twice over: a single confirm
+ * answers with a 409 whose message the row prints under the entry, and a batch confirm answers 200
+ * with a per-draft `BatchConfirmOutcome` whose `reason` `readBatchOutcomes`
+ * (client/src/views/ledger/spine.ts) routes onto the same line. It used to end "which points at
+ * cat_sub_software". A row id is not a name, and there is
  * no screen in this app that maps one back to one. The parent goes in front because the owner picks
  * a category as a path, and because nothing constrains leaf names to be unique: `categories` carries
  * exactly one index, `sqlite_autoindex_categories_1`, which `pragma_index_info` shows covers `id`,

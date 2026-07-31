@@ -1,13 +1,12 @@
 import { useState } from 'react';
 import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query';
-import { useNavigate } from 'react-router-dom';
 import { AlertTriangle, Download, Database, History, Sparkles } from 'lucide-react';
 import { networthApi, settingsApi, syncApi } from '../../lib/api';
 import type { ReconstructionTrigger } from '../../lib/api';
 import { formatCurrency, formatRelativeTime } from '../../lib/formatters';
 import { useAppStore } from '../../store';
 import { invalidateFinancialData } from '../../lib/queryInvalidation';
-import { advisorRouteState } from '../../lib/advisorRouteState';
+import { askAdvisor } from '../../lib/askAdvisor';
 import { buildImportRunAdvisorPrompt } from '../../lib/advisorPrompts';
 import {
   detectCsvImportMapping,
@@ -218,7 +217,6 @@ function ReconstructedHistoryPanel() {
 export function DataSection() {
   const { addToast } = useAppStore();
   const qc = useQueryClient();
-  const navigate = useNavigate();
   const [showDangerModal, setShowDangerModal] = useState(false);
   const [deleteConfirm, setDeleteConfirm] = useState('');
   const [csvText, setCsvText] = useState('');
@@ -707,9 +705,7 @@ export function DataSection() {
                 </div>
                 <button
                   className="text-muted hover:text-ink transition-colors"
-                  onClick={() => navigate('/advisor', {
-                    state: advisorRouteState(buildImportRunAdvisorPrompt(run)),
-                  })}
+                  onClick={() => askAdvisor(buildImportRunAdvisorPrompt(run))}
                   title="Ask advisor"
                 >
                   <Sparkles size={12} />

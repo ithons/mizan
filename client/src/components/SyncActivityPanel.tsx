@@ -1,6 +1,5 @@
 import React, { useEffect, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { useNavigate } from 'react-router-dom';
 import {
   AlertTriangle,
   CheckCircle2,
@@ -13,7 +12,7 @@ import {
 import type { LucideIcon } from 'lucide-react';
 import type { SyncRun, SyncRunDetail, SyncRunStatus } from '@shared/types';
 import { syncApi } from '../lib/api';
-import { advisorRouteState } from '../lib/advisorRouteState';
+import { askAdvisor } from '../lib/askAdvisor';
 import { buildSyncRunAdvisorPrompt } from '../lib/advisorPrompts';
 import { formatRelativeTime } from '../lib/formatters';
 
@@ -90,7 +89,6 @@ export function SyncActivityPanel({
   title?: string;
   showDetail?: boolean;
 }) {
-  const navigate = useNavigate();
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const visibleRuns = runs ?? [];
 
@@ -107,11 +105,11 @@ export function SyncActivityPanel({
 
   const selectedRun = visibleRuns.find((run) => run.id === selectedId) ?? visibleRuns[0];
   const selectedDetail = detail?.id === selectedRun?.id ? detail : undefined;
+  // Opens the ⌘K sheet over this panel with the question already written. It used to navigate to
+  // /advisor, which answered a question about this sync run on a screen that did not show it.
   const askAdvisorAboutSync = () => {
     if (!selectedRun) return;
-    navigate('/advisor', {
-      state: advisorRouteState(buildSyncRunAdvisorPrompt(selectedRun, selectedDetail)),
-    });
+    askAdvisor(buildSyncRunAdvisorPrompt(selectedRun, selectedDetail));
   };
 
   return (
