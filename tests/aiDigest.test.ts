@@ -9,7 +9,9 @@ import {
 } from '../server/src/services/aiDigest';
 import { writeTransactionCategory } from '../server/src/services/categoryWrites';
 import { undoAdvisorAction } from '../server/src/services/advisorDrafts';
+import { retireMerchantRule, upsertMerchantRule } from '../server/src/services/rules';
 import {
+  TEST_NOW,
   insertAccount,
   insertAdvisorAction,
   insertCategory,
@@ -420,6 +422,81 @@ test('since filters on the action timestamp, and a truncated window says it is t
   const capped = buildAiDigest(f.db, { limit: 1 });
   assert.equal(capped.action_count, 1);
   assert.equal(capped.truncated, true, 'silent truncation would read as completeness');
+});
+
+// ─── A retirement counts on both sides of the scope ───────────────────────────
+
+/**
+ * One AI action that categorizes a row AND retires a rule, written the way the apply path writes
+ * both halves: `retireMerchantRule` carries the action id into `merchant_rule_revisions`, which is
+ * the only place a retirement is attributable to an action.
+ */
+function aiCategorizedAndRetired(
+  f: Fixture,
+  params: { pattern: string; at: string }
+): { actionId: string; transactionId: string; ruleId: string } {
+  // Created before it is retired, because both revisions land on the same rule and "restorable"
+  // means the retirement is the NEWEST of them. A rule stamped later than its own retirement is not
+  // a state the apply path can produce, and `undoRuleRetirements` would decline it too.
+  const createdAt = new Date(Date.parse(params.at) - 60_000).toISOString();
+  const rule = upsertMerchantRule(f.db, params.pattern, f.dining, createdAt, { source: 'ai' });
+  const written = aiCategorized(f, {
+    merchant: 'Sweetgreen',
+    amount: -1875,
+    to: f.groceries,
+    at: params.at,
+  });
+  retireMerchantRule(f.db, rule.ruleId as string, {
+    source: 'ai',
+    actionId: written.actionId,
+    now: params.at,
+  });
+  return { ...written, ruleId: rule.ruleId as string };
+}
+
+test('an action whose rows all revert and whose retirement restores is full, not partial', (t) => {
+  const f = fixture();
+  t.after(() => f.db.close());
+
+  const { ruleId } = aiCategorizedAndRetired(f, { pattern: 'Trupanion', at: '2026-07-20T10:00:00.000Z' });
+
+  const [action] = buildAiDigest(f.db).actions;
+  assert.equal(action.revertable_rows, 1);
+  assert.equal(action.revertable_rules, 1);
+  // A restorable retirement makes an action MORE revertable, so counting it against `full` inverted
+  // the argument this field exists for.
+  assert.equal(action.revert_scope, 'full');
+
+  const outcome = revertAiDigestSince(f.db, '2026-07-01T00:00:00.000Z');
+  assert.equal(outcome.ok, true);
+  if (!outcome.ok) return;
+  assert.equal(outcome.result.reverted_rows, 1);
+  assert.equal(outcome.result.reverted_rules, 1);
+  assert.deepEqual(outcome.result.discrepancies, [], 'the plan is what the gesture did');
+
+  const live = f.db.prepare('SELECT retired_at FROM merchant_rules WHERE id = ?').get(ruleId) as {
+    retired_at: string | null;
+  };
+  assert.equal(live.retired_at, null);
+});
+
+test('a retirement whose pattern a replacement rule now holds is not planned as revertable', (t) => {
+  const f = fixture();
+  t.after(() => f.db.close());
+
+  aiCategorizedAndRetired(f, { pattern: 'Trupanion', at: '2026-07-20T10:00:00.000Z' });
+  // The partial unique index frees the pattern on retirement, and the owner used it. Putting the old
+  // rule back would be a second, unasked change to the rule they have now.
+  upsertMerchantRule(f.db, 'Trupanion', f.groceries, TEST_NOW, { source: 'human' });
+
+  const [action] = buildAiDigest(f.db).actions;
+  assert.equal(action.revertable_rows, 1);
+  assert.equal(action.revertable_rules, 0, 'undo would refuse it, so the plan must not promise it');
+  assert.equal(
+    action.revert_scope,
+    'partial',
+    'one gesture cannot put everything back, and `full` would say it could'
+  );
 });
 
 test('a deleted category is named as deleted rather than dropped from the diff', (t) => {

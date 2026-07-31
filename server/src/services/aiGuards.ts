@@ -6,30 +6,41 @@ import { revertAction } from './categoryWrites';
 import { readLatestSnapshot } from './netWorthHistory';
 import { buildRecurringForecast } from './recurringForecast';
 import { getIncomeReport, getReportSummary, getSpendingReport } from './reporting';
+import { unretireMerchantRule } from './rules';
 import { transactionReportInclusion } from './schemaDoc';
 
 /**
  * The harness that makes widening the AI's write authority safe.
  *
  * It snapshots the headline set, runs an autonomous batch, re-runs the set, and reverts the whole
- * batch by action id if the movement is not one a category rewrite can produce.
+ * batch if the movement is not one the window's own rows can produce.
+ *
+ * "THE WHOLE BATCH" MEANS EVERY TABLE THE BATCH WROTE, NOT THE ONE THIS FILE FINDS EASIEST TO WALK.
+ * The undo used to be `revertAction` per id, which is `transaction_category_revisions` and nothing
+ * else, and its completeness check read the same single table. A batch of one categorization plus
+ * one retirement of an inert AI rule therefore reverted the categorization, left `retired_at` set,
+ * and reported itself 'reverted' with the rule still gone. `merchant_rule_revisions` is the batch's
+ * other write log and it is walked here too, so the completeness check sees everything the batch
+ * wrote and the word "whole" is one the code establishes.
  *
  * WHY "A FIGURE MOVED" IS THE WRONG BREACH CONDITION. A categorization change is SUPPOSED to move
  * per-category totals. That is its entire purpose. A guard keyed on movement fires on every healthy
  * pass, and a guard that fires on healthy passes gets switched off.
  *
- * THE PROPERTY THAT IS ACTUALLY TRUE. Recategorizing is a reshuffle, not a change in magnitude. A
- * batch that only rewrites `category_id` cannot change how much money moved; it can only change
- * which line the money is filed under.
+ * THE PROPERTY THAT IS ACTUALLY TRUE. Reclassifying is a reshuffle, not a change in magnitude. A
+ * batch that refiles rows cannot change how much money moved; it can only change which line the
+ * money is filed under, and by exactly the amounts those rows already carried.
  *
  * THE HONEST RULE, because the naive version of even that is wrong. Some category roots (cat_xfer,
  * cat_inv, cat_crypto) are outside report scope, and `is_income` / `is_investment` decide which side
  * of the ledger a row lands on. So filing a row INTO a transfer category, or across the income
  * boundary, legitimately changes the month's totals, and that is exactly the write most worth
- * watching. What makes it a breach is the total moving by an amount the batch's own rewrites cannot
- * account for. Each rewritten row's contribution is computed from its BEFORE amount and its
- * before/after classification, so a batch that quietly changed an amount as well as a category
- * produces an expectation that does not match the observed movement.
+ * watching. What makes it a breach is the total moving by an amount the window's own rows cannot
+ * account for. EVERY row in the window is asked, not only the ones whose category id moved: its
+ * contribution is recomputed from its BEFORE amount and its before/after classification, so a batch
+ * that quietly changed an amount as well as a category produces an expectation that does not match
+ * the observed movement, while a pass whose integrity refresh un-paired a transfer reconciles by the
+ * row it let back in.
  *
  * EVERY FIGURE COMES FROM THE SERVICE THAT OWNS IT. reporting.ts for spend, income and the savings
  * rate, netWorthHistory.ts for net worth, recurringForecast.ts for the scheduled net, and
@@ -38,11 +49,14 @@ import { transactionReportInclusion } from './schemaDoc';
  * style: advisorChatTools ran its own aggregates and drifted until the advisor reported $1,695.00 of
  * spending where Reports reported $75.00 on the same data.
  *
- * SCOPE. This guards a batch that rewrites `category_id` and nothing else, which covers both current
- * autonomous kinds (categorize_transaction, create_merchant_rule). A batch that also confirms
- * transfers or resolves duplicates changes `counts` without changing a category, and this harness
- * reports that as a breach rather than absorbing it: those writes need their own conservation rule,
- * not a widened version of this one.
+ * SCOPE. This guards a batch whose effect on the month is a RECLASSIFICATION of rows that already
+ * exist: their category, or which side of the report they land on, or whether they count at all.
+ * That covers the autonomous kinds (categorize_transaction, create_merchant_rule,
+ * retire_merchant_rule) and it covers the integrity refresh a categorization pass runs as a side
+ * effect. It does NOT decide which kinds may apply unattended; `DRAFT_KIND_AUTONOMY` does, and
+ * `evaluateAiJobInvariants` enforces it. A batch that inserts a row, deletes one, moves a date or
+ * changes an amount is outside the scope and is reported structurally, because no reclassification
+ * can produce any of those.
  *
  * EVERY WINDOW IS PINNED BEFORE THE FIRST CAPTURE. The month and the forecast window are both
  * resolved once and handed to both captures. A window either capture resolved for itself would move
@@ -80,18 +94,22 @@ export type MovementPolicy = 'invariant' | 'accounted' | 'derived' | 'evidence';
  * because this table IS the policy the checks below read.
  *
  *  - `invariant`: a category rewrite cannot reach it. Any movement at all is a breach.
- *  - `accounted`: it may move, by exactly what the rewritten rows explain and no more.
+ *  - `accounted`: it may move, by exactly what the window's own rows explain and no more.
  *  - `derived`: it is a function of accounted headlines, so it may move only when they did.
  *  - `evidence`: it moves on every healthy pass. Recorded so an incident says what shifted, never
  *    a breach condition.
  *
- * WHAT THE `accounted` CHECK ACTUALLY CATCHES, since a batch that rewrote only categories cannot
- * trip it: the expectation and the headline are computed by two different services over the same
- * rows, so they agree by arithmetic while those services agree with each other. The check fires when
- * they stop agreeing, which is the drift this codebase has already paid for once, when
- * advisorChatTools' own aggregates reported $1,695.00 of spending against Reports' $75.00 on the
- * same data. Everything a batch can do that a category rewrite cannot is caught upstream of it, as a
- * `ledger_shape` breach, and quantified by this one.
+ * WHAT `accounted` MEASURES AGAINST. `diffWindowLedger` recomputes each window row's contribution
+ * from the amount it held BEFORE the batch and its before/after report classification, whether or
+ * not its category id moved. A category rewrite is one way to move that classification and it is no
+ * longer the only one this check tolerates: a transfer pairing broken as a side effect of an
+ * ordinary categorization pass moves a row across the counted boundary with no category rewrite
+ * anywhere, and it reconciles here to the cent. The expectation and the headline are computed by two
+ * different services over the same rows, so they agree by arithmetic while those services agree with
+ * each other. The check fires when they stop, which is the drift this codebase has already paid for
+ * once, when advisorChatTools' own aggregates reported $1,695.00 of spending against Reports'
+ * $75.00 on the same data. Everything a batch can do that no reclassification can produce is caught
+ * upstream of it, as a `ledger_shape` breach, and quantified by this one.
  */
 export const HEADLINE_MOVEMENT_POLICY: Readonly<Record<HeadlineName, MovementPolicy>> = {
   net_worth: 'invariant',
@@ -131,7 +149,10 @@ export interface HeadlineBreach {
   after: number | null;
   /** after - before. */
   moved: number | null;
-  /** What the batch's own category rewrites account for. Null where nothing may explain movement. */
+  /**
+   * What the window's own rows account for, each recomputed from the amount it held before the
+   * batch. Null where nothing may explain movement.
+   */
   explained: number | null;
   unit: 'cents' | 'percent' | 'none';
   detail: string;
@@ -194,6 +215,12 @@ export interface GuardedBatchReport<T> {
    * wrote twice counts twice: the revert had to undo both writes to leave the row where it started.
    */
   reverted_rows: number;
+  /**
+   * Merchant rules the revert un-retired. 0 unless `status` is 'reverted'. Counted apart from
+   * `reverted_rows` because it is not a row of the owner's ledger, and reported at all because a
+   * batch reported "reverted whole" while a rule stayed retired is the defect this exists to stop.
+   */
+  reverted_rules: number;
   /** Category writes the batch made that no action id can revert. Non-zero blocks the revert. */
   unrevertable_rows: number;
   /**
@@ -311,6 +338,14 @@ interface LedgerRow {
   categoryId: string | null;
   counts: boolean;
   side: 'expense' | 'income' | null;
+  /**
+   * The row's OWN inputs to whether the reports count it: `pending`, `transfer_status`,
+   * `duplicate_status`. Held as one comparable string because only equality is ever asked.
+   *
+   * These are what separate "this row changed" from "the category changed under this row". Both
+   * leave `category_id` alone and both move the month's totals; only the second is a breach.
+   */
+  flags: string;
 }
 
 /**
@@ -321,11 +356,20 @@ interface LedgerRow {
  */
 function captureWindowLedger(db: Database.Database, window: DateWindow): Map<string, LedgerRow> {
   const rows = db
-    .prepare('SELECT id, amount, category_id FROM transactions WHERE date BETWEEN ? AND ?')
+    .prepare(`
+      SELECT id, amount, category_id,
+             COALESCE(pending, 0) AS pending,
+             COALESCE(transfer_status, 'none') AS transfer_status,
+             COALESCE(duplicate_status, 'none') AS duplicate_status
+      FROM transactions WHERE date BETWEEN ? AND ?
+    `)
     .all(window.startDate, window.endDate) as Array<{
       id: string;
       amount: number;
       category_id: string | null;
+      pending: number;
+      transfer_status: string;
+      duplicate_status: string;
     }>;
 
   const ledger = new Map<string, LedgerRow>();
@@ -339,6 +383,7 @@ function captureWindowLedger(db: Database.Database, window: DateWindow): Map<str
       categoryId: row.category_id,
       counts: inclusion.counts,
       side: inclusion.side,
+      flags: `${row.pending}|${row.transfer_status}|${row.duplicate_status}`,
     });
   }
   return ledger;
@@ -380,12 +425,37 @@ interface LedgerDiff {
 }
 
 /**
- * What the batch's rewrites explain, and anything it did that a category rewrite cannot do.
+ * What the batch explains, row by row, and anything it did that no reclassification can explain.
  *
- * A row whose category is unchanged but whose classification is not is a structural breach: its
- * `pending`, `transfer_status`, `duplicate_status` or its category's own `is_income` changed under
- * it, and every one of those is either outside this batch's remit or inside the owner's
- * proposal-only carve-out.
+ * A ROW'S CONTRIBUTION IS RECOMPUTED FROM ITS OWN BEFORE-AMOUNT AND ITS BEFORE/AFTER REPORT
+ * CLASSIFICATION, whether or not its category moved. That last clause used to be the opposite: a row
+ * whose category was unchanged and whose classification was not was reported as a structural breach,
+ * on the reasoning that only a transfer confirmation or a duplicate resolution could do that and
+ * neither belongs in an autonomous batch.
+ *
+ * THAT REASONING WAS WRONG ONCE THE HARNESS HAD A CALLER, and the case that proves it is ordinary.
+ * `confirmCategorizeTransaction` re-runs `refreshTransactionIntegrity`, so a categorization pass
+ * legitimately pairs and un-pairs transfers as a side effect, and a candidate leg is excluded from
+ * every total by `excludedFromTotalsSql`. The owner hand-categorizing one leg of a detected pair is
+ * enough: the pair breaks on the next pass, the surviving leg re-enters the month's totals, its
+ * category never moved, and the old rule called that a structural breach and auto-reverted a pass
+ * that had done nothing wrong. Reverted the good work, too, and could not take back the un-pairing.
+ *
+ * WHAT REPLACED IT IS NARROWER AND STILL CATCHES THE CASE THAT MATTERED. A classification that
+ * changes while NEITHER the category id NOR the row's own pending/transfer/duplicate state moved
+ * leaves exactly one culprit: the category was redefined underneath the row, by a merge, a delete or
+ * a re-parent into the trees the reports drop wholesale. That is inside the owner's carve-out, it
+ * empties a month of spending with no row rewritten, and it is still structural.
+ *
+ * WHAT IS STILL CAUGHT BESIDES: a row that entered or left the window, or whose amount changed. And
+ * the month's totals must still move by exactly the sum of the per-row contributions, which the two
+ * sides compute through different services over the same rows; they agree by arithmetic only while
+ * those services agree with each other, and the check fires when they stop.
+ *
+ * WHAT IS NO LONGER CAUGHT HERE: a batch that resolves a duplicate or confirms a transfer now
+ * reconciles instead of breaching, because it moves the totals by exactly the row it excluded. That
+ * is not this file's question any more. `evaluateAiJobInvariants`' `autonomy_boundary` is what says
+ * which kinds may apply unattended, and both of those are proposal-only in `DRAFT_KIND_AUTONOMY`.
  */
 function diffWindowLedger(before: Map<string, LedgerRow>, after: Map<string, LedgerRow>): LedgerDiff {
   const breaches: HeadlineBreach[] = [];
@@ -403,13 +473,24 @@ function diffWindowLedger(before: Map<string, LedgerRow>, after: Map<string, Led
       breaches.push(structuralBreach(`Transaction ${id} changed amount from ${was.amount} to ${now.amount} cents: a category rewrite does not touch money.`));
       continue;
     }
-    if (now.categoryId === was.categoryId) {
-      if (now.counts !== was.counts || now.side !== was.side) {
-        breaches.push(structuralBreach(`Transaction ${id} changed how the reports count it without its category changing, from ${describeClassification(was)} to ${describeClassification(now)}.`));
-      }
+    const categoryChanged = now.categoryId !== was.categoryId;
+    const rowChanged = now.flags !== was.flags;
+    const classificationChanged = now.counts !== was.counts || now.side !== was.side;
+
+    // THE ROW DID NOT MOVE AND NEITHER DID ITS CATEGORY ID, AND THE REPORTS COUNT IT DIFFERENTLY.
+    // The only thing left that can do that is the CATEGORY's own definition changing underneath it:
+    // `is_income`, `is_investment`, or its parent chain moving into or out of the cat_xfer / cat_inv
+    // / cat_crypto trees the reports drop wholesale. Every one of those is a category merge, delete
+    // or re-parent, which is inside the owner's proposal-only carve-out. It empties a month of
+    // spending with no row rewritten and no per-row check anywhere else would see it.
+    if (!categoryChanged && !rowChanged && classificationChanged) {
+      breaches.push(structuralBreach(`Transaction ${id} changed how the reports count it while neither its category id nor its own pending/transfer/duplicate state moved, so the category "${String(was.categoryId)}" was redefined under it.`));
       continue;
     }
-    rewrittenRows += 1;
+
+    if (categoryChanged) rewrittenRows += 1;
+    // Both sides read `was.amount`, so a row that changed nothing contributes exactly 0 and cannot
+    // inflate the expectation.
     explainedSpend += spendContribution(now, was.amount) - spendContribution(was, was.amount);
     explainedIncome += incomeContribution(now, was.amount) - incomeContribution(was, was.amount);
   }
@@ -421,11 +502,6 @@ function diffWindowLedger(before: Map<string, LedgerRow>, after: Map<string, Led
   }
 
   return { breaches, explainedSpend, explainedIncome, rewrittenRows };
-}
-
-function describeClassification(row: LedgerRow): string {
-  if (!row.counts) return 'not counted';
-  return row.side === null ? 'counted on no side' : `counted as ${row.side}`;
 }
 
 function sameRate(before: number | null, after: number | null): boolean {
@@ -483,15 +559,15 @@ function accountedBreach(
     moved,
     explained,
     unit: 'cents',
-    detail: `Moved ${moved} cents; the batch's category rewrites account for ${explained}. The unexplained ${moved - explained} cents did not come from a row this batch refiled.`,
+    detail: `Moved ${moved} cents; the window's own rows account for ${explained}. The unexplained ${moved - explained} cents did not come from a row this window holds.`,
   };
 }
 
 /**
  * Compare two headline sets under the movement policy.
  *
- * Exported so a caller can judge a batch it ran itself. `explainedSpend` / `explainedIncome` are the
- * cents the batch's rewrites account for, which `diffWindowLedger` derives.
+ * Exported so a caller can judge a batch it ran itself. `explained.spend` / `explained.income` are
+ * the cents the window's own rows account for, which `diffWindowLedger` derives.
  *
  * Throws rather than compares when the two sets cover different windows: every headline here is
  * window-scoped, so a difference between two windows is a difference in the question, not an answer
@@ -686,6 +762,86 @@ function standingWriteCount(db: Database.Database, revisionFloor: number): numbe
   return row.count;
 }
 
+function maxRuleRevisionRowid(db: Database.Database): number {
+  // merchant_rule_revisions is append-only for the same reason its category counterpart is: every
+  // create, recategorize, rename, retire and unretire adds a row and none is ever updated. So a
+  // rowid above this floor is a rule change the batch made.
+  const row = db
+    .prepare('SELECT COALESCE(MAX(rowid), 0) AS floor FROM merchant_rule_revisions')
+    .get() as { floor: number };
+  return row.floor;
+}
+
+/**
+ * Rules the batch retired that are still retired.
+ *
+ * The state of the rule is what is asked, not the shape of the log: an un-retire appends its own
+ * revision and clears `retired_at`, so a restored rule drops out of this count without the query
+ * having to reason about which revision is newest.
+ */
+function standingRetirementCount(db: Database.Database, ruleRevisionFloor: number): number {
+  const row = db
+    .prepare(`
+      SELECT COUNT(DISTINCT v.rule_id) AS count
+      FROM merchant_rule_revisions v
+      JOIN merchant_rules m ON m.id = v.rule_id
+      WHERE v.rowid > ? AND v.operation = 'retire' AND m.retired_at IS NOT NULL
+    `)
+    .get(ruleRevisionFloor) as { count: number };
+  return row.count;
+}
+
+interface RetirementRestore {
+  restored: number;
+  /** Why a rule could not be put back. Named, never absorbed into a count that reads as success. */
+  failures: string[];
+}
+
+/**
+ * Put back every rule the batch retired.
+ *
+ * Keyed on the revision floor rather than on the batch's action ids, deliberately. A retirement is
+ * undone by clearing `retired_at`, which needs no action id to attribute, so scoping this by id
+ * would strand exactly the retirement whose action the harness failed to discover. The floor is the
+ * batch, and `standingRetirementCount` afterwards is what decides whether the undo was complete.
+ *
+ * The one refusal that can survive a healthy batch is `pattern_taken`: a replacement rule now holds
+ * the pattern, and reviving the old one would be a second, unasked change to whichever rule the
+ * owner has now. That is reported and left standing, which fails the completeness check and rolls
+ * the whole undo back, rather than being quietly counted as done.
+ */
+function restoreRuleRetirements(
+  db: Database.Database,
+  ruleRevisionFloor: number,
+  now: string
+): RetirementRestore {
+  const retirements = db
+    .prepare(`
+      SELECT DISTINCT v.rule_id AS rule_id, v.pattern AS pattern
+      FROM merchant_rule_revisions v
+      JOIN merchant_rules m ON m.id = v.rule_id
+      WHERE v.rowid > ? AND v.operation = 'retire' AND m.retired_at IS NOT NULL
+      ORDER BY v.rule_id
+    `)
+    .all(ruleRevisionFloor) as Array<{ rule_id: string; pattern: string }>;
+
+  const outcome: RetirementRestore = { restored: 0, failures: [] };
+  for (const retirement of retirements) {
+    const result = unretireMerchantRule(db, retirement.rule_id, { source: 'ai', actionId: null, now });
+    if (result.ok) {
+      outcome.restored += 1;
+      continue;
+    }
+    if (result.reason === 'pattern_taken') {
+      outcome.failures.push(`"${retirement.pattern}" could not be un-retired: another live rule now holds that pattern.`);
+    } else if (result.reason === 'not_found') {
+      outcome.failures.push(`"${retirement.pattern}" could not be un-retired: the rule row is gone.`);
+    }
+    // 'not_retired' cannot reach here: the query only returns rules that are still retired.
+  }
+  return outcome;
+}
+
 /**
  * The batch's action ids, newest write first.
  *
@@ -723,6 +879,23 @@ function actionIdsNewestWriteFirst(
   return [...ranked.map((row) => row.id), ...silent];
 }
 
+interface BatchRevert {
+  rows: number;
+  rules: number;
+}
+
+/** "2 category writes", "1 merchant rule retirement", or both, for one sentence about a batch. */
+function describeStanding(categoryWrites: number, retirements: number): string {
+  const parts: string[] = [];
+  if (categoryWrites > 0) {
+    parts.push(`${categoryWrites} category write${categoryWrites === 1 ? '' : 's'}`);
+  }
+  if (retirements > 0) {
+    parts.push(`${retirements} merchant rule retirement${retirements === 1 ? '' : 's'}`);
+  }
+  return parts.join(' and ');
+}
+
 /**
  * Undo the whole batch, or none of it.
  *
@@ -737,17 +910,23 @@ function actionIdsNewestWriteFirst(
  * so a log the revert cannot converge on falls through to the completeness check instead of
  * spinning.
  *
- * The completeness check reads the same append-only log the revert walks: afterwards, no category
- * write the batch made may still be standing. If one is, the throw rolls the whole undo back and the
- * batch stays fully applied, which is a state that can at least be reasoned about.
+ * RULE RETIREMENTS ARE THE BATCH'S OTHER WRITE, and they are undone here rather than left to a
+ * caller. `revertAction` walks `transaction_category_revisions` only, so a batch of one
+ * categorization and one retirement used to come back 'reverted' with the rule still retired and a
+ * completeness check that could not see it. Both logs are consumed, and both are counted.
+ *
+ * The completeness check reads the same append-only logs the revert walks: afterwards, no category
+ * write and no retirement the batch made may still be standing. If one is, the throw rolls the whole
+ * undo back and the batch stays fully applied, which is a state that can at least be reasoned about.
  */
 function revertBatch(
   db: Database.Database,
   actionIds: readonly string[],
   revisionFloor: number,
+  ruleRevisionFloor: number,
   now: string
-): number {
-  const undo = db.transaction(() => {
+): BatchRevert {
+  const undo = db.transaction((): BatchRevert => {
     const order = actionIdsNewestWriteFirst(db, actionIds, revisionFloor);
     let standing = standingWriteCount(db, revisionFloor);
     const maxPasses = standing;
@@ -760,10 +939,14 @@ function revertBatch(
       standing = remaining;
     }
 
-    if (standing > 0) {
-      throw new Error(`The revert left ${standing} of the batch's category writes standing, so it was rolled back and the batch is still fully applied.`);
+    const retirements = restoreRuleRetirements(db, ruleRevisionFloor, now);
+    const standingRules = standingRetirementCount(db, ruleRevisionFloor);
+
+    if (standing > 0 || standingRules > 0) {
+      const why = retirements.failures.length > 0 ? ` ${retirements.failures.join(' ')}` : '';
+      throw new Error(`The revert left the batch with ${describeStanding(standing, standingRules)} still standing, so it was rolled back and the batch is still fully applied.${why}`);
     }
-    return rows;
+    return { rows, rules: retirements.restored };
   });
   return undo();
 }
@@ -800,6 +983,7 @@ export function runGuardedCategoryBatch<T>(
   const before = captureHeadlines(db, capture);
   const beforeLedger = captureWindowLedger(db, window);
   const revisionFloor = maxRevisionRowid(db);
+  const ruleRevisionFloor = maxRuleRevisionRowid(db);
   const knownActions = new Set(advisorActionIds(db));
 
   const outcome = batch.run();
@@ -816,6 +1000,7 @@ export function runGuardedCategoryBatch<T>(
   ];
   const moves = categoryMoves(before, after);
   const unrevertableRows = unrevertableRowCount(db, revisionFloor, actionIds);
+  const standingRetirements = standingRetirementCount(db, ruleRevisionFloor);
 
   if (breaches.length === 0) {
     return {
@@ -828,6 +1013,7 @@ export function runGuardedCategoryBatch<T>(
       after,
       category_moves: moves,
       reverted_rows: 0,
+      reverted_rules: 0,
       unrevertable_rows: unrevertableRows,
       headlines_restored: null,
     };
@@ -862,33 +1048,43 @@ export function runGuardedCategoryBatch<T>(
       after,
       category_moves: moves,
       reverted_rows: 0,
+      reverted_rules: 0,
       unrevertable_rows: unrevertableRows,
       headlines_restored: null,
     };
   };
 
+  // What a refusal leaves behind, so the incident names it rather than describing only the half the
+  // refusal was about.
+  const alsoStanding = standingRetirements > 0
+    ? ` ${standingRetirements} merchant rule retirement${standingRetirements === 1 ? '' : 's'} the batch made ${standingRetirements === 1 ? 'is' : 'are'} also left standing.`
+    : '';
+
   if (actionIds.length === 0) {
     // Reverting "by action id" needs an action id. Reporting this as a clean revert because zero
     // actions were undone successfully would be the emptiest kind of true.
-    return failed('The batch created no advisor action, so there is nothing to revert by id and the breach stands.');
+    return failed(`The batch created no advisor action, so there is nothing to revert by id and the breach stands.${alsoStanding}`);
   }
 
   if (unrevertableRows > 0) {
-    return failed(`${unrevertableRows} category write${unrevertableRows === 1 ? '' : 's'} carry no action id this harness can revert, so undoing the ${actionIds.length} action${actionIds.length === 1 ? '' : 's'} it can reach would leave the batch half applied. Nothing was reverted.`);
+    return failed(`${unrevertableRows} category write${unrevertableRows === 1 ? '' : 's'} carry no action id this harness can revert, so undoing the ${actionIds.length} action${actionIds.length === 1 ? '' : 's'} it can reach would leave the batch half applied. Nothing was reverted.${alsoStanding}`);
   }
 
-  let revertedRows: number;
+  let reverted: BatchRevert;
   try {
-    revertedRows = revertBatch(db, actionIds, revisionFloor, now);
+    reverted = revertBatch(db, actionIds, revisionFloor, ruleRevisionFloor, now);
   } catch (error) {
     return failed(error instanceof Error ? error.message : String(error));
   }
 
   const restored = headlinesMatch(captureHeadlines(db, capture), before);
+  // `reverted_rows` is category writes and only category writes, which is what migration 050's
+  // column says it is. `ai_incidents` has no column for rules, so the retirement count travels on
+  // the report and reaches the record through `ai_runs.invariant_breach`, which aiJobs writes.
   resolveIncident(db, incidentId, {
     status: 'reverted',
     revertedActionIds: actionIds,
-    revertedRows,
+    revertedRows: reverted.rows,
     headlinesRestored: restored,
     error: restored
       ? null
@@ -905,7 +1101,8 @@ export function runGuardedCategoryBatch<T>(
     before,
     after,
     category_moves: moves,
-    reverted_rows: revertedRows,
+    reverted_rows: reverted.rows,
+    reverted_rules: reverted.rules,
     unrevertable_rows: unrevertableRows,
     headlines_restored: restored,
   };

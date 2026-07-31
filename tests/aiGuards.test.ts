@@ -12,6 +12,7 @@ import {
 } from '../server/src/services/aiGuards';
 import { writeTransactionCategories } from '../server/src/services/categoryWrites';
 import { buildRecurringForecast } from '../server/src/services/recurringForecast';
+import { retireMerchantRule, upsertMerchantRule } from '../server/src/services/rules';
 import {
   TEST_NOW,
   insertAccount,
@@ -436,13 +437,101 @@ test('a category re-parented under Transfers breaches without any row being rewr
   assert.equal(report.status, 'revert_failed', 'there is no action id to revert, so the batch stands and is recorded');
   const shape = report.breaches.find((breach) => breach.headline === 'ledger_shape');
   assert.ok(shape);
-  assert.match(shape.detail, /without its category changing/);
+  assert.match(shape.detail, /was redefined under it/);
   assert.equal(report.before.month_spend_cents, 30_000);
   assert.equal(report.after.month_spend_cents, 0);
 
   const incident = listAiIncidents(fx.db)[0];
   assert.equal(incident.revert_status, 'failed');
   assert.match(incident.revert_error ?? '', /no advisor action/);
+});
+
+test('a transfer pair breaking under the batch moves the month and is silent', (t) => {
+  const fx = fixture();
+  t.after(() => fx.db.close());
+
+  // The healthy case that made the old rule untenable, reduced to its mechanics. A candidate
+  // transfer leg is excluded from every total; when the pair breaks the row re-enters them, its
+  // category id never moves, and nothing about that is a defect. `confirmCategorizeTransaction`
+  // re-runs the integrity detector on every categorization, so this is reachable from an ordinary
+  // pass, and the owner hand-categorizing the other leg is enough to cause it.
+  const leg = spendRow(fx, { id: 'txn_leg', amount: -30_000, category_id: 'cat_food' });
+  fx.db.prepare(
+    "UPDATE transactions SET transfer_status = 'candidate', transfer_pair_id = 'xfer_1' WHERE id = ?"
+  ).run(leg);
+  const tracked = spendRow(fx, { amount: -2_500 });
+  const actionId = insertAdvisorAction(fx.db);
+
+  const report = guarded(fx.db, () => {
+    categorize(fx.db, actionId, [{ id: tracked, categoryId: 'cat_food' }]);
+    fx.db.prepare(
+      "UPDATE transactions SET transfer_status = 'none', transfer_pair_id = NULL WHERE id = ?"
+    ).run(leg);
+    return { actionIds: [actionId] };
+  });
+
+  assert.equal(report.status, 'clean', 'a row re-entering the totals because its own state changed is not a breach');
+  assert.deepEqual(report.breaches, []);
+  // The movement was real, so the silence is about something rather than about nothing.
+  assert.equal(report.before.month_spend_cents, 2_500);
+  assert.equal(report.after.month_spend_cents, 32_500);
+  assert.equal(listAiIncidents(fx.db).length, 0);
+});
+
+test('a pass that rewrites no category at all still accounts for the movement it caused', (t) => {
+  const fx = fixture();
+  t.after(() => fx.db.close());
+
+  // The case that made "the headline set moved only by what this pass's own CATEGORY REWRITES
+  // account for" a false description of the check, and that sentence is persisted verbatim into
+  // ai_runs.invariant_breach. Not one category id moves here. The month's spend still moves, by
+  // exactly the row the integrity refresh let back into the totals, and every window row is asked
+  // for its contribution whether or not its category moved.
+  const leg = spendRow(fx, { id: 'txn_only_leg', amount: -30_000, category_id: 'cat_food' });
+  fx.db.prepare(
+    "UPDATE transactions SET transfer_status = 'candidate', transfer_pair_id = 'xfer_1' WHERE id = ?"
+  ).run(leg);
+
+  const report = guarded(fx.db, () => {
+    fx.db.prepare(
+      "UPDATE transactions SET transfer_status = 'none', transfer_pair_id = NULL WHERE id = ?"
+    ).run(leg);
+    return { actionIds: [] };
+  });
+
+  assert.equal(report.status, 'clean');
+  assert.deepEqual(report.breaches, []);
+  assert.equal(report.before.month_spend_cents, 0);
+  assert.equal(report.after.month_spend_cents, 30_000);
+  assert.equal(listAiIncidents(fx.db).length, 0);
+
+  const rewrites = fx.db
+    .prepare('SELECT COUNT(*) AS count FROM transaction_category_revisions')
+    .get() as { count: number };
+  assert.equal(rewrites.count, 0, 'nothing rewrote a category, so a rewrite cannot be what explained it');
+});
+
+test('a duplicate resolved under the batch moves the month and is silent', (t) => {
+  const fx = fixture();
+  t.after(() => fx.db.close());
+
+  const copy = spendRow(fx, { id: 'txn_copy', amount: -12_000, category_id: 'cat_food' });
+  const tracked = spendRow(fx, { amount: -2_500 });
+  const actionId = insertAdvisorAction(fx.db);
+
+  const report = guarded(fx.db, () => {
+    categorize(fx.db, actionId, [{ id: tracked, categoryId: 'cat_food' }]);
+    fx.db.prepare("UPDATE transactions SET duplicate_status = 'confirmed' WHERE id = ?").run(copy);
+    return { actionIds: [actionId] };
+  });
+
+  // Which KINDS may do this is not this harness's question: duplicate resolution is proposal-only
+  // in DRAFT_KIND_AUTONOMY and `autonomy_boundary` is what enforces that. What this asserts is that
+  // the arithmetic reconciles, so the harness does not report a cause it cannot establish.
+  assert.equal(report.status, 'clean');
+  assert.equal(report.before.month_spend_cents, 14_500);
+  assert.equal(report.after.month_spend_cents, 2_500);
+  assert.equal(listAiIncidents(fx.db).length, 0);
 });
 
 test('net worth is invariant under a category batch and a movement is a breach', (t) => {
@@ -747,6 +836,167 @@ test('an action that wrote the same transaction twice is reverted all the way ba
     WHERE revert_of IS NULL AND reverted_at IS NULL
   `).get() as { count: number };
   assert.equal(standing.count, 0, 'no write the batch made is left standing');
+});
+
+// ── Rule retirements are part of the batch ────────────────────────────────────
+
+/**
+ * The batch shape the harness could not see, and the reason both logs are walked now.
+ *
+ * `retire_merchant_rule` is autonomous, so an ordinary pass can retire one of the model's own inert
+ * rules alongside its categorizations. That write lives in `merchant_rules` and
+ * `merchant_rule_revisions`, and the undo used to be `revertAction` per id, which reads
+ * `transaction_category_revisions` and nothing else. A breached batch therefore came back
+ * 'reverted', with the categorization restored, the rule still retired, and a completeness check
+ * that could not see the difference.
+ */
+function retirableAiRule(fx: Fixture, pattern = 'Trupanion'): string {
+  const rule = upsertMerchantRule(fx.db, pattern, 'cat_pets', TEST_NOW, { source: 'ai' });
+  assert.equal(rule.status, 'created');
+  assert.ok(rule.ruleId);
+  return rule.ruleId as string;
+}
+
+function ruleIsRetired(fx: Fixture, ruleId: string): boolean {
+  const row = fx.db
+    .prepare('SELECT retired_at FROM merchant_rules WHERE id = ?')
+    .get(ruleId) as { retired_at: string | null };
+  return row.retired_at !== null;
+}
+
+test('HEALTHY: a pass that also retires an inert AI rule is silent, and the retirement stands', (t) => {
+  const fx = fixture();
+  t.after(() => fx.db.close());
+
+  // Nothing in the ledger is named Trupanion, so the rule holds zero rows and retiring it moves no
+  // category. This is the pass `checkRuleIsRetirableByAi` exists to allow.
+  const ruleId = retirableAiRule(fx);
+  const row = spendRow(fx, { amount: -2_500 });
+  const categorizeAction = insertAdvisorAction(fx.db);
+  const retireAction = insertAdvisorAction(fx.db, { kind: 'retire_merchant_rule' });
+
+  const report = guarded(fx.db, () => {
+    categorize(fx.db, categorizeAction, [{ id: row, categoryId: 'cat_food' }]);
+    retireMerchantRule(fx.db, ruleId, { source: 'ai', actionId: retireAction });
+    return { actionIds: [categorizeAction, retireAction] };
+  });
+
+  assert.equal(report.status, 'clean');
+  assert.deepEqual(report.breaches, []);
+  assert.equal(report.reverted_rows, 0);
+  assert.equal(report.reverted_rules, 0);
+  assert.equal(listAiIncidents(fx.db).length, 0);
+  assert.equal(ruleIsRetired(fx, ruleId), true, 'a clean pass is not undone, so the retirement stays');
+});
+
+test('a breach in a batch that retired a rule takes the retirement back too', (t) => {
+  const fx = fixture();
+  t.after(() => fx.db.close());
+
+  const ruleId = retirableAiRule(fx);
+  const row = spendRow(fx, { amount: -2_500 });
+  const categorizeAction = insertAdvisorAction(fx.db);
+  const retireAction = insertAdvisorAction(fx.db, { kind: 'retire_merchant_rule' });
+
+  const report = guarded(fx.db, () => {
+    categorize(fx.db, categorizeAction, [{ id: row, categoryId: 'cat_food' }]);
+    retireMerchantRule(fx.db, ruleId, { source: 'ai', actionId: retireAction });
+    // The unexplained movement: an amount no reclassification can produce.
+    fx.db.prepare('UPDATE transactions SET amount = ? WHERE id = ?').run(-9_900, row);
+    return { actionIds: [categorizeAction, retireAction] };
+  });
+
+  assert.equal(report.status, 'reverted');
+  assert.equal(report.reverted_rows, 1);
+  assert.equal(report.reverted_rules, 1, 'the other half of the batch is counted, not assumed');
+
+  const settled = fx.db.prepare('SELECT category_id FROM transactions WHERE id = ?').get(row);
+  assert.deepEqual(settled, { category_id: null });
+  assert.equal(ruleIsRetired(fx, ruleId), false, 'the rule the batch retired is live again');
+
+  // Restoring it is recorded, so the rule's own history still explains what happened to it.
+  const operations = fx.db
+    .prepare('SELECT operation FROM merchant_rule_revisions WHERE rule_id = ? ORDER BY rowid')
+    .all(ruleId) as Array<{ operation: string }>;
+  assert.deepEqual(operations.map((r) => r.operation), ['create', 'retire', 'unretire']);
+});
+
+test('a retirement the harness cannot put back refuses the whole revert and says which rule', (t) => {
+  const fx = fixture();
+  t.after(() => fx.db.close());
+
+  const ruleId = retirableAiRule(fx);
+  const row = spendRow(fx, { amount: -2_500 });
+  const categorizeAction = insertAdvisorAction(fx.db);
+  const retireAction = insertAdvisorAction(fx.db, { kind: 'retire_merchant_rule' });
+
+  const report = guarded(fx.db, () => {
+    categorize(fx.db, categorizeAction, [{ id: row, categoryId: 'cat_food' }]);
+    retireMerchantRule(fx.db, ruleId, { source: 'ai', actionId: retireAction });
+    // The retirement freed the pattern and something took it. Reviving the old rule would be a
+    // second, unasked change to whichever rule the owner has now, so undo cannot complete.
+    upsertMerchantRule(fx.db, 'Trupanion', 'cat_shop', TEST_NOW, { source: 'human' });
+    fx.db.prepare('UPDATE transactions SET amount = ? WHERE id = ?').run(-9_900, row);
+    return { actionIds: [categorizeAction, retireAction] };
+  });
+
+  assert.equal(report.status, 'revert_failed');
+  assert.equal(report.reverted_rows, 0);
+  assert.equal(report.reverted_rules, 0);
+
+  const incident = listAiIncidents(fx.db)[0];
+  assert.equal(incident.revert_status, 'failed');
+  assert.match(incident.revert_error ?? '', /1 merchant rule retirement still standing/);
+  assert.match(incident.revert_error ?? '', /another live rule now holds that pattern/);
+
+  // All or nothing: the category write is still applied rather than half undone.
+  const settled = fx.db.prepare('SELECT category_id FROM transactions WHERE id = ?').get(row);
+  assert.deepEqual(settled, { category_id: 'cat_food' });
+  assert.equal(ruleIsRetired(fx, ruleId), true);
+});
+
+test('a refusal for a different reason still names the retirement it leaves standing', (t) => {
+  const fx = fixture();
+  t.after(() => fx.db.close());
+
+  const ruleId = retirableAiRule(fx);
+  spendRow(fx, { amount: -30_000, category_id: 'cat_pets' });
+
+  // No advisor action anywhere, so the id-based revert cannot start. The retirement is still a write
+  // the batch made, and an incident that mentioned only the missing action would under-report it.
+  const report = guarded(fx.db, () => {
+    retireMerchantRule(fx.db, ruleId, { source: 'ai', actionId: null });
+    fx.db.prepare("UPDATE categories SET parent_id = 'cat_xfer' WHERE id = 'cat_pets'").run();
+    return { actionIds: [] };
+  });
+
+  assert.equal(report.status, 'revert_failed');
+  const incident = listAiIncidents(fx.db)[0];
+  assert.match(incident.revert_error ?? '', /no advisor action/);
+  assert.match(incident.revert_error ?? '', /1 merchant rule retirement the batch made is also left standing/);
+  assert.equal(ruleIsRetired(fx, ruleId), true, 'nothing was reverted, and the row says so');
+});
+
+test('a rule the batch did not touch is left alone by the revert', (t) => {
+  const fx = fixture();
+  t.after(() => fx.db.close());
+
+  // Retired before the batch starts, so it is below the revision floor and outside the batch.
+  const bystander = retirableAiRule(fx, 'Backblaze');
+  retireMerchantRule(fx.db, bystander, { source: 'ai', actionId: null });
+
+  const row = spendRow(fx, { amount: -2_500 });
+  const actionId = insertAdvisorAction(fx.db);
+
+  const report = guarded(fx.db, () => {
+    categorize(fx.db, actionId, [{ id: row, categoryId: 'cat_food' }]);
+    fx.db.prepare('UPDATE transactions SET amount = ? WHERE id = ?').run(-9_900, row);
+    return { actionIds: [actionId] };
+  });
+
+  assert.equal(report.status, 'reverted');
+  assert.equal(report.reverted_rules, 0);
+  assert.equal(ruleIsRetired(fx, bystander), true, 'the revert reaches the batch and stops there');
 });
 
 test('the guard refuses to run inside an open transaction', (t) => {

@@ -9,8 +9,10 @@ import type {
   AdvisorEffort,
   SyncEvent,
 } from '../../../shared/types';
-import { AUTONOMOUS_DRAFT_KINDS, confirmAdvisorDraft, isAutonomousDraftKind } from './advisorDrafts';
+import { confirmAdvisorDraft } from './advisorDrafts';
+import { isAutonomousDraftKind } from './draftAutonomy';
 import { JOB_MODELS, type AiJobName } from './advisorSettings';
+import { runGuardedCategoryBatch, type GuardedBatchReport } from './aiGuards';
 import { DraftRefusedError } from './aiWriteGuards';
 import { hasAnthropicCredentials } from './anthropicClient';
 
@@ -45,7 +47,10 @@ export type AiJobExecution = 'scheduler' | 'callsite';
 /** The digest section a pass's output belongs under. */
 export type AiDigestSection = 'review' | 'categorization';
 
-export type AiJobInvariant = 'autonomy_boundary' | 'human_categories_preserved';
+export type AiJobInvariant =
+  | 'autonomy_boundary'
+  | 'human_categories_preserved'
+  | 'headline_conservation';
 
 /**
  * What each invariant asserts. `closeRunRow` writes this text into `ai_runs.invariant_breach`
@@ -54,9 +59,16 @@ export type AiJobInvariant = 'autonomy_boundary' | 'human_categories_preserved';
  */
 export const AI_JOB_INVARIANTS: Readonly<Record<AiJobInvariant, string>> = {
   autonomy_boundary:
-    'every action this pass applied unattended is one of AUTONOMOUS_DRAFT_KINDS',
+    'every action this pass applied unattended is declared autonomous in DRAFT_KIND_AUTONOMY',
   human_categories_preserved:
     'no category this pass wrote replaced one the owner had set by hand',
+  // Not "what this pass's own category rewrites account for", which is what it used to say and what
+  // the check stopped measuring. `diffWindowLedger` recomputes every window row's contribution from
+  // the amount it already carried, whether or not its category moved, so a transfer pairing broken
+  // as a side effect explains its own movement with no category rewrite anywhere. This sentence is
+  // written verbatim into ai_runs.invariant_breach, so a drift here is a false claim on the record.
+  headline_conservation:
+    'the headline set moved only by what the window\'s own rows account for, cent for cent',
 };
 
 export interface AiJobDeclaration {
@@ -95,12 +107,13 @@ export const AI_JOBS: Readonly<Record<AiJobName, AiJobDeclaration>> = {
     writes: [
       'categorize_transaction',
       'create_merchant_rule',
+      'retire_merchant_rule',
       'create_recurring_adjustment',
       'update_budget',
       'update_goal_target',
       'create_budget_group',
     ],
-    invariants: ['autonomy_boundary', 'human_categories_preserved'],
+    invariants: ['autonomy_boundary', 'human_categories_preserved', 'headline_conservation'],
     digestSection: 'review',
     execution: 'scheduler',
   }),
@@ -224,7 +237,10 @@ export function evaluateAiJobInvariants(
 
   if (declared.includes('autonomy_boundary')) {
     const widened = actions.filter(
-      (action) => action.source === 'worker_auto' && !AUTONOMOUS_DRAFT_KINDS.has(action.kind)
+      // `action.kind` is whatever was written to the row, so it is judged as a string rather than
+      // narrowed to the union: a kind that is not a draft kind at all must fail this check, not
+      // fail to typecheck.
+      (action) => action.source === 'worker_auto' && !isAutonomousDraftKind(action.kind)
     );
     if (widened.length > 0) {
       const kinds = [...new Set(widened.map((a) => a.kind))].join(', ');
@@ -344,6 +360,7 @@ function closeRunRow(
 export function draftTargetKey(payload: AdvisorDraftPayload): string {
   switch (payload.kind) {
     case 'create_merchant_rule': return `create_merchant_rule:${payload.pattern}`;
+    case 'retire_merchant_rule': return `retire_merchant_rule:${payload.rule_id}`;
     case 'categorize_transaction': return `categorize_transaction:${payload.transaction_id}`;
     case 'update_budget': return `update_budget:${payload.category_id}`;
     case 'update_goal_target': return `update_goal_target:${payload.goal_id}`;
@@ -379,6 +396,8 @@ interface PersistResult {
   applied: number;
   queued: number;
   refusedByGuards: number;
+  /** Draft ids this pass applied unattended, in the order it applied them. */
+  appliedDraftIds: string[];
 }
 
 function persistProposals(
@@ -395,6 +414,7 @@ function persistProposals(
   let applied = 0;
   let queued = 0;
   let refusedByGuards = 0;
+  const appliedDraftIds: string[] = [];
 
   db.transaction(() => {
     supersedeRegeneratedDrafts(db, new Set(proposals.map((p) => draftTargetKey(p.payload))));
@@ -405,7 +425,7 @@ function persistProposals(
 
       // The carve-out is by DOMAIN and it is not `writes`. A job may be allowed to propose
       // update_budget and still never apply one unattended: `writes` says what it may put in front
-      // of the owner, AUTONOMOUS_DRAFT_KINDS says what may land without the owner.
+      // of the owner, the autonomy table says what may land without the owner.
       if (isAutonomousDraftKind(proposal.kind)) {
         const action: AdvisorDraftAction = {
           id,
@@ -422,6 +442,7 @@ function persistProposals(
           confirmAdvisorDraft(db, action, true, 'worker_auto');
           status = 'confirmed';
           applied++;
+          appliedDraftIds.push(id);
         } catch (err) {
           if (err instanceof DraftRefusedError) {
             // Policy, not failure: the guards read the owner's own rules and history and said no.
@@ -454,7 +475,116 @@ function persistProposals(
     }
   })();
 
-  return { applied, queued, refusedByGuards };
+  return { applied, queued, refusedByGuards, appliedDraftIds };
+}
+
+/**
+ * Hand back to the queue every draft a reverted batch had marked confirmed.
+ *
+ * A batch reverts whole, so leaving its drafts at 'confirmed' would tell the owner N suggestions
+ * were applied while the ledger holds none of them. They go back to 'open' and are counted as
+ * queued, which is what they now are: a proposal the owner can look at. Nothing is deleted, because
+ * the drafts are the only surviving statement of what the model actually suggested.
+ */
+function requeueRevertedDrafts(db: Database.Database, draftIds: readonly string[], now: string): void {
+  if (draftIds.length === 0) return;
+  const reopen = db.prepare(
+    `UPDATE advisor_drafts SET status = 'open', updated_at = ? WHERE id = ? AND status = 'confirmed'`
+  );
+  db.transaction(() => {
+    for (const id of draftIds) reopen.run(now, id);
+  })();
+}
+
+/**
+ * ONE MODEL PASS IS ONE UNIT OF WORK, and this is where that is decided.
+ *
+ * `runGuardedCategoryBatch` reverts the WHOLE batch on breach, so the boundary has to be something
+ * a reader can defend as coherent. The pass is that boundary: six categorizations and a rule from
+ * one model call are one answer to one question, produced from one snapshot of the ledger, and a
+ * conservation breach says that snapshot was not what the model thought it was. Reverting the six
+ * that "look fine" alongside the one that broke conservation is the point, not collateral: the
+ * harness cannot tell which write caused an unexplained movement, and picking one to blame would be
+ * naming a cause the code did not establish.
+ *
+ * The two constraints in the harness's own contract shape this seam.
+ *
+ * IT MUST NOT ALREADY BE IN A TRANSACTION, because the incident row has to outlive a revert that
+ * rolls back. So the guard wraps `persistProposals` from outside; `persistProposals` keeps its own
+ * transaction and `confirmAdvisorDraft` keeps its per-draft one, and both commit before the guard
+ * decides anything.
+ *
+ * `run` MUST BE SYNCHRONOUS, because the harness discovers action ids by diffing `advisor_actions`
+ * across the call and that only attributes correctly while nothing else can write. `persistProposals`
+ * awaits nothing and better-sqlite3 is synchronous, so the whole batch holds the thread.
+ *
+ * The alternative seam, one guarded batch per draft, was rejected: a per-draft guard cannot see a
+ * pass whose writes each look conservative and whose total does not, and it would run two headline
+ * captures per draft where a whole six-row pass costs 18 to 23 ms with two.
+ */
+function runGuardedPersist(
+  db: Database.Database,
+  job: AiJobDeclaration,
+  proposals: AiJobProposal[],
+  now: string
+): { persisted: PersistResult; report: GuardedBatchReport<PersistResult> } {
+  const report = runGuardedCategoryBatch(
+    db,
+    {
+      name: `${job.name}_autonomous_pass`,
+      run: () => {
+        const persisted = persistProposals(db, job, proposals, now);
+        // No `actionIds` handed over: `confirmAdvisorDraft` does not return one, and the harness
+        // discovers every id that appeared in `advisor_actions` while the batch ran. Reporting a
+        // partial list would leave the rest outside the revert.
+        return { value: persisted };
+      },
+    },
+    { now }
+  );
+
+  // 'revert_failed' is NOT a reverted batch. The harness refuses to half-undo, so on that outcome
+  // every write the pass made is still standing and the counts must keep saying so. Requeueing the
+  // drafts there would tell the owner the pass was taken back while the ledger still holds it.
+  if (report.status !== 'reverted') return { persisted: report.value, report };
+
+  requeueRevertedDrafts(db, report.value.appliedDraftIds, now);
+  return {
+    persisted: {
+      applied: 0,
+      queued: report.value.queued + report.value.appliedDraftIds.length,
+      refusedByGuards: report.value.refusedByGuards,
+      appliedDraftIds: [],
+    },
+    report,
+  };
+}
+
+/**
+ * What a non-clean guard report says on the run row.
+ *
+ * `revert_failed` is the louder of the two and reads that way: the batch is still applied and the
+ * incident row names what moved. Both carry the incident id, because everything else about the
+ * breach lives there.
+ *
+ * "REVERTED WHOLE" NAMES EVERY LOG THE HARNESS CONSUMED. It used to say "N category write(s) taken
+ * back" on a harness that only walked category revisions, so a batch whose retirement was still
+ * standing wrote that sentence into `ai_runs.invariant_breach` as a completed revert. The harness
+ * now refuses to report 'reverted' unless both its logs came back empty, and this restates both
+ * counts so the row says what was undone rather than what one table happened to hold.
+ */
+function conservationBreach(report: GuardedBatchReport<unknown>): AiJobInvariantBreach | null {
+  if (report.status === 'clean') return null;
+  const headlines = report.breaches.map((b) => `${b.headline}: ${b.detail}`).join(' ');
+  const takenBack = [`${report.reverted_rows} category write(s)`];
+  if (report.reverted_rules > 0) takenBack.push(`${report.reverted_rules} rule retirement(s)`);
+  const outcome = report.status === 'reverted'
+    ? `the pass was reverted whole (${takenBack.join(' and ')} taken back)`
+    : 'the revert did NOT run and the pass is still applied';
+  return {
+    invariant: 'headline_conservation',
+    detail: `${headlines} ${outcome}; see ai_incidents ${report.incident_id ?? '(unrecorded)'}.`,
+  };
 }
 
 // ─── The framework ───────────────────────────────────────────────────────────
@@ -556,12 +686,19 @@ async function runOnePass(
     // Nothing else can write between these two reads: better-sqlite3 is synchronous and
     // persistProposals awaits nothing, so `rowid >` attributes exactly this pass's actions.
     const rowidBefore = maxActionRowid(db);
-    const persisted = persistProposals(db, job, allowed, startedAt);
+    const guarded = job.invariants.includes('headline_conservation')
+      ? runGuardedPersist(db, job, allowed, startedAt)
+      : { persisted: persistProposals(db, job, allowed, startedAt), report: null };
+    const persisted = guarded.persisted;
     const actions = db
       .prepare(`SELECT id, kind, source FROM advisor_actions WHERE rowid > ?`)
       .all(rowidBefore) as AppliedAction[];
 
-    const breaches = evaluateAiJobInvariants(db, actions, job.invariants);
+    const conservation = guarded.report === null ? null : conservationBreach(guarded.report);
+    const breaches = [
+      ...evaluateAiJobInvariants(db, actions, job.invariants),
+      ...(conservation ? [conservation] : []),
+    ];
     for (const breach of breaches) {
       console.error(`[ai:${job.name}] Invariant ${breach.invariant} broke: ${breach.detail}`);
     }

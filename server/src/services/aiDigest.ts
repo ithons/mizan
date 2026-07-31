@@ -204,11 +204,21 @@ function loadStacks(db: Database.Database, transactionIds: readonly string[]): M
 
 function loadRules(db: Database.Database, actionIds: readonly string[]): Map<string, RuleRow> {
   if (actionIds.length === 0) return new Map();
+  // Two ways an action names a rule, and only the first used to be read. `merchant_rules.action_id`
+  // records the action that CREATED or recategorized the rule; a retirement never touches that
+  // column, so a `retire_merchant_rule` action showed no rule at all and the digest reported it as
+  // an action about nothing. The revision log is the other way in, and it is the one that carries
+  // the retirement.
   const rows = db.prepare(`
-    SELECT m.id, m.action_id, m.pattern, m.category_id, m.source, m.retired_at, c.name AS category_name
+    SELECT v.action_id, m.id, m.pattern, m.category_id, m.source, m.retired_at, c.name AS category_name
     FROM merchant_rules m
     LEFT JOIN categories c ON c.id = m.category_id
-    WHERE m.action_id IN (${placeholders(actionIds.length)})
+    JOIN (
+      SELECT id AS rule_id, action_id FROM merchant_rules WHERE action_id IS NOT NULL
+      UNION
+      SELECT rule_id, action_id FROM merchant_rule_revisions WHERE action_id IS NOT NULL
+    ) v ON v.rule_id = m.id
+    WHERE v.action_id IN (${placeholders(actionIds.length)})
   `).all(...actionIds) as RuleRow[];
   return new Map(rows.map((r) => [r.action_id, r]));
 }
@@ -276,12 +286,90 @@ function recordState(
   return 'unrecorded';
 }
 
-function revertScope(rows: readonly AiDigestRow[], state: AiDigestRecordState): AiDigestRevertScope {
-  if (state === 'no_rows_changed') return 'nothing_to_revert';
-  if (state === 'unrecorded') return 'unrecorded';
-  const revertable = rows.filter((r) => r.revertable).length;
-  if (revertable === 0) return 'none';
-  return revertable === rows.length ? 'full' : 'partial';
+/**
+ * What one gesture would put back.
+ *
+ * Rules count on BOTH sides, which is the whole reason this is not a count of rows.
+ * `retire_merchant_rule` earns autonomy BECAUSE it changes no transaction, so an action with zero
+ * rows and one restorable retirement is fully revertable, not `nothing_to_revert`. The same argument
+ * says a restorable retirement alongside a fully revertable row set leaves nothing behind and is
+ * still `full`; this read `revertable === rows.length && revertableRules === 0`, which inverted its
+ * own reasoning and reported the MORE revertable action as `partial`.
+ *
+ * `strandedRules` is the other half, and without it `full` would be a claim the code did not check:
+ * a retirement a later revision buried, or whose pattern a replacement rule now holds, stays retired
+ * after the gesture. The decision is therefore over what comes back and what is left, never over
+ * rows alone.
+ */
+function revertScope(
+  rows: readonly AiDigestRow[],
+  state: AiDigestRecordState,
+  revertableRules: number,
+  strandedRules: number
+): AiDigestRevertScope {
+  const revertableRows = rows.filter((r) => r.revertable).length;
+  const restorable = revertableRows + revertableRules;
+  const left = rows.length - revertableRows + strandedRules;
+
+  if (restorable === 0) {
+    if (left > 0) return 'none';
+    return state === 'unrecorded' ? 'unrecorded' : 'nothing_to_revert';
+  }
+  return left === 0 ? 'full' : 'partial';
+}
+
+/** Retirements an action made that are still standing, split by whether undo can put them back. */
+interface RuleRetirementPlan {
+  restorable: number;
+  stranded: number;
+}
+
+/**
+ * Retirements an action made whose rule is still retired, and which of them undo would restore.
+ *
+ * Both conditions are the ones `unretireMerchantRule` itself applies, so the plan and the gesture
+ * cannot disagree. A retirement is restorable while it is the NEWEST revision for its rule, which
+ * is the stack rule categories follow, AND while no live rule holds its pattern: the partial unique
+ * index `idx_merchant_rules_pattern_live` allows one live rule per pattern, so a replacement written
+ * after the retirement blocks the restore and reviving the old rule would be a second, unasked
+ * change to whichever rule the owner has now.
+ *
+ * The stranded half exists because `revert_scope` has to be able to say `full` truthfully. Counting
+ * only what comes back would let an action with one unrestorable retirement report that one gesture
+ * puts everything back.
+ */
+function loadRuleRetirementPlans(
+  db: Database.Database,
+  actionIds: readonly string[]
+): Map<string, RuleRetirementPlan> {
+  if (actionIds.length === 0) return new Map();
+  const rows = db.prepare(`
+    SELECT v.action_id, COUNT(*) AS standing,
+           SUM(
+             CASE
+               WHEN v.id = (
+                      SELECT v2.id FROM merchant_rule_revisions v2
+                      WHERE v2.rule_id = v.rule_id
+                      ORDER BY v2.created_at DESC, v2.rowid DESC
+                      LIMIT 1
+                    )
+                    AND NOT EXISTS (
+                      SELECT 1 FROM merchant_rules live
+                      WHERE live.retired_at IS NULL AND lower(live.pattern) = lower(m.pattern)
+                    )
+               THEN 1 ELSE 0
+             END
+           ) AS restorable
+    FROM merchant_rule_revisions v
+    JOIN merchant_rules m ON m.id = v.rule_id
+    WHERE v.action_id IN (${placeholders(actionIds.length)})
+      AND v.operation = 'retire'
+      AND m.retired_at IS NOT NULL
+    GROUP BY v.action_id
+  `).all(...actionIds) as Array<{ action_id: string; standing: number; restorable: number }>;
+  return new Map(
+    rows.map((r) => [r.action_id, { restorable: r.restorable, stranded: r.standing - r.restorable }])
+  );
 }
 
 function toFeedback(rows: readonly FeedbackRow[]): AiDigestFeedback[] {
@@ -340,6 +428,7 @@ export function buildAiDigest(db: Database.Database, options: AiDigestOptions = 
   const rules = loadRules(db, actionIds);
   const ruleRevisions = loadRuleRevisions(db, actionIds);
   const feedback = loadFeedback(db, actionIds);
+  const retirementPlans = loadRuleRetirementPlans(db, actionIds);
   const logStart = revisionLogStart(db);
 
   // What the ledger holds right now, read before the simulation consumes anything.
@@ -415,6 +504,7 @@ export function buildAiDigest(db: Database.Database, options: AiDigestOptions = 
     }
 
     const revertableRows = rows.filter((r) => r.revertable).length;
+    const retirements = retirementPlans.get(action.id) ?? { restorable: 0, stranded: 0 };
     const state = recordState(rows.length, action.created_at, logStart);
     actions.push({
       action_id: action.id,
@@ -431,7 +521,8 @@ export function buildAiDigest(db: Database.Database, options: AiDigestOptions = 
       standing_rows: rows.filter((r) => r.status === 'standing').length,
       revertable_rows: revertableRows,
       blocked_rows: rows.length - revertableRows,
-      revert_scope: revertScope(rows, state),
+      revertable_rules: retirements.restorable,
+      revert_scope: revertScope(rows, state, retirements.restorable, retirements.stranded),
     });
   }
 
@@ -447,6 +538,7 @@ export function buildAiDigest(db: Database.Database, options: AiDigestOptions = 
     row_count: allRows.length,
     standing_rows: allRows.filter((r) => r.status === 'standing').length,
     revertable_rows: allRows.filter((r) => r.revertable).length,
+    revertable_rules: actions.reduce((sum, a) => sum + a.revertable_rules, 0),
     already_reverted_rows: allRows.filter((r) => r.blocked_reason === 'already_reverted').length,
     changed_since_rows: allRows.filter((r) => r.blocked_reason === 'changed_since').length,
     replaced_within_action_rows: allRows.filter((r) => r.blocked_reason === 'replaced_by_same_action').length,
@@ -497,22 +589,36 @@ export function revertAiDigestSince(
     const outcomes: AiDigestRevertActionOutcome[] = [];
     const discrepancies: string[] = [];
     let revertedRows = 0;
+    let revertedRules = 0;
 
     for (const action of digest.actions) {
-      if (action.revertable_rows === 0) continue;
+      // A rule retirement changes no transaction, so an action with zero revertable rows can still
+      // have something to put back. Skipping on rows alone left every autonomous retirement in the
+      // window standing while the result reported a complete revert.
+      if (action.revertable_rows === 0 && action.revertable_rules === 0) continue;
       const undone = undoAdvisorAction(db, action.action_id);
+      const undoneRules = undone.reverted_rules ?? 0;
       outcomes.push({
         action_id: action.action_id,
         label: action.label,
         planned_rows: action.revertable_rows,
         reverted_rows: undone.reverted,
+        planned_rules: action.revertable_rules,
+        reverted_rules: undoneRules,
       });
       revertedRows += undone.reverted;
+      revertedRules += undoneRules;
       if (undone.reverted !== action.revertable_rows) {
         discrepancies.push(
           `"${action.label}" was expected to restore ${action.revertable_rows} row(s) and restored ${undone.reverted}.`
         );
       }
+      if (undoneRules !== action.revertable_rules) {
+        discrepancies.push(
+          `"${action.label}" was expected to restore ${action.revertable_rules} rule(s) and restored ${undoneRules}.`
+        );
+      }
+      for (const failure of undone.rule_failures ?? []) discrepancies.push(failure);
     }
 
     return {
@@ -520,6 +626,8 @@ export function revertAiDigestSince(
       action_limit: limit,
       planned_rows: digest.revertable_rows,
       reverted_rows: revertedRows,
+      planned_rules: digest.revertable_rules,
+      reverted_rules: revertedRules,
       already_reverted_rows: digest.already_reverted_rows,
       changed_since_rows: digest.changed_since_rows,
       replaced_within_action_rows: digest.replaced_within_action_rows,

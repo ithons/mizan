@@ -17,8 +17,10 @@ import {
 import { collectorFor, jobsForTrigger } from '../server/src/services/aiScheduler';
 import {
   WORKER_DRAFTS_FORMAT,
+  buildBackgroundReviewPrompt,
   collectBackgroundReview,
   newDetections,
+  type BackgroundReviewPromptInput,
   type DetectedChange,
 } from '../server/src/services/aiWorker';
 import { _setDbForTesting } from '../server/src/db/index';
@@ -273,6 +275,125 @@ test("the worker's output schema offers a payload for every kind its job declare
   const declared = [...AI_JOBS.background_review.writes].sort();
   assert.deepEqual([...items.kind.enum].sort(), declared);
   assert.deepEqual(items.payload.anyOf.map((v) => v.properties.kind.const).sort(), declared);
+});
+
+// ─── The prompt body ─────────────────────────────────────────────────────────
+//
+// The prompt is the interface to the model: every rule in it is enforced by the model reading it
+// and by nothing else, which makes it the one surface where two sentences can contradict each
+// other and no test fails. Until these, none did.
+//
+// The contradiction that got here: the id rule said transaction_id came from "Uncategorized
+// transactions", and twelve lines below that a second list of machine-filed rows invited
+// categorize_transaction proposals it did not admit. On the owner's ledger the first list is empty
+// (`SELECT COUNT(*) FROM transactions WHERE category_id IS NULL` is 0 on a copy at migration 052,
+// 2026-07-31), so a model obeying the stated MUST could not have refiled anything at all.
+
+const UNCATEGORIZED_HEADING = 'Uncategorized transactions';
+const REFILABLE_HEADING = 'Already filed by a machine, and open to being refiled';
+const CATEGORIES_HEADING = 'Valid categories';
+const OWN_RULES_HEADING = 'Merchant rules you wrote yourself';
+const DETECTIONS_HEADING = 'System detections new since the last review pass';
+
+/** Every heading whose body the model is told to copy ids out of. */
+const ID_LIST_HEADINGS = [CATEGORIES_HEADING, UNCATEGORIZED_HEADING, REFILABLE_HEADING, OWN_RULES_HEADING];
+
+function promptInput(
+  overrides: Partial<BackgroundReviewPromptInput> = {}
+): BackgroundReviewPromptInput {
+  return {
+    context: 'Net worth: $1.00',
+    categories: [{ id: 'cat_health', name: 'Health' }],
+    uncategorized: [
+      { id: 'txn_new', merchant_name: 'Trupanion', original_name: 'TRUPANION', amount: -3902, date: '2026-07-29' },
+    ],
+    refilable: [
+      {
+        id: 'txn_refile', merchant_name: 'Trupanion', original_name: 'TRUPANION', amount: -3902,
+        date: '2026-07-28', category_name: 'Shopping', category_source: 'rule',
+      },
+    ],
+    ownRules: [{ id: 'rule_1', pattern: 'Trupanion', category_name: 'Health' }],
+    uncategorizedTotal: 1,
+    adjustedRecurringCount: 0,
+    overdueRecurringCount: 0,
+    detections: [{ entity_type: 'integrity', description: '2 transfer pair(s) need review' }],
+    ...overrides,
+  };
+}
+
+/** Sentences, split on the terminators the prompt actually uses. */
+function sentences(prompt: string): string[] {
+  return prompt.split(/(?<=[.:])\s+/).map((s) => s.trim()).filter((s) => s.length > 0);
+}
+
+/** The line under a heading, which is where that section's first list entry has to be. */
+function lineUnderHeading(prompt: string, heading: string): string {
+  const lines = prompt.split('\n');
+  const at = lines.findIndex((line) => line.startsWith(heading));
+  assert.notEqual(at, -1, `the prompt has no "${heading}" section`);
+  return lines[at + 1];
+}
+
+test('the prompt states exactly one rule about which transaction ids may be used', () => {
+  const prompt = buildBackgroundReviewPrompt(promptInput());
+
+  // Exactly one, because two rules about the same field is how the prompt came to forbid in one
+  // sentence what it invited in another. A model cannot obey both and nothing here can tell it
+  // which one won.
+  const rules = sentences(prompt).filter((s) => s.includes('transaction_id') && s.includes('MUST'));
+  assert.equal(
+    rules.length,
+    1,
+    `expected one rule about transaction_id, found ${rules.length}:\n${rules.join('\n---\n')}`
+  );
+
+  // And that one rule admits BOTH lists the prompt goes on to print ids in. Naming only one of
+  // them is the same contradiction with a different sentence deleted.
+  assert.ok(rules[0].includes(`"${UNCATEGORIZED_HEADING}"`), 'the rule does not name the uncategorized list');
+  assert.ok(rules[0].includes(`"${REFILABLE_HEADING}"`), 'the rule does not name the refilable list');
+});
+
+test('no other sentence narrows which rows the model may name', () => {
+  const prompt = buildBackgroundReviewPrompt(promptInput());
+  const idRule = sentences(prompt).find((s) => s.includes('transaction_id') && s.includes('MUST'));
+  assert.ok(idRule);
+
+  // The refile section says which rows are WORTH proposing, which is judgement, and it must not
+  // restate where ids come from. Any sentence outside the rule that pairs a MUST with one of the
+  // two list headings is a second rule wearing different words.
+  const rivals = sentences(prompt).filter(
+    (s) => s !== idRule && s.includes('MUST') && (s.includes(UNCATEGORIZED_HEADING) || s.includes(REFILABLE_HEADING))
+  );
+  assert.deepEqual(rivals, []);
+});
+
+test('HEALTHY: on the owner\'s real shape, an empty id list says it is empty', () => {
+  // The owner's ledger today: nothing uncategorized, rows to refile, no AI rules of its own yet.
+  // The empty section is the one the id rule points at first, so a heading followed by a blank
+  // line reads as a truncated list of ids rather than an absence of them.
+  const prompt = buildBackgroundReviewPrompt(
+    promptInput({ uncategorized: [], uncategorizedTotal: 0, ownRules: [], detections: [] })
+  );
+
+  for (const heading of ID_LIST_HEADINGS) {
+    const line = lineUnderHeading(prompt, heading);
+    assert.notEqual(line, '', `"${heading}" renders as a heading followed by a blank line`);
+  }
+  assert.equal(lineUnderHeading(prompt, UNCATEGORIZED_HEADING), '(none)');
+  assert.equal(lineUnderHeading(prompt, OWN_RULES_HEADING), '(none)');
+  assert.equal(lineUnderHeading(prompt, DETECTIONS_HEADING), '(none)');
+
+  // The refilable row is still named and still nameable, which is the whole point of the widening.
+  assert.ok(prompt.includes('id: "txn_refile"'));
+});
+
+test('HEALTHY: every id the prompt offers is one the pass actually read', () => {
+  const input = promptInput();
+  const prompt = buildBackgroundReviewPrompt(input);
+  for (const id of ['txn_new', 'txn_refile', 'cat_health', 'rule_1']) {
+    assert.ok(prompt.includes(`id: "${id}"`), `${id} was collected and never reached the prompt`);
+  }
 });
 
 // ─── `writes` is enforced, not documented ────────────────────────────────────
