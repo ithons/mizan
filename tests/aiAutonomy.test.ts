@@ -66,6 +66,16 @@ function setup(): Database.Database {
       id TEXT PRIMARY KEY, kind TEXT NOT NULL, label TEXT NOT NULL, summary TEXT NOT NULL,
       source TEXT NOT NULL, payload TEXT NOT NULL, created_at TEXT NOT NULL
     );
+    -- undoAdvisorAction records the reversal here (migration 047). See tests/aiFeedback.test.ts for
+    -- what it writes; this schema only has to exist for the undo path to complete.
+    CREATE TABLE ai_feedback (
+      id TEXT PRIMARY KEY, signal TEXT NOT NULL, proposal_kind TEXT NOT NULL,
+      action_id TEXT, draft_id TEXT, transaction_id TEXT, merchant_name TEXT,
+      proposed_category_id TEXT, proposed_pattern TEXT, proposal_summary TEXT,
+      owner_choice TEXT NOT NULL, owner_category_id TEXT,
+      affected_transactions INTEGER NOT NULL DEFAULT 0, stale INTEGER,
+      created_at TEXT NOT NULL
+    );
     CREATE TABLE budgets (
       id TEXT PRIMARY KEY, category_id TEXT NOT NULL, amount INTEGER NOT NULL,
       period TEXT NOT NULL DEFAULT 'monthly', rollover INTEGER NOT NULL DEFAULT 0,

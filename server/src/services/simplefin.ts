@@ -8,6 +8,7 @@ import { balancesDiffer, type AccountBalanceChange } from './balanceChanges';
 import { guessAccountTypeAndLiability } from './accountClassification';
 import { isBelowBackfillFloor } from './backfillFloor';
 import { toCents, toCentsOrNull, toDollars } from './money';
+import { recordFieldRevision } from './categoryWrites';
 
 // We store liability balances as positive "amount owed" and negate what SimpleFIN reports (which
 // normally sends credit balances as negatives).
@@ -320,9 +321,13 @@ export interface SimplefinTransactionValues {
 export type SimplefinTransactionWrite = 'added' | 'modified' | 'unchanged';
 
 interface ExistingTransactionRow {
+  id: string;
   date: string;
+  date_source: string | null;
   amount: number;
+  amount_source: string | null;
   merchant_name: string | null;
+  merchant_name_source: string | null;
   original_name: string;
   pending: number;
 }
@@ -334,8 +339,8 @@ interface ExistingTransactionRow {
  *
  * It does not rewrite `merchant_name` on a row that has already posted. The owner is allowed to
  * correct a merchant (UpdateTransactionSchema permits `merchant_name`), and the old unconditional
- * refresh reverted every such correction within the hour with nothing on screen to say so. No
- * provenance for a rename is stored anywhere, so the test is the row's own state instead: while a
+ * refresh reverted every such correction within the hour with nothing on screen to say so. The
+ * first test is the row's own state, which is all a row written before migration 048 has: while a
  * transaction is pending the provider is still settling it and may legitimately sharpen the payee,
  * and once it has posted the payee does not change at the institution, so a divergence from that
  * point on is the owner's. `original_name` carries the provider's raw description either way, so
@@ -345,6 +350,13 @@ interface ExistingTransactionRow {
  * 'modified', so the sync panel claimed ~123 updated transactions every hour on a ledger that had
  * not moved. That panel is also where reauth prompts and partial failures appear, and noise there
  * is what teaches the owner to stop reading it.
+ *
+ * What migration 048 adds is a record, not a veto. `date` and `amount` are still overwritten from
+ * the provider unconditionally, because an institution revises a posted row for ordinary reasons
+ * and a pinned money field would leave the ledger permanently disagreeing with the balance it
+ * reconciles against. What changes is that overwriting a field the owner authored now appends a
+ * `transaction_field_revisions` row, so the owner's value survives as evidence and the
+ * disagreement is knowable instead of silent.
  */
 export function upsertSimplefinTransaction(
   db: Database.Database,
@@ -353,7 +365,8 @@ export function upsertSimplefinTransaction(
   now: string
 ): SimplefinTransactionWrite {
   const existing = db.prepare(`
-    SELECT date, amount, merchant_name, original_name, pending
+    SELECT id, date, date_source, amount, amount_source, merchant_name, merchant_name_source,
+           original_name, pending
     FROM transactions
     WHERE simplefin_transaction_id = ?
   `).get(values.providerId) as ExistingTransactionRow | undefined;
@@ -362,8 +375,9 @@ export function upsertSimplefinTransaction(
     db.prepare(`
       INSERT INTO transactions
         (id, simplefin_transaction_id, account_id, date, amount, merchant_name,
-         original_name, pending, is_manual, source_type, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, 'simplefin', ?, ?)
+         original_name, pending, is_manual, source_type,
+         date_source, amount_source, merchant_name_source, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, 'simplefin', 'provider', 'provider', 'provider', ?, ?)
     `).run(
       uuidv4(),
       values.providerId,
@@ -380,8 +394,48 @@ export function upsertSimplefinTransaction(
   }
 
   const stillSettling = existing.pending === 1 || values.pending === 1;
-  const ownerOwnsMerchant = !stillSettling && (existing.merchant_name ?? '') !== '';
+  // The pending-state heuristic is kept and the provenance test is added ON TOP of it, never in
+  // place of it. Every row written before migration 048 carries a NULL source, so a
+  // provenance-only test would hand the provider back the right to overwrite merchant names it has
+  // been leaving alone, and the owner's older corrections are exactly the ones no backfill can
+  // identify. This union only ever narrows what the provider may rewrite.
+  //
+  // A CLEARED name is not a claim over the field, which is why the provenance half asks for a name
+  // and not just for the source. `UpdateTransactionSchema` permits `merchant_name: null`, and
+  // reading that as ownership would silently block the provider from ever labelling the row again,
+  // pending rows included, with nothing on screen saying why. The choice made here is that clearing
+  // a name means "I have no label for this", not "leave this blank forever": the provider may fill
+  // it, and doing so appends a `provider_revision` row, so the owner's clearing survives as
+  // evidence exactly the way a displaced amount does.
+  const ownerNamedMerchant =
+    existing.merchant_name_source === 'human' && (existing.merchant_name ?? '') !== '';
+  const ownerClearedMerchant =
+    existing.merchant_name_source === 'human' && (existing.merchant_name ?? '') === '';
+  const ownerOwnsMerchant =
+    ownerNamedMerchant || (!stillSettling && (existing.merchant_name ?? '') !== '');
   const merchantName = ownerOwnsMerchant ? existing.merchant_name : values.merchantName;
+
+  // Recorded before the early return: a rejected payee changes nothing on the row, so the
+  // comparison below reports 'unchanged' and the disagreement would otherwise never surface.
+  //
+  // Gated on explicit owner authorship rather than on `ownerOwnsMerchant`, because the heuristic
+  // half of that union also covers an ordinary provider event -- an institution sharpening its own
+  // payee after posting -- which is not a disagreement with anybody. And gated on the provider
+  // having sent a payee at all: `merchantName` is `txn.payee || null` at the call site, and a
+  // provider that sends nothing has not "reported a different value", which is what migration 048
+  // defines `provider_rejected` to mean. A row with `to_value` NULL under that origin would be a
+  // record of an event that never happened.
+  if (ownerNamedMerchant && values.merchantName !== null && values.merchantName !== existing.merchant_name) {
+    recordFieldRevision(db, {
+      transactionId: existing.id,
+      field: 'merchant_name',
+      fromValue: existing.merchant_name,
+      toValue: values.merchantName,
+      fromSource: 'human',
+      toSource: 'provider',
+      origin: 'provider_rejected',
+    }, now);
+  }
 
   if (
     existing.date === values.date &&
@@ -393,9 +447,52 @@ export function upsertSimplefinTransaction(
     return 'unchanged';
   }
 
+  if (existing.date_source === 'human' && existing.date !== values.date) {
+    recordFieldRevision(db, {
+      transactionId: existing.id,
+      field: 'date',
+      fromValue: existing.date,
+      toValue: values.date,
+      fromSource: 'human',
+      toSource: 'provider',
+      origin: 'provider_revision',
+    }, now);
+  }
+  if (existing.amount_source === 'human' && existing.amount !== values.amount) {
+    recordFieldRevision(db, {
+      transactionId: existing.id,
+      field: 'amount',
+      fromValue: String(existing.amount),
+      toValue: String(values.amount),
+      fromSource: 'human',
+      toSource: 'provider',
+      origin: 'provider_revision',
+    }, now);
+  }
+  // The other side of the clearing decision above: the owner removed a label, the provider supplies
+  // one, and the provider's value wins. Logged so the removal is knowable rather than silently
+  // undone. Self-limiting like the two revisions above: this write leaves the source 'provider', so
+  // the next pass no longer sees a cleared owner field and there is nothing to drip.
+  if (ownerClearedMerchant && values.merchantName !== null && values.merchantName !== '') {
+    recordFieldRevision(db, {
+      transactionId: existing.id,
+      field: 'merchant_name',
+      fromValue: existing.merchant_name,
+      toValue: values.merchantName,
+      fromSource: 'human',
+      toSource: 'provider',
+      origin: 'provider_revision',
+    }, now);
+  }
+
+  // date and amount are written from the provider on every update, so 'provider' is what authored
+  // the stored value once this statement runs. merchant_name_source only moves when the provider's
+  // payee is the one actually being written.
   db.prepare(`
     UPDATE transactions
-    SET date = ?, amount = ?, merchant_name = ?, original_name = ?, pending = ?, updated_at = ?
+    SET date = ?, amount = ?, merchant_name = ?, original_name = ?, pending = ?,
+        date_source = 'provider', amount_source = 'provider',
+        merchant_name_source = ?, updated_at = ?
     WHERE simplefin_transaction_id = ?
   `).run(
     values.date,
@@ -403,6 +500,7 @@ export function upsertSimplefinTransaction(
     merchantName,
     values.originalName,
     values.pending,
+    ownerOwnsMerchant ? existing.merchant_name_source : 'provider',
     now,
     values.providerId
   );

@@ -256,3 +256,63 @@ export function revertAction(
 ): number {
   return revertRevisions(db, revertableRevisionsForAction(db, actionId), now);
 }
+
+/** The transaction fields migration 048 tracks an author for. */
+export type TransactionField = 'date' | 'amount' | 'merchant_name';
+
+export type FieldRevisionOrigin = 'owner_edit' | 'provider_revision' | 'provider_rejected';
+
+export interface FieldRevision {
+  transactionId: string;
+  field: TransactionField;
+  /** The value the row held. */
+  fromValue: string | null;
+  /** The value the event is about. `origin` says whether the row now holds it. */
+  toValue: string | null;
+  fromSource: string | null;
+  toSource: string | null;
+  origin: FieldRevisionOrigin;
+}
+
+/**
+ * Append one field-provenance revision (migration 048). Returns whether a row was written.
+ *
+ * `provider_rejected` is deduped and the other two are not, and the asymmetry is the point. A
+ * rejected provider value has no write behind it, so the same disagreement is re-offered on every
+ * hourly sync forever; without the dedup a single corrected merchant name would grow a revision
+ * row an hour, which is the sync-panel noise this codebase has already shipped once. The other two
+ * origins are self-limiting because each records a write that makes the next comparison equal, and
+ * deduping them would silently drop a genuine A -> B -> A -> B edit history.
+ */
+export function recordFieldRevision(
+  db: Database.Database,
+  revision: FieldRevision,
+  now = new Date().toISOString()
+): boolean {
+  if (revision.origin === 'provider_rejected') {
+    const seen = db.prepare(`
+      SELECT 1 FROM transaction_field_revisions
+      WHERE transaction_id = ? AND field = ? AND origin = 'provider_rejected'
+        AND from_value IS ? AND to_value IS ?
+      LIMIT 1
+    `).get(revision.transactionId, revision.field, revision.fromValue, revision.toValue);
+    if (seen) return false;
+  }
+
+  db.prepare(`
+    INSERT INTO transaction_field_revisions
+      (id, transaction_id, field, from_value, to_value, from_source, to_source, origin, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    uuidv4(),
+    revision.transactionId,
+    revision.field,
+    revision.fromValue,
+    revision.toValue,
+    revision.fromSource,
+    revision.toSource,
+    revision.origin,
+    now
+  );
+  return true;
+}

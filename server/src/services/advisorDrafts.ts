@@ -24,7 +24,16 @@ import {
   partitionByAuthorship,
 } from './aiWriteGuards';
 import { recordBudgetRolloverLedger } from './budgetProjection';
-import { revertAction, writeTransactionCategory } from './categoryWrites';
+import {
+  revertRevisions,
+  revertableRevisionsForAction,
+  writeTransactionCategory,
+} from './categoryWrites';
+import {
+  recordDraftDismissalFeedback,
+  recordUndoFeedback,
+  type DraftDismissalFeedback,
+} from './aiFeedback';
 import { refreshTransactionIntegrity } from './transactionIntegrity';
 import { upsertRecurringAdjustment } from './recurringAdjustments';
 import { setManualCostBasis, setSecurityMetadata } from './investmentMetadata';
@@ -1191,6 +1200,17 @@ function confirmSectorMetadata(
 }
 
 /**
+ * What a liveness check concluded about an open draft.
+ *
+ * Three states, not two, because "we looked and the premise holds" and "we never looked" are
+ * different facts and only one of them is a claim. Five kinds have a cheap premise to check; the
+ * other six have none, and calling those live would assert a check that did not run. The queue
+ * treats both the same on purpose (see `isDraftStillActionable`); anything that RECORDS the
+ * conclusion must not.
+ */
+export type DraftLiveness = 'live' | 'lapsed' | 'not_judged';
+
+/**
  * Whether an open draft's premise is still true.
  *
  * Drafts are generated from a snapshot of the ledger and then persisted, but nothing ever
@@ -1205,60 +1225,150 @@ function confirmSectorMetadata(
  * Checked on read rather than fixed by a one-off cleanup, because a cleanup would decay the same
  * way: this is the invariant, not a repair.
  */
-export function isDraftStillActionable(
+export function draftLiveness(
   db: Database.Database,
   payload: AdvisorDraftPayload
-): boolean {
+): DraftLiveness {
   const categoryExists = (id: string): boolean =>
     db.prepare('SELECT 1 FROM categories WHERE id = ?').get(id) !== undefined;
+  const verdict = (live: boolean): DraftLiveness => (live ? 'live' : 'lapsed');
 
   switch (payload.kind) {
     case 'categorize_transaction': {
-      if (!categoryExists(payload.category_id)) return false;
+      if (!categoryExists(payload.category_id)) return 'lapsed';
       const txn = db.prepare(
         'SELECT category_id, manually_categorized, category_source FROM transactions WHERE id = ?'
       ).get(payload.transaction_id) as
         | { category_id: string | null; manually_categorized: number; category_source: string | null }
         | undefined;
-      if (!txn) return false;
+      if (!txn) return 'lapsed';
       // The draft's premise is "this row is uncategorized". Once it isn't, the draft is a
       // proposal to overwrite a decision nobody asked it to revisit.
-      if (txn.category_id !== null) return false;
-      if (txn.manually_categorized === 1 || txn.category_source === 'human') return false;
-      return true;
+      if (txn.category_id !== null) return 'lapsed';
+      if (txn.manually_categorized === 1 || txn.category_source === 'human') return 'lapsed';
+      return 'live';
     }
     case 'create_merchant_rule':
       // Only the category, deliberately. Asking `checkMerchantRuleWritable` here as well hid every
       // draft the guards would refuse, and the guards refuse healthy proposals (see the note on
       // that function). A suggestion the owner cannot see is worse than one that refuses when
       // clicked: the refusal is a 409 carrying its own reason, which is readable and dismissable.
-      return categoryExists(payload.category_id);
+      return verdict(categoryExists(payload.category_id));
     case 'update_budget':
-      return categoryExists(payload.category_id);
+      return verdict(categoryExists(payload.category_id));
     case 'update_goal_target':
-      return (
+      return verdict(
         db.prepare('SELECT 1 FROM goals WHERE id = ? AND is_archived = 0').get(payload.goal_id) !== undefined
       );
     case 'confirm_recurring':
-      return (
+      return verdict(
         db.prepare('SELECT 1 FROM recurring_patterns WHERE id = ?').get(payload.recurring_id) !== undefined
       );
     default:
-      // Kinds without a cheap liveness check stay visible; a draft that cannot be validated is
-      // better shown than silently swallowed.
-      return true;
+      // No cheap premise to check for the budget-group, recurring-adjustment and investment-metadata
+      // kinds. Reported as unjudged rather than live, so a reader can tell the difference.
+      return 'not_judged';
   }
 }
 
-export function dismissAdvisorDraft(db: Database.Database, id: string): { changed: number } {
-  const result = db.prepare(`
-    UPDATE advisor_drafts
-    SET status = 'dismissed',
-        updated_at = ?
-    WHERE id = ? AND status = 'open'
-  `).run(new Date().toISOString(), id);
+/**
+ * Whether the queue should still offer this draft.
+ *
+ * Unjudged counts as showable: a draft that cannot be validated is better shown than silently
+ * swallowed. That is a decision about what to display, and it is deliberately NOT the same as
+ * concluding the premise holds, which is why callers that store a conclusion use `draftLiveness`.
+ */
+export function isDraftStillActionable(
+  db: Database.Database,
+  payload: AdvisorDraftPayload
+): boolean {
+  return draftLiveness(db, payload) !== 'lapsed';
+}
 
-  return { changed: result.changes };
+interface OpenDraftRow {
+  id: string;
+  kind: string;
+  summary: string;
+  payload: string;
+}
+
+/**
+ * The category the model is proposing FOR SOMETHING, or null when the payload names no such thing.
+ *
+ * Two other kinds carry a `category_id` that is the subject of the change rather than a proposal
+ * about it: `update_budget` and `assign_category_to_budget_group` name the category whose budget or
+ * grouping is being changed. Filing either into `ai_feedback.proposed_category_id` would record the
+ * model as having proposed a categorization it never proposed.
+ */
+function proposedCategoryOf(payload: AdvisorDraftPayload): string | null {
+  switch (payload.kind) {
+    case 'categorize_transaction':
+    case 'create_merchant_rule':
+      return payload.category_id;
+    default:
+      return null;
+  }
+}
+
+/** 1 lapsed, 0 live, null when nothing judged it. Never defaults an unasked question to 0. */
+function staleFlag(liveness: DraftLiveness | null): number | null {
+  if (liveness === null || liveness === 'not_judged') return null;
+  return liveness === 'lapsed' ? 1 : 0;
+}
+
+/**
+ * The evidence a dismissed draft rested on, as `ai_feedback` needs to read it.
+ *
+ * `stale` is NULL for both a payload that no longer parses and a kind no liveness check covers. The
+ * draft was still declined and that fact is worth keeping, but "its premise was still live" is a
+ * claim nothing checked in either case, and writing 0 would assert it (migration 047's own header).
+ */
+function dismissedDraftEvidence(db: Database.Database, draft: OpenDraftRow): DraftDismissalFeedback {
+  const parsed = AdvisorDraftPayloadSchema.safeParse(
+    safeJsonParse<unknown>(draft.payload, null, `advisor_drafts.payload for ${draft.id}`)
+  );
+  const payload: AdvisorDraftPayload | null = parsed.success ? parsed.data : null;
+
+  return {
+    draftId: draft.id,
+    kind: draft.kind,
+    summary: draft.summary,
+    proposedCategoryId: payload === null ? null : proposedCategoryOf(payload),
+    proposedPattern: payload?.kind === 'create_merchant_rule' ? payload.pattern : null,
+    transactionId: payload?.kind === 'categorize_transaction' ? payload.transaction_id : null,
+    stale: staleFlag(payload === null ? null : draftLiveness(db, payload)),
+  };
+}
+
+/**
+ * Decline a proposal, and record that it was declined (migration 047).
+ *
+ * The status flip alone kept no trace: `aiWorker` deletes drafts on its next pass, so the payload
+ * the owner rejected disappears with the row and the model is never shown that it happened.
+ */
+export function dismissAdvisorDraft(db: Database.Database, id: string): { changed: number } {
+  const now = new Date().toISOString();
+
+  const dismiss = db.transaction(() => {
+    const draft = db.prepare(`
+      SELECT id, kind, summary, payload FROM advisor_drafts WHERE id = ? AND status = 'open'
+    `).get(id) as OpenDraftRow | undefined;
+
+    const result = db.prepare(`
+      UPDATE advisor_drafts
+      SET status = 'dismissed',
+          updated_at = ?
+      WHERE id = ? AND status = 'open'
+    `).run(now, id);
+
+    if (result.changes > 0 && draft) {
+      recordDraftDismissalFeedback(db, dismissedDraftEvidence(db, draft), now);
+    }
+
+    return { changed: result.changes };
+  });
+
+  return dismiss();
 }
 
 export interface AdvisorActionLog {
@@ -1298,14 +1408,27 @@ export interface UndoAdvisorActionResult {
  * change, and the rule is visible and removable in Settings; undo here means "put the ledger
  * back", not "erase that this happened". The action stays in the audit trail for the same
  * reason.
+ *
+ * A successful undo also writes an `ai_feedback` row (migration 047). Until then the strongest
+ * signal the owner can give -- reversing an applied answer wholesale -- left no record anywhere,
+ * so the model's own history showed 140 applied actions and not one outcome.
  */
 export function undoAdvisorAction(db: Database.Database, actionId: string): UndoAdvisorActionResult {
   const action = db.prepare('SELECT id FROM advisor_actions WHERE id = ?').get(actionId);
   if (!action) return { ok: false, reason: 'not_found', reverted: 0 };
 
-  const reverted = revertAction(db, actionId);
-  if (reverted === 0) return { ok: false, reason: 'nothing_to_undo', reverted: 0 };
-  return { ok: true, reverted };
+  const undo = db.transaction((): UndoAdvisorActionResult => {
+    // The revisions are read before they are consumed, because they carry what the model chose and
+    // what it displaced. `revertRevisions` only returns a count.
+    const revisions = revertableRevisionsForAction(db, actionId);
+    const reverted = revertRevisions(db, revisions);
+    if (reverted === 0) return { ok: false, reason: 'nothing_to_undo', reverted: 0 };
+
+    recordUndoFeedback(db, { actionId, revisions, reverted });
+    return { ok: true, reverted };
+  });
+
+  return undo();
 }
 
 export function listAdvisorActions(db: Database.Database, limit = 50): AdvisorActionLog[] {

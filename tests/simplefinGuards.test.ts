@@ -253,30 +253,43 @@ test('a settling transaction still takes the provider date, amount and payee', (
   db.close();
 });
 
-test('a blank merchant name is filled in by the provider rather than protected', () => {
-  const db = migratedTestDb();
-  const accountId = insertAccount(db, { connection_type: 'simplefin', is_manual: 0 });
-  const txnId = insertSimplefinTransaction(db, 'sf_txn_3', {
-    account_id: accountId,
-    merchant_name: null,
-    original_name: 'ACH CREDIT',
-    pending: 0,
+// A blank merchant name is filled in by the provider, and that holds whether the blank is an
+// untouched row or one the OWNER cleared by hand. Clearing a name means "I have no label for this",
+// not "leave this blank forever": the alternative reading would let one null edit block the
+// provider from ever labelling the row again, pending rows included, with nothing on screen saying
+// why. The refill of a cleared name is logged as a provider_revision (see fieldProvenance.test.ts),
+// so the owner's clearing survives as evidence rather than being silently undone.
+for (const cleared of [false, true]) {
+  const label = cleared ? 'a merchant name the owner cleared' : 'a merchant name never set';
+  test(`${label} is filled in by the provider rather than protected`, () => {
+    const db = migratedTestDb();
+    const accountId = insertAccount(db, { connection_type: 'simplefin', is_manual: 0 });
+    const txnId = insertSimplefinTransaction(db, 'sf_txn_3', {
+      account_id: accountId,
+      merchant_name: null,
+      original_name: 'ACH CREDIT',
+      pending: 0,
+    });
+    db.prepare('UPDATE transactions SET merchant_name_source = ? WHERE id = ?')
+      .run(cleared ? 'human' : null, txnId);
+
+    const write = upsertSimplefinTransaction(db, accountId, {
+      providerId: 'sf_txn_3',
+      date: '2026-07-01',
+      amount: -1000,
+      merchantName: 'Payroll',
+      originalName: 'ACH CREDIT',
+      pending: 0,
+    }, '2026-07-30T12:00:00.000Z');
+
+    assert.equal(write, 'modified');
+    const row = db.prepare('SELECT merchant_name, merchant_name_source FROM transactions WHERE id = ?').get(txnId) as
+      { merchant_name: string; merchant_name_source: string };
+    assert.equal(row.merchant_name, 'Payroll');
+    assert.equal(row.merchant_name_source, 'provider', 'the provider authored the stored value');
+    db.close();
   });
-
-  const write = upsertSimplefinTransaction(db, accountId, {
-    providerId: 'sf_txn_3',
-    date: '2026-07-01',
-    amount: -1000,
-    merchantName: 'Payroll',
-    originalName: 'ACH CREDIT',
-    pending: 0,
-  }, '2026-07-30T12:00:00.000Z');
-
-  assert.equal(write, 'modified');
-  const row = db.prepare('SELECT merchant_name FROM transactions WHERE id = ?').get(txnId) as { merchant_name: string };
-  assert.equal(row.merchant_name, 'Payroll');
-  db.close();
-});
+}
 
 test('an unchanged row is not counted as modified and its updated_at is left alone', () => {
   const db = migratedTestDb();

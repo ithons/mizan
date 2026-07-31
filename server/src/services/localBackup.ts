@@ -28,6 +28,7 @@ export const LOCAL_BACKUP_TABLES = [
   'securities',
   'transactions',
   'transaction_category_revisions',
+  'transaction_field_revisions',
   'holdings',
   'holdings_history',
   'budgets',
@@ -51,6 +52,11 @@ export const LOCAL_BACKUP_TABLES = [
   'data_import_runs',
   'advisor_actions',
   'advisor_drafts',
+  // Declares no foreign key on purpose (migration 047): the record of a rejected AI answer has to
+  // outlive the draft the worker deletes and the category a merge removes. Listed here anyway,
+  // and last among the advisor tables, because the closure test only guards tables it can see.
+  'ai_feedback',
+  'ai_memory',
   'conversations',
   'messages',
 ] as const;

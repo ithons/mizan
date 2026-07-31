@@ -152,6 +152,12 @@ function seedEveryTable(db: Database.Database, tag: string): SeededIds {
   `).run(`txnrev_${tag}`, transactionId, categoryId, TEST_NOW);
 
   db.prepare(`
+    INSERT INTO transaction_field_revisions (id, transaction_id, field, from_value, to_value,
+                                             from_source, to_source, origin, created_at)
+    VALUES (?, ?, 'merchant_name', 'BLUE BOTTLE 0042', ?, 'provider', 'human', 'owner_edit', ?)
+  `).run(`fieldrev_${tag}`, transactionId, `Blue Bottle ${tag}`, TEST_NOW);
+
+  db.prepare(`
     INSERT INTO goals (id, name, type, target_amount, account_id, created_at, updated_at)
     VALUES (?, ?, 'savings', 500000, ?, ?, ?)
   `).run(`goal_${tag}`, `Goal ${tag}`, accountId, TEST_NOW, TEST_NOW);
@@ -198,6 +204,24 @@ function seedEveryTable(db: Database.Database, tag: string): SeededIds {
                                 created_at, updated_at)
     VALUES (?, 'categorize_transaction', 'draft', 'draft', '/transactions', '{}', '[]', '[]', ?, ?)
   `).run(`draft_${tag}`, TEST_NOW, TEST_NOW);
+
+  db.prepare(`
+    INSERT INTO ai_feedback (id, signal, proposal_kind, action_id, transaction_id, merchant_name,
+                             proposed_category_id, owner_choice, owner_category_id,
+                             affected_transactions, created_at)
+    VALUES (?, 'undo', 'categorize_transaction', ?, ?, ?, ?, 'uncategorized', NULL, 1, ?)
+  `).run(`fb_${tag}`, actionId, transactionId, `Blue Bottle ${tag}`, categoryId, TEST_NOW);
+
+  db.prepare(`
+    INSERT INTO ai_memory (id, scope, subject, statement, kind, evidence, created_at)
+    VALUES (?, 'merchant', ?, ?, 'preference', ?, ?)
+  `).run(
+    `mem_${tag}`,
+    `Blue Bottle ${tag}`,
+    `Coffee at Blue Bottle belongs in dining out for ${tag}`,
+    `Categorised by hand three times in a row for ${tag}`,
+    TEST_NOW
+  );
 
   const conversationId = `conv_${tag}`;
   db.prepare('INSERT INTO conversations (id, title, created_at, updated_at) VALUES (?, ?, ?, ?)')

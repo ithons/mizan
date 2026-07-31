@@ -3,7 +3,13 @@ import { v4 as uuidv4 } from 'uuid';
 import { toCents } from './money';
 import { adjustManualAccountBalance } from './manualAccountBalance';
 import { applyMerchantRuleToMatchingTransactions, upsertMerchantRule } from './rules';
-import { recordCategoryRevision, writeTransactionCategories } from './categoryWrites';
+import {
+  recordCategoryRevision,
+  recordFieldRevision,
+  writeTransactionCategories,
+  type FieldRevision,
+} from './categoryWrites';
+import { recordManualOverrideFeedback } from './aiFeedback';
 
 // All money here is integer cents (the DB contract). Callers dollarize at the
 // response boundary. Query-string parsing and the resulting 400s stay in the route;
@@ -282,10 +288,15 @@ export function updateTransaction(
     | {
         account_id: string;
         amount: number;
+        amount_source: string | null;
+        date: string;
+        date_source: string | null;
         category_id: string | null;
         category_source: string | null;
+        category_action_id: string | null;
         is_manual: number;
         merchant_name: string | null;
+        merchant_name_source: string | null;
         original_name: string;
       }
     | undefined;
@@ -330,17 +341,59 @@ export function updateTransaction(
     updates.push('notes = ?');
     values.push(input.notes);
   }
+
+  // Field provenance (migration 048). A field's author changes only when its value does: retyping
+  // the value already stored is not an authorship event, and recording one would put a standing
+  // owner-versus-provider disagreement on a row where none exists.
+  const fieldEdits: FieldRevision[] = [];
   if (input.date !== undefined) {
     updates.push('date = ?');
     values.push(input.date);
+    if (input.date !== existing.date) {
+      updates.push("date_source = 'human'");
+      fieldEdits.push({
+        transactionId: id,
+        field: 'date',
+        fromValue: existing.date,
+        toValue: input.date,
+        fromSource: existing.date_source,
+        toSource: 'human',
+        origin: 'owner_edit',
+      });
+    }
   }
-  if (input.amount !== undefined) {
+  if (input.amount !== undefined && amountCents !== undefined) {
     updates.push('amount = ?');
     values.push(amountCents);
+    if (amountCents !== existing.amount) {
+      updates.push("amount_source = 'human'");
+      // Integer cents on both sides, stringified only because one log column holds three types.
+      fieldEdits.push({
+        transactionId: id,
+        field: 'amount',
+        fromValue: String(existing.amount),
+        toValue: String(amountCents),
+        fromSource: existing.amount_source,
+        toSource: 'human',
+        origin: 'owner_edit',
+      });
+    }
   }
   if (input.merchant_name !== undefined) {
     updates.push('merchant_name = ?');
     values.push(input.merchant_name);
+    if (input.merchant_name !== existing.merchant_name) {
+      updates.push("merchant_name_source = 'human'");
+      fieldEdits.push({
+        transactionId: id,
+        field: 'merchant_name',
+        fromValue: existing.merchant_name,
+        toValue: input.merchant_name,
+        fromSource: existing.merchant_name_source,
+        toSource: 'human',
+        origin: 'owner_edit',
+      });
+    }
   }
 
   const now = new Date().toISOString();
@@ -351,7 +404,34 @@ export function updateTransaction(
   let balanceChanged = false;
   if (updates.length > 1) {
     const updateTransactionTx = db.transaction(() => {
+      // Before the UPDATE, which sets category_action_id = NULL. That clear is what stops undo
+      // reaching back through a human decision, and it was also the only thing that ever recorded
+      // the model's answer, so the rejection has to be captured while the link still exists
+      // (migration 047). Only a genuine disagreement: an edit that lands on the category the model
+      // already chose is agreement, and filing it as feedback would teach the opposite.
+      if (
+        input.category_id !== undefined &&
+        existing.category_action_id !== null &&
+        categoryId !== existing.category_id
+      ) {
+        recordManualOverrideFeedback(
+          db,
+          {
+            transactionId: id,
+            actionId: existing.category_action_id,
+            proposedCategoryId: existing.category_id,
+            ownerCategoryId: categoryId,
+            merchantName: existing.merchant_name ?? existing.original_name,
+          },
+          now
+        );
+      }
+
       db.prepare(`UPDATE transactions SET ${updates.join(', ')} WHERE id = ?`).run(...values);
+
+      for (const edit of fieldEdits) {
+        recordFieldRevision(db, edit, now);
+      }
 
       // A hand edit is a category write like any other and belongs in the revision log, so undo
       // can see that a human decision now sits on top of whatever the AI had done. The write
