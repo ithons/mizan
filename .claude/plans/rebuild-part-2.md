@@ -346,25 +346,25 @@ Three SDK call sites exist. `routes/ai.ts` is already modern (streaming, adaptiv
 
 **6.3 What the model may do.**
 
-- [ ] **`aiGuards.ts`**: snapshot the headline set (net worth, month spend, month income, savings
+- [x] **`aiGuards.ts`**: snapshot the headline set (net worth, month spend, month income, savings
       rate, 60-day scheduled net, per-category totals) before an autonomous batch, re-run the
       invariants after, diff, and auto-revert the whole batch by action id on breach.
-- [ ] **`aiJobs.ts` + `aiScheduler.ts`**: named jobs with a declared
+- [x] **`aiJobs.ts` + `aiScheduler.ts`**: named jobs with a declared
       `{trigger, model, effort, writes, invariants, digestSection}`. Move the worker kickoff into a
       `finally` so a partial sync still triggers a pass (today it sits after `if (deferredError)
       throw`).
-- [ ] Emit an SSE event when a background pass applies anything, so the client stops rendering
+- [x] Emit an SSE event when a background pass applies anything, so the client stops rendering
       pre-AI category totals for up to 5 minutes.
-- [ ] **Expanded autonomous writes**: recategorize beyond uncategorized (never `human`), update and
+- [x] **Expanded autonomous writes**: recategorize beyond uncategorized (never `human`), update and
       retire merchant rules, security metadata, merchant-name normalisation (with `original_name`
       immutable), exact-match duplicate resolution, equal-and-opposite transfer confirmation,
       recurring confirmation at 4+ occurrences.
-- [ ] **Proposal-only, per the owner's carve-out**: `update_budget`, `update_goal_target`,
+- [x] **Proposal-only, per the owner's carve-out**: `update_budget`, `update_goal_target`,
       `set_manual_cost_basis`, category merge / delete / re-parent.
-- [ ] **`GET /api/ai/digest`**: diff-shaped and complete, row-level before/after, one-click
+- [x] **`GET /api/ai/digest`**: diff-shaped and complete, row-level before/after, one-click
       revert-since-timestamp. Not a summary.
-- [ ] Chat loads history server-side from `conversationId` rather than trusting the client array.
-- [ ] Tests: `aiMemory`, `aiFeedback`, `aiGuards`, autonomy boundary.
+- [x] Chat loads history server-side from `conversationId` rather than trusting the client array.
+- [x] Tests: `aiMemory`, `aiFeedback`, `aiGuards`, autonomy boundary.
 
 ---
 
@@ -843,3 +843,81 @@ misdescribed:
 **One correction to my own brief:** the concrete example I passed on for the payoff defect
 (liquid $1,000, debt $10) does not reproduce; it returns exactly 0. The defect is real and the
 smallest reproducing pairs are liquid $0.08 / debt $0.01, and at the owner's scale $5,291.49 / $0.03.
+
+---
+
+## Phase 6.3, landed 2026-07-31
+
+Six commits: `3ffffef`, `8c35dde`, `7dd2958`, `797b89c`, `a943f7c`, `ecad696`. **950 tests pass**,
+both typechecks clean, `vite build` succeeds. Migrations 050, 051, 052. Phase 6 is complete.
+
+**The guard.** An autonomous batch is snapshotted, run, and re-checked against a conservation
+invariant: **recategorizing is a reshuffle, not a change in magnitude.** The hard part was that "any
+figure moved" cannot be the breach condition, since moving per-category totals is what the pass is
+for. So each headline carries a movement policy (invariant / accounted / derived / evidence), the
+accounted ones must move by exactly what the batch's own rows explain to the cent, and crossing into
+a transfer category or across the income boundary is legitimate rather than a breach. On breach the
+whole batch reverts, or it refuses and says so. No parallel SQL: every headline comes from the
+service that already owns it.
+
+**Autonomy is now three kinds, and it is structural.** `AUTONOMOUS_DRAFT_KINDS` was a `Set<string>`
+anyone could push a line onto; it is derived from `DRAFT_KIND_AUTONOMY`, a
+`Readonly<Record<AdvisorDraftActionKind, ...>>`, so a new kind that declares nothing is a compile
+error and cannot default into autonomy by omission. Every proposal-only kind names the criteria it
+fails. Your carve-out kinds carry `ownerCarveOut: true`, and the writes that have no draft kind
+(category merge, delete, re-parent) are recorded too, so the carve-out is complete rather than as
+complete as today's union.
+
+Two kinds were added and five were judged and refused:
+
+| kind | verdict |
+|---|---|
+| categorize_transaction, now including rows a rule or the heuristic filed | autonomous |
+| create_merchant_rule | autonomous (unchanged) |
+| retire_merchant_rule (new) | autonomous, only the model's own rules, only when the rule files zero rows |
+| confirm_recurring | proposal-only: no exact inverse, nothing records that the model set it |
+| set_sector_metadata | proposal-only: `setSecurityMetadata` overwrites with no record of the prior value |
+| merchant-name normalisation | proposal-only for now |
+| duplicate resolution, transfer confirmation | proposal-only |
+| update_budget, update_goal_target, set_manual_cost_basis | proposal-only, your carve-out, always |
+
+**The digest** shows every row the AI touched, row-level before and after, grouped by the action that
+caused it, with revert-since-timestamp in one gesture. It plans the peel before executing it, so the
+count it promises is the count it delivers.
+
+### What three independent verification lenses found
+
+I ran verification through three lenses on the autonomy work rather than one, and each found a
+different real defect. All three converged on the same core one:
+
+- **The auto-revert could not un-retire a rule.** `revertBatch` walked `transaction_category_revisions`
+  only, so a breached batch containing a retirement was half-reverted and reported itself whole, into
+  `ai_runs.invariant_breach`. That is precisely the state the design exists to prevent.
+- **A fourth hand-listed set.** `Settings.tsx` held its own copy of the OLD autonomous set gating the
+  Undo button, so a retirement rendered with no way to put it back, under a row promising "the ones
+  you can put back". The server-side undo worked and was unreachable.
+- **The owner-facing sentence was false.** "Categorizes transactions and writes merchant rules" after
+  a third kind was added and the second widened. It is now generated from the same table the
+  enforcement reads, as the model's sentence already was.
+- **The prompt contradicted the widening in the same string:** a MUST saying transaction ids may only
+  come from the uncategorized list, twelve lines above a new section inviting refiles. On this ledger
+  the uncategorized list is empty, so the MUST pointed at nothing. The prompt now states one rule, and
+  four tests assert it: **the prompt is the interface to the model and was the least tested surface in
+  the system.**
+- **`countTransactionsHeldByRule` took 1.65 seconds** on the real ledger, inside the write
+  transaction, on the process serving the UI. Rewritten to ask each distinct merchant name once:
+  **7.8 ms, about 210x, and still exact** (0 mismatches against a reference winner-resolution over
+  all 234 live rules).
+- **The chat tool path bypassed the guard entirely**, applying up to 200 categorizations with no
+  conservation check and no run row, under the same `source = 'worker_auto'` label as the background
+  pass. It now runs inside the guard, and the audit trail distinguishes the two.
+
+### An oscillation the autonomy argument did not account for
+
+`draftLiveness` lapses on `category_source = 'ai'` so a pass cannot re-answer its own answer hourly.
+But "Re-check all transactions" rewrites the model's row back to the rule's category with source
+`'rule'`, returning it to the pool. Decision, and it is a judgement rather than a bug fix: **the owner
+pressing re-check is a deliberate reset and the model does not undo it, and separately the model gets
+one answer per row, ever.** The pool now excludes any row carrying an AI revision, because the
+revision log is durable where `category_source` is not. The cost is that a genuinely wrong rule stays
+wrong after an explicit re-check; that is a state the owner chose and can still fix by hand.
