@@ -2,6 +2,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { format, subMonths, startOfMonth, differenceInCalendarMonths } from 'date-fns';
 import type Database from 'better-sqlite3';
 import { getDb } from '../db/index';
+import { getPreference, setPreference } from './preferences';
 
 // Upper bound on reverse-replay estimation: a 50-year backstop so a stray ancient
 // transaction can't spin the loop for an absurd number of months. There is deliberately no
@@ -121,13 +122,21 @@ function monthIsInformative(
  *
  * Only `is_estimated = 1` rows are eligible. A measured snapshot records real balances at a point
  * in time and is never deleted or rewritten here.
+ *
+ * The second clause covers a row the walk can never revisit. Every month the walk visits is
+ * `startOfMonth(...)`, so an estimated row dated anywhere but the first of a month is one this
+ * function can neither refresh nor delete in the loop below, and it keeps whatever it was written
+ * with forever, including the NULL coverage every estimated row carried before migration 044.
  */
 function purgeUnjustifiedEstimates(db: Database.Database, earliestMonth: string | null): number {
   if (!earliestMonth) {
     return db.prepare('DELETE FROM net_worth_snapshots WHERE is_estimated = 1').run().changes;
   }
   return db
-    .prepare('DELETE FROM net_worth_snapshots WHERE is_estimated = 1 AND date < ?')
+    .prepare(
+      `DELETE FROM net_worth_snapshots
+       WHERE is_estimated = 1 AND (date < ? OR substr(date, 9, 2) != '01')`
+    )
     .run(earliestMonth).changes;
 }
 
@@ -231,6 +240,248 @@ export function takeHoldingsSnapshot(db: Database.Database, today: string, now: 
   for (const h of holdings) {
     upsert.run(uuidv4(), h.account_id, h.security_id, today, h.quantity, h.institution_price, h.institution_value, h.cost_basis, now);
   }
+}
+
+/* ── Making the reconstruction reachable ───────────────────────────────────── */
+
+export type ReconstructionTrigger =
+  | 'no_ledger'
+  | 'floor_raised'
+  | 'unreachable_estimates'
+  | 'never_reconstructed'
+  | 'ledger_window_moved'
+  | 'balances_moved';
+
+/**
+ * What the last reconstruction was computed against.
+ *
+ * Persisted because every state derivable from the rows themselves flaps. "The ledger reaches
+ * below the oldest snapshot" looks like the natural condition and is permanently true on the real
+ * database: after a full rebuild the oldest reconstructed month is 2024-07-01 while the ledger
+ * starts 2023-09-16, because the months between are covered and uninformative and the walk
+ * correctly declines to emit them. Keyed on that, the reconstruction re-runs every hour forever,
+ * which is the churn this design exists to avoid. A watermark is the only thing that can tell
+ * "declined to emit" from "never looked".
+ *
+ * `app_preferences` is the existing key/value store; `services/rules.ts` already keeps machine
+ * bookkeeping there, so this needs no migration.
+ */
+const RECONSTRUCTION_MARK_KEY = 'net_worth_reconstruction_mark';
+
+export interface ReconstructionMark {
+  derivedAt: string;
+  /** The oldest month that run was able to consider. */
+  reconstructableFrom: string | null;
+  /** The newest `accounts.updated_at` that run started from. */
+  balancesAt: string | null;
+}
+
+function readMark(db: Database.Database): ReconstructionMark | null {
+  const stored = getPreference(db, RECONSTRUCTION_MARK_KEY);
+  const value: unknown = stored?.value;
+  if (typeof value !== 'object' || value === null) return null;
+
+  const record = value as Record<string, unknown>;
+  const derivedAt = record.derivedAt;
+  if (typeof derivedAt !== 'string') return null;
+
+  return {
+    derivedAt,
+    reconstructableFrom: typeof record.reconstructableFrom === 'string' ? record.reconstructableFrom : null,
+    balancesAt: typeof record.balancesAt === 'string' ? record.balancesAt : null,
+  };
+}
+
+export interface ReconstructionFrontier {
+  /** Oldest month reverse-replay can justify from today's balances, or null when it justifies none. */
+  reconstructableFrom: string | null;
+  /** Oldest snapshot of any kind on record. */
+  oldestSnapshot: string | null;
+  /** Oldest reconstructed row on record. */
+  oldestEstimate: string | null;
+  /** Reconstructed rows the month walk can never revisit, so nothing would ever correct them. */
+  unreachableEstimates: number;
+  /**
+   * Newest write to a balance the replay starts from.
+   *
+   * This is the seed of every reconstructed month: reverse-replay is today's balance minus the
+   * transactions after the target, so a balance that moved shifts every point in the series.
+   * Hidden accounts are excluded because the walk excludes them.
+   */
+  balancesAt: string | null;
+  mark: ReconstructionMark | null;
+}
+
+export interface ReconstructionRun {
+  ran: boolean;
+  /** Which check found work. Null when the run was forced by the owner, or when none did. */
+  trigger: ReconstructionTrigger | null;
+  reconstructed: number;
+  oldestReconstructed: string | null;
+  measured: number;
+}
+
+/**
+ * Everything the trigger decision needs, read without running the reconstruction.
+ *
+ * The two queries here are the cheap half of `backfillSnapshots`: the accounts, one grouped MIN
+ * over transactions, and one aggregate over the snapshot table. The expensive half is loading
+ * every posted row and walking the months, and the point of this function is not to pay for that
+ * on a sync that has nothing to reconstruct.
+ */
+export function readReconstructionFrontier(db: Database.Database): ReconstructionFrontier {
+  const accounts = db.prepare(`
+    SELECT id, current_balance, updated_at FROM accounts WHERE is_hidden = 0
+  `).all() as Array<{ id: string; current_balance: number; updated_at: string }>;
+
+  const firstSeen = db.prepare(`
+    SELECT account_id, MIN(date) AS first_date
+    FROM transactions
+    WHERE pending = 0
+    GROUP BY account_id
+  `).all() as Array<{ account_id: string; first_date: string }>;
+
+  const floors = accountFloorMonths(
+    accounts,
+    new Map(firstSeen.map((row) => [row.account_id, row.first_date]))
+  );
+
+  const bounds = db.prepare(`
+    SELECT MIN(date) AS oldest,
+           MIN(CASE WHEN is_estimated = 1 THEN date END) AS oldest_estimate,
+           SUM(CASE WHEN is_estimated = 1 AND substr(date, 9, 2) != '01' THEN 1 ELSE 0 END) AS unreachable
+    FROM net_worth_snapshots
+  `).get() as { oldest: string | null; oldest_estimate: string | null; unreachable: number | null };
+
+  let balancesAt: string | null = null;
+  for (const account of accounts) {
+    if (balancesAt === null || account.updated_at > balancesAt) balancesAt = account.updated_at;
+  }
+
+  return {
+    reconstructableFrom: earliestCoveredMonth(floors),
+    oldestSnapshot: bounds.oldest,
+    oldestEstimate: bounds.oldest_estimate,
+    unreachableEstimates: bounds.unreachable ?? 0,
+    balancesAt,
+    mark: readMark(db),
+  };
+}
+
+/**
+ * Whether reconstruction has anything new to say, and which check decided so.
+ *
+ * The alternatives were a clock and a button, and both are wrong for different reasons.
+ *
+ * Every sync is wrong because nothing about this is periodic. An hourly rerun rewrites months of
+ * reconstructed history whether or not anything it reads has changed, so points move under the
+ * owner between two glances at the same screen. Freshness is a property of the inputs, not of the
+ * clock.
+ *
+ * A button alone is wrong because the moments reconstruction matters (a deep resync, a CSV import,
+ * an account connected with history behind it) are exactly the moments nobody is thinking about
+ * net-worth history, and a maintenance script the owner has to know about is a feature that does
+ * not exist. `backfillSnapshots` was correct and unreachable for precisely that reason: its only
+ * caller was `scripts/backfill/rebuild.ts`.
+ *
+ * So the trigger is a condition on the data, and each clause is a check rather than a guess:
+ *
+ *   no_ledger             nothing holding value has history left, so every reconstructed row on
+ *                         record is unsupported and has to go.
+ *   floor_raised          reconstructed rows sit below the oldest month today's data can justify.
+ *   unreachable_estimates reconstructed rows the month walk cannot revisit, so nothing corrects
+ *                         them and their coverage stays whatever it was written with.
+ *   never_reconstructed   no run has ever been recorded.
+ *   ledger_window_moved   the oldest month the ledger can justify is not the one the last run was
+ *                         computed for. A deep resync or an import of old history looks like this.
+ *   balances_moved        the balances the replay starts from were written after the last run.
+ *                         Reverse-replay is today's balance minus what came after, so a balance
+ *                         that moved shifts every reconstructed point, and leaving them fixed is
+ *                         how the reconstructed segment drifts out of agreement with the measured
+ *                         one it joins.
+ *
+ * `balances_moved` is what keeps this from being a button in disguise, and it is not an hourly
+ * rewrite either. Measured 2026-07-31 on a copy of .mizan/mizan.db at migration 046:
+ *
+ *   SELECT COUNT(DISTINCT updated_at) FROM accounts WHERE is_hidden = 0;   -- 6, over 14 accounts
+ *   SELECT MIN(updated_at), MAX(updated_at) FROM accounts;  -- 2026-06-30 .. 2026-07-30
+ *
+ * Six balance writes in the month those snapshots cover, against roughly 24 syncs a day.
+ *
+ * What this deliberately does NOT catch: transactions arriving inside the window already
+ * reconstructed without moving any balance, which adds evidence to a month that had none. The
+ * frontier cannot see that without doing the walk it exists to avoid. That is what the owner's
+ * rebuild is for, and Settings > Data says when the replay last ran so the gap is visible.
+ */
+export function reconstructionTrigger(frontier: ReconstructionFrontier): ReconstructionTrigger | null {
+  const { mark } = frontier;
+
+  if (frontier.reconstructableFrom === null) {
+    // Nothing to replay. Still work if rows are on record claiming otherwise; otherwise the run
+    // that withdrew them recorded a mark, and there is nothing left to withdraw.
+    if (frontier.oldestEstimate !== null) return 'no_ledger';
+    return mark === null ? 'never_reconstructed' : null;
+  }
+  if (frontier.oldestEstimate !== null && frontier.oldestEstimate < frontier.reconstructableFrom) {
+    return 'floor_raised';
+  }
+  if (frontier.unreachableEstimates > 0) return 'unreachable_estimates';
+  if (mark === null) return 'never_reconstructed';
+  if (mark.reconstructableFrom !== frontier.reconstructableFrom) return 'ledger_window_moved';
+  if (frontier.balancesAt !== null && (mark.balancesAt === null || frontier.balancesAt > mark.balancesAt)) {
+    return 'balances_moved';
+  }
+  return null;
+}
+
+function reconstructionCounts(db: Database.Database): Omit<ReconstructionRun, 'ran' | 'trigger'> {
+  const row = db.prepare(`
+    SELECT SUM(CASE WHEN is_estimated = 1 THEN 1 ELSE 0 END) AS reconstructed,
+           SUM(CASE WHEN is_estimated = 0 THEN 1 ELSE 0 END) AS measured,
+           MIN(CASE WHEN is_estimated = 1 THEN date END) AS oldest
+    FROM net_worth_snapshots
+  `).get() as { reconstructed: number | null; measured: number | null; oldest: string | null };
+
+  return {
+    reconstructed: row.reconstructed ?? 0,
+    measured: row.measured ?? 0,
+    oldestReconstructed: row.oldest,
+  };
+}
+
+/**
+ * The one entry point that puts reverse-replay in front of the owner.
+ *
+ * Called by the post-sync stages (which pass nothing, so the trigger decides) and by the owner's
+ * explicit rebuild (which forces it). Both land in the same place, so there is one definition of
+ * what reconstructed history is.
+ *
+ * Measured snapshots are never at risk here: `backfillSnapshots` skips a month holding an
+ * `is_estimated = 0` row, and its purge is scoped to `is_estimated = 1`. Forcing changes when the
+ * walk runs, never what it is allowed to touch.
+ */
+export function reconcileReconstructedHistory(options: { force?: boolean } = {}): ReconstructionRun {
+  const db = getDb();
+  const frontier = readReconstructionFrontier(db);
+  const trigger = reconstructionTrigger(frontier);
+
+  if (trigger === null && !options.force) {
+    return { ran: false, trigger: null, ...reconstructionCounts(db) };
+  }
+
+  backfillSnapshots();
+
+  // Recorded even when the walk emitted nothing. "The ledger justified no month" and "no run has
+  // happened" are different states, and only the mark can tell them apart; without it the empty
+  // case re-runs on every sync forever.
+  const mark: ReconstructionMark = {
+    derivedAt: new Date().toISOString(),
+    reconstructableFrom: frontier.reconstructableFrom,
+    balancesAt: frontier.balancesAt,
+  };
+  setPreference(db, RECONSTRUCTION_MARK_KEY, mark);
+
+  return { ran: true, trigger, ...reconstructionCounts(db) };
 }
 
 export function backfillSnapshots(): void {

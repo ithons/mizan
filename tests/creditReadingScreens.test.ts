@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { creditBalancePhrase, readOwedTotal } from '../client/src/lib/accountBalance';
 import { afterPayoff, formatPayoffFigure, payoffState, type Buckets } from '../client/src/views/Reports';
+import { readCardCredit } from '../client/src/views/Today';
 import {
   buildAccountAdvisorPrompt,
   buildNetWorthEvidenceAdvisorPrompt,
@@ -199,6 +200,51 @@ test('the credit phrase is one string, shared with the server context', () => {
 function round(value: number): number {
   return Math.round(value * 100) / 100;
 }
+
+// ─── The credit the total hides ───────────────────────────────────────────────
+//
+// Three cards in credit and two in debt sum to an ordinary positive liabilities total, so
+// `readOwedTotal` correctly reports "Owed" and the credit disappears. Today therefore reads the
+// cards themselves, through the same two helpers the Accounts screen uses.
+
+const CARDS: Account[] = [
+  account({ id: 'c1', account_name: 'Discover', current_balance: -563.26 }),
+  account({ id: 'c2', account_name: 'Chase Freedom Flex', current_balance: -283.81 }),
+  account({ id: 'c3', account_name: 'BofA Cash Rewards', current_balance: -5.82 }),
+  account({ id: 'c4', account_name: 'Chase Sapphire', current_balance: 4791.94 }),
+  account({ id: 'c5', account_name: 'Capital One Savor', current_balance: 8.88 }),
+];
+
+test('the cards in credit are counted even though the total they sum to is a debt', () => {
+  const total = CARDS.reduce((s, c) => s + c.current_balance, 0);
+  assert.equal(round(total), 3947.93, 'the sheet as a whole owes money');
+  assert.equal(readOwedTotal(round(total)).inCredit, false, 'so the total is not a credit reading');
+
+  const reading = readCardCredit(CARDS);
+  assert.equal(reading.inCredit, 3);
+  assert.equal(reading.cards, 5);
+  assert.equal(round(reading.total), CREDIT_TOTAL);
+});
+
+test('an ordinary set of cards reports no credit at all', () => {
+  const healthy = CARDS.map((c) => account({ ...c, current_balance: Math.abs(c.current_balance) }));
+  assert.deepEqual(readCardCredit(healthy), { inCredit: 0, cards: 5, total: 0 });
+  // A card settled at exactly zero is not in credit either.
+  assert.equal(readCardCredit([account({ current_balance: 0 })]).inCredit, 0);
+});
+
+test('only credit cards are counted, so the word "cards" is always accurate', () => {
+  const mixed: Account[] = [
+    ...CARDS,
+    account({ id: 'l1', account_name: 'Overpaid loan', type: 'other', current_balance: -20 }),
+    account({ id: 'a1', account_name: 'Checking', type: 'checking', is_liability: false, current_balance: -40 }),
+    account({ id: 'h1', account_name: 'Old card', current_balance: -99, is_hidden: true }),
+  ];
+  const reading = readCardCredit(mixed);
+  assert.equal(reading.cards, 5, 'a loan and an overdrawn checking account are not cards');
+  assert.equal(reading.inCredit, 3, 'and a hidden card is not on the screen it is counted for');
+  assert.equal(round(reading.total), CREDIT_TOTAL);
+});
 
 // ─── The payoff section on a sheet with nothing to pay off ────────────────────
 //

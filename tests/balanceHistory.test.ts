@@ -513,8 +513,10 @@ test('GET /:id/history routes by account type and answers in dollars', async () 
 /**
  * What the chart draws for each of those series.
  *
- * The single-boundary split is what Reports, Investments and the Accounts net-worth chart rely on,
- * so it is asserted here alongside the ledger series that must not use it.
+ * Every segment is classified by its own two ends. An earlier version split the series at a single
+ * estimated/measured boundary, which the snapshot series only satisfies by luck: `backfillSnapshots`
+ * writes an estimated row for any past month holding no measured snapshot, so a fortnight with the
+ * app switched off puts an estimate after a measurement. The last case here is that series.
  */
 test('a ledger series is one unbroken line, with the recorded balances dotted on it', () => {
   const days = ['2026-07-01', '2026-07-02', '2026-07-03', '2026-07-04'];
@@ -522,14 +524,14 @@ test('a ledger series is one unbroken line, with the recorded balances dotted on
 
   const geometry = trendGeometry(history, [{ date: '2026-07-02', value: 110 }, { date: '2026-07-04', value: 130 }]);
 
-  assert.equal(geometry.measuredPoints, geometry.points, 'no segment is drawn in a second style');
-  assert.equal(geometry.estimatedPoints, '');
+  assert.deepEqual(geometry.segments.map((s) => s.kind), ['measured'], 'no segment is drawn in a second style');
+  assert.deepEqual([geometry.segments[0].from, geometry.segments[0].to], [0, 3]);
   assert.deepEqual(geometry.marks.map((m) => m.date), ['2026-07-02', '2026-07-04']);
   // A dot sitting on the line sits exactly on it.
   assert.equal(geometry.marks[0].yPct.toFixed(3), ((geometry.ys[1] / 140) * 100).toFixed(3));
 });
 
-test('a snapshot series still splits once, where the estimates end', () => {
+test('a snapshot series splits where the estimates end, and the joining segment stays estimated', () => {
   const history = [
     { date: '2026-04-01', value: 10, estimated: true },
     { date: '2026-05-01', value: 20, estimated: true },
@@ -539,9 +541,11 @@ test('a snapshot series still splits once, where the estimates end', () => {
 
   const geometry = trendGeometry(history, []);
 
-  // The joining segment belongs to both runs, so the line reads continuous across the handover.
-  assert.equal(geometry.estimatedPoints.split(' ').length, 3);
-  assert.equal(geometry.measuredPoints.split(' ').length, 2);
+  // The joining segment has a reconstructed end, so it cannot claim to be an observation.
+  assert.deepEqual(geometry.segments.map((s) => [s.kind, s.from, s.to]), [
+    ['estimated', 0, 2],
+    ['measured', 2, 3],
+  ]);
 });
 
 test('a series that is estimated end to end is not drawn as though it were measured', () => {
@@ -552,8 +556,27 @@ test('a series that is estimated end to end is not drawn as though it were measu
 
   const geometry = trendGeometry(history, []);
 
-  assert.equal(geometry.estimatedPoints, geometry.points);
-  assert.equal(geometry.measuredPoints, '');
+  assert.deepEqual(geometry.segments.map((s) => s.kind), ['estimated']);
+});
+
+test('an estimate landing after a measurement splits the series twice, not once', () => {
+  // Two weeks with the app switched off: the backfill writes 2026-09-01 as an estimate because no
+  // measured snapshot exists for that month, and it lands after two measured days in July.
+  const history = [
+    { date: '2026-06-01', value: 10, estimated: true },
+    { date: '2026-07-01', value: 20, estimated: false },
+    { date: '2026-07-02', value: 21, estimated: false },
+    { date: '2026-09-01', value: 30, estimated: true },
+    { date: '2026-09-05', value: 31, estimated: false },
+  ];
+
+  const geometry = trendGeometry(history, []);
+
+  assert.deepEqual(geometry.segments.map((s) => [s.kind, s.from, s.to]), [
+    ['estimated', 0, 1],
+    ['measured', 1, 2],
+    ['estimated', 2, 4],
+  ]);
 });
 
 test('a recorded balance well off the line is drawn where it is, not clipped to the edge', () => {

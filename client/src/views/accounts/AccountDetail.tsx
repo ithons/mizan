@@ -149,12 +149,13 @@ export function AccountDetail() {
         onClick={() => navigate('/accounts')}
         className="mb-4 text-note text-muted-2 transition-colors hover:text-ink"
       >
-        ← Accounts
+        Back to accounts
       </button>
 
-      <div className="mb-6 flex flex-wrap items-baseline justify-between gap-2">
+      {/* The balance is the subject of this screen; the account's name is the label on it. */}
+      <div className="mb-8 flex flex-wrap items-end justify-between gap-4">
         <div>
-          <h1 className="font-serif text-display font-normal leading-tight text-ink">{account.account_name}</h1>
+          <h1 className="font-serif text-title font-normal leading-tight text-ink">{account.account_name}</h1>
           <div className="mt-1 text-body text-muted">
             {account.institution_name || 'Manual'} · {ACCOUNT_TYPE_LABELS[account.type] ?? account.type} · updated{' '}
             {formatCompactRelative(account.updated_at)}
@@ -162,20 +163,22 @@ export function AccountDetail() {
         </div>
         <div className="text-right">
           <div
-            className={`font-serif text-display tabular-nums ${
+            className={`font-serif text-hero-lg font-light leading-none tabular-nums ${
               inCredit ? 'text-sage-deep' : signedBalance < 0 ? 'text-clay' : 'text-ink'
             }`}
           >
             {formatWholeCurrency(signedBalance)}
           </div>
-          {inCredit && <div className="mt-1 text-note text-sage-deep">{creditNote(account)}</div>}
+          {inCredit && <div className="mt-2 text-note text-sage-deep">{creditNote(account)}</div>}
         </div>
       </div>
 
       {history && (
         <div className="mb-8">
           <SectionLabel className="mb-2">Balance over time</SectionLabel>
-          {chart.length >= 2 && <TrendChart history={chart} marks={marks} height={110} />}
+          {chart.length >= 2 && (
+            <TrendChart history={chart} marks={marks} height={110} label={account.account_name} />
+          )}
           {origin && <div className="mt-2 text-note text-muted-2">{origin}</div>}
           {measurements && <div className="mt-1 text-note text-muted-2">{measurements}</div>}
         </div>
@@ -203,7 +206,7 @@ export function AccountDetail() {
           <SectionLabel underline className="flex-1">
             Recent transactions
           </SectionLabel>
-          <TextButton onClick={() => navigate('/transactions')}>View all →</TextButton>
+          <TextButton onClick={() => navigate('/transactions')}>View all</TextButton>
         </div>
         {transactions.length === 0 ? (
           <div className="py-6 text-body text-muted">No transactions for this account yet.</div>

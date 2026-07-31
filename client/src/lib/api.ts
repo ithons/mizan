@@ -502,10 +502,56 @@ export const reportsApi = {
 
 // ─── Net Worth ───────────────────────────────────────────────────────────────
 
+/**
+ * The state of the replayed half of the net-worth series.
+ *
+ * Declared here rather than in `shared/types` because nothing on the server side of this call
+ * consumes a shared shape: `routes/networth.ts` composes the object from two queries and hands it
+ * straight out. If a second consumer appears, move it.
+ *
+ * `pending` is the sync stage's own trigger, verbatim, so the screen and the sync cannot disagree
+ * about whether a rebuild is owed. Null means the ledger has nothing new to reconstruct.
+ */
+export type ReconstructionTrigger =
+  | 'no_ledger'
+  | 'floor_raised'
+  | 'unreachable_estimates'
+  | 'never_reconstructed'
+  | 'ledger_window_moved'
+  | 'balances_moved';
+
+export interface ReconstructionState {
+  reconstructed: number;
+  measured: number;
+  /** Reconstructed rows carrying no coverage, which the chart cannot compare against anything. */
+  without_coverage: number;
+  /** When the replay last ran, even if that run justified no month and wrote no row. */
+  last_run_at: string | null;
+  oldest_reconstructed: string | null;
+  oldest_snapshot: string | null;
+  /** Oldest month today's balances and ledger can justify replaying. */
+  reconstructable_from: string | null;
+  pending: ReconstructionTrigger | null;
+}
+
+export interface ReconstructionRun {
+  ran: boolean;
+  trigger: ReconstructionTrigger | null;
+  reconstructed: number;
+  oldestReconstructed: string | null;
+  measured: number;
+}
+
 export const networthApi = {
-  snapshot: () => apiFetch<NetWorthSnapshot>('/api/networth/snapshot'),
+  // Null, not undefined, and not a zeroed sheet: the route returns null when no sheet has ever
+  // been recorded, and a caller that cannot see the difference reports "nothing on either side of
+  // the sheet" as a fact about the owner's finances.
+  snapshot: () => apiFetch<NetWorthSnapshot | null>('/api/networth/snapshot'),
   history: (months?: number) =>
     apiFetch<NetWorthSnapshot[]>(`/api/networth/history${months ? `?months=${months}` : ''}`),
+  reconstruction: () => apiFetch<ReconstructionState>('/api/networth/reconstruction'),
+  rebuildReconstruction: () =>
+    apiFetch<ReconstructionRun>('/api/networth/reconstruction/rebuild', { method: 'POST' }),
 };
 
 // ─── Sync ────────────────────────────────────────────────────────────────────

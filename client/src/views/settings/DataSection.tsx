@@ -1,8 +1,9 @@
 import { useState } from 'react';
 import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
-import { AlertTriangle, Download, Database, Sparkles } from 'lucide-react';
-import { settingsApi, syncApi } from '../../lib/api';
+import { AlertTriangle, Download, Database, History, Sparkles } from 'lucide-react';
+import { networthApi, settingsApi, syncApi } from '../../lib/api';
+import type { ReconstructionTrigger } from '../../lib/api';
 import { formatCurrency, formatRelativeTime } from '../../lib/formatters';
 import { useAppStore } from '../../store';
 import { invalidateFinancialData } from '../../lib/queryInvalidation';
@@ -101,6 +102,117 @@ function importRunStatusClass(status: DataImportRun['status']): string {
 
 function importRunSourceLabel(source: DataImportRun['source']): string {
   return source === 'csv' ? 'CSV import' : 'Backup restore';
+}
+
+/**
+ * Why the ledger currently has something new to replay, in the owner's words.
+ *
+ * One entry per `reconstructionTrigger` branch on the server. The panel states the reason rather
+ * than a bare "rebuild available", because the reason is what tells the owner whether to wait for
+ * the next sync or to act now.
+ */
+const RECONSTRUCTION_PENDING: Record<ReconstructionTrigger, string> = {
+  no_ledger:
+    'No account holding value has ledger history left, so the replayed months on record are no longer supported by anything.',
+  floor_raised: 'Replayed months sit further back than the ledger can now justify.',
+  unreachable_estimates:
+    'Replayed points sit outside the months the replay can revisit, so nothing would ever correct them.',
+  never_reconstructed: 'The ledger has never been replayed.',
+  ledger_window_moved:
+    'The ledger now reaches a different month than the last replay was computed for.',
+  balances_moved:
+    'Account balances have been written since the last replay, and the replay starts from them.',
+};
+
+function ReconstructedHistoryPanel() {
+  const { addToast } = useAppStore();
+  const qc = useQueryClient();
+
+  const { data: state } = useQuery({
+    queryKey: ['networth', 'reconstruction'],
+    queryFn: () => networthApi.reconstruction(),
+  });
+
+  const rebuild = useMutation({
+    mutationFn: networthApi.rebuildReconstruction,
+    onSuccess: (run) => {
+      void qc.invalidateQueries({ queryKey: ['networth'] });
+      addToast({
+        type: 'success',
+        message: run.oldestReconstructed
+          ? `${run.reconstructed} reconstructed month${run.reconstructed === 1 ? '' : 's'}, back to ${run.oldestReconstructed}`
+          : 'The ledger justifies no reconstructed months',
+      });
+    },
+    onError: (err: Error) => addToast({ type: 'error', message: err.message }),
+  });
+
+  return (
+    <div className="rounded-xl border border-line-2 bg-card shadow-e1 p-4 space-y-3">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <p className="text-body-lg text-ink">Reconstructed History</p>
+          <p className="text-note text-muted mt-1">
+            Net worth before mizān started measuring, replayed by undoing every transaction back
+            from today&rsquo;s balances. These points are marked as replayed everywhere they appear.
+            Rebuilding never touches a measured sheet, and a sync rebuilds them by itself whenever
+            the ledger gains history older than anything on record.
+          </p>
+        </div>
+        <History size={16} className="text-muted flex-shrink-0" />
+      </div>
+
+      {state && (
+        <div className="rounded-lg border border-line-2 bg-rail p-3 space-y-3">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-note">
+            <div>
+              <p className="text-muted mb-0.5">Replayed</p>
+              <p className="font-mono text-ink">{state.reconstructed}</p>
+            </div>
+            <div>
+              <p className="text-muted mb-0.5">Measured</p>
+              <p className="font-mono text-ink">{state.measured}</p>
+            </div>
+            <div>
+              <p className="text-muted mb-0.5">Oldest replayed</p>
+              <p className="font-mono text-ink">{state.oldest_reconstructed ?? '-'}</p>
+            </div>
+            <div>
+              <p className="text-muted mb-0.5">Ledger reaches</p>
+              <p className="font-mono text-ink">{state.reconstructable_from ?? '-'}</p>
+            </div>
+          </div>
+
+          {/* A replayed point with no coverage cannot be compared to anything, because the chart
+              cannot tell a coverage change from an estimate across that boundary. Migration 044
+              filled this column only WHERE is_estimated = 0, so every row written before it is in
+              this state until a rebuild recomputes it. */}
+          {state.without_coverage > 0 && (
+            <p className="text-note text-gold">
+              <span className="font-mono">{state.without_coverage}</span> replayed point
+              {state.without_coverage === 1 ? '' : 's'} record no account coverage. A rebuild
+              recomputes it.
+            </p>
+          )}
+
+          <p className="text-note text-muted">
+            {state.pending
+              ? `${RECONSTRUCTION_PENDING[state.pending]} The next sync will replay it.`
+              : 'Up to date with the balances and the ledger.'}{' '}
+            {state.last_run_at ? `Last replayed ${formatRelativeTime(state.last_run_at)}.` : ''}
+          </p>
+        </div>
+      )}
+
+      <button
+        className="flex items-center gap-2 rounded-lg border border-pill-border bg-pill-bg px-4 py-2 text-body-lg text-muted transition-colors hover:text-ink disabled:opacity-40"
+        onClick={() => rebuild.mutate()}
+        disabled={rebuild.isPending}
+      >
+        {rebuild.isPending ? 'Rebuilding...' : 'Rebuild Replayed History'}
+      </button>
+    </div>
+  );
 }
 
 export function DataSection() {
@@ -253,7 +365,7 @@ export function DataSection() {
       <div>
         <h3 className="text-body-lg font-medium text-ink mb-3">Data Management</h3>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-          <div className="rounded-xl border border-line-2 bg-card shadow-e1-alt p-4 space-y-3 md:col-span-2">
+          <div className="rounded-xl border border-line-2 bg-card shadow-e1 p-4 space-y-3 md:col-span-2">
             <div>
               <p className="text-body-lg text-ink">CSV Import Preview</p>
               <p className="text-note text-muted mt-1">Preview normalized rows, invalid rows, duplicate and transfer warnings, and manual-account balance impact before importing.</p>
@@ -405,7 +517,7 @@ export function DataSection() {
             </div>
           </div>
 
-          <div className="rounded-xl border border-line-2 bg-card shadow-e1-alt p-4 space-y-3">
+          <div className="rounded-xl border border-line-2 bg-card shadow-e1 p-4 space-y-3">
             <div>
               <p className="text-body-lg text-ink">Transactions CSV</p>
               <p className="text-note text-muted mt-1">Download transactions for spreadsheets, external analysis, or a Monarch-friendly import file.</p>
@@ -426,7 +538,7 @@ export function DataSection() {
             </div>
           </div>
 
-          <div className="rounded-xl border border-line-2 bg-card shadow-e1-alt p-4 space-y-3 md:col-span-2">
+          <div className="rounded-xl border border-line-2 bg-card shadow-e1 p-4 space-y-3 md:col-span-2">
             <div>
               <p className="text-body-lg text-ink">Full Local Backup</p>
               <p className="text-note text-muted mt-1">
@@ -564,7 +676,7 @@ export function DataSection() {
         </div>
       </div>
 
-      <div className="rounded-xl border border-line-2 bg-card shadow-e1-alt p-4 space-y-3">
+      <div className="rounded-xl border border-line-2 bg-card shadow-e1 p-4 space-y-3">
         <div className="flex items-center justify-between gap-3">
           <div>
             <p className="text-body-lg text-ink">Import Audit</p>
@@ -607,6 +719,8 @@ export function DataSection() {
           </div>
         )}
       </div>
+
+      <ReconstructedHistoryPanel />
 
       <DataQualityPanel />
 

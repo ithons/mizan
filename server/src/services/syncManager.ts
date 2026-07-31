@@ -5,7 +5,7 @@ import { syncCoinbase } from './coinbase';
 import { syncSimplefin, triageSimplefinErrors } from './simplefin';
 import { detectRecurring } from './recurring';
 import { autoCategorizeTransactions } from './rules';
-import { takeSnapshot } from './snapshot';
+import { reconcileReconstructedHistory, takeSnapshot, type ReconstructionRun } from './snapshot';
 import { getCredentials } from './credentials';
 import { getDb } from '../db/index';
 import {
@@ -144,6 +144,23 @@ const defaultPostSyncStages: PostSyncStageFns = {
   correctLiabilitySigns: (db) => correctLiabilitySigns(db, new Date().toISOString()),
   takeSnapshot,
 };
+
+/** What the reconstruction found, in the words the sync panel shows the owner. */
+export function describeReconstruction(run: ReconstructionRun): string {
+  const reach = run.oldestReconstructed
+    ? `back to ${run.oldestReconstructed}`
+    : 'and the ledger now justifies none';
+  const cause: Record<NonNullable<ReconstructionRun['trigger']>, string> = {
+    no_ledger: 'nothing holding value has ledger history left',
+    floor_raised: 'replayed months sat below what the ledger can now justify',
+    unreachable_estimates: 'replayed rows sat outside the months the replay can revisit',
+    never_reconstructed: 'the ledger had never been replayed',
+    ledger_window_moved: 'the ledger reaches a different month than the last replay used',
+    balances_moved: 'the balances the replay starts from have been written since',
+  };
+  const because = run.trigger ? cause[run.trigger] : 'rebuilt on request';
+  return `${run.reconstructed} reconstructed month(s) ${reach}: ${because}.`;
+}
 
 export interface PostSyncStagesResult {
   integrity: TransactionIntegrityResult;
@@ -550,6 +567,46 @@ async function _runFullSyncInternal(): Promise<void> {
     );
     const integrity = postSync.integrity;
     deferredError = postSync.deferredError;
+
+    // Reconstructed net-worth history. Conditional, so it lives here rather than in
+    // `runPostSyncStages` alongside the stages that run every time, the same way the rollover
+    // ledger below does.
+    //
+    // After `takeSnapshot`, never before: today's sheet is an observation and the replay has to be
+    // reconciled against a table that already holds it. Silent when the ledger has nothing new to
+    // say, which is almost every sync: `reconcileReconstructedHistory` reads only the cheap
+    // frontier in that case, and narrating a stage that did nothing teaches the owner to skim the
+    // panel. `reconstructionTrigger` in services/snapshot.ts argues why this is a condition on the
+    // data rather than an hourly rewrite of months of reconstructed history.
+    try {
+      const reconstruction = reconcileReconstructedHistory();
+      if (reconstruction.ran) {
+        emitSyncEvent({ type: 'sync_progress', message: 'Replaying net worth history...', progress: 92 });
+        const item = recordSyncRunItem(db, run.id, {
+          provider: 'system',
+          connection_id: 'net-worth-reconstruction',
+          institution_name: 'Reconstructed net worth history',
+          status: 'succeeded',
+        });
+        recordSyncChange(db, item.id, {
+          entity_type: 'snapshot',
+          entity_id: null,
+          change_type: 'updated',
+          description: describeReconstruction(reconstruction),
+        });
+      }
+    } catch (err) {
+      const message = (err as Error).message || 'Net worth reconstruction failed';
+      recordSyncRunItem(db, run.id, {
+        provider: 'system',
+        connection_id: 'net-worth-reconstruction',
+        institution_name: 'Reconstructed net worth history',
+        status: 'failed',
+        error_message: message,
+        recovery_action: 'Retry sync, or rebuild replayed history from Settings > Data.',
+      });
+      deferredError = deferredError ?? new Error(message);
+    }
 
     // Runs after auto-categorization, because a row that just changed category changed the budget
     // it counts against. This is the only writer of the rollover ledger now that reading it no

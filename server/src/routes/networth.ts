@@ -1,6 +1,11 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import { getDb } from '../db/index';
 import { dollarizeFields, toDollars } from '../services/money';
+import {
+  readReconstructionFrontier,
+  reconcileReconstructedHistory,
+  reconstructionTrigger,
+} from '../services/snapshot';
 
 const router = Router();
 
@@ -101,6 +106,58 @@ router.get('/history', (req: Request, res: Response, next: NextFunction): void =
     `).all(...params);
 
     res.json({ data: snapshots.map(dollarizeSnapshotRow) });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * GET /reconstruction - the state of the replayed half of the series.
+ *
+ * No money crosses this boundary, so nothing here goes through `dollarizeFields`: it is counts,
+ * dates and one flag. The flag is the same `reconstructionTrigger` the sync stage consults, so the
+ * screen cannot claim a rebuild is pending when the sync would decline to run one.
+ */
+router.get('/reconstruction', (_req: Request, res: Response, next: NextFunction): void => {
+  try {
+    const db = getDb();
+    const frontier = readReconstructionFrontier(db);
+    const counts = db.prepare(`
+      SELECT SUM(CASE WHEN is_estimated = 1 THEN 1 ELSE 0 END) AS reconstructed,
+             SUM(CASE WHEN is_estimated = 0 THEN 1 ELSE 0 END) AS measured,
+             SUM(CASE WHEN is_estimated = 1 AND covered_accounts IS NULL THEN 1 ELSE 0 END) AS without_coverage
+      FROM net_worth_snapshots
+    `).get() as {
+      reconstructed: number | null;
+      measured: number | null;
+      without_coverage: number | null;
+    };
+
+    res.json({
+      data: {
+        reconstructed: counts.reconstructed ?? 0,
+        measured: counts.measured ?? 0,
+        without_coverage: counts.without_coverage ?? 0,
+        oldest_reconstructed: frontier.oldestEstimate,
+        oldest_snapshot: frontier.oldestSnapshot,
+        reconstructable_from: frontier.reconstructableFrom,
+        // The mark, not MAX(created_at) over the rows: a run that justified no month writes no
+        // row, and reporting "never replayed" for it would be false.
+        last_run_at: frontier.mark?.derivedAt ?? null,
+        pending: reconstructionTrigger(frontier),
+      },
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// POST /reconstruction/rebuild - replay the ledger now, whatever the trigger says.
+// The owner asking is its own justification: the frontier cannot see an import that landed inside
+// the window already reconstructed. Measured snapshots are untouchable on both paths.
+router.post('/reconstruction/rebuild', (_req: Request, res: Response, next: NextFunction): void => {
+  try {
+    res.json({ data: reconcileReconstructedHistory({ force: true }) });
   } catch (err) {
     next(err);
   }

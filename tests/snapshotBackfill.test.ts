@@ -7,6 +7,9 @@ import {
   accountFloorMonths,
   backfillSnapshots,
   earliestCoveredMonth,
+  readReconstructionFrontier,
+  reconcileReconstructedHistory,
+  reconstructionTrigger,
   takeSnapshot,
 } from '../server/src/services/snapshot';
 import { insertAccount, insertTransaction, migratedTestDb } from './helpers/schema';
@@ -557,6 +560,293 @@ test('a zero-balance account carries no floor and stays in every reconstructed m
     assert.equal(breakdown.acc_closed, 0);
     assert.equal(deep.covered_accounts, 2, 'nothing to reconstruct counts as accounted for');
   });
+});
+
+// ── Reaching the reconstruction at all ──────────────────────────────────────
+// `backfillSnapshots` had no caller anywhere in server/src: only scripts/backfill/rebuild.ts, run
+// by hand, and this file. Every improvement above was therefore correct and unreachable, and the
+// stored database still held what the old code wrote. `reconcileReconstructedHistory` is the entry
+// point the sync and the owner's rebuild both go through.
+
+const EMPTY_FRONTIER = {
+  reconstructableFrom: null,
+  oldestSnapshot: null,
+  oldestEstimate: null,
+  unreachableEstimates: 0,
+  balancesAt: null,
+  mark: null,
+};
+
+test('an ordinary sync finds nothing to reconstruct and does not touch the series', () => {
+  withTestDb((db) => {
+    insertAccount(db, { id: 'acc_check', type: 'checking', current_balance: 100000 });
+    insertTransaction(db, { account_id: 'acc_check', date: midMonth(6), amount: -5000 });
+
+    // First run: nothing has ever been replayed.
+    const first = reconcileReconstructedHistory();
+    assert.equal(first.ran, true);
+    assert.equal(first.trigger, 'never_reconstructed');
+    assert.ok(first.reconstructed > 0);
+
+    const before = db.prepare('SELECT id, date, created_at FROM net_worth_snapshots ORDER BY date').all();
+
+    // Second run against the same data. Reconstruction is a pure function of today's balances and
+    // the ledger, so an hourly rerun would rewrite these rows on evidence that did not change.
+    const second = reconcileReconstructedHistory();
+    assert.equal(second.ran, false);
+    assert.equal(second.trigger, null);
+    assert.deepEqual(
+      db.prepare('SELECT id, date, created_at FROM net_worth_snapshots ORDER BY date').all(),
+      before,
+      'a sync with nothing new to replay must leave every row byte-identical'
+    );
+  });
+});
+
+test('a ledger that reaches a new month is what fires the rebuild', () => {
+  withTestDb((db) => {
+    insertAccount(db, { id: 'acc_check', type: 'checking', current_balance: 100000 });
+    insertTransaction(db, { account_id: 'acc_check', date: midMonth(3), amount: -5000 });
+    reconcileReconstructedHistory();
+    assert.equal(reconcileReconstructedHistory().ran, false);
+
+    // The shape of a deep resync or a CSV import of old history: rows land below everything the
+    // reconstruction has ever seen.
+    insertTransaction(db, { account_id: 'acc_check', date: midMonth(20), amount: -2500 });
+
+    const frontier = readReconstructionFrontier(db);
+    assert.equal(frontier.reconstructableFrom, monthStart(20));
+    assert.equal(reconstructionTrigger(frontier), 'ledger_window_moved');
+
+    const run = reconcileReconstructedHistory();
+    assert.equal(run.ran, true);
+    assert.equal(run.oldestReconstructed, monthStart(20));
+    assert.equal(reconcileReconstructedHistory().ran, false, 'and it settles again afterwards');
+  });
+});
+
+/**
+ * The failure a watermark exists to prevent, reproduced.
+ *
+ * "The ledger reaches below the oldest snapshot" is the obvious condition and is permanently true
+ * on the real database: the ledger starts 2023-09-16, a full rebuild produces an oldest replayed
+ * month of 2024-07-01, and every month between is covered but uninformative, so the walk correctly
+ * refuses to emit one. Keyed on the rows alone, the reconstruction would run every hour forever.
+ */
+test('a run that declines to emit the oldest months still settles', () => {
+  withTestDb((db) => {
+    insertAccount(db, { id: 'acc_check', type: 'checking', current_balance: 100000 });
+    // The live BofA card in miniature: purchases known, payments not, ~$0 owed today, so every
+    // month it reaches is pinned on the clamp. Its first purchase sets the floor 24 months back
+    // and not one of those months earns a point, which is the live ledger's 2023-09 to 2024-06.
+    insertAccount(db, { id: 'acc_card', type: 'credit', current_balance: 582, is_liability: 1 });
+    for (const monthsBack of [24, 18, 12, 6]) {
+      insertTransaction(db, { account_id: 'acc_card', date: midMonth(monthsBack), amount: -40000 });
+    }
+    insertTransaction(db, { account_id: 'acc_check', date: midMonth(4), amount: -2500 });
+
+    const first = reconcileReconstructedHistory();
+    assert.equal(first.ran, true);
+    assert.equal(first.oldestReconstructed, monthStart(4));
+    assert.ok(
+      readReconstructionFrontier(db).reconstructableFrom! < first.oldestReconstructed!,
+      'the ledger reaches below the oldest row the walk agreed to write'
+    );
+
+    assert.equal(
+      reconcileReconstructedHistory().ran,
+      false,
+      'the gap between what the ledger reaches and what the walk emitted is not work'
+    );
+  });
+});
+
+test('balances moving is work, because every replayed point starts from them', () => {
+  withTestDb((db) => {
+    insertAccount(db, { id: 'acc_check', type: 'checking', current_balance: 100000 });
+    insertTransaction(db, { account_id: 'acc_check', date: midMonth(4), amount: -5000 });
+    reconcileReconstructedHistory();
+    assert.equal(reconcileReconstructedHistory().ran, false);
+
+    const before = snapshotAt(db, monthStart(4));
+    assert.ok(before);
+    assert.equal(before.net_worth, 105000);
+
+    // A sync writes a new balance. Reverse-replay is today's balance minus what came after, so
+    // every replayed month moves with it; left alone, the replayed segment drifts away from the
+    // measured one it joins.
+    db.prepare("UPDATE accounts SET current_balance = 250000, updated_at = ? WHERE id = 'acc_check'")
+      .run('2099-01-01T00:00:00.000Z');
+
+    assert.equal(reconstructionTrigger(readReconstructionFrontier(db)), 'balances_moved');
+    const run = reconcileReconstructedHistory();
+    assert.equal(run.ran, true);
+    assert.equal(snapshotAt(db, monthStart(4))?.net_worth, 255000);
+    assert.equal(reconcileReconstructedHistory().ran, false);
+  });
+});
+
+test('the reconstruction never consumes a measured snapshot, on either path', () => {
+  withTestDb((db) => {
+    insertAccount(db, { id: 'acc_check', type: 'checking', current_balance: 100000 });
+    insertTransaction(db, { account_id: 'acc_check', date: midMonth(6), amount: -5000 });
+    insertTransaction(db, { account_id: 'acc_check', date: midMonth(2), amount: -3000 });
+
+    // A measurement sitting on a month start the walk is about to visit, and one below the floor
+    // the purge sweeps.
+    seedMeasured(db, 'inside', monthStart(2), 777777);
+    seedMeasured(db, 'below', monthStart(30), 555555);
+
+    reconcileReconstructedHistory();
+    reconcileReconstructedHistory({ force: true });
+
+    const inside = snapshotAt(db, monthStart(2));
+    const below = snapshotAt(db, monthStart(30));
+    assert.ok(inside && below);
+    assert.equal(inside.net_worth, 777777);
+    assert.equal(inside.created_at, '2026-01-01T00:00:00.000Z');
+    assert.equal(below.net_worth, 555555);
+    assert.equal(below.is_estimated, 0);
+  });
+});
+
+test('a forced rebuild runs when the trigger would decline, and says the trigger was null', () => {
+  withTestDb((db) => {
+    insertAccount(db, { id: 'acc_check', type: 'checking', current_balance: 100000 });
+    insertTransaction(db, { account_id: 'acc_check', date: midMonth(4), amount: -5000 });
+    reconcileReconstructedHistory();
+
+    // The case the frontier cannot see: an import landing INSIDE the window already reconstructed,
+    // adding evidence to a month that had none. This is what the owner's rebuild is for.
+    assert.equal(snapshotAt(db, monthStart(2)), undefined);
+    insertTransaction(db, { account_id: 'acc_check', date: midMonth(2), amount: -1500 });
+    assert.equal(reconcileReconstructedHistory().ran, false);
+
+    const forced = reconcileReconstructedHistory({ force: true });
+    assert.equal(forced.ran, true);
+    assert.equal(forced.trigger, null, 'the owner asking is not one of the data conditions');
+    assert.ok(snapshotAt(db, monthStart(2)), 'the newly evidenced month is now reconstructed');
+  });
+});
+
+test('every reconstructed row a rebuild leaves behind carries its coverage', () => {
+  withTestDb((db) => {
+    insertAccount(db, { id: 'acc_check', type: 'checking', current_balance: 100000 });
+    insertAccount(db, { id: 'acc_card', type: 'credit', current_balance: 28381, is_liability: 1 });
+    insertTransaction(db, { account_id: 'acc_check', date: midMonth(9), amount: -5000 });
+    insertTransaction(db, { account_id: 'acc_check', date: midMonth(3), amount: -2500 });
+    insertTransaction(db, { account_id: 'acc_card', date: midMonth(3), amount: -2000 });
+
+    // Migration 044 filled covered_accounts only WHERE is_estimated = 0, so every estimated row
+    // written before it carries NULL and the chart cannot tell a coverage change from an estimate
+    // across that boundary. `seedEstimate` reproduces exactly that row.
+    seedEstimate(db, 'legacy', monthStart(3), 400000);
+    // Same, but dated somewhere the month walk never visits, so nothing in the loop can correct it.
+    seedEstimate(db, 'orphan', format(addDays(startOfMonth(subMonths(new Date(), 5)), 9), 'yyyy-MM-dd'), 410000);
+
+    assert.equal(readReconstructionFrontier(db).unreachableEstimates, 1);
+    assert.equal(reconstructionTrigger(readReconstructionFrontier(db)), 'unreachable_estimates');
+
+    reconcileReconstructedHistory();
+
+    const uncovered = db.prepare(
+      'SELECT COUNT(*) AS n FROM net_worth_snapshots WHERE is_estimated = 1 AND covered_accounts IS NULL'
+    ).get() as { n: number };
+    assert.equal(uncovered.n, 0);
+    assert.equal(snapshotAt(db, monthStart(3))?.covered_accounts, 2);
+    assert.equal(readReconstructionFrontier(db).unreachableEstimates, 0);
+  });
+});
+
+test('a raised floor is a reason to run, and the run clears what it forbids', () => {
+  withTestDb((db) => {
+    // Paying the card to zero exempts it and drops the floor to what checking can reach.
+    insertAccount(db, { id: 'acc_check', type: 'checking', current_balance: 100000 });
+    insertTransaction(db, { account_id: 'acc_check', date: midMonth(3), amount: -5000 });
+    seedEstimate(db, 'stale', monthStart(14), 400000);
+
+    assert.equal(reconstructionTrigger(readReconstructionFrontier(db)), 'floor_raised');
+    const run = reconcileReconstructedHistory();
+    assert.equal(run.ran, true);
+    assert.equal(snapshotAt(db, monthStart(14)), undefined);
+  });
+});
+
+test('every estimate is unsupported once nothing holding value has history, and that is a trigger', () => {
+  withTestDb((db) => {
+    insertAccount(db, { id: 'wallet', type: 'cash', current_balance: 38000 });
+    seedEstimate(db, 'orphaned', monthStart(4), 300000);
+
+    const frontier = readReconstructionFrontier(db);
+    assert.equal(frontier.reconstructableFrom, null);
+    assert.equal(reconstructionTrigger(frontier), 'no_ledger');
+
+    assert.equal(reconcileReconstructedHistory().ran, true);
+    assert.equal(
+      (db.prepare('SELECT COUNT(*) AS n FROM net_worth_snapshots').get() as { n: number }).n,
+      0
+    );
+    // And with nothing left to withdraw, the next sync is quiet again. This is the case that only
+    // the mark can settle: the run wrote no row, so nothing in the series records that it happened.
+    assert.equal(reconstructionTrigger(readReconstructionFrontier(db)), null);
+    assert.equal(reconcileReconstructedHistory().ran, false);
+  });
+});
+
+test('reconstructionTrigger reports the state, not an opinion about it', () => {
+  const MARK = { derivedAt: '2026-07-30T00:00:00.000Z', reconstructableFrom: '2024-07-01', balancesAt: '2026-07-30T00:00:00.000Z' };
+
+  assert.equal(reconstructionTrigger(EMPTY_FRONTIER), 'never_reconstructed');
+  assert.equal(
+    reconstructionTrigger({ ...EMPTY_FRONTIER, mark: MARK }),
+    null,
+    'no ledger, nothing on record, and a run already recorded is not work'
+  );
+  assert.equal(
+    reconstructionTrigger({ ...EMPTY_FRONTIER, oldestEstimate: '2026-02-01', mark: MARK }),
+    'no_ledger'
+  );
+
+  // The live state on 2026-07-31, before anything called this: per-account floors reach 2023-09-01
+  // and no run had ever been recorded.
+  //   SELECT account_id, MIN(date) FROM transactions WHERE pending = 0 GROUP BY account_id;
+  //   SELECT MIN(date) FROM net_worth_snapshots;   -- 2026-02-01
+  const live = {
+    reconstructableFrom: '2023-09-01',
+    oldestSnapshot: '2026-02-01',
+    oldestEstimate: '2026-02-01',
+    unreachableEstimates: 0,
+    balancesAt: '2026-07-30T21:50:51.314Z',
+    mark: null,
+  };
+  assert.equal(reconstructionTrigger(live), 'never_reconstructed');
+
+  // After that run, the same ledger is quiet: the walk emitted 2024-07-01 as its oldest row and
+  // declined every month below it, which is a refusal rather than an omission.
+  const settled = {
+    ...live,
+    oldestSnapshot: '2024-07-01',
+    oldestEstimate: '2024-07-01',
+    mark: { derivedAt: '2026-07-31T00:00:00.000Z', reconstructableFrom: '2023-09-01', balancesAt: '2026-07-30T21:50:51.314Z' },
+  };
+  assert.equal(reconstructionTrigger(settled), null);
+  assert.equal(
+    reconstructionTrigger({ ...settled, balancesAt: '2026-07-31T09:00:00.000Z' }),
+    'balances_moved'
+  );
+  assert.equal(
+    reconstructionTrigger({ ...settled, reconstructableFrom: '2023-01-01' }),
+    'ledger_window_moved'
+  );
+  assert.equal(
+    reconstructionTrigger({ ...settled, reconstructableFrom: '2026-03-01' }),
+    'floor_raised',
+    'a floor above the rows on record outranks the window having moved'
+  );
+  assert.equal(
+    reconstructionTrigger({ ...settled, unreachableEstimates: 1 }),
+    'unreachable_estimates'
+  );
 });
 
 test('a transaction-free account is carried flat rather than excluded', () => {

@@ -2,8 +2,9 @@ import { useMemo } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { format, startOfMonth, endOfMonth, subMonths, differenceInCalendarDays, parseISO } from 'date-fns';
-import type { AdvisorDraftAction, Insight } from '@shared/types';
+import type { Account, AdvisorDraftAction, Insight } from '@shared/types';
 import {
+  accountsApi,
   aiApi,
   budgetsApi,
   goalsApi,
@@ -13,18 +14,19 @@ import {
   reportsApi,
   transactionsApi,
 } from '../lib/api';
-import { readOwedTotal } from '../lib/accountBalance';
+import { isInCredit, signedAccountBalance } from '../lib/accountBalance';
 import { formatCurrency, formatWholeCurrency } from '../lib/formatters';
 import { useAppStore } from '../store';
 import { QueryErrorBanner } from '../components/QueryErrorBanner';
 import { Screen, BalanceScale, TextButton } from '../components/balance';
+import { comparableHistory, readCalibration, type BeamHistoryPoint } from '../components/balance/BalanceScale';
 
 const SPARK_W = 62;
 const SPARK_H = 16;
 
 /** Six months of shape behind a figure. Scaled to its own maximum: trend, not magnitude. */
 function Sparkline({ values }: { values: number[] }) {
-  if (values.length < 2) return <span className="text-faint">—</span>;
+  if (values.length < 2) return <span className="text-muted">–</span>;
   const max = Math.max(...values, 1);
   const step = SPARK_W / (values.length - 1);
   const points = values.map((v, i) => `${(i * step).toFixed(1)},${(SPARK_H - (v / max) * SPARK_H).toFixed(1)}`).join(' ');
@@ -71,19 +73,44 @@ function Skeleton({ rows }: { rows: number }) {
   );
 }
 
+/**
+ * How many cards owe the owner rather than the other way round.
+ *
+ * Restricted to `type === 'credit'` so the word "card" is always accurate, and read through
+ * `signedAccountBalance` / `isInCredit` rather than a fourth local copy of the sign rule.
+ */
+export interface CardCreditReading {
+  inCredit: number;
+  cards: number;
+  total: number;
+}
+
+export function readCardCredit(accounts: Account[]): CardCreditReading {
+  const cards = accounts.filter((a) => a.type === 'credit' && a.is_liability && !a.is_hidden);
+  const credited = cards.filter(isInCredit);
+  return {
+    inCredit: credited.length,
+    cards: cards.length,
+    total: credited.reduce((sum, card) => sum + signedAccountBalance(card), 0),
+  };
+}
+
 export function Today() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const addToast = useAppStore((s) => s.addToast);
+  const syncStatus = useAppStore((s) => s.syncStatus);
 
   const now = new Date();
   const currentMonth = format(now, 'yyyy-MM');
   const monthStart = format(startOfMonth(now), 'yyyy-MM-dd');
   const monthEnd = format(endOfMonth(now), 'yyyy-MM-dd');
+  const today = format(now, 'yyyy-MM-dd');
   const trendStart = format(startOfMonth(subMonths(now, 5)), 'yyyy-MM-dd');
 
   const snapshotQ = useQuery({ queryKey: ['networth', 'snapshot'], queryFn: () => networthApi.snapshot(), retry: false });
   const historyQ = useQuery({ queryKey: ['networth', 'history', 12], queryFn: () => networthApi.history(12), retry: false });
+  const accountsQ = useQuery({ queryKey: ['accounts'], queryFn: () => accountsApi.list() });
   const reviewQ = useQuery({ queryKey: ['transactions', 'review'], queryFn: () => transactionsApi.review() });
   const forecastQ = useQuery({ queryKey: ['recurring', 'forecast', 30], queryFn: () => recurringApi.forecast(30) });
   const budgetsQ = useQuery({ queryKey: ['budgets', currentMonth], queryFn: () => budgetsApi.getMonth(currentMonth) });
@@ -112,10 +139,11 @@ export function Today() {
   const forecast = forecastQ.data;
   const reviewSummary = reviewQ.data;
 
-  // A dead request must not render as a quiet zero — the banner names what is missing.
+  // A dead request must not render as a quiet zero: the banner names what is missing.
   const failableQueries = [
     { query: snapshotQ, label: 'net worth' },
     { query: historyQ, label: 'net worth history' },
+    { query: accountsQ, label: 'accounts' },
     { query: reviewQ, label: 'review queue' },
     { query: forecastQ, label: 'upcoming bills' },
     { query: budgetsQ, label: 'budgets' },
@@ -158,6 +186,7 @@ export function Today() {
   // the claims on the liquid pool (cards, dated bills, budgeted allocations, goal earmarks)
   // exceed it, which is exactly what the old clamped-at-zero version could never say.
   const safeToSpend = safeToSpendQ.data?.free ?? null;
+  const forecastDays = safeToSpendQ.data?.forecast_days ?? 30;
   const recentAiCount = (aiActionsQ.data ?? []).filter(
     (a) => differenceInCalendarDays(new Date(), parseISO(a.created_at)) <= 1
   ).length;
@@ -184,10 +213,38 @@ export function Today() {
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['transactions', 'review'] }),
   });
 
+  // The instrument reports nothing until it has a sheet to read. An absent snapshot and a
+  // snapshot still in flight are different states, and "no balance sheet has been recorded yet"
+  // is false during the second.
   const sheetLoading = snapshotQ.isLoading;
-  // The total is signed: cards holding more credit than debt sum below zero, and "-$852.89" under
-  // "Owed" says the opposite of what happened.
-  const owed = readOwedTotal(snapshot?.total_liabilities ?? 0);
+  const calibration = readCalibration({
+    sheetDate: snapshot?.date ?? null,
+    today,
+    isEstimated: Boolean(snapshot?.is_estimated),
+    coveredAccounts: snapshot?.covered_accounts ?? null,
+    totalAccounts: snapshot?.total_accounts ?? null,
+    syncIncomplete: syncStatus === 'error',
+  });
+
+  const history = useMemo(() => {
+    const points: BeamHistoryPoint[] = (historyQ.data ?? [])
+      .filter((s) => s.date !== snapshot?.date)
+      .map((s) => ({
+        date: s.date,
+        assets: s.total_assets,
+        liabilities: s.total_liabilities,
+        isEstimated: Boolean(s.is_estimated),
+        coveredAccounts: s.covered_accounts ?? null,
+        totalAccounts: s.total_accounts ?? null,
+      }));
+    return comparableHistory(points, {
+      coveredAccounts: snapshot?.covered_accounts ?? null,
+      totalAccounts: snapshot?.total_accounts ?? null,
+    });
+  }, [historyQ.data, snapshot?.date, snapshot?.covered_accounts, snapshot?.total_accounts]);
+
+  const cardCredit = readCardCredit(accountsQ.data ?? []);
+  const short = safeToSpend != null && safeToSpend < 0;
 
   return (
     <Screen size="wide">
@@ -204,67 +261,75 @@ export function Today() {
 
       <QueryErrorBanner items={failableQueries} className="mt-6" />
 
-      <div className="mt-9 flex flex-col gap-12 lg:flex-row lg:items-start lg:gap-16">
-        {/* The sheet, read off the instrument: the pans carry assets against owed, the base
-            carries the net. This replaced a four-across stat row that said the same thing. */}
-        {/* Capped when stacked too, or the rail takes the full column and the scale blows up to
-            the width of the screen with its two figures stranded at opposite edges. */}
-        <div className="w-full max-w-[332px] flex-shrink-0 lg:w-[332px]">
-          <BalanceScale
-            assets={snapshot?.total_assets ?? 0}
-            liabilities={snapshot?.total_liabilities ?? 0}
-            className="h-auto w-full"
-          />
-          <Link to="/accounts" className="group mt-0.5 flex items-start justify-between gap-4">
-            <div>
-              <div className="text-rule uppercase tracking-[0.16em] text-muted transition-colors group-hover:text-ink">
-                Assets
-              </div>
-              <div className="font-mono text-body-lg leading-[1.4] tabular-nums text-ink">
-                {formatCurrency(snapshot?.total_assets ?? 0)}
-              </div>
-            </div>
-            <div className="text-right">
-              <div className="text-rule uppercase tracking-[0.16em] text-muted transition-colors group-hover:text-ink">
-                {owed.label}
-              </div>
-              <div
-                className={`font-mono text-body-lg leading-[1.4] tabular-nums ${
-                  owed.inCredit ? 'text-sage-deep' : 'text-clay'
-                }`}
-              >
-                {formatCurrency(owed.amount)}
-              </div>
-            </div>
-          </Link>
+      {/* The whole sheet, across the whole measure. The beam gets the full content width because
+          the reading is a position on it, and on this instrument width is resolution.
 
-          <div className="mt-6 border-t border-line-2 pt-5">
-            <div className="mb-2.5 text-rule uppercase tracking-[0.16em] text-muted">Net worth</div>
-            {sheetLoading ? (
-              <div className="h-[38px] w-3/4 rounded bg-line" aria-hidden />
-            ) : (
-              <>
-                <div className="font-mono text-hero font-light leading-none tracking-[-0.02em] tabular-nums text-ink">
-                  {formatCurrency(snapshot?.net_worth ?? 0)}
-                </div>
-                <div className={`mt-2.5 font-mono text-body ${weekDelta != null && weekDelta < 0 ? 'text-clay' : 'text-sage-deep'}`}>
-                  {weekDelta == null
-                    ? '—'
-                    : `${weekDelta < 0 ? '−' : '+'}${formatWholeCurrency(Math.abs(weekDelta))} this week`}
-                </div>
-              </>
-            )}
+          The widths are set by `Screen size="wide"` (max-w-[1240px], lg:px-9 / xl:px-12) beside
+          NavRail (w-14, xl:w-[148px]): 896px of beam in a 1024px window, 1036px at 1280, 1196px at
+          1440, and the 1240px cap only above about a 1484px window. 1240 is therefore the width
+          this screen is least often at, which is the one the note here used to quote.
+
+          At 1196px, the month of measured sheets recorded to 2026-07-29 spans 181px of beam. The
+          drawn scale this replaced moved a pan end 5.1px across that same month. Both figures are
+          recomputed in tests/accountBalanceView.test.ts rather than asserted here. */}
+      {sheetLoading ? (
+        <div className="mt-8 space-y-4" aria-hidden>
+          <div className="h-[28px] w-1/3 rounded bg-line" />
+          <div className="h-[26px] w-full rounded bg-line" />
+        </div>
+      ) : (
+        <BalanceScale
+          className="mt-8"
+          assets={snapshot?.total_assets ?? 0}
+          liabilities={snapshot?.total_liabilities ?? 0}
+          calibration={calibration}
+          history={history}
+          owedNote={
+            cardCredit.inCredit > 0 ? (
+              <Link to="/accounts" className="transition-colors hover:text-ink">
+                {cardCredit.inCredit} of {cardCredit.cards} cards in credit, {formatCurrency(cardCredit.total)}
+              </Link>
+            ) : null
+          }
+        />
+      )}
+
+      <div className="mt-11 flex flex-col gap-12 lg:flex-row lg:items-start lg:gap-16">
+        <div className="w-full max-w-[332px] flex-shrink-0 lg:w-[332px]">
+          <div className="mb-2.5 text-rule uppercase tracking-[0.16em] text-muted">Net worth</div>
+          <div className="font-mono text-hero font-light leading-none tracking-[-0.02em] tabular-nums text-ink">
+            {formatCurrency(snapshot?.net_worth ?? 0)}
+          </div>
+          <div className={`mt-2.5 font-mono text-body ${weekDelta != null && weekDelta < 0 ? 'text-clay' : 'text-sage-deep'}`}>
+            {weekDelta == null
+              ? '–'
+              : `${weekDelta < 0 ? '−' : '+'}${formatWholeCurrency(Math.abs(weekDelta))} this week`}
           </div>
 
-          {/* Stacked in the rail rather than run along the foot: one fewer horizontal band, and
-              the rail would otherwise run out well before the tables beside it do. */}
+          {/* Being short and having room are different states, so they are drawn differently: a
+              different eyebrow, a different sentence, and a magnitude rather than a signed figure.
+              The same slot in a different colour reads as the same state having gone wrong. */}
+          <Link to="/budget" className="group mt-6 block border-t border-line-2 pt-5">
+            <div
+              className={`text-rule uppercase tracking-[0.16em] ${short ? 'text-clay' : 'text-muted'}`}
+            >
+              {short ? 'Short this month' : 'Free to spend'}
+            </div>
+            <div
+              className={`mt-1 font-mono text-figure tabular-nums ${short ? 'text-clay' : 'text-ink'}`}
+            >
+              {safeToSpend == null ? '–' : formatCurrency(short ? -safeToSpend : safeToSpend)}
+            </div>
+            {safeToSpend != null && (
+              <p className="mt-1.5 text-note leading-relaxed text-muted">
+                {short
+                  ? `Cards, the next ${forecastDays} days of dated bills, budgeted allocations and goal earmarks claim more than the liquid pool holds.`
+                  : `Left in the liquid pool after cards, the next ${forecastDays} days of dated bills, budgeted allocations and goal earmarks.`}
+              </p>
+            )}
+          </Link>
+
           <div className="mt-6 grid gap-[11px] border-t border-line-2 pt-5">
-            <RailRow
-              to="/budget"
-              label={safeToSpend != null && safeToSpend < 0 ? 'Short this month' : 'Free to spend'}
-              value={safeToSpend == null ? '—' : formatCurrency(safeToSpend)}
-              tone={safeToSpend != null && safeToSpend < 0 ? 'text-clay' : undefined}
-            />
             {topGoal && (
               <RailRow
                 to="/goals"
@@ -373,13 +438,15 @@ export function Today() {
                   to="/transactions"
                   className="group grid grid-cols-[58px_minmax(0,1fr)_auto_100px] items-baseline gap-x-3 py-[7px]"
                 >
-                  <span className="whitespace-nowrap font-mono text-note text-faint">
+                  {/* `faint` is a non-text token (3.26:1 light, 4.10:1 dark) and both of these are
+                      text, so they wear `muted` (5.67:1 / 6.95:1). */}
+                  <span className="whitespace-nowrap font-mono text-note text-muted">
                     {format(parseISO(t.date), 'dd MMM')}
                   </span>
                   <span className="truncate text-body text-ink-soft transition-colors group-hover:text-ink">
                     {t.merchant_name || t.original_name}
                   </span>
-                  <span className={`truncate text-right text-micro ${t.category_name ? 'text-faint' : 'text-clay'}`}>
+                  <span className={`truncate text-right text-micro ${t.category_name ? 'text-muted' : 'text-clay'}`}>
                     {t.category_name ?? 'uncategorized'}
                   </span>
                   <span
