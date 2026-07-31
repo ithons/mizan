@@ -547,15 +547,236 @@ a settings surface Phase 8 is moving, and verification only means something once
 in flight.
 
 
-- [ ] Full suite plus both typechecks.
-- [ ] Run the reconciliation invariant against the real database and record the residuals.
-- [ ] Re-derive every headline figure named in both plan files from the live DB and confirm it
-      matches what the UI renders.
+- [x] Full suite plus both typechecks. **1,352 tests pass**, 20 suites, 0 fail. Run twice, twenty
+      minutes apart, across a concurrent rewrite of the test schemas (see the last item): 1,352 both
+      times, 11.3s then 11.0s. `npx tsc --noEmit` clean on `tsconfig.server.json` and on
+      `tsconfig.json`.
+- [x] Run the reconciliation invariant against the real database and record the residuals.
+      Recorded below, with the flow-conservation check and the data-quality summary beside it.
+- [x] Re-derive every headline figure named in both plan files from the live DB. Recorded below and
+      in the matching section of `rebuild.md`. **Nine figures no longer hold and two never did.**
 - [ ] Drive the app and verify both themes at 1440 / 1280 / 1024.
 - [ ] Sweep the 91 capped findings from the original audit for anything the phases did not
       incidentally fix.
-- [ ] Convert the remaining hand-written test schemas to `migratedTestDb()`.
+- [ ] Convert the remaining hand-written test schemas to `migratedTestDb()`. **In flight while this
+      verification ran**, so no count here is a standing figure. Two readings twenty minutes apart:
+      65 of 113 files calling `migratedTestDb()` with 16 still holding a literal `CREATE TABLE`,
+      then 68 of 113 with 11. The 11 at the second reading were `accountTypeClosed`,
+      `budgetProjection`, `coinbaseConsolidation`, `conversations`, `deadPreferences`,
+      `localBackup`, `merchantRules`, `nestedTransaction`, `readonlySql`, `recategorize`,
+      `simplefinGuards`. Count it again before believing it.
 - [ ] Update `CLAUDE.md`, and note that it is currently gitignored and therefore unversioned.
+
+---
+
+### Phase 9, run 2026-07-31: the three invariants against the owner's real database
+
+Run against a private byte copy of `.mizan/mizan.db` taken with `sqlite3 .backup`, at **migration
+`054_drop_dead_preferences.sql`** (53 rows in `schema_migrations`, `001` through `054`, `038`
+deliberately absent). Twelve migrations later than the database Part I's audit measured, and one
+later than the copy the Phase 8 test harnesses were built on. The live file was never opened for
+writing; a dev server holds it.
+
+One caveat on the code-side figures only, and it is worth stating rather than hiding: another session
+was rewriting test files under `tests/` while this ran. `client/` and `server/` were untouched
+throughout, so every grep-derived figure below is stable, and nothing in the ledger figures depends
+on the working tree at all. The test-file counts are the exception and are marked as such.
+
+Ledger as it stands: 2,588 settled transactions, 2023-09-16 to 2026-07-29, 14 accounts, 236 merchant
+rules of which 234 live, 253 advisor drafts, 142 applied AI actions, 1 budget, 1 goal, 32 net-worth
+snapshots of which 16 measured and 16 estimated.
+
+**1. Reconciliation invariant.** `reconcileAccounts(db)`, no `since`.
+
+| | |
+|---|---|
+| measured snapshots in the horizon | 16, 2026-06-30 to 2026-07-31 |
+| accounts judged | 14 |
+| accounts skipped, unjudged | 0 |
+| `unreconciled` | **empty** |
+| `total_residual` | **134,748 cents, $1,347.48** |
+
+Per account, cents, `residual` / `boundary_amount` / `adjusted_residual`:
+
+| account | residual | boundary | adjusted | note |
+|---|---|---|---|---|
+| Fidelity Individual | 78,438 | 0 | **78,438** | market-driven; `explained_delta` is −40,000 against an observed +38,438 |
+| Chase Checking | 54,418 | 54,418 | **0** | the 5b.3 horizon artifact, one payroll dated on `first_date` |
+| Coinbase | 3,318 | 0 | **3,318** | market-driven price drift |
+| Chase Sapphire | −1,326 | −1,326 | **0** | the same artifact, opposite sign |
+| Fidelity Roth IRA | −100 | 0 | **−100** | market-driven price drift |
+| Wallet, Chase Freedom Flex, BofA Cash Rewards, Capital One Savor, Discover, Wealthfront Cash, BofA Checking, BofA Savings, Chase Savings | 0 | 0 | **0** | |
+
+Sum check: 78,438 + 54,418 + 3,318 − 1,326 − 100 = 134,748, which is `total_residual` exactly.
+
+`direction_conflict` is false on every row. `residual_ratio` is 1.96 on Fidelity Individual, which is
+why it stays out of `unreconciled`: the market-driven early return holds because there is no
+direction conflict.
+
+**2. Flow conservation.** `findFlowConservationViolations(db)`: **1 finding**, and it is the same one.
+
+> Chase Checking and Fidelity Individual, **20 legs**, 2026-05-21 to 2026-07-27, **$700.00** of
+> movement.
+
+This reproduces the Phase 5b figure to the leg and to the cent.
+
+**3. Data-quality summary.** `getDataQualitySummary(db)` returns `{ issues }` and nothing else. No
+`score`. **2 open conditions**, which is the count Phase 5c recorded, but neither is the condition it
+recorded:
+
+| id | severity | route | message |
+|---|---|---|---|
+| `sync-attention` | critical | `/accounts` | "1 connection need action before Mizān can fully trust the data." |
+| `transaction-review` | info | `/review` | "7 review items need attention." |
+
+`sync-attention` is firing on real state, not spuriously: `simplefin_connections` holds
+`status = 'sync_error'`, `last_synced_at = 2026-07-30T21:50:47.031Z`. `/review` is a retired path but
+not a dead link: `LEGACY_TARGETS` redirects it to `/ledger?uncategorized=1`.
+
+**Copy defect, live on that first row.** `syncHealth.ts:167` pluralizes the noun and not the verb, so
+at a count of one the owner reads "1 connection **need** action". The condition fires correctly; the
+sentence is wrong, on the one issue rendered at critical severity.
+
+---
+
+### Every figure both plan files claim, re-derived 2026-07-31
+
+The originals are left where they are. This is the annotation, not a rewrite: what a figure was when
+the decision was made is the record, and overwriting it would destroy the thing the plan is for.
+
+**Verdicts used below.** *Holds* means the stated query returns the stated number today. *Moved*
+means it was true and the world changed. *Does not reproduce* means the number cannot be recovered
+from what is written down, either because it never held or because the query behind it was never
+recorded.
+
+#### Figures that hold, unchanged
+
+| figure | query | today | source |
+|---|---|---|---|
+| Flow-conservation finding: 20 legs, 2026-05-21 to 2026-07-27, $700.00 | `findFlowConservationViolations(db)` | identical | 5b table |
+| `recategorizeAll` relabels **2** rows | `recategorizeAll(db)` on a throwaway copy | `{updated: 2}`; the four category counts that move are `cat_income_other` 9→8, `cat_travel_hotels` 36→37, `cat_xfer_cc` 46→47, `cat_xfer_in` 39→38 | 5b.5, 5b table |
+| Both contradicting AI rules retired rather than deleted | `SELECT pattern, source, retired_at FROM merchant_rules WHERE lower(pattern) IN ('spotify','backblaze')` | both carry `source = 'ai'`, `retired_at = 2026-07-30T21:50:31Z` | 5b.5 |
+| 236 merchant rules, 41 distinct `created_at` | `SELECT COUNT(*), COUNT(DISTINCT created_at) FROM merchant_rules` | 236 and 41 | diagnosis §3 |
+| 32 Spotify rows, 7 Backblaze rows | `SELECT COUNT(*) FROM transactions WHERE lower(COALESCE(merchant_name, original_name)) LIKE '%spotify%'` (and `%backblaze%`) | 32 and 7 | diagnosis §3 |
+| **62** rows are `manually_categorized = 1` or `category_source = 'human'`, not 0 | `SELECT COUNT(*) FROM transactions WHERE manually_categorized = 1 OR category_source = 'human'` | 62 | corrections to Part I |
+| 2,412 rows carry `category_source` NULL | `SELECT category_source, COUNT(*) FROM transactions GROUP BY 1` | 2,412 (the denominator moved: 2,588, not 2,579) | 6.1 |
+| `review_status`: open **153**, reviewed **2,435**, dismissed **0** | `SELECT review_status, COUNT(*) FROM transactions GROUP BY 1` | 153 / 2,435 / 0, and `dismissed` is still a value nothing writes | Phase 8 |
+| Amazon $1,795.86 gross against a $1,112.99 window total | `getTopMerchantsReport(db, {2026-07-01..2026-07-31})` | merchant total 179,586 cents, report total 111,299 cents, ratio 161.4% | Phase 8 |
+| $1,800 of brokerage ledger error | the 12 non-reversal `Electronic Funds Transfer Received` rows on Fidelity Individual sum to −90,000 cents; a sign error is twice that | −$900.00 stored, $1,800.00 of error, and all 14 rows are still negative | diagnosis §2 |
+| The AI is told `investments: 8 transactions, net -$800.00` | `buildFinancialContext()`, "Excluded from income and spending reports" | verbatim, still | diagnosis §2 |
+| Freedom Flex owed $1,235.95 on 06-30; Amazon refund $955.19 on 07-13; autopay 07-26 exactly $280.76; $283.81 statement credit 07-27 | the 06-30 snapshot `breakdown` and the account's July rows | 123,595 cents on 06-30; +95,519 / +28,076 / +28,381 on 07-13 / 07-26 / 07-27 | diagnosis §1 |
+| One payroll of $544.18 dated 2026-06-30, the horizon's first date | `SELECT date, amount FROM transactions WHERE lower(...) LIKE '%payroll%'` | present; 21 payroll rows now, not 20 | corrections to Part I |
+| Discover's backfill floor 2026-06-16, Coinbase's 2025-09-04 | `SELECT backfill_floor_date FROM accounts` | both exact | 5b.2 |
+| Wealthfront Cash: 12 real transactions reconciling to zero residual | `reconcileAccounts` plus the ledger reach section | 12 rows, residual 0 | 5c |
+| Coinbase disposal history exists only in the CSV: **24 Convert, 7 Send, 6 Receive, 1 Dust** | `Transaction Type` histogram over `data/coinbase/*.csv` | 24 / 7 / 6 / 1 Retail Simple Dust, exact | 5c |
+| 14 holdings, the 8 Coinbase ones all `cost_basis IS NULL` | `SELECT COUNT(*) FROM holdings` and the join to `securities` | 14 holdings, 8 Coinbase, all NULL; 10 NULL in total once the two SPAXX sweeps are counted | 5c |
+| Summing only the rows `get_transaction_full` counts reproduces the reports exactly | walk `get_transaction_full` over every July row, sum the signed amount of those whose `reading.counts_toward_reports.spending_and_cashflow` is true | 160,241 cents, which is `getCashflowReport` net (271,540 income minus 111,299 expenses) to the cent | 6.1 |
+| `getSpendingReport.total` equals cashflow expenses exactly | both, over 2026-07 | 111,299 = 111,299 | Part I Phase 2 consequence |
+| The five refund rows the old classification dropped in July are worth **$2,054.24**, three Amazon credits, an REI return, a Lyft adjustment | the pre-fix predicate, run over 2026-07 | 5,738 + 95,519 + 102 + 75,936 + 28,129 = 205,424 cents, and the composition matches | `transactionFilters.ts` docstring |
+| Ledger-wide the residual is **53 rows** | the same predicate, no date filter | 53 rows (the money moved: see below) | `transactionFilters.ts` docstring |
+| Six nav items, and a catch-all route | `NAV_ITEMS` + `SETTINGS_ITEM` in `NavRail.tsx`; `path="*"` in `App.tsx` | 5 + Settings; `NotFound` is mounted | Phase 8 |
+| `shadow-e1-alt`, `text-faint`, U+2192 all gone from views | grep over `client/src` | zero uses of each; all three survive only as comments recording why | Phase 7b carryover |
+| `Advisor.tsx` was 290 lines | `git diff --numstat 9676b0c f28232e` | 290 deleted | Phase 8 |
+| 1,352 tests, both typechecks clean | `npm test`, `npx tsc --noEmit` on both configs | 1,352 pass, both clean | Phase 10 |
+
+#### Figures that no longer hold, and what they are now
+
+| figure, as recorded | what it is on 2026-07-31 | why it moved |
+|---|---|---|
+| **`total_residual` is $40.13** (Coinbase $41.06 + Roth IRA −$0.93), 5b.3 | **$1,347.48.** Fidelity Individual $784.38, Chase Checking $544.18 (boundary, adjusts to 0), Coinbase $33.18, Chase Sapphire −$13.26 (boundary, adjusts to 0), Roth IRA −$1.00 | the horizon rolled forward to 2026-06-30..2026-07-31 and Fidelity Individual now carries an unexplained market-driven residual it did not then. `unreconciled` is still empty, which is the part of the prediction that was load-bearing |
+| Net worth **$3,787.23**, 5b table | **$4,193.18** (snapshot 2026-07-31). The 2026-07-30 snapshot is $4,202.86, which is the figure Phase 8 quotes | three more days of ledger |
+| Liabilities **$3,947.93 owed**, 5b table | **$4,278.70 owed.** Still three cards in credit: Discover −$563.26, Chase Freedom Flex −$276.12, BofA Cash Rewards −$5.82 | Freedom Flex took a $7.69 Blue Bottle charge on 07-29, so it is −$276.12 and no longer −$283.81 |
+| Free to spend **+$277.82**, 5b table | **+$191.23** with the Shopping claim capped at its $500.00 ceiling, **+$691.23** before budget claims. Components: liquid $6,035.67, cards $4,278.70, bills $64.04, goals $1,001.70 | the whole sheet moved |
+| July net **+$1,389.00**, savings rate **+64.0%**, Part I Phase 2 | **+$1,602.41** and **59.0%**. Income $2,715.40, expenses $1,112.99 | July was mid-month when it was measured |
+| July Shopping **−$1,203.63**, Part I and hazard 1 | **−$1,028.63.** Still negative, which is the point of the hazard | |
+| July Amazon credits **$1,772.93** | **$1,771.93** (+95,519, +75,936, +5,738). The REI return is $281.29 exactly, unchanged | off by $1.00; not reconstructible from what is written down |
+| Ledger-wide refund residual **$6,267.43** | **$6,277.43**, over the same 53 rows | |
+| Estimated 2026-06-01 is **$3,823.16** at 14/14 coverage against measured 2026-06-30 at $1,068.29 at 11/11, hazard 3 | **$5,521.48** at 14/14 against $1,068.29 at 11/11. The coverage asymmetry that the hazard is actually about holds exactly | the reconstruction re-ran on a later balance sheet |
+| The 2026-01-01 estimated point is **+$228.70** where the ledger supports **−$1,571.30**, diagnosis §2 | **+$1,367.35.** Neither number reproduces | |
+| BofA Cash Rewards **1,049** ledger points, Discover **475**, Wealthfront Cash **226**, 5c table | **1,050 / 476 / 227.** Each grew by exactly one calendar day, which is the series behaving as designed | |
+| `describe_schema` **25,507** bytes | **27,254** bytes | Phase 10 added a provider dimension the dictionary describes |
+| `get_merchant_rules` for one merchant **1,136** bytes | **1,122** bytes for `merchant: 'Spotify'`; 23,918 unfiltered | the two AI rules retired |
+| `get_transaction_full`: **102 of 120** July rows count | **110 of 129** | more July |
+| 251 drafts, 140 applied actions | **253** and **142** | |
+| `category_source`: 2,412 / 86 ai / 62 human / 12 heuristic / 7 rule, Phase 8 | 2,412 / **88** ai / 62 human / **13** heuristic / **13** rule | |
+| 1,297 distinct merchant names | **1,299** | |
+| Reconciliation finds **6 of 14** accounts unreconciled, largest residual −$1,126.52 on Discover, Part I | **0 of 14.** Discover reconciles at 0 | this is the 5b work landing, and it is the strongest single confirmation in this pass |
+| Backup closure **17 to 28** tables, Part I Phase 4a | **32 of 32.** `LOCAL_BACKUP_TABLES` covers every table in the database | the AI tables from 6.2 and 6.3 were added to it |
+| Three dead preference rows are **not yet gone**; `schema_migrations` tops out at 053, Phase 8 "Correction to record" | **Stale. Migration 054 ran at 2026-07-31T22:28:11.786Z.** `app_preferences` holds exactly two rows, `advisor_user_profile` and `net_worth_reconstruction_mark`. `advisor_auto_apply_high_confidence` is gone and `run_sql_query` can no longer read it | |
+| Ledger basis: 2,579 transactions to 2026-07-28, 236 rules, 140 actions, 19 snapshots, Part I | 2,588 to 2026-07-29, 236 rules (234 live), 142 actions, **32** snapshots (16 measured, 16 estimated) | |
+| Baseline **374 tests**, Part I Phase 0 | **1,352** | |
+
+#### Figures that do not reproduce from what is written down
+
+- **`countTransactionsHeldByRule` at 7.8 ms, about 210x.** The plan names neither the rule nor the
+  call shape. Measured today over all 234 live rules: **2,283 ms total, 9.8 ms mean**, with a spread
+  from 9.2 ms to **177.9 ms** on the widest rule. The rewrite is clearly real, and the improvement
+  is probably close to what was claimed, but "7.8 ms" is a single unlabelled sample that no re-run
+  can land on. The claim needs the rule id beside it or it needs to be a range.
+- **113 reverse-containment pairs, all endorsed by the owner's settled category.** The predicate is
+  not written down. Reconstructing it as "`merchantMatchesRulePattern(name, pattern)` is true and
+  the merchant name is shorter than the pattern", over 1,299 distinct names x 234 live rules, gives
+  **159**. Either the predicate differed or the ledger moved; from the plan alone it is not possible
+  to tell which, and that is the defect.
+- **A dollars-only crypto basis would report $739.45 where the truth is $501.40.** The code that
+  produced both numbers was deleted with `investmentAnalytics.ts`. Nothing in the repo can re-derive
+  either one. The conclusion it supports is sound and independently visible (all 8 Coinbase holdings
+  still carry NULL `cost_basis`, and the disposals are still only in the CSV), but the two figures
+  are unverifiable and should be read as a record of a decision, not as measurements.
+- **73,738 of 529,149 whole-cent sheets** rendered the false payoff sentence. The enumeration ran
+  against the pre-fix `Reports.tsx`, which no longer exists, and its input (liquid $5,291.49) is now
+  $6,035.67. Not reproducible.
+- **568 lines deleted across twelve files, Phase 8.** `git diff --numstat 9676b0c..f28232e` over the
+  whole phase is 14,922 insertions and 5,991 deletions across 154 files; the nine deleted view files
+  alone account for **3,202** deleted lines. There is no reading of "twelve files" that yields 568.
+  The deletion is much larger than the claim, so the claim understates rather than overstates, but
+  it still does not reproduce.
+- **The beam puts the measured month across 181px of a 1196px axis**, and the tilt figures it
+  replaced (8.66px, 5.13px). These are rendering geometry, not database state. The tests that pin
+  them pass, so they are checked; they are simply not re-derivable from the ledger.
+- **Onboarding was 139 lines.** `git diff --numstat` says **138**.
+
+#### One claim in code that its own published query does not return
+
+`rules.ts`, in the `rulesOutranking` docstring, says "236 live rules over 41 distinct timestamps,
+173 of them sharing one" and prints the query beside it:
+
+```sql
+SELECT created_at, COUNT(*) FROM merchant_rules WHERE retired_at IS NULL
+GROUP BY created_at ORDER BY 2 DESC
+```
+
+That query returns **234** live rules, 41 distinct timestamps, and **171** in the largest group.
+Two of the three numbers are wrong, and they are wrong because the comment was written before 5b.5
+retired the two AI rules that the same commit retired. This is the exact failure mode Phase 6.1
+recorded and closed ("re-measure any figure you write into a comment, state the query beside it, or
+delete it"), reappearing in the file the retirement happened in. The query is right there and
+disagrees with the sentence above it.
+
+#### Still open on the real data, and not a regression
+
+- The **mis-signed Fidelity amounts remain uncorrected**, deliberately, per 5b.4 and the 6.2 note.
+  Their live cost, re-measured: a $784.38 unexplained residual on Fidelity Individual, and an AI
+  prompt that still reads `investments: 8 transactions, net -$800.00`. Migration 048 landed the
+  provenance that makes correcting them possible; nothing has used it yet.
+- **23 hardcoded hexes remain** under `client/src/views` and `client/src/components`, against the
+  "~27, route them through tokens" item marked done in Phase 7b. 22 are the swatch values in
+  `settings/CategoriesSection.tsx`, which is a colour picker and arguably wants literals; the
+  remaining one is `#c9963a` in `SyncActivityPanel.tsx`, which is not.
+- **`font-bold` is still used zero times.** Phase 7b diagnosed "unused in weight" and opened the
+  scale; the weight range today runs light (9), normal (6), medium (24), semibold (13). That is a
+  wider range than before and the diagnosis figure still literally describes the code, so the item
+  is done in spirit and the specific number was never re-checked after.
+- **`budget_rollover_ledger` holds one orphaned row.** The only budget carries `rollover = 0`, so
+  `computeBudgetRolloverLedger(db)` returns `[]`, but the table still holds
+  `2026-07 / budget_amount 50000 / actual_spend −120363 / ending_rollover 170363`, calculated
+  2026-07-30. The row's `actual_spend` of −120,363 cents is stale: July Shopping is **−102,863**
+  cents today. Nothing reads it while `rollover = 0`, so it is inert rather than wrong on screen,
+  but it is a stored figure no live code path can restate.
+- **`ai_feedback`, `ai_memory` and `ai_incidents` are all empty**; `ai_runs` holds exactly one row
+  (`background_review`, `claude-sonnet-5`, medium, completed, 0 proposed / 0 applied / 0 refused,
+  21,817 input tokens, 0 cache read and 0 cache write, which is what 6.0 says the worker should
+  show). The 6.2 machinery is installed and has not yet had anything to record.
 
 ---
 

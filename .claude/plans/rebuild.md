@@ -344,3 +344,40 @@ must handle:
 | money numerals | muted ramp had failed AA before the last fix | every one clears AA on both grounds, both themes |
 | fonts | 3 families from Google on every cold load, mono 300 never downloaded | **6 self-hosted variable woff2, 308 KB**, mono 300 real |
 | `/alpha` utilities | the class that silently died once before | **9 of 9 emit**, verified in the built CSS per theme |
+
+
+---
+
+## Part I's figures, re-derived 2026-07-31
+
+Phase 9 re-ran every measured figure in both plan files against a private byte copy of
+`.mizan/mizan.db` at migration **`054_drop_dead_preferences.sql`**, twelve migrations after the
+database this file's audit was written against. **The full record, with the query beside each
+figure, is in `rebuild-part-2.md` under "Every figure both plan files claim, re-derived 2026-07-31".**
+The reconciliation, flow-conservation and data-quality residuals are recorded in the same place.
+
+Nothing above has been edited. What a number was when the decision was made is the record; this is
+the annotation. What follows is only the Part I entries whose verdict is not "holds".
+
+**The basis line at the top of this file has moved.** 2,579 transactions to 2026-07-28 is now
+**2,588** to 2026-07-29; 19 net-worth snapshots is now **32** (16 measured, 16 estimated); 140
+applied AI actions is **142**; 236 merchant rules still reads 236, of which **234 are live** after
+5b.5 retired two. 14 accounts, 1 budget and 1 goal are unchanged. The 374-test baseline is **1,352**.
+
+| Part I figure | 2026-07-31 | verdict |
+|---|---|---|
+| Reconciliation: 6 of 14 accounts unreconciled, largest residual −$1,126.52 on Discover | **0 of 14 unreconciled.** Discover reconciles at 0. `total_residual` $1,347.48, none of it flagged | moved; this is Phase 5b landing and it is the strongest confirmation in the pass |
+| Phase 2: July net −$665.24 to **+$1,389.00**, savings rate −31% to **+64.0%** | **+$1,602.41** and **59.0%**. Income $2,715.40, expenses $1,112.99 | moved; July was mid-month when measured |
+| Phase 2: free-to-spend $2,523.56 to **−$1,926.52** | **+$191.23** with the Shopping claim at its $500.00 ceiling, +$691.23 before budget claims | moved twice, once here and once in 5b |
+| Phase 2 consequence: July Shopping **−$1,203.63**, from $1,772.93 of Amazon credits and a $281.29 REI return | **−$1,028.63**, from **$1,771.93** of Amazon credits and the same $281.29 REI return. Still negative, which is what hazard 1 is about | moved; the Amazon figure is off by $1.00 and cannot be reconstructed |
+| Phase 2 consequence: July spending total equals cashflow expenses exactly ($782.22 = $782.22) | **$1,112.99 = $1,112.99.** The equality is what the claim was, and it holds | holds, values moved |
+| Phase 3: 3-month average income $2,862.93/mo to **$2,139.19/mo** | **$2,139.19/mo**, verbatim in `buildFinancialContext()`. Expenses $3,475.31/mo, net −$1,336.12/mo | holds exactly |
+| Phase 3: three disagreeing investment totals, $2,044.62 / $2,144.62 / $2,443.67 | account balances and the holdings sum now **agree exactly at $2,045.04**. The third, $2,436.21, differs only because it adds Coinbase's $391.17, which is a scope difference and not a disagreement | moved, and the defect is closed |
+| Phase 4a: backup closure 17 to **28** tables | **32 of 32.** `LOCAL_BACKUP_TABLES` now covers every table in the database, including the 6.2 and 6.3 AI tables | moved, in the right direction |
+| Phase 5: 4 of 11 recurring patterns carry a category; payroll expected $544.18 on both surfaces; Backblaze next charge 2026-08-17 | **4 of 11**, payroll `average_amount` **54418**, Backblaze `next_expected` **2026-08-17** | all three hold exactly |
+| Phase 5: estimated net-worth points 5, oldest 2026-02-01, to **16, oldest 2024-07-01**, each with coverage | **16 estimated, oldest 2024-07-01, zero rows with NULL coverage.** 2024-07-01 sits at 6/14, and its nearest neighbour is still 2025-04-01, nine months later | holds |
+| Rendering hazard 3: estimated 2026-06-01 $3,823.16 at 14/14 against measured 2026-06-30 $1,068.29 at 11/11 | **$5,521.48** at 14/14 against **$1,068.29** at 11/11. The coverage asymmetry the hazard is about holds exactly; the estimated dollar figure does not | partly moved |
+| Phase 4: Chase Freedom Flex opened 2026-03-10 and capped the walk | first transaction **2026-03-10**, and per-account floors mean it no longer caps anything | holds |
+| Phase 7 carryover: `shadow-e1-alt` used 5 times and undefined; `text-faint` on two strings in `Today.tsx`; U+2192 in 8 files | all three are **zero uses**. Each survives only as a comment recording why it is gone | all fixed |
+| Phase 7 diagnosis: 422 of 466 type-step usages in an 11.5 to 15px band, **0 `font-bold`** | `font-bold` is **still 0**. The weight range opened to semibold instead: light 9, normal 6, medium 24, semibold 13 | the diagnosis figure still describes the code; the item is done by a different lever than the one named |
+| Phase 7 carryover: ~27 hardcoded hexes in views | **23 remain.** 22 are swatch literals in `settings/CategoriesSection.tsx`, a colour picker; the outlier is `#c9963a` in `SyncActivityPanel.tsx` | partly done, and the item is marked done |
