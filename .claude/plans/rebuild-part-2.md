@@ -370,15 +370,15 @@ Three SDK call sites exist. `routes/ai.ts` is already modern (streaming, adaptiv
 
 ## Phase 7b — Finish the design system
 
-- [ ] **Type**: open the range. The scale exists and is well built; it is unused above 17px and
+- [x] **Type**: open the range. The scale exists and is well built; it is unused above 17px and
       unused in weight. 422 of 466 type-step usages sit in an 11.5–15px band; 0 `font-bold`.
-- [ ] **Elevation** that works on a dark ground: shadow stops being the mechanism and value
+- [x] **Elevation** that works on a dark ground: shadow stops being the mechanism and value
       separation takes over.
-- [ ] **Charts**: `TrendChart` autoscales to its own min/max, so a $40 wobble and the real $1,518
+- [x] **Charts**: `TrendChart` autoscales to its own min/max, so a $40 wobble and the real $1,518
       July fall draw the identical picture, and its x-axis is an array index, so a 5-month gap and a
       1-day gap have the same width. Calibrated scale with a printed zero; time-proportional x.
       Load the `dataviz` skill before touching chart colour.
-- [ ] **The motif.** Transform, do not kill: mīzān *is* balance. `MAX_TILT_DEG = 9` and the real
+- [x] **The motif.** Transform, do not kill: mīzān *is* balance. `MAX_TILT_DEG = 9` and the real
       sheet returns 1.40°, moving the pan end ~2.6px; seven months of real snapshots span a 2.1°
       excursion, about 4px. Replace the drawn scale with a calibrated horizontal beam: extent is the
       whole sheet, a fixed tick at 50% is the fulcrum that never moves, the needle sits at the real
@@ -391,14 +391,14 @@ Three SDK call sites exist. `routes/ai.ts` is already modern (streaming, adaptiv
 
 Carried from the token work, still open:
 
-- [ ] ~27 hardcoded hexes in views (category and chart colours) do not follow the theme and will look
+- [x] ~27 hardcoded hexes in views (category and chart colours) do not follow the theme and will look
       wrong on the dark ground. Route them through tokens.
-- [ ] `shadow-e1-alt` is used 5 times and is not defined in `tailwind.config.js` — a dead utility
+- [x] `shadow-e1-alt` is used 5 times and is not defined in `tailwind.config.js` — a dead utility
       emitting no CSS.
-- [ ] `Today.tsx` uses `text-faint` on two strings; `faint` is documented non-text (3.26:1 light,
+- [x] `Today.tsx` uses `text-faint` on two strings; `faint` is documented non-text (3.26:1 light,
       4.10:1 dark) and is the one token deliberately below AA.
-- [ ] U+2192 (used in 8 files) is in neither font subset and falls back to the system stack.
-- [ ] Instrument Sans italic is not shipped; the two italic strings in Advisor synthesize oblique.
+- [x] U+2192 (used in 8 files) is in neither font subset and falls back to the system stack.
+- [x] Instrument Sans italic is not shipped; the two italic strings in Advisor synthesize oblique.
 
 ---
 
@@ -920,3 +920,74 @@ pressing re-check is a deliberate reset and the model does not undo it, and sepa
 one answer per row, ever.** The pool now excludes any row carrying an AI revision, because the
 revision log is durable where `category_source` is not. The cost is that a genuinely wrong rule stays
 wrong after an explicit re-check; that is a state the owner chose and can still fix by hand.
+
+---
+
+## Phase 7b, landed 2026-07-31
+
+Three commits: `b01baf8`, `f576faa`, `92a5272`. **1,039 tests pass**, both typechecks clean,
+`vite build` succeeds. Phase 7 is complete.
+
+**Type.** The scale was well built and unused: 380 of 424 step usages (89.6%) sat inside an 11.5 to
+15px band and there was no `font-bold` anywhere. A new `Figure` primitive owns the money numeral at
+four steps with real gaps, and the screen title stepped DOWN from 28px to 19px, because the title was
+previously larger than every number on the page it headed and the nav rail already says where you
+are. Both levers, not just the loud one.
+
+**Elevation.** `e1`/`e2`/`e3` were keyed to a dark shadow, which is invisible on a dark ground, so the
+whole ladder collapsed there. Each step now raises surface and border together, running away from
+each ground, so the word means the same thing in both themes. The top rung deliberately stops raising
+the surface on dark: measured, the surface it would have used puts `clay` at 3.41:1 and `muted-2` at
+3.30:1, and a dialog is exactly the surface that carries money.
+
+**Charts.** `TrendChart` autoscaled to its own min and max, so a $40 wobble and a $1,518 fall drew the
+identical picture, and its x-axis was an array index, so a 31-day gap and a 1-day gap had the same
+width. It now has a calibrated domain with a printed zero and a time-proportional axis, and it breaks
+rather than joining across a gap it cannot justify.
+
+**The motif.** The drawn scale is gone. Measured, `MAX_TILT_DEG = 9` meant the owner's whole recorded
+history spanned **8.66px of pan travel**, and the measured month within it **5.13px**. Nobody can read
+that. The calibrated beam puts the same measured month across **181px of a 1196px axis**. A position
+on a labelled axis is a measurement; a rotation is a mood. The beam is also where degradation shows:
+when a stage failed, or the sheet is stale, or coverage is partial, the whole primary reading goes
+uncalibrated rather than a 7px dot changing colour in the corner.
+
+### Three findings that were bigger than the brief
+
+**A whole phase of work the running app never reached.** `backfillSnapshots()` reconstructs net-worth
+history from the ledger, and Phase 4 rebuilt it substantially: per-account floors, an informativeness
+gate, coverage per snapshot. **It had no caller in `server/src`.** Only `scripts/backfill/rebuild.ts`,
+run by hand. So the recorded Phase 4 result, "5 estimated points becoming 16, oldest 2024-07-01", was
+what the script produces and never what the database held. It is now conditioned on the data through
+a persisted watermark, with an explicit owner rebuild beside it. On the real ledger: 5 replayed months
+become 16, oldest 2026-02-01 becomes 2024-07-01, NULL coverage 5 becomes 0, and every measured row is
+byte-identical afterwards.
+
+The implementer's first predicate for it was "the ledger reaches below the oldest snapshot", which is
+permanently true here (the ledger starts 2023-09-16, the oldest justifiable month is 2024-07-01,
+because the months between are covered but uninformative and the walk correctly declines to emit
+them). That would have re-run the reconstruction every hour forever. Caught by running it twice.
+
+**A false count in owner-facing chart copy, pinned by a test.** The caption said "6 segments are
+dotted" while 3 polylines were drawn: the number counted point-to-point transitions, which the merge
+loop collapses. The test asserted the string by regex and never against the rendered segment count.
+Now there is one entry per rendered polyline by construction, and the test parses the number back out
+of the caption and compares it to what the geometry drew.
+
+**Hazard 3's named instance could not fire.** Migration 044 populates `covered_accounts` only
+`WHERE is_estimated = 0`, so every estimated row carries NULL, and the classifier needed a count on
+both ends. The exact cliff the hazard names, estimated 2026-06-01 at 14 accounts against measured
+2026-06-30 at 11, was classified as an ordinary estimate. **An unrecorded count is now a reason to
+distinguish rather than an assumption of agreement**, and the copy claims only what is known: "only
+one end records how many accounts were counted, so whether that number changed across it is not
+known."
+
+### Also caught
+
+A `--mz-edge` token that put a **3.19:1 grey stripe across every primary button** on light while doing
+nothing (1.03:1) on the surfaces it was designed for. A `cat-1..8` colour ramp shipping 16 CSS
+properties and 8 config entries and emitting **zero utilities**, duplicated beside the 8 literal hexes
+that actually render. A money numeral at **3.91:1** in `Investments.tsx`, failing AA. `trendGeometry`
+returning a plausible geometry on unsorted input instead of raising. And three comment figures that
+did not reproduce, including one the implementer's own report admitted it could not reproduce and
+shipped anyway.
