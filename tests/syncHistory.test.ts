@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import Database from 'better-sqlite3';
+import { migratedTestDb } from './helpers/schema';
 import {
   startSyncRun,
   recordSyncRunItem,
@@ -10,34 +10,11 @@ import {
   listSyncRuns,
 } from '../server/src/services/syncHistory';
 
-function setupDb(): Database.Database {
-  const db = new Database(':memory:');
-  db.exec(`
-    CREATE TABLE sync_runs (
-      id TEXT PRIMARY KEY, scope TEXT NOT NULL, status TEXT NOT NULL,
-      started_at TEXT NOT NULL, completed_at TEXT, message TEXT,
-      error_code TEXT, error_message TEXT, recovery_action TEXT,
-      accounts_seen INTEGER DEFAULT 0, transactions_added INTEGER DEFAULT 0,
-      transactions_modified INTEGER DEFAULT 0, transactions_removed INTEGER DEFAULT 0,
-      transactions_skipped INTEGER DEFAULT 0, duplicate_candidates INTEGER DEFAULT 0,
-      transfer_candidates INTEGER DEFAULT 0
-    );
-    CREATE TABLE sync_run_items (
-      id TEXT PRIMARY KEY, run_id TEXT NOT NULL, provider TEXT NOT NULL,
-      connection_id TEXT, institution_name TEXT, status TEXT NOT NULL,
-      started_at TEXT NOT NULL, completed_at TEXT,
-      accounts_seen INTEGER DEFAULT 0, transactions_added INTEGER DEFAULT 0,
-      transactions_modified INTEGER DEFAULT 0, transactions_removed INTEGER DEFAULT 0,
-      transactions_skipped INTEGER DEFAULT 0, error_code TEXT, error_message TEXT,
-      recovery_action TEXT
-    );
-    CREATE TABLE sync_changes (
-      id TEXT PRIMARY KEY, run_item_id TEXT NOT NULL, entity_type TEXT NOT NULL,
-      entity_id TEXT, change_type TEXT NOT NULL, description TEXT NOT NULL, created_at TEXT NOT NULL
-    );
-  `);
-  return db;
-}
+// `scope`, `status`, `provider`, `entity_type` and `change_type` all carry CHECK constraints in
+// the real schema that the hand-written one dropped, and the three tables are chained by foreign
+// key, so a change recorded against a run item that does not exist now fails here as it would
+// in production.
+const setupDb = migratedTestDb;
 
 test('a sync run aggregates per-item transaction counts on finish', (t) => {
   const db = setupDb();

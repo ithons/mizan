@@ -12,6 +12,10 @@ const MIGRATION = fs.readFileSync(
 );
 
 // The pre-034 accounts schema (022 table + type_source/backfill_floor_date/name_source added after).
+//
+// Deliberately NOT migratedTestDb(): this file drives migration 034 itself, and migratedTestDb()
+// has already applied it. The schema below is the input the migration is being tested against,
+// not a stand-in for the one production has.
 function setupDb(): Database.Database {
   const db = new Database(':memory:');
   db.exec(`

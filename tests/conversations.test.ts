@@ -16,21 +16,7 @@ import {
   deleteConversation,
 } from '../server/src/services/conversations';
 
-function setup(): Database.Database {
-  const db = new Database(':memory:');
-  db.exec(`
-    CREATE TABLE conversations (id TEXT PRIMARY KEY, title TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
-    CREATE TABLE messages (
-      id TEXT PRIMARY KEY,
-      conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
-      role TEXT NOT NULL CHECK(role IN ('user','assistant')),
-      content TEXT NOT NULL,
-      created_at TEXT NOT NULL
-    );
-  `);
-  db.pragma('foreign_keys = ON');
-  return db;
-}
+const setup = migratedTestDb;
 
 test('create, append, and read a conversation round-trips messages in order', (t) => {
   const db = setup();

@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import Database from 'better-sqlite3';
+import { migratedTestDb, insertAccount } from './helpers/schema';
 import {
   getHoldingHistory,
   listHoldingsWithMetadata,
@@ -8,55 +9,18 @@ import {
   setSecurityMetadata,
 } from '../server/src/services/investmentMetadata';
 
+// The hand-written schema this replaced still declared `plaid_security_id`, a column migration
+// 014 dropped, and `institution_value` / `cost_basis` / `manual_cost_basis` as REAL where
+// production has been INTEGER cents since migration 022.
 function setupDb(): Database.Database {
-  const db = new Database(':memory:');
-
-  db.exec(`
-    CREATE TABLE securities (
-      id TEXT PRIMARY KEY,
-      plaid_security_id TEXT,
-      ticker TEXT,
-      name TEXT NOT NULL,
-      type TEXT NOT NULL,
-      currency TEXT NOT NULL DEFAULT 'USD',
-      sector TEXT,
-      sector_source TEXT
-    );
-
-    CREATE TABLE holdings (
-      id TEXT PRIMARY KEY,
-      account_id TEXT NOT NULL,
-      security_id TEXT NOT NULL,
-      quantity REAL NOT NULL,
-      institution_price REAL NOT NULL,
-      institution_value REAL NOT NULL,
-      cost_basis REAL,
-      manual_cost_basis REAL,
-      manual_cost_basis_note TEXT,
-      manual_cost_basis_updated_at TEXT,
-      currency TEXT NOT NULL DEFAULT 'USD',
-      updated_at TEXT NOT NULL
-    );
-
-    CREATE TABLE holdings_history (
-      id TEXT PRIMARY KEY,
-      account_id TEXT NOT NULL,
-      security_id TEXT NOT NULL,
-      date TEXT NOT NULL,
-      quantity REAL NOT NULL,
-      institution_price REAL NOT NULL,
-      institution_value REAL NOT NULL,
-      cost_basis REAL,
-      created_at TEXT NOT NULL,
-      UNIQUE(account_id, security_id, date)
-    );
-  `);
+  const db = migratedTestDb();
+  insertAccount(db, { id: 'acct', type: 'brokerage' });
 
   db.prepare(`
-    INSERT INTO securities (id, plaid_security_id, ticker, name, type, currency, sector, sector_source)
+    INSERT INTO securities (id, ticker, name, type, currency, sector, sector_source)
     VALUES
-      ('sec_vti', 'plaid_vti', 'VTI', 'Vanguard Total Stock Market ETF', 'etf', 'USD', NULL, NULL),
-      ('sec_cash', NULL, NULL, 'Cash', 'cash', 'USD', NULL, NULL)
+      ('sec_vti', 'VTI', 'Vanguard Total Stock Market ETF', 'etf', 'USD', NULL, NULL),
+      ('sec_cash', NULL, 'Cash', 'cash', 'USD', NULL, NULL)
   `).run();
 
   db.prepare(`

@@ -1,34 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import Database from 'better-sqlite3';
+import { migratedTestDb, insertAccount } from './helpers/schema';
 import { createManualAccount } from '../server/src/services/accounts';
 import { getSnapshotBalanceHistory } from '../server/src/services/balanceHistory';
 
-// Minimal accounts schema covering the columns createManualAccount writes/reads.
-// institution_name is NOT NULL DEFAULT '' (as in the real schema) so the test proves
+// institution_name is NOT NULL DEFAULT '' in the real schema, so the test proves
 // the bind-site fallback, not just the Zod default.
-function setupDb(): Database.Database {
-  const db = new Database(':memory:');
-  db.exec(`
-    CREATE TABLE accounts (
-      id TEXT PRIMARY KEY,
-      connection_type TEXT NOT NULL,
-      institution_name TEXT NOT NULL DEFAULT '',
-      account_name TEXT NOT NULL,
-      type TEXT NOT NULL,
-      current_balance INTEGER NOT NULL DEFAULT 0,
-      currency TEXT NOT NULL DEFAULT 'USD',
-      is_manual INTEGER NOT NULL DEFAULT 0,
-      is_hidden INTEGER NOT NULL DEFAULT 0,
-      is_liability INTEGER NOT NULL DEFAULT 0,
-      color TEXT,
-      sort_order INTEGER NOT NULL DEFAULT 0,
-      created_at TEXT NOT NULL,
-      updated_at TEXT NOT NULL
-    );
-  `);
-  return db;
-}
+const setupDb = migratedTestDb;
 
 test('createManualAccount succeeds when institution_name is omitted (no 500)', (t) => {
   const db = setupDb();
@@ -63,12 +41,12 @@ test('createManualAccount derives liability for credit type', (t) => {
 });
 
 test('the snapshot series extracts one account\'s points, skipping what it cannot read', (t) => {
-  const db = new Database(':memory:');
+  const db = migratedTestDb();
   t.after(() => db.close());
-  db.exec(`CREATE TABLE accounts (id TEXT PRIMARY KEY, is_liability INTEGER NOT NULL DEFAULT 0)`);
-  db.prepare('INSERT INTO accounts (id) VALUES (?)').run('acct');
-  db.exec(`CREATE TABLE net_worth_snapshots (id TEXT PRIMARY KEY, date TEXT NOT NULL, breakdown TEXT NOT NULL, is_estimated INTEGER NOT NULL DEFAULT 0)`);
-  const ins = db.prepare('INSERT INTO net_worth_snapshots (id, date, breakdown) VALUES (?,?,?)');
+  insertAccount(db, { id: 'acct' });
+  const ins = db.prepare(`INSERT INTO net_worth_snapshots
+    (id, date, total_assets, total_liabilities, net_worth, breakdown, created_at)
+    VALUES (?,?,0,0,0,?,'2026-01-01T00:00:00.000Z')`);
   ins.run('s1', '2026-01-01', JSON.stringify({ acct: 10000, other: 5000 }));
   ins.run('s2', '2026-02-01', JSON.stringify({ acct: 12000, other: 5000 }));
   ins.run('s3', '2026-03-01', JSON.stringify({ other: 5000 })); // acct not present yet/anymore

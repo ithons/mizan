@@ -1,39 +1,15 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import Database from 'better-sqlite3';
+import { migratedTestDb, insertAccount } from './helpers/schema';
 import { getAnomalyInsights } from '../server/src/services/anomalyInsights';
 
+// The real taxonomy is what production classifies against, so the category names the insight
+// copy prints are the seeded ones ("Food & Drink", not "Food"). The hand-written schema this
+// replaced also declared `amount REAL`, where production has been INTEGER cents since 022.
 function setupDb(): Database.Database {
-  const db = new Database(':memory:');
-
-  db.exec(`
-    CREATE TABLE categories (
-      id TEXT PRIMARY KEY,
-      name TEXT NOT NULL,
-      parent_id TEXT,
-      is_income INTEGER NOT NULL DEFAULT 0,
-      is_investment INTEGER NOT NULL DEFAULT 0
-    );
-
-    CREATE TABLE transactions (
-      manually_categorized INTEGER NOT NULL DEFAULT 0,
-      id TEXT PRIMARY KEY,
-      date TEXT NOT NULL,
-      amount REAL NOT NULL,
-      category_id TEXT,
-      pending INTEGER NOT NULL DEFAULT 0,
-      transfer_status TEXT NOT NULL DEFAULT 'none',
-      duplicate_status TEXT NOT NULL DEFAULT 'none'
-    );
-
-    INSERT INTO categories (id, name, parent_id, is_income, is_investment)
-    VALUES
-      ('cat_food', 'Food', NULL, 0, 0),
-      ('cat_income_paycheck', 'Paycheck', NULL, 1, 0),
-      ('cat_xfer', 'Transfers', NULL, 0, 0),
-      ('cat_xfer_child', 'Internal Transfer', 'cat_xfer', 0, 0);
-  `);
-
+  const db = migratedTestDb();
+  insertAccount(db, { id: 'acct' });
   return db;
 }
 
@@ -46,9 +22,10 @@ function insertTransaction(
   transferStatus = 'none'
 ): void {
   db.prepare(`
-    INSERT INTO transactions (id, date, amount, category_id, transfer_status)
-    VALUES (?, ?, ?, ?, ?)
-  `).run(id, date, amount, categoryId, transferStatus);
+    INSERT INTO transactions
+      (id, account_id, date, amount, category_id, transfer_status, created_at, updated_at)
+    VALUES (?, 'acct', ?, ?, ?, ?, ?, ?)
+  `).run(id, date, amount, categoryId, transferStatus, `${date}T00:00:00.000Z`, `${date}T00:00:00.000Z`);
 }
 
 test('anomaly insights flag category spending spikes and income gaps', (t) => {
@@ -65,7 +42,7 @@ test('anomaly insights flag category spending spikes and income gaps', (t) => {
   const spendingSpike = insights.find((insight) => insight.id === 'spending-category-spike');
   const incomeGap = insights.find((insight) => insight.id === 'income-gap');
   assert.equal(spendingSpike?.severity, 'warning');
-  assert.match(spendingSpike?.message ?? '', /Food spending is up 550%/);
+  assert.match(spendingSpike?.message ?? '', /Food & Drink spending is up 550%/);
   assert.equal(incomeGap?.severity, 'warning');
   assert.match(incomeGap?.message ?? '', /Income in the last 30 days is \$1,000/);
 });
@@ -74,8 +51,8 @@ test('anomaly insights exclude transfer categories from spending spikes', (t) =>
   const db = setupDb();
   t.after(() => db.close());
 
-  insertTransaction(db, 'transfer_previous', '2026-05-20', -50, 'cat_xfer_child');
-  insertTransaction(db, 'transfer_current', '2026-06-20', -2500, 'cat_xfer_child');
+  insertTransaction(db, 'transfer_previous', '2026-05-20', -50, 'cat_xfer_in');
+  insertTransaction(db, 'transfer_current', '2026-06-20', -2500, 'cat_xfer_in');
   insertTransaction(db, 'food_current', '2026-06-20', -80, 'cat_food');
 
   const insights = getAnomalyInsights(db, new Date('2026-06-30T12:00:00.000Z'));

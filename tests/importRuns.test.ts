@@ -1,28 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import Database from 'better-sqlite3';
+import { migratedTestDb } from './helpers/schema';
 import { listDataImportRuns, recordDataImportRun } from '../server/src/services/importRuns';
 
-function setupDb(): Database.Database {
-  const db = new Database(':memory:');
-  db.exec(`
-    CREATE TABLE data_import_runs (
-      id TEXT PRIMARY KEY,
-      source TEXT NOT NULL,
-      status TEXT NOT NULL,
-      rows_seen INTEGER NOT NULL DEFAULT 0,
-      rows_imported INTEGER NOT NULL DEFAULT 0,
-      rows_invalid INTEGER NOT NULL DEFAULT 0,
-      duplicate_candidates INTEGER NOT NULL DEFAULT 0,
-      transfer_candidates INTEGER NOT NULL DEFAULT 0,
-      warnings_count INTEGER NOT NULL DEFAULT 0,
-      errors_count INTEGER NOT NULL DEFAULT 0,
-      summary TEXT NOT NULL,
-      created_at TEXT NOT NULL
-    );
-  `);
-  return db;
-}
+// `source` and `status` both carry CHECK constraints in the real schema that the hand-written
+// one omitted, so a run recorded under an unknown source used to pass here and fail in production.
+const setupDb = migratedTestDb;
 
 test('import runs record audit summaries in newest-first order', (t) => {
   const db = setupDb();

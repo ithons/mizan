@@ -1,68 +1,39 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import Database from 'better-sqlite3';
+import { migratedTestDb, insertAccount, insertTransaction } from './helpers/schema';
 import { getPersonalFinanceInvariantIssues } from '../server/src/services/personalFinanceInvariants';
 
 function setupInvariantDb(): Database.Database {
-  const db = new Database(':memory:');
-
-  db.exec(`
-    CREATE TABLE accounts (
-      id TEXT PRIMARY KEY,
-      account_name TEXT NOT NULL,
-      is_hidden INTEGER NOT NULL DEFAULT 0,
-      type TEXT NOT NULL DEFAULT 'checking',
-      current_balance INTEGER NOT NULL DEFAULT 0
-    );
-
-    CREATE TABLE net_worth_snapshots (
-      is_estimated INTEGER NOT NULL DEFAULT 0,
-      id TEXT PRIMARY KEY,
-      date TEXT NOT NULL,
-      breakdown TEXT NOT NULL,
-      created_at TEXT NOT NULL
-    );
-
-    CREATE TABLE transactions (
-      manually_categorized INTEGER NOT NULL DEFAULT 0,
-      id TEXT PRIMARY KEY,
-      date TEXT NOT NULL,
-      pending INTEGER NOT NULL DEFAULT 0
-    );
-
-    CREATE TABLE holdings (
-      id TEXT PRIMARY KEY,
-      account_id TEXT NOT NULL,
-      security_id TEXT NOT NULL DEFAULT 'sec'
-    );
-  `);
-
+  const db = migratedTestDb();
+  insertAccount(db, { id: 'acct_txn', account_name: 'Ledger Home' });
+  db.prepare("INSERT INTO securities (id, name, type) VALUES ('sec', 'Placeholder', 'other')").run();
   return db;
+}
+
+function insertSnapshot(db: Database.Database, id: string, date: string, breakdown: string): void {
+  db.prepare(`
+    INSERT INTO net_worth_snapshots
+      (id, date, total_assets, total_liabilities, net_worth, breakdown, created_at)
+    VALUES (?, ?, 0, 0, 0, ?, ?)
+  `).run(id, date, breakdown, `${date}T12:00:00.000Z`);
+}
+
+function insertHolding(db: Database.Database, id: string, accountId: string): void {
+  db.prepare(`
+    INSERT INTO holdings
+      (id, account_id, security_id, quantity, institution_price, institution_value, updated_at)
+    VALUES (?, ?, 'sec', 1, 1, 100, '2026-06-30T12:00:00.000Z')
+  `).run(id, accountId);
 }
 
 test('personal finance invariants detect hidden accounts in latest net worth snapshot', (t) => {
   const db = setupInvariantDb();
   t.after(() => db.close());
 
-  db.prepare('INSERT INTO accounts (id, account_name, is_hidden) VALUES (?, ?, ?)').run(
-    'acct_hidden',
-    'Old Savings',
-    1
-  );
-  db.prepare('INSERT INTO accounts (id, account_name, is_hidden) VALUES (?, ?, ?)').run(
-    'acct_visible',
-    'Checking',
-    0
-  );
-  db.prepare(`
-    INSERT INTO net_worth_snapshots (id, date, breakdown, created_at)
-    VALUES (?, ?, ?, ?)
-  `).run(
-    'snap_1',
-    '2026-06-30',
-    JSON.stringify({ acct_hidden: 100, acct_visible: 500 }),
-    '2026-06-30T12:00:00.000Z'
-  );
+  insertAccount(db, { id: 'acct_hidden', account_name: 'Old Savings', is_hidden: 1 });
+  insertAccount(db, { id: 'acct_visible', account_name: 'Checking' });
+  insertSnapshot(db, 'snap_1', '2026-06-30', JSON.stringify({ acct_hidden: 100, acct_visible: 500 }));
 
   const issues = getPersonalFinanceInvariantIssues(db, new Date('2026-06-30T12:00:00.000Z'));
 
@@ -76,20 +47,9 @@ test('personal finance invariants flag old pending transactions', (t) => {
   const db = setupInvariantDb();
   t.after(() => db.close());
 
-  db.prepare(`
-    INSERT INTO net_worth_snapshots (id, date, breakdown, created_at)
-    VALUES ('snap_1', '2026-06-30', '{}', '2026-06-30T12:00:00.000Z')
-  `).run();
-  db.prepare('INSERT INTO transactions (id, date, pending) VALUES (?, ?, ?)').run(
-    'pending_old',
-    '2026-06-20',
-    1
-  );
-  db.prepare('INSERT INTO transactions (id, date, pending) VALUES (?, ?, ?)').run(
-    'pending_fresh',
-    '2026-06-28',
-    1
-  );
+  insertSnapshot(db, 'snap_1', '2026-06-30', '{}');
+  insertTransaction(db, { id: 'pending_old', account_id: 'acct_txn', date: '2026-06-20', pending: 1 });
+  insertTransaction(db, { id: 'pending_fresh', account_id: 'acct_txn', date: '2026-06-28', pending: 1 });
 
   const issues = getPersonalFinanceInvariantIssues(db, new Date('2026-06-30T12:00:00.000Z'));
 
@@ -105,9 +65,16 @@ test('personal finance invariants flag holdings whose account was deleted', (t) 
   const db = setupInvariantDb();
   t.after(() => db.close());
 
-  db.prepare("INSERT INTO accounts (id, account_name) VALUES ('acct_live', 'Brokerage')").run();
-  db.prepare("INSERT INTO holdings (id, account_id) VALUES ('h_ok', 'acct_live')").run();
-  db.prepare("INSERT INTO holdings (id, account_id) VALUES ('h_orphan', 'acct_gone')").run();
+  insertAccount(db, { id: 'acct_live', account_name: 'Brokerage', type: 'brokerage' });
+  insertHolding(db, 'h_ok', 'acct_live');
+
+  // The real schema declares holdings.account_id REFERENCES accounts(id), so an orphan cannot be
+  // created through an ordinary insert. It still happens: `runMigrationsOn` turns enforcement off
+  // for the duration of a migration, which is exactly the window this detector exists to cover,
+  // so the orphan is made the same way production makes one.
+  db.pragma('foreign_keys = OFF');
+  insertHolding(db, 'h_orphan', 'acct_gone');
+  db.pragma('foreign_keys = ON');
 
   const issues = getPersonalFinanceInvariantIssues(db, new Date('2026-06-30T12:00:00.000Z'));
   const orphan = issues.find((i) => i.id === 'orphan-holdings');
@@ -119,8 +86,8 @@ test('personal finance invariants flag a closed account with a non-zero balance'
   const db = setupInvariantDb();
   t.after(() => db.close());
 
-  db.prepare("INSERT INTO accounts (id, account_name, type, current_balance) VALUES ('c_ok', 'BofA Checking', 'closed', 0)").run();
-  db.prepare("INSERT INTO accounts (id, account_name, type, current_balance) VALUES ('c_bad', 'Chase Savings', 'closed', 4200)").run();
+  insertAccount(db, { id: 'c_ok', account_name: 'BofA Checking', type: 'closed', current_balance: 0 });
+  insertAccount(db, { id: 'c_bad', account_name: 'Chase Savings', type: 'closed', current_balance: 4200 });
 
   const issues = getPersonalFinanceInvariantIssues(db, new Date('2026-06-30T12:00:00.000Z'));
   const closed = issues.find((i) => i.id === 'closed-account-nonzero');

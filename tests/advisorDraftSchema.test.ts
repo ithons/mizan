@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import Database from 'better-sqlite3';
+import { migratedTestDb, TEST_NOW } from './helpers/schema';
 import { AiWorkerDraftSchema, AdvisorDraftPayloadSchema } from '../shared/schemas';
 import { confirmAdvisorDraft, listAdvisorActions } from '../server/src/services/advisorDrafts';
 import type { AdvisorDraftAction } from '../shared/types';
@@ -96,7 +97,9 @@ test('accepts set_manual_cost_basis with an explicit null cost basis', () => {
 // The apply path (POST /api/ai/confirm -> confirmAdvisorDraft) can receive a fully
 // client-supplied draft. Validation must run there too, not only on worker ingestion,
 // or a non-finite/wrong-typed money field reaches toCents() and writes NaN. The gate
-// runs before the DB transaction opens, so an empty DB is enough to prove rejection.
+// runs before the DB transaction opens, so an empty DB is enough to prove rejection: the two
+// tests below take `new Database(':memory:')` deliberately rather than migratedTestDb(), because
+// "no table was even reachable" is the property being asserted.
 function malformedGoalAction(targetAmount: unknown): AdvisorDraftAction {
   return {
     id: 'draft_1',
@@ -136,14 +139,10 @@ test('confirmAdvisorDraft rejects a string money amount before any DB write', ()
 });
 
 test('confirmAdvisorDraft records an audit action with its source', () => {
-  const db = new Database(':memory:');
+  const db = migratedTestDb();
   try {
-    db.exec(`
-      CREATE TABLE goals (id TEXT PRIMARY KEY, target_amount INTEGER, updated_at TEXT);
-      CREATE TABLE advisor_drafts (id TEXT PRIMARY KEY, status TEXT, updated_at TEXT);
-      CREATE TABLE advisor_actions (id TEXT PRIMARY KEY, kind TEXT, label TEXT, summary TEXT, source TEXT, payload TEXT, created_at TEXT);
-    `);
-    db.prepare("INSERT INTO goals (id, target_amount) VALUES ('goal_1', 100000)").run();
+    db.prepare(`INSERT INTO goals (id, name, type, target_amount, created_at, updated_at)
+      VALUES ('goal_1', 'Emergency fund', 'savings', 100000, ?, ?)`).run(TEST_NOW, TEST_NOW);
     const action = {
       id: 'draft_x',
       kind: 'update_goal_target',

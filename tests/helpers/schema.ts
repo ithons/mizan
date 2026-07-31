@@ -68,6 +68,7 @@ export function insertAccount(
   overrides: Partial<{
     id: string;
     account_name: string;
+    institution_name: string;
     type: string;
     connection_type: string;
     current_balance: number;
@@ -81,10 +82,11 @@ export function insertAccount(
     INSERT INTO accounts
       (id, connection_type, institution_name, account_name, type, current_balance,
        is_liability, is_hidden, is_manual, created_at, updated_at)
-    VALUES (?, ?, '', ?, ?, ?, ?, ?, ?, ?, ?)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
     id,
     overrides.connection_type ?? 'manual',
+    overrides.institution_name ?? '',
     overrides.account_name ?? id,
     overrides.type ?? 'checking',
     overrides.current_balance ?? 0,

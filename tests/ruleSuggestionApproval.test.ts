@@ -1,82 +1,19 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import Database from 'better-sqlite3';
+import { migratedTestDb, insertAccount } from './helpers/schema';
 import {
   approveMerchantRuleSuggestions,
   suggestMerchantRules,
 } from '../server/src/services/rules';
 
 function setupDb(): Database.Database {
-  const db = new Database(':memory:');
-
-  db.exec(`
-    CREATE TABLE categories (
-      id TEXT PRIMARY KEY,
-      name TEXT NOT NULL,
-      color TEXT,
-      icon TEXT
-    );
-
-    CREATE TABLE accounts (
-      id TEXT PRIMARY KEY,
-      account_name TEXT NOT NULL
-    );
-
-    CREATE TABLE merchant_rules (
-      id TEXT PRIMARY KEY,
-      pattern TEXT NOT NULL,
-      category_id TEXT NOT NULL,
-      created_at TEXT NOT NULL,
-      source TEXT NOT NULL DEFAULT 'human',
-      action_id TEXT,
-      updated_at TEXT,
-      retired_at TEXT
-    );
-    CREATE UNIQUE INDEX idx_merchant_rules_pattern_live
-      ON merchant_rules(lower(pattern)) WHERE retired_at IS NULL;
-    CREATE TABLE merchant_rule_revisions (
-      id TEXT PRIMARY KEY, rule_id TEXT NOT NULL, pattern TEXT NOT NULL,
-      from_category_id TEXT, to_category_id TEXT, source TEXT NOT NULL,
-      action_id TEXT, operation TEXT NOT NULL, created_at TEXT NOT NULL
-    );
-    CREATE TABLE transaction_category_revisions (
-      id TEXT PRIMARY KEY, transaction_id TEXT NOT NULL,
-      from_category_id TEXT, to_category_id TEXT, from_source TEXT, to_source TEXT,
-      action_id TEXT, revert_of TEXT, reverted_at TEXT, created_at TEXT NOT NULL
-    );
-
-    CREATE TABLE app_preferences (
-      key TEXT PRIMARY KEY,
-      value TEXT NOT NULL,
-      created_at TEXT NOT NULL,
-      updated_at TEXT NOT NULL
-    );
-
-    CREATE TABLE transactions (
-      category_source TEXT, category_action_id TEXT, category_previous_id TEXT,
-      id TEXT PRIMARY KEY,
-      account_id TEXT,
-      date TEXT NOT NULL,
-      amount INTEGER NOT NULL,
-      merchant_name TEXT,
-      original_name TEXT NOT NULL,
-      category_id TEXT,
-      pending INTEGER NOT NULL DEFAULT 0,
-      review_status TEXT NOT NULL DEFAULT 'open',
-      manually_categorized INTEGER NOT NULL DEFAULT 0,
-      updated_at TEXT NOT NULL
-    );
-
-    INSERT INTO categories (id, name) VALUES
-      ('cat_food_coffee', 'Coffee'),
-      ('cat_travel', 'Travel');
-
-    INSERT INTO accounts (id, account_name) VALUES ('acct', 'Checking');
-  `);
+  const db = migratedTestDb();
+  insertAccount(db, { id: 'acct', account_name: 'Checking' });
 
   const ins = db.prepare(`
-    INSERT INTO transactions (id, account_id, date, amount, merchant_name, original_name, category_id, updated_at)
-    VALUES (@id, 'acct', @date, @amount, @merchant, @merchant, @category_id, '2026-07-01')
+    INSERT INTO transactions (id, account_id, date, amount, merchant_name, original_name, category_id, created_at, updated_at)
+    VALUES (@id, 'acct', @date, @amount, @merchant, @merchant, @category_id, '2026-07-01', '2026-07-01')
   `);
 
   // Three already categorized as Coffee + two uncategorized: a high-confidence suggestion.
@@ -169,8 +106,8 @@ test('affected ids come from the server, so a stale client cannot widen the blas
 
   // An unrelated uncategorized transaction the suggestion has nothing to do with.
   db.prepare(`
-    INSERT INTO transactions (id, account_id, date, amount, merchant_name, original_name, category_id, updated_at)
-    VALUES ('other', 'acct', '2026-06-30', -900, 'Some Airline', 'Some Airline', NULL, '2026-07-01')
+    INSERT INTO transactions (id, account_id, date, amount, merchant_name, original_name, category_id, created_at, updated_at)
+    VALUES ('other', 'acct', '2026-06-30', -900, 'Some Airline', 'Some Airline', NULL, '2026-07-01', '2026-07-01')
   `).run();
 
   const suggestion = suggestMerchantRules(db).find((s) => s.pattern === 'Blue Bottle');

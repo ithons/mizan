@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import Database from 'better-sqlite3';
+import { migratedTestDb } from './helpers/schema';
 import {
   getAdvisorSettings,
   updateAdvisorSettings,
@@ -15,18 +15,7 @@ import type { AiProviderId } from '../server/src/services/aiProviders/types';
 // snapshot reached the model, and it defaulted to sending a subset, so its only effect was a
 // worse answer. The snapshot is always complete now; model and effort remain configurable.
 
-function freshDb(): Database.Database {
-  const db = new Database(':memory:');
-  db.exec(`
-    CREATE TABLE app_preferences (
-      key TEXT PRIMARY KEY,
-      value TEXT NOT NULL,
-      created_at TEXT NOT NULL,
-      updated_at TEXT NOT NULL
-    );
-  `);
-  return db;
-}
+const freshDb = migratedTestDb;
 
 test('defaults when nothing is stored', () => {
   const db = freshDb();

@@ -15,64 +15,29 @@ import {
 import type { AccountBalanceChange } from '../server/src/services/balanceChanges';
 import type { TransactionIntegrityResult } from '../server/src/services/transactionIntegrity';
 import type { SyncEvent } from '../shared/types';
+import { migratedTestDb } from './helpers/schema';
 
 function setupSyncDb(): Database.Database {
-  const db = new Database(':memory:');
-
-  db.exec(`
-    CREATE TABLE sync_runs (
-      id TEXT PRIMARY KEY,
-      scope TEXT NOT NULL,
-      status TEXT NOT NULL,
-      started_at TEXT NOT NULL,
-      completed_at TEXT,
-      message TEXT,
-      error_code TEXT,
-      error_message TEXT,
-      recovery_action TEXT,
-      accounts_seen INTEGER NOT NULL DEFAULT 0,
-      transactions_added INTEGER NOT NULL DEFAULT 0,
-      transactions_modified INTEGER NOT NULL DEFAULT 0,
-      transactions_removed INTEGER NOT NULL DEFAULT 0,
-      transactions_skipped INTEGER NOT NULL DEFAULT 0,
-      duplicate_candidates INTEGER NOT NULL DEFAULT 0,
-      transfer_candidates INTEGER NOT NULL DEFAULT 0
-    );
-
-    CREATE TABLE sync_run_items (
-      id TEXT PRIMARY KEY,
-      run_id TEXT NOT NULL,
-      provider TEXT NOT NULL,
-      connection_id TEXT,
-      institution_name TEXT NOT NULL DEFAULT '',
-      status TEXT NOT NULL,
-      started_at TEXT NOT NULL,
-      completed_at TEXT,
-      accounts_seen INTEGER NOT NULL DEFAULT 0,
-      transactions_added INTEGER NOT NULL DEFAULT 0,
-      transactions_modified INTEGER NOT NULL DEFAULT 0,
-      transactions_removed INTEGER NOT NULL DEFAULT 0,
-      transactions_skipped INTEGER NOT NULL DEFAULT 0,
-      error_code TEXT,
-      error_message TEXT,
-      recovery_action TEXT
-    );
-
-    CREATE TABLE sync_changes (
-      id TEXT PRIMARY KEY,
-      run_item_id TEXT NOT NULL,
-      entity_type TEXT NOT NULL,
-      entity_id TEXT,
-      change_type TEXT NOT NULL,
-      description TEXT NOT NULL,
-      created_at TEXT NOT NULL
-    );
-
+  const db = migratedTestDb();
+  db.prepare(`
     INSERT INTO sync_runs (id, scope, status, started_at)
-    VALUES ('run_1', 'full', 'running', '2026-06-30T00:00:00.000Z');
-  `);
+    VALUES ('run_1', 'full', 'running', '2026-06-30T00:00:00.000Z')
+  `).run();
 
   return db;
+}
+
+/**
+ * The provider's own run item, which exists before any of its changes are recorded:
+ * `sync_changes.run_item_id` references `sync_run_items(id)`. The hand-written schema this file
+ * used to build dropped that foreign key, so the balance-change tests below asserted a change row
+ * pointing at a run item that never existed.
+ */
+function insertProviderRunItem(db: Database.Database): void {
+  db.prepare(`
+    INSERT INTO sync_run_items (id, run_id, provider, status, started_at)
+    VALUES ('item_sf', 'run_1', 'simplefin', 'succeeded', '2026-06-30T00:00:00.000Z')
+  `).run();
 }
 
 const emptyIntegrity: TransactionIntegrityResult = {
@@ -274,6 +239,7 @@ test('reconcileBalanceChanges: an account nobody corrected passes through untouc
 test('runPostSyncStages: a settled card produces no rows at all on the next sync', (t) => {
   const db = setupSyncDb();
   t.after(() => db.close());
+  insertProviderRunItem(db);
 
   runPostSyncStages(db, 'run_1', null, {
     detectRecurring: () => {},
@@ -312,6 +278,7 @@ test('runPostSyncStages: a correction the ledger has not seen before is still re
 test('runPostSyncStages: provider balance changes still reach the panel when nothing was corrected', (t) => {
   const db = setupSyncDb();
   t.after(() => db.close());
+  insertProviderRunItem(db);
 
   runPostSyncStages(db, 'run_1', null, {
     detectRecurring: () => {},
@@ -442,14 +409,7 @@ test('the partial terminal event actually reaches a connected SSE client', (t) =
   assert.match(parsed.message, /auto-categorization failed/);
 });
 
-function setupConnectionsDb(): Database.Database {
-  const db = new Database(':memory:');
-  db.exec(`
-    CREATE TABLE simplefin_connections (id TEXT PRIMARY KEY, last_synced_at TEXT, status TEXT NOT NULL DEFAULT 'active');
-    CREATE TABLE coinbase_connections (id TEXT PRIMARY KEY, last_synced_at TEXT, status TEXT NOT NULL DEFAULT 'active');
-  `);
-  return db;
-}
+const setupConnectionsDb = migratedTestDb;
 
 test('isSyncStale: no configured connections at all is not considered stale (nothing to sync)', (t) => {
   const db = setupConnectionsDb();
@@ -460,28 +420,28 @@ test('isSyncStale: no configured connections at all is not considered stale (not
 test('isSyncStale: a connection that has never synced is stale', (t) => {
   const db = setupConnectionsDb();
   t.after(() => db.close());
-  db.prepare(`INSERT INTO simplefin_connections (id, last_synced_at) VALUES ('c1', NULL)`).run();
+  db.prepare(`INSERT INTO simplefin_connections (id, last_synced_at, created_at) VALUES ('c1', NULL, '2026-06-30T00:00:00.000Z')`).run();
   assert.equal(isSyncStale(db, 10), true);
 });
 
 test('isSyncStale: a recent sync within the threshold is not stale', (t) => {
   const db = setupConnectionsDb();
   t.after(() => db.close());
-  db.prepare(`INSERT INTO simplefin_connections (id, last_synced_at) VALUES ('c1', ?)`).run(new Date(Date.now() - 2 * 60_000).toISOString());
+  db.prepare(`INSERT INTO simplefin_connections (id, last_synced_at, created_at) VALUES ('c1', ?, '2026-06-30T00:00:00.000Z')`).run(new Date(Date.now() - 2 * 60_000).toISOString());
   assert.equal(isSyncStale(db, 10), false);
 });
 
 test('isSyncStale: a sync older than the threshold is stale', (t) => {
   const db = setupConnectionsDb();
   t.after(() => db.close());
-  db.prepare(`INSERT INTO simplefin_connections (id, last_synced_at) VALUES ('c1', ?)`).run(new Date(Date.now() - 20 * 60_000).toISOString());
+  db.prepare(`INSERT INTO simplefin_connections (id, last_synced_at, created_at) VALUES ('c1', ?, '2026-06-30T00:00:00.000Z')`).run(new Date(Date.now() - 20 * 60_000).toISOString());
   assert.equal(isSyncStale(db, 10), true);
 });
 
 test('isSyncStale: any one stale connection makes the whole thing stale, even if another is fresh', (t) => {
   const db = setupConnectionsDb();
   t.after(() => db.close());
-  db.prepare(`INSERT INTO simplefin_connections (id, last_synced_at) VALUES ('c1', ?)`).run(new Date(Date.now() - 1 * 60_000).toISOString());
-  db.prepare(`INSERT INTO coinbase_connections (id, last_synced_at) VALUES ('c2', ?)`).run(new Date(Date.now() - 20 * 60_000).toISOString());
+  db.prepare(`INSERT INTO simplefin_connections (id, last_synced_at, created_at) VALUES ('c1', ?, '2026-06-30T00:00:00.000Z')`).run(new Date(Date.now() - 1 * 60_000).toISOString());
+  db.prepare(`INSERT INTO coinbase_connections (id, coinbase_user_id, last_synced_at, created_at) VALUES ('c2', 'cb_user', ?, '2026-06-30T00:00:00.000Z')`).run(new Date(Date.now() - 20 * 60_000).toISOString());
   assert.equal(isSyncStale(db, 10), true);
 });

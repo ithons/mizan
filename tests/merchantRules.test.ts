@@ -19,63 +19,8 @@ import {
 } from './helpers/schema';
 
 function setupDb(): Database.Database {
-  const db = new Database(':memory:');
-
-  db.exec(`
-    CREATE TABLE categories (
-      id TEXT PRIMARY KEY
-    );
-
-    INSERT OR IGNORE INTO categories (id) VALUES ('cat_shop_amazon'), ('cat_ent_streaming');
-
-    CREATE TABLE merchant_rules (
-      id TEXT PRIMARY KEY,
-      pattern TEXT NOT NULL,
-      category_id TEXT NOT NULL,
-      created_at TEXT NOT NULL,
-      source TEXT NOT NULL DEFAULT 'human',
-      action_id TEXT,
-      updated_at TEXT,
-      retired_at TEXT
-    );
-    CREATE UNIQUE INDEX idx_merchant_rules_pattern_live
-      ON merchant_rules(lower(pattern)) WHERE retired_at IS NULL;
-    CREATE TABLE merchant_rule_revisions (
-      id TEXT PRIMARY KEY, rule_id TEXT NOT NULL, pattern TEXT NOT NULL,
-      from_category_id TEXT, to_category_id TEXT, source TEXT NOT NULL,
-      action_id TEXT, operation TEXT NOT NULL, created_at TEXT NOT NULL
-    );
-    CREATE TABLE transaction_category_revisions (
-      id TEXT PRIMARY KEY, transaction_id TEXT NOT NULL,
-      from_category_id TEXT, to_category_id TEXT, from_source TEXT, to_source TEXT,
-      action_id TEXT, revert_of TEXT, reverted_at TEXT, created_at TEXT NOT NULL
-    );
-
-    -- suggestMerchantRules reads skipped suggestions from here.
-    CREATE TABLE app_preferences (
-      key TEXT PRIMARY KEY,
-      value TEXT NOT NULL,
-      created_at TEXT NOT NULL,
-      updated_at TEXT NOT NULL
-    );
-
-    CREATE TABLE transactions (
-      manually_categorized INTEGER NOT NULL DEFAULT 0,
-      category_source TEXT, category_action_id TEXT, category_previous_id TEXT,
-      id TEXT PRIMARY KEY,
-      merchant_name TEXT,
-      original_name TEXT NOT NULL,
-      category_id TEXT,
-      review_status TEXT NOT NULL DEFAULT 'open',
-      updated_at TEXT NOT NULL
-    );
-
-    INSERT INTO categories (id)
-    VALUES
-      ('cat_food_coffee'),
-      ('cat_travel');
-  `);
-
+  const db = migratedTestDb();
+  insertAccount(db, { id: 'acct' });
   return db;
 }
 
@@ -90,13 +35,13 @@ test('single transaction categorization propagates to matching uncategorized mer
   t.after(() => db.close());
 
   db.prepare(`
-    INSERT INTO transactions (id, merchant_name, original_name, category_id, review_status, updated_at)
+    INSERT INTO transactions (id, account_id, merchant_name, original_name, category_id, review_status, date, amount, created_at, updated_at)
     VALUES
-      ('current', 'Starbucks Store 123', 'STARBUCKS 123', 'cat_food_coffee', 'reviewed', '2026-06-01'),
-      ('similar', 'STARBUCKS STORE 456', 'STARBUCKS 456', NULL, 'open', '2026-06-01'),
-      ('shorter', 'Starbucks', 'STARBUCKS', NULL, 'open', '2026-06-01'),
-      ('different', 'Different Cafe', 'DIFFERENT CAFE', NULL, 'open', '2026-06-01'),
-      ('user_set', 'Starbucks Store 789', 'STARBUCKS 789', 'cat_travel', 'reviewed', '2026-06-01')
+      ('current', 'acct', 'Starbucks Store 123', 'STARBUCKS 123', 'cat_food_coffee', 'reviewed', '2026-06-01', -500, '2026-06-01', '2026-06-01'),
+      ('similar', 'acct', 'STARBUCKS STORE 456', 'STARBUCKS 456', NULL, 'open', '2026-06-01', -500, '2026-06-01', '2026-06-01'),
+      ('shorter', 'acct', 'Starbucks', 'STARBUCKS', NULL, 'open', '2026-06-01', -500, '2026-06-01', '2026-06-01'),
+      ('different', 'acct', 'Different Cafe', 'DIFFERENT CAFE', NULL, 'open', '2026-06-01', -500, '2026-06-01', '2026-06-01'),
+      ('user_set', 'acct', 'Starbucks Store 789', 'STARBUCKS 789', 'cat_travel', 'reviewed', '2026-06-01', -500, '2026-06-01', '2026-06-01')
   `).run();
 
   const ruleId = upsertMerchantRule(
@@ -165,10 +110,10 @@ test('applyMerchantRulesToExistingTransactions marks matched transactions review
   t.after(() => db.close());
 
   db.prepare(`
-    INSERT INTO transactions (id, merchant_name, original_name, category_id, review_status, updated_at)
+    INSERT INTO transactions (id, account_id, merchant_name, original_name, category_id, review_status, date, amount, created_at, updated_at)
     VALUES
-      ('matched', 'Starbucks Store 123', 'STARBUCKS 123', NULL, 'open', '2026-06-01'),
-      ('no_match', 'Some Random Merchant', 'SOME RANDOM MERCHANT', NULL, 'open', '2026-06-01')
+      ('matched', 'acct', 'Starbucks Store 123', 'STARBUCKS 123', NULL, 'open', '2026-06-01', -500, '2026-06-01', '2026-06-01'),
+      ('no_match', 'acct', 'Some Random Merchant', 'SOME RANDOM MERCHANT', NULL, 'open', '2026-06-01', -500, '2026-06-01', '2026-06-01')
   `).run();
 
   upsertMerchantRule(db, 'Starbucks Store 123', 'cat_food_coffee', '2026-06-30T12:00:00.000Z');
@@ -191,12 +136,12 @@ test('autoCategorizeTransactions applies merchant rules first, then falls back t
   t.after(() => db.close());
 
   db.prepare(`
-    INSERT INTO transactions (id, merchant_name, original_name, category_id, review_status, updated_at)
+    INSERT INTO transactions (id, account_id, merchant_name, original_name, category_id, review_status, date, amount, created_at, updated_at)
     VALUES
-      ('rule_match', 'Starbucks Store 123', 'STARBUCKS 123', NULL, 'open', '2026-06-01'),
-      ('heuristic_match', 'AMAZON.COM*A1B2C3', 'AMAZON.COM*A1B2C3', NULL, 'open', '2026-06-01'),
-      ('no_match', 'Some Random Merchant', 'SOME RANDOM MERCHANT', NULL, 'open', '2026-06-01'),
-      ('already_set', 'Netflix.com', 'NETFLIX.COM', 'cat_travel', 'reviewed', '2026-06-01')
+      ('rule_match', 'acct', 'Starbucks Store 123', 'STARBUCKS 123', NULL, 'open', '2026-06-01', -500, '2026-06-01', '2026-06-01'),
+      ('heuristic_match', 'acct', 'AMAZON.COM*A1B2C3', 'AMAZON.COM*A1B2C3', NULL, 'open', '2026-06-01', -500, '2026-06-01', '2026-06-01'),
+      ('no_match', 'acct', 'Some Random Merchant', 'SOME RANDOM MERCHANT', NULL, 'open', '2026-06-01', -500, '2026-06-01', '2026-06-01'),
+      ('already_set', 'acct', 'Netflix.com', 'NETFLIX.COM', 'cat_travel', 'reviewed', '2026-06-01', -500, '2026-06-01', '2026-06-01')
   `).run();
 
   upsertMerchantRule(db, 'Starbucks Store 123', 'cat_food_coffee', '2026-06-30T12:00:00.000Z');

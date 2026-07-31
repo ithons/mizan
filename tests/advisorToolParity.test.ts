@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import Database from 'better-sqlite3';
 import { format } from 'date-fns';
+import { migratedTestDb, insertAccount } from './helpers/schema';
 import { runAdvisorTool } from '../server/src/services/advisorChatTools';
 import { getCashflowReport, getSpendingReport } from '../server/src/services/reporting';
 import { formatMoney } from '../server/src/services/aiContext';
@@ -15,120 +16,15 @@ import { formatMoney } from '../server/src/services/aiContext';
 const RANGE = { start_date: '2026-06-01', end_date: '2026-06-30' };
 
 function setupDb(): Database.Database {
-  const db = new Database(':memory:');
-
-  db.exec(`
-    CREATE TABLE categories (
-      id TEXT PRIMARY KEY,
-      name TEXT NOT NULL,
-      icon TEXT,
-      color TEXT,
-      parent_id TEXT,
-      is_income INTEGER NOT NULL DEFAULT 0,
-      is_investment INTEGER NOT NULL DEFAULT 0
-    );
-
-    CREATE TABLE accounts (
-      id TEXT PRIMARY KEY,
-      account_name TEXT NOT NULL,
-      institution_name TEXT NOT NULL DEFAULT '',
-      type TEXT NOT NULL DEFAULT 'checking',
-      is_liability INTEGER NOT NULL DEFAULT 0,
-      is_hidden INTEGER NOT NULL DEFAULT 0
-    );
-
-    CREATE TABLE transactions (
-      manually_categorized INTEGER NOT NULL DEFAULT 0,
-      id TEXT PRIMARY KEY,
-      account_id TEXT NOT NULL,
-      date TEXT NOT NULL,
-      amount INTEGER NOT NULL,
-      merchant_name TEXT,
-      original_name TEXT NOT NULL DEFAULT '',
-      category_id TEXT,
-      notes TEXT,
-      pending INTEGER NOT NULL DEFAULT 0,
-      recurring_id TEXT,
-      transfer_status TEXT NOT NULL DEFAULT 'none',
-      duplicate_status TEXT NOT NULL DEFAULT 'none',
-      review_status TEXT NOT NULL DEFAULT 'open',
-      created_at TEXT NOT NULL DEFAULT '2026-06-30T00:00:00.000Z',
-      updated_at TEXT NOT NULL DEFAULT '2026-06-30T00:00:00.000Z'
-    );
-
-    CREATE TABLE budgets (
-      id TEXT PRIMARY KEY,
-      category_id TEXT NOT NULL,
-      amount INTEGER NOT NULL,
-      period TEXT NOT NULL DEFAULT 'monthly',
-      rollover INTEGER NOT NULL DEFAULT 0,
-      rollover_balance INTEGER NOT NULL DEFAULT 0,
-      created_at TEXT NOT NULL DEFAULT '2026-06-01T00:00:00.000Z',
-      updated_at TEXT NOT NULL DEFAULT '2026-06-01T00:00:00.000Z'
-    );
-
-    CREATE TABLE budget_rollover_ledger (
-      id TEXT PRIMARY KEY,
-      budget_id TEXT NOT NULL,
-      month TEXT NOT NULL,
-      starting_rollover INTEGER NOT NULL,
-      budget_amount INTEGER NOT NULL,
-      actual_spend INTEGER NOT NULL,
-      ending_rollover INTEGER NOT NULL,
-      calculated_at TEXT NOT NULL
-    );
-
-    CREATE TABLE recurring_patterns (
-      id TEXT PRIMARY KEY,
-      merchant_name TEXT NOT NULL,
-      category_id TEXT,
-      average_amount INTEGER NOT NULL,
-      amount_variance REAL NOT NULL DEFAULT 0,
-      frequency TEXT NOT NULL,
-      last_seen TEXT NOT NULL,
-      next_expected TEXT NOT NULL,
-      is_active INTEGER NOT NULL DEFAULT 1,
-      is_confirmed INTEGER NOT NULL DEFAULT 0,
-      transaction_count INTEGER NOT NULL DEFAULT 0,
-      created_at TEXT NOT NULL DEFAULT '2026-06-01T00:00:00.000Z',
-      updated_at TEXT NOT NULL DEFAULT '2026-06-01T00:00:00.000Z'
-    );
-
-    CREATE TABLE recurring_occurrence_adjustments (
-      id TEXT PRIMARY KEY,
-      recurring_id TEXT NOT NULL,
-      original_date TEXT NOT NULL,
-      action TEXT NOT NULL,
-      adjusted_date TEXT,
-      adjusted_amount INTEGER,
-      note TEXT,
-      created_at TEXT NOT NULL DEFAULT '2026-06-01T00:00:00.000Z',
-      updated_at TEXT NOT NULL DEFAULT '2026-06-01T00:00:00.000Z'
-    );
-  `);
-
-  db.prepare('INSERT INTO accounts (id, account_name) VALUES (?, ?)').run('acct', 'Checking');
-
-  const category = db.prepare(
-    'INSERT INTO categories (id, name, parent_id, is_income, is_investment) VALUES (?, ?, ?, ?, ?)'
-  );
-  category.run('cat_food', 'Food & Drink', null, 0, 0);
-  category.run('cat_food_restaurants', 'Restaurants', 'cat_food', 0, 0);
-  category.run('cat_shop', 'Shopping', null, 0, 0);
-  category.run('cat_shop_household', 'Household & Everyday', 'cat_shop', 0, 0);
-  category.run('cat_xfer', 'Transfers', null, 0, 0);
-  category.run('cat_xfer_out', 'Transfer Out', 'cat_xfer', 0, 0);
-  category.run('cat_inv', 'Investments', null, 0, 1);
-  category.run('cat_inv_buy', 'Buy', 'cat_inv', 0, 1);
-  category.run('cat_crypto', 'Crypto', null, 0, 0);
-  category.run('cat_crypto_buy', 'Crypto Buy', 'cat_crypto', 0, 0);
-  category.run('cat_income_paycheck', 'Paycheck', null, 1, 0);
+  const db = migratedTestDb();
+  insertAccount(db, { id: 'acct', account_name: 'Checking' });
 
   // Amounts are integer cents. Only the two rows marked "counts" are real June spending.
   const txn = db.prepare(`
     INSERT INTO transactions
-      (id, account_id, date, amount, merchant_name, original_name, category_id, pending, transfer_status, duplicate_status)
-    VALUES (?, 'acct', ?, ?, ?, ?, ?, ?, ?, ?)
+      (id, account_id, date, amount, merchant_name, original_name, category_id, pending, transfer_status, duplicate_status,
+       created_at, updated_at)
+    VALUES (?, 'acct', ?, ?, ?, ?, ?, ?, ?, ?, '2026-06-30T00:00:00.000Z', '2026-06-30T00:00:00.000Z')
   `);
   txn.run('t1', '2026-06-04', -5000, 'Cafe', 'CAFE', 'cat_food_restaurants', 0, 'none', 'none');       // counts
   txn.run('t2', '2026-06-05', -2500, 'Target', 'TARGET', 'cat_shop_household', 0, 'none', 'none');     // counts
@@ -207,7 +103,7 @@ test('monthly_cashflow returns newest month first', () => {
 
 test('get_budgets resolves the current month in local time, not UTC', () => {
   const db = setupDb();
-  db.prepare('INSERT INTO budgets (id, category_id, amount) VALUES (?, ?, ?)').run('b1', 'cat_food', 40000);
+  db.prepare(`INSERT INTO budgets (id, category_id, amount, created_at, updated_at)\n    VALUES (?, ?, ?, '2026-06-01T00:00:00.000Z', '2026-06-01T00:00:00.000Z')`).run('b1', 'cat_food', 40000);
 
   const tool = runAdvisorTool(db, 'get_budgets', {}) as { month: string };
 

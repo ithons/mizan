@@ -21,6 +21,19 @@ import {
 } from './helpers/schema';
 import type { AdvisorDraftAction, AdvisorDraftPayload } from '../shared/types';
 
+/**
+ * Deliberately NOT migratedTestDb(), and the only fixture in this file that is not.
+ *
+ * Every table here is `(id, value)` on purpose: these tests exercise the export/restore MACHINERY,
+ * which enumerates tables and copies rows without knowing any column, and the column-rejection test
+ * below needs a shape the payload can disagree with. This is not a hand-written copy of the real
+ * schema, so it cannot drift from one.
+ *
+ * The divergence this file could suffer, a table named in `LOCAL_BACKUP_TABLES` that the migrations
+ * no longer create, is caught by "the backup set covers every table the real migrations create"
+ * below, which compares the list against `sqlite_master` on a migrated database. The same paths are
+ * driven against the real schema by the round-trip tests above it.
+ */
 function setupBackupDb(): Database.Database {
   const db = new Database(':memory:');
 

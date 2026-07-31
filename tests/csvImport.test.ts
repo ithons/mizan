@@ -1,63 +1,32 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import Database from 'better-sqlite3';
+import { migratedTestDb, insertAccount } from './helpers/schema';
 import { buildCsvImportPreview, commitCsvImport } from '../server/src/services/csvImport';
 
+// Categories are matched by name against the seeded taxonomy, so 'Food & Drink' is the name a
+// real CSV would have to carry. The hand-written schema this replaced declared `amount REAL` and
+// `current_balance REAL`, where production has been INTEGER cents since migration 022.
 function setupCsvImportDb(): Database.Database {
-  const db = new Database(':memory:');
+  const db = migratedTestDb();
+  insertAccount(db, {
+    id: 'acct_cash', account_name: 'Cash', institution_name: 'Manual',
+    current_balance: 10000, is_manual: 1,
+  });
+  insertAccount(db, {
+    id: 'acct_savings', account_name: 'Savings', institution_name: 'Manual',
+    type: 'savings', current_balance: 25000, is_manual: 1,
+  });
 
-  db.exec(`
-    CREATE TABLE accounts (
-      id TEXT PRIMARY KEY,
-      account_name TEXT NOT NULL,
-      institution_name TEXT NOT NULL,
-      current_balance REAL NOT NULL DEFAULT 0,
-      is_manual INTEGER NOT NULL DEFAULT 0,
-      updated_at TEXT NOT NULL DEFAULT '2026-06-30T00:00:00.000Z'
-    );
-
-    CREATE TABLE categories (
-      id TEXT PRIMARY KEY,
-      name TEXT NOT NULL
-    );
-
-    CREATE TABLE transactions (
-      manually_categorized INTEGER NOT NULL DEFAULT 0,
-      id TEXT PRIMARY KEY,
-      account_id TEXT NOT NULL,
-      date TEXT NOT NULL,
-      amount REAL NOT NULL,
-      merchant_name TEXT,
-      original_name TEXT NOT NULL DEFAULT '',
-      category_id TEXT,
-      pending INTEGER NOT NULL DEFAULT 0,
-      notes TEXT,
-      is_manual INTEGER NOT NULL DEFAULT 0,
-      source_type TEXT NOT NULL DEFAULT 'manual',
-      created_at TEXT NOT NULL,
-      updated_at TEXT NOT NULL
-    );
-
-    INSERT INTO accounts (id, account_name, institution_name, current_balance, is_manual)
+  db.prepare(`
+    INSERT INTO transactions
+      (id, account_id, date, amount, merchant_name, original_name, category_id, created_at, updated_at)
     VALUES
-      ('acct_cash', 'Cash', 'Manual', 10000, 1),
-      ('acct_savings', 'Savings', 'Manual', 25000, 1);
-
-    INSERT INTO categories (id, name)
-    VALUES ('cat_food', 'Food');
-
-    INSERT INTO transactions (
-      id, account_id, date, amount, merchant_name, original_name, category_id, created_at, updated_at
-    )
-    VALUES (
-      'txn_existing', 'acct_cash', '2026-06-30', -450, 'Coffee', 'Coffee', 'cat_food',
-      '2026-06-30T00:00:00.000Z', '2026-06-30T00:00:00.000Z'
-    ),
-    (
-      'txn_transfer_pair', 'acct_savings', '2026-06-29', 1200, 'Transfer', 'Transfer', NULL,
-      '2026-06-29T00:00:00.000Z', '2026-06-29T00:00:00.000Z'
-    );
-  `);
+      ('txn_existing','acct_cash','2026-06-30',-450,'Coffee','Coffee','cat_food',
+       '2026-06-30T00:00:00.000Z','2026-06-30T00:00:00.000Z'),
+      ('txn_transfer_pair','acct_savings','2026-06-29',1200,'Transfer','Transfer',NULL,
+       '2026-06-29T00:00:00.000Z','2026-06-29T00:00:00.000Z')
+  `).run();
 
   return db;
 }
@@ -78,7 +47,7 @@ const rows = [
     date: '2026-06-30',
     amount: '-4.50',
     merchant: 'Coffee',
-    category: 'Food',
+    category: 'Food & Drink',
     account: 'Cash',
     notes: 'Morning',
   },
@@ -86,7 +55,7 @@ const rows = [
     date: 'not-a-date',
     amount: 'abc',
     merchant: 'Bad Row',
-    category: 'Food',
+    category: 'Food & Drink',
     account: 'Cash',
     notes: '',
   },
@@ -149,8 +118,8 @@ test('csv import duplicate detection compares exact cents, not a float epsilon',
   `).run(Math.round(-(0.1 + 0.2 + 19.5) * 100));
 
   const noisyRows = [
-    { date: '2026-06-28', amount: '-19.80', merchant: 'Noisy', category: 'Food', account: 'Cash', notes: '' },
-    { date: '2026-06-28', amount: '-19.79', merchant: 'Noisy', category: 'Food', account: 'Cash', notes: '' },
+    { date: '2026-06-28', amount: '-19.80', merchant: 'Noisy', category: 'Food & Drink', account: 'Cash', notes: '' },
+    { date: '2026-06-28', amount: '-19.79', merchant: 'Noisy', category: 'Food & Drink', account: 'Cash', notes: '' },
   ];
 
   const preview = buildCsvImportPreview(db, { rows: noisyRows, mapping });

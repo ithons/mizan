@@ -14,32 +14,12 @@ import { upsertMerchantRule } from '../server/src/services/rules';
 import { TEST_NOW, insertAccount, insertCategory, insertTransaction, migratedTestDb } from './helpers/schema';
 
 function setupDb(): Database.Database {
-  const db = new Database(':memory:');
-  db.exec(`
-    CREATE TABLE goals (
-      id TEXT PRIMARY KEY,
-      target_amount INTEGER NOT NULL,
-      updated_at TEXT NOT NULL DEFAULT '2026-07-01'
-    );
-    CREATE TABLE advisor_drafts (
-      id TEXT PRIMARY KEY,
-      kind TEXT NOT NULL,
-      label TEXT NOT NULL,
-      summary TEXT NOT NULL,
-      route TEXT,
-      payload TEXT NOT NULL,
-      changes TEXT,
-      citations TEXT,
-      status TEXT NOT NULL DEFAULT 'open',
-      created_at TEXT NOT NULL DEFAULT '2026-07-01',
-      updated_at TEXT NOT NULL DEFAULT '2026-07-01'
-    );
-    CREATE TABLE advisor_actions (
-      id TEXT PRIMARY KEY, kind TEXT, label TEXT, summary TEXT, source TEXT, payload TEXT, created_at TEXT
-    );
-
-    INSERT INTO goals (id, target_amount) VALUES ('goal_1', 100000), ('goal_2', 200000);
-  `);
+  const db = migratedTestDb();
+  db.prepare(`
+    INSERT INTO goals (id, name, type, target_amount, created_at, updated_at)
+    VALUES ('goal_1', 'Goal one', 'savings', 100000, '2026-07-01', '2026-07-01'),
+           ('goal_2', 'Goal two', 'savings', 200000, '2026-07-01', '2026-07-01')
+  `).run();
   return db;
 }
 
@@ -50,8 +30,9 @@ function insertDraft(
   status = 'open'
 ): void {
   db.prepare(`
-    INSERT INTO advisor_drafts (id, kind, label, summary, route, payload, changes, citations, status)
-    VALUES (?, 'update_goal_target', ?, 'summary', '/goals', ?, '[]', '[]', ?)
+    INSERT INTO advisor_drafts (id, kind, label, summary, route, payload, changes, citations, status,
+                                created_at, updated_at)
+    VALUES (?, 'update_goal_target', ?, 'summary', '/goals', ?, '[]', '[]', ?, '2026-07-01', '2026-07-01')
   `).run(id, `Draft ${id}`, JSON.stringify(payload), status);
 }
 
@@ -146,8 +127,10 @@ test('an unreadable payload is reported rather than crashing the batch', (t) => 
   t.after(() => db.close());
 
   db.prepare(`
-    INSERT INTO advisor_drafts (id, kind, label, summary, route, payload, changes, citations, status)
-    VALUES ('broken', 'update_goal_target', 'Broken', 'summary', '/goals', 'not json', '[]', '[]', 'open')
+    INSERT INTO advisor_drafts (id, kind, label, summary, route, payload, changes, citations, status,
+                                created_at, updated_at)
+    VALUES ('broken', 'update_goal_target', 'Broken', 'summary', '/goals', 'not json', '[]', '[]', 'open',
+            '2026-07-01', '2026-07-01')
   `).run();
   insertDraft(db, 'ok', { kind: 'update_goal_target', goal_id: 'goal_1', target_amount: 5000 });
 

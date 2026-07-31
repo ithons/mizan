@@ -1,124 +1,22 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import Database from 'better-sqlite3';
+import { migratedTestDb, insertAccount } from './helpers/schema';
 import { getTransactionReviewSummary } from '../server/src/services/transactionReview';
 
 function setupReviewDb(): Database.Database {
-  const db = new Database(':memory:');
-
-  db.exec(`
-    CREATE TABLE categories (
-      id TEXT PRIMARY KEY,
-      name TEXT NOT NULL,
-      color TEXT,
-      icon TEXT
-    );
-
-    CREATE TABLE transactions (
-      manually_categorized INTEGER NOT NULL DEFAULT 0,
-      id TEXT PRIMARY KEY,
-      account_id TEXT NOT NULL,
-      date TEXT NOT NULL,
-      amount REAL NOT NULL,
-      merchant_name TEXT,
-      original_name TEXT NOT NULL DEFAULT '',
-      category_id TEXT,
-      pending INTEGER NOT NULL DEFAULT 0,
-      duplicate_group_id TEXT,
-      duplicate_status TEXT NOT NULL DEFAULT 'none',
-      transfer_pair_id TEXT,
-      transfer_status TEXT NOT NULL DEFAULT 'none',
-      review_status TEXT NOT NULL DEFAULT 'open'
-    );
-
-    CREATE TABLE accounts (
-      id TEXT PRIMARY KEY,
-      account_name TEXT NOT NULL
-    );
-
-    CREATE TABLE recurring_patterns (
-      id TEXT PRIMARY KEY,
-      merchant_name TEXT NOT NULL,
-      category_id TEXT,
-      average_amount REAL NOT NULL,
-      amount_variance REAL NOT NULL DEFAULT 0,
-      frequency TEXT NOT NULL,
-      last_seen TEXT NOT NULL,
-      next_expected TEXT NOT NULL,
-      is_active INTEGER NOT NULL DEFAULT 1,
-      is_confirmed INTEGER NOT NULL DEFAULT 0,
-      transaction_count INTEGER NOT NULL DEFAULT 0,
-      created_at TEXT NOT NULL,
-      updated_at TEXT NOT NULL
-    );
-
-    CREATE TABLE advisor_drafts (
-      id TEXT PRIMARY KEY,
-      kind TEXT NOT NULL,
-      label TEXT NOT NULL,
-      summary TEXT NOT NULL,
-      route TEXT NOT NULL,
-      payload TEXT NOT NULL,
-      changes TEXT NOT NULL,
-      citations TEXT NOT NULL,
-      status TEXT NOT NULL DEFAULT 'open',
-      created_at TEXT NOT NULL,
-      updated_at TEXT NOT NULL
-    );
-
-    CREATE TABLE merchant_rules (
-      id TEXT PRIMARY KEY,
-      pattern TEXT NOT NULL,
-      category_id TEXT NOT NULL,
-      created_at TEXT NOT NULL,
-      source TEXT NOT NULL DEFAULT 'human',
-      action_id TEXT,
-      updated_at TEXT,
-      retired_at TEXT
-    );
-    CREATE UNIQUE INDEX idx_merchant_rules_pattern_live
-      ON merchant_rules(lower(pattern)) WHERE retired_at IS NULL;
-    CREATE TABLE merchant_rule_revisions (
-      id TEXT PRIMARY KEY, rule_id TEXT NOT NULL, pattern TEXT NOT NULL,
-      from_category_id TEXT, to_category_id TEXT, source TEXT NOT NULL,
-      action_id TEXT, operation TEXT NOT NULL, created_at TEXT NOT NULL
-    );
-    CREATE TABLE transaction_category_revisions (
-      id TEXT PRIMARY KEY, transaction_id TEXT NOT NULL,
-      from_category_id TEXT, to_category_id TEXT, from_source TEXT, to_source TEXT,
-      action_id TEXT, revert_of TEXT, reverted_at TEXT, created_at TEXT NOT NULL
-    );
-
-    -- suggestMerchantRules reads skipped suggestions from here.
-    CREATE TABLE app_preferences (
-      key TEXT PRIMARY KEY,
-      value TEXT NOT NULL,
-      created_at TEXT NOT NULL,
-      updated_at TEXT NOT NULL
-    );
-  `);
+  const db = migratedTestDb();
+  insertAccount(db, { id: 'acct_checking', account_name: 'Checking' });
 
   db.prepare(`
-    INSERT INTO categories (id, name, color, icon)
+    INSERT INTO transactions (id, account_id, date, amount, merchant_name, original_name, category_id, pending, created_at, updated_at)
     VALUES
-      ('cat_food', 'Food', '#e07070', 'fork'),
-      ('cat_bills', 'Bills', '#d4a44c', 'receipt')
-  `).run();
-
-  db.prepare(`
-    INSERT INTO accounts (id, account_name)
-    VALUES ('acct_checking', 'Checking')
-  `).run();
-
-  db.prepare(`
-    INSERT INTO transactions (id, account_id, date, amount, merchant_name, original_name, category_id, pending)
-    VALUES
-      ('target_1', 'acct_checking', '2026-06-01', -40, 'Target', 'TARGET STORE', 'cat_food', 0),
-      ('target_2', 'acct_checking', '2026-06-02', -42, 'Target', 'TARGET STORE', 'cat_food', 0),
-      ('target_3', 'acct_checking', '2026-06-03', -44, 'Target', 'TARGET STORE', NULL, 0),
-      ('unknown_1', 'acct_checking', '2026-06-04', -20, 'Unknown Shop', 'UNKNOWN', NULL, 0),
-      ('pending_1', 'acct_checking', '2026-06-05', -5, 'Coffee', 'COFFEE', NULL, 1),
-      ('pending_2', 'acct_checking', '2026-06-06', -60, 'Grocery', 'GROCERY', 'cat_food', 1)
+      ('target_1', 'acct_checking', '2026-06-01', -40, 'Target', 'TARGET STORE', 'cat_food', 0, '2026-06-01', '2026-06-01'),
+      ('target_2', 'acct_checking', '2026-06-02', -42, 'Target', 'TARGET STORE', 'cat_food', 0, '2026-06-02', '2026-06-02'),
+      ('target_3', 'acct_checking', '2026-06-03', -44, 'Target', 'TARGET STORE', NULL, 0, '2026-06-03', '2026-06-03'),
+      ('unknown_1', 'acct_checking', '2026-06-04', -20, 'Unknown Shop', 'UNKNOWN', NULL, 0, '2026-06-04', '2026-06-04'),
+      ('pending_1', 'acct_checking', '2026-06-05', -5, 'Coffee', 'COFFEE', NULL, 1, '2026-06-05', '2026-06-05'),
+      ('pending_2', 'acct_checking', '2026-06-06', -60, 'Grocery', 'GROCERY', 'cat_food', 1, '2026-06-06', '2026-06-06')
   `).run();
 
   db.prepare(`
@@ -137,9 +35,9 @@ function setupReviewDb(): Database.Database {
       updated_at
     )
     VALUES
-      ('rent', 'Rent', 'cat_bills', 1200, 'monthly', '2026-06-01', '2026-07-01', 1, 0, 3, '2026-06-01', '2026-06-01'),
-      ('weak', 'Weak Pattern', 'cat_bills', 20, 'monthly', '2026-06-01', '2026-07-01', 1, 0, 2, '2026-06-01', '2026-06-01'),
-      ('confirmed', 'Confirmed', 'cat_bills', 50, 'monthly', '2026-06-01', '2026-07-01', 1, 1, 5, '2026-06-01', '2026-06-01')
+      ('rent', 'Rent', 'cat_home_utilities', 1200, 'monthly', '2026-06-01', '2026-07-01', 1, 0, 3, '2026-06-01', '2026-06-01'),
+      ('weak', 'Weak Pattern', 'cat_home_utilities', 20, 'monthly', '2026-06-01', '2026-07-01', 1, 0, 2, '2026-06-01', '2026-06-01'),
+      ('confirmed', 'Confirmed', 'cat_home_utilities', 50, 'monthly', '2026-06-01', '2026-07-01', 1, 1, 5, '2026-06-01', '2026-06-01')
   `).run();
 
   return db;
@@ -164,7 +62,7 @@ test('transaction review summary combines review queues from existing data', (t)
   assert.equal(summary.rule_suggestions[0].pattern, 'Target');
   assert.equal(summary.rule_suggestions[0].category_id, 'cat_food');
   assert.deepEqual(summary.rule_suggestions[0].affected_transaction_ids, ['target_3']);
-  assert.match(summary.rule_suggestions[0].reason, /2 of 2 categorized Target transactions use Food/);
+  assert.match(summary.rule_suggestions[0].reason, /2 of 2 categorized Target transactions use Food & Drink/);
   assert.equal(
     summary.rule_suggestions[0].preview_transactions.some((transaction) =>
       transaction.id === 'target_3' &&
@@ -177,7 +75,7 @@ test('transaction review summary combines review queues from existing data', (t)
     summary.rule_suggestions[0].preview_transactions.some((transaction) =>
       transaction.id === 'target_2' &&
       !transaction.will_apply &&
-      transaction.category_name === 'Food'
+      transaction.category_name === 'Food & Drink'
     ),
     true
   );

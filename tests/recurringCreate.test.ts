@@ -1,56 +1,14 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import Database from 'better-sqlite3';
 import { addDays, format } from 'date-fns';
+import { migratedTestDb } from './helpers/schema';
 import { createRecurringPattern } from '../server/src/services/recurring';
 import { buildRecurringForecast } from '../server/src/services/recurringForecast';
 
-function setupDb(): Database.Database {
-  const db = new Database(':memory:');
-  db.exec(`
-    CREATE TABLE categories (
-      id TEXT PRIMARY KEY,
-      name TEXT NOT NULL,
-      color TEXT,
-      is_income INTEGER NOT NULL DEFAULT 0
-    );
-    CREATE TABLE recurring_patterns (
-      id TEXT PRIMARY KEY,
-      merchant_name TEXT NOT NULL,
-      category_id TEXT,
-      average_amount REAL NOT NULL,
-      amount_variance REAL NOT NULL DEFAULT 0,
-      frequency TEXT NOT NULL,
-      last_seen TEXT NOT NULL,
-      next_expected TEXT NOT NULL,
-      is_active INTEGER NOT NULL DEFAULT 1,
-      is_confirmed INTEGER NOT NULL DEFAULT 0,
-      transaction_count INTEGER NOT NULL DEFAULT 0,
-      created_at TEXT NOT NULL,
-      updated_at TEXT NOT NULL,
-      UNIQUE(merchant_name)
-    );
-    CREATE TABLE transactions (
-      manually_categorized INTEGER NOT NULL DEFAULT 0,id TEXT PRIMARY KEY, recurring_id TEXT,
-      date TEXT NOT NULL DEFAULT '2026-01-01', amount REAL NOT NULL, pending INTEGER NOT NULL DEFAULT 0);
-    CREATE TABLE recurring_occurrence_adjustments (
-      id TEXT PRIMARY KEY,
-      recurring_id TEXT NOT NULL,
-      original_date TEXT NOT NULL,
-      action TEXT NOT NULL,
-      adjusted_date TEXT,
-      adjusted_amount REAL,
-      note TEXT,
-      created_at TEXT NOT NULL,
-      updated_at TEXT NOT NULL,
-      UNIQUE(recurring_id, original_date)
-    );
-  `);
-  db.prepare(`INSERT INTO categories (id, name, color, is_income) VALUES
-    ('cat_income', 'Income', '#4ecba3', 1),
-    ('cat_bills', 'Bills', '#e07070', 0)`).run();
-  return db;
-}
+// The hand-written schema this replaced declared `average_amount REAL` and
+// `adjusted_amount REAL`, where production has both as INTEGER cents since migration 022, and
+// dropped the CHECK on `frequency`. Categories are the seeded taxonomy.
+const setupDb = migratedTestDb;
 
 test('createRecurringPattern inserts a confirmed pattern with an unsigned amount', () => {
   const db = setupDb();
@@ -60,7 +18,7 @@ test('createRecurringPattern inserts a confirmed pattern with an unsigned amount
     frequency: 'monthly',
     average_amount: -1800, // sign should be stripped
     next_expected: next,
-    category_id: 'cat_bills',
+    category_id: 'cat_home_rent',
   });
 
   const row = db.prepare('SELECT * FROM recurring_patterns WHERE id = ?').get(id) as any;
@@ -81,7 +39,7 @@ test('a manually created pattern appears in the forecast with the right sign', (
     frequency: 'monthly',
     average_amount: 4000,
     next_expected: next,
-    category_id: 'cat_income',
+    category_id: 'cat_income_paycheck',
   });
 
   const forecast = buildRecurringForecast(db, 30);

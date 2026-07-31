@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import Database from 'better-sqlite3';
+import { migratedTestDb, insertAccount } from './helpers/schema';
 import {
   getCashflowReport,
   getIncomeReport,
@@ -14,15 +15,6 @@ import {
   getTopMerchantsReport,
 } from '../server/src/services/reporting';
 
-interface CategoryFixture {
-  id: string;
-  name: string;
-  color?: string | null;
-  parent_id?: string | null;
-  is_income?: number;
-  is_investment?: number;
-}
-
 interface TransactionFixture {
   id: string;
   date: string;
@@ -33,122 +25,38 @@ interface TransactionFixture {
 }
 
 function setupReportingDb(): Database.Database {
-  const db = new Database(':memory:');
+  const db = migratedTestDb();
 
-  db.exec(`
-    CREATE TABLE categories (
-      id TEXT PRIMARY KEY,
-      name TEXT NOT NULL,
-      icon TEXT,
-      color TEXT,
-      parent_id TEXT,
-      is_income INTEGER NOT NULL DEFAULT 0,
-      is_investment INTEGER NOT NULL DEFAULT 0
-    );
+  insertAccount(db, {
+    id: 'acct_checking', account_name: 'Everyday Checking', institution_name: 'Mizan Test Bank',
+  });
+  insertAccount(db, {
+    id: 'acct_credit', account_name: 'Rewards Card', institution_name: 'Mizan Test Bank',
+    type: 'credit', is_liability: 1,
+  });
 
-    CREATE TABLE accounts (
-      id TEXT PRIMARY KEY,
-      account_name TEXT NOT NULL,
-      institution_name TEXT NOT NULL,
-      type TEXT NOT NULL DEFAULT 'checking',
-      is_liability INTEGER NOT NULL DEFAULT 0
-    );
-
-    CREATE TABLE transactions (
-      manually_categorized INTEGER NOT NULL DEFAULT 0,
-      id TEXT PRIMARY KEY,
-      account_id TEXT NOT NULL,
-      date TEXT NOT NULL,
-      amount REAL NOT NULL,
-      merchant_name TEXT,
-      original_name TEXT NOT NULL,
-      category_id TEXT,
-      pending INTEGER NOT NULL DEFAULT 0,
-      transfer_status TEXT NOT NULL DEFAULT 'none',
-      -- Reports exclude confirmed duplicates (a redundant copy would double the spend).
-      duplicate_status TEXT NOT NULL DEFAULT 'none',
-      created_at TEXT NOT NULL DEFAULT '2026-06-30T00:00:00.000Z',
-      updated_at TEXT NOT NULL DEFAULT '2026-06-30T00:00:00.000Z'
-    );
-
-    CREATE TABLE net_worth_snapshots (
-      id TEXT PRIMARY KEY,
-      date TEXT NOT NULL,
-      total_assets REAL NOT NULL,
-      total_liabilities REAL NOT NULL,
-      net_worth REAL NOT NULL,
-      breakdown TEXT NOT NULL,
-      is_estimated INTEGER NOT NULL DEFAULT 0,
-      liquid_assets REAL,
-      investment_assets REAL,
-      crypto_assets REAL,
-      created_at TEXT NOT NULL
-    );
-
-    INSERT INTO accounts (id, account_name, institution_name)
-    VALUES ('acct_checking', 'Everyday Checking', 'Mizan Test Bank');
-
-    INSERT INTO accounts (id, account_name, institution_name, type, is_liability)
-    VALUES ('acct_credit', 'Rewards Card', 'Mizan Test Bank', 'credit', 1);
-
+  db.prepare(`
     INSERT INTO net_worth_snapshots (
       id, date, total_assets, total_liabilities, net_worth, breakdown, is_estimated,
       liquid_assets, investment_assets, crypto_assets, created_at
     )
     VALUES
-      (
-        'nw_may', '2026-05-31', 1000, 300, 700,
-        '{"acct_checking":1000,"acct_credit":300}', 0, 1000, 0, 0,
-        '2026-05-31T00:00:00.000Z'
-      ),
-      (
-        'nw_jun', '2026-06-30', 1200, 200, 1000,
-        '{"acct_checking":1200,"acct_credit":200}', 0, 1200, 0, 0,
-        '2026-06-30T00:00:00.000Z'
-      );
-  `);
-
-  const insertCategory = db.prepare(`
-    INSERT INTO categories (id, name, color, parent_id, is_income, is_investment)
-    VALUES (@id, @name, @color, @parent_id, @is_income, @is_investment)
-  `);
-
-  const categories: CategoryFixture[] = [
-    { id: 'cat_income_paycheck', name: 'Paycheck', color: '#4ecba3', is_income: 1 },
-    { id: 'cat_food', name: 'Food', color: '#e07070' },
-    { id: 'cat_food_restaurants', name: 'Restaurants', color: '#e07070', parent_id: 'cat_food' },
-    { id: 'cat_xfer', name: 'Transfers', color: '#6b6b7a' },
-    { id: 'cat_xfer_in', name: 'Transfer In', color: '#6b6b7a', parent_id: 'cat_xfer' },
-    { id: 'cat_inv', name: 'Investments', color: '#5b8dee', is_investment: 1 },
-    {
-      id: 'cat_inv_dividend',
-      name: 'Dividends',
-      color: '#5b8dee',
-      parent_id: 'cat_inv',
-      is_income: 1,
-      is_investment: 1,
-    },
-    { id: 'cat_crypto', name: 'Crypto', color: '#a78bfa' },
-    { id: 'cat_crypto_buy', name: 'Crypto Buy', color: '#a78bfa', parent_id: 'cat_crypto' },
-  ];
-
-  for (const category of categories) {
-    insertCategory.run({
-      id: category.id,
-      name: category.name,
-      color: category.color ?? null,
-      parent_id: category.parent_id ?? null,
-      is_income: category.is_income ?? 0,
-      is_investment: category.is_investment ?? 0,
-    });
-  }
+      ('nw_may', '2026-05-31', 1000, 300, 700,
+       '{"acct_checking":1000,"acct_credit":300}', 0, 1000, 0, 0,
+       '2026-05-31T00:00:00.000Z'),
+      ('nw_jun', '2026-06-30', 1200, 200, 1000,
+       '{"acct_checking":1200,"acct_credit":200}', 0, 1200, 0, 0,
+       '2026-06-30T00:00:00.000Z')
+  `).run();
 
   const insertTransaction = db.prepare(`
     INSERT INTO transactions (
-      id, account_id, date, amount, merchant_name, original_name, category_id, pending, transfer_status
+      id, account_id, date, amount, merchant_name, original_name, category_id, pending, transfer_status,
+      created_at, updated_at
     )
     VALUES (
-      @id, @account_id, @date, @amount, @merchant_name, @original_name, @category_id, @pending, @transfer_status
+      @id, @account_id, @date, @amount, @merchant_name, @original_name, @category_id, @pending, @transfer_status,
+      '2026-06-30T00:00:00.000Z', '2026-06-30T00:00:00.000Z'
     )
   `);
 
@@ -275,7 +183,7 @@ test('spending trends expand selected parent categories to their descendants', (
   assert.deepEqual(selectedTrends.series, [
     {
       category_id: 'cat_food',
-      category_name: 'Food',
+      category_name: 'Food & Drink',
       color: '#e07070',
       values: [100],
     },
@@ -375,7 +283,7 @@ test('report drilldown returns backing spending transactions for category rollup
     endDate: '2026-06-30',
   });
 
-  assert.equal(detail.category_name, 'Food');
+  assert.equal(detail.category_name, 'Food & Drink');
   assert.equal(detail.total, 100);
   assert.equal(detail.count, 1);
   assert.equal(detail.transactions[0]?.id, 'restaurant');
@@ -515,8 +423,9 @@ test('a confirmed duplicate stops counting toward spending', (t) => {
   // Simulate the user resolving a duplicate: one copy kept, the redundant copy flagged.
   // It is FLAGGED rather than deleted because a provider row would return on the next sync.
   db.prepare(`
-    INSERT INTO transactions (id, account_id, date, amount, merchant_name, original_name, category_id, pending, transfer_status, duplicate_status)
-    VALUES ('dupe_copy', 'acct_checking', '2026-06-07', -100, 'restaurant', 'restaurant', 'cat_food_restaurants', 0, 'none', 'confirmed')
+    INSERT INTO transactions (id, account_id, date, amount, merchant_name, original_name, category_id, pending, transfer_status, duplicate_status, created_at, updated_at)
+    VALUES ('dupe_copy', 'acct_checking', '2026-06-07', -100, 'restaurant', 'restaurant', 'cat_food_restaurants', 0, 'none', 'confirmed',
+            '2026-06-30T00:00:00.000Z', '2026-06-30T00:00:00.000Z')
   `).run();
 
   assert.equal(
@@ -535,12 +444,15 @@ test('top merchants ranks reportable spend and excludes transfers, crypto, and p
   t.after(() => db.close());
 
   db.prepare(`
-    INSERT INTO transactions (id, account_id, date, amount, merchant_name, original_name, category_id, pending, transfer_status)
+    INSERT INTO transactions (id, account_id, date, amount, merchant_name, original_name, category_id, pending, transfer_status, created_at, updated_at)
     VALUES
-      ('cafe_1', 'acct_checking', '2026-06-12', -40, 'Blue Bottle', 'BLUE BOTTLE #12', 'cat_food_restaurants', 0, 'none'),
-      ('cafe_2', 'acct_checking', '2026-06-18', -35, 'Blue Bottle', 'BLUE BOTTLE #12', 'cat_food_restaurants', 0, 'none'),
+      ('cafe_1', 'acct_checking', '2026-06-12', -40, 'Blue Bottle', 'BLUE BOTTLE #12', 'cat_food_restaurants', 0, 'none',
+       '2026-06-30T00:00:00.000Z', '2026-06-30T00:00:00.000Z'),
+      ('cafe_2', 'acct_checking', '2026-06-18', -35, 'Blue Bottle', 'BLUE BOTTLE #12', 'cat_food_restaurants', 0, 'none',
+       '2026-06-30T00:00:00.000Z', '2026-06-30T00:00:00.000Z'),
       -- No merchant_name: must fall back to original_name rather than collapsing into "Unknown".
-      ('raw_only', 'acct_checking', '2026-06-19', -25, NULL, 'CORNER STORE', 'cat_food', 0, 'none')
+      ('raw_only', 'acct_checking', '2026-06-19', -25, NULL, 'CORNER STORE', 'cat_food', 0, 'none',
+       '2026-06-30T00:00:00.000Z', '2026-06-30T00:00:00.000Z')
   `).run();
 
   const report = getTopMerchantsReport(db, { startDate: '2026-06-01', endDate: '2026-06-30' });

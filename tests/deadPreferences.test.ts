@@ -62,7 +62,8 @@ test('no source file reads any retired key', () => {
 
 test('migration 054 removes rows an older database already stored', () => {
   const db = new Database(':memory:');
-  // Pre-054 shape, so the rows exist before the migration that deletes them runs.
+  // Deliberately NOT migratedTestDb(): this test drives migration 054 itself, so it needs the
+  // pre-054 database, where the rows the migration deletes still exist.
   db.exec(`
     CREATE TABLE app_preferences (
       key TEXT PRIMARY KEY,

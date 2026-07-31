@@ -1,20 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import Database from 'better-sqlite3';
+import { migratedTestDb } from './helpers/schema';
 import { getPreference, setPreference } from '../server/src/services/preferences';
 
-function setupDb(): Database.Database {
-  const db = new Database(':memory:');
-  db.exec(`
-    CREATE TABLE app_preferences (
-      key TEXT PRIMARY KEY,
-      value TEXT NOT NULL,
-      created_at TEXT NOT NULL,
-      updated_at TEXT NOT NULL
-    );
-  `);
-  return db;
-}
+const setupDb = migratedTestDb;
 
 test('preferences persist structured JSON by key', (t) => {
   const db = setupDb();

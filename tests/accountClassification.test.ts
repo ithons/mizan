@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import Database from 'better-sqlite3';
+import { migratedTestDb } from './helpers/schema';
 import {
   guessAccountTypeAndLiability,
   reclassifyAutoAccountTypes,
@@ -31,34 +31,17 @@ test('guessAccountTypeAndLiability recognizes known credit card product names th
   assert.deepEqual(guessAccountTypeAndLiability('Venture X', 'Capital One'), { type: 'credit', isLiability: true });
 });
 
-function setupAccountsDb(): Database.Database {
-  const db = new Database(':memory:');
-  db.exec(`
-    CREATE TABLE accounts (
-      id TEXT PRIMARY KEY,
-      account_name TEXT NOT NULL,
-      institution_name TEXT NOT NULL DEFAULT '',
-      connection_type TEXT NOT NULL,
-      type TEXT NOT NULL,
-      is_liability INTEGER NOT NULL DEFAULT 0,
-      type_source TEXT NOT NULL DEFAULT 'auto',
-      updated_at TEXT NOT NULL
-    );
-  `);
-  return db;
-}
-
 test('reclassifyAutoAccountTypes fixes frozen auto accounts but never touches manual overrides', (t) => {
-  const db = setupAccountsDb();
+  const db = migratedTestDb();
   t.after(() => db.close());
 
   db.prepare(`
-    INSERT INTO accounts (id, account_name, institution_name, connection_type, type, is_liability, type_source, updated_at)
+    INSERT INTO accounts (id, account_name, institution_name, connection_type, type, is_liability, type_source, created_at, updated_at)
     VALUES
-      ('fidelity_individual', 'Individual', 'Fidelity Investments', 'simplefin', 'checking', 0, 'auto', '2026-01-01'),
-      ('user_corrected', 'Individual', 'Fidelity Investments', 'simplefin', 'checking', 0, 'manual', '2026-01-01'),
-      ('already_correct', 'Individual', 'Fidelity Investments', 'simplefin', 'brokerage', 0, 'auto', '2026-01-01'),
-      ('coinbase_wallet', 'BTC Wallet', 'Coinbase', 'coinbase', 'crypto_wallet', 0, 'manual', '2026-01-01')
+      ('fidelity_individual', 'Individual', 'Fidelity Investments', 'simplefin', 'checking', 0, 'auto', '2026-01-01', '2026-01-01'),
+      ('user_corrected', 'Individual', 'Fidelity Investments', 'simplefin', 'checking', 0, 'manual', '2026-01-01', '2026-01-01'),
+      ('already_correct', 'Individual', 'Fidelity Investments', 'simplefin', 'brokerage', 0, 'auto', '2026-01-01', '2026-01-01'),
+      ('coinbase_wallet', 'BTC Wallet', 'Coinbase', 'coinbase', 'crypto_wallet', 0, 'manual', '2026-01-01', '2026-01-01')
   `).run();
 
   const result = reclassifyAutoAccountTypes(db);

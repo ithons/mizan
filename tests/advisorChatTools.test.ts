@@ -14,76 +14,28 @@ import {
 // recurring tables. A tool that needs a column this schema lacks is a tool that started running
 // its own SQL again.
 function setup(): Database.Database {
-  const db = new Database(':memory:');
-  db.exec(`
-    CREATE TABLE accounts (
-      id TEXT PRIMARY KEY, account_name TEXT, institution_name TEXT,
-      type TEXT DEFAULT 'checking', is_liability INTEGER DEFAULT 0, is_hidden INTEGER DEFAULT 0
-    );
-    CREATE TABLE categories (
-      id TEXT PRIMARY KEY, name TEXT, color TEXT, icon TEXT, parent_id TEXT,
-      is_income INTEGER NOT NULL DEFAULT 0, is_investment INTEGER NOT NULL DEFAULT 0
-    );
-    CREATE TABLE transactions (
-      manually_categorized INTEGER NOT NULL DEFAULT 0,
-      id TEXT PRIMARY KEY, account_id TEXT, date TEXT, amount INTEGER, merchant_name TEXT,
-      original_name TEXT DEFAULT '', category_id TEXT, notes TEXT, pending INTEGER DEFAULT 0,
-      recurring_id TEXT, review_status TEXT DEFAULT 'open',
-      transfer_status TEXT NOT NULL DEFAULT 'none', duplicate_status TEXT NOT NULL DEFAULT 'none',
-      created_at TEXT DEFAULT '2026-06-01', updated_at TEXT DEFAULT '2026-06-01'
-    );
-    CREATE TABLE budgets (
-      id TEXT PRIMARY KEY, category_id TEXT, amount INTEGER, period TEXT DEFAULT 'monthly',
-      rollover INTEGER NOT NULL DEFAULT 0, rollover_balance INTEGER NOT NULL DEFAULT 0,
-      created_at TEXT DEFAULT '2026-06-01', updated_at TEXT DEFAULT '2026-06-01'
-    );
-    CREATE TABLE budget_rollover_ledger (
-      id TEXT PRIMARY KEY, budget_id TEXT NOT NULL, month TEXT NOT NULL,
-      starting_rollover INTEGER NOT NULL, budget_amount INTEGER NOT NULL,
-      actual_spend INTEGER NOT NULL, ending_rollover INTEGER NOT NULL, calculated_at TEXT NOT NULL
-    );
-    CREATE TABLE goals (id TEXT PRIMARY KEY, name TEXT, type TEXT, target_amount INTEGER, current_amount INTEGER, target_date TEXT, is_archived INTEGER DEFAULT 0);
-    CREATE TABLE securities (id TEXT PRIMARY KEY, ticker TEXT, name TEXT, type TEXT);
-    CREATE TABLE holdings (id TEXT PRIMARY KEY, account_id TEXT, security_id TEXT, quantity REAL, institution_price REAL, institution_value INTEGER, cost_basis INTEGER, manual_cost_basis INTEGER);
-    CREATE TABLE recurring_patterns (
-      id TEXT PRIMARY KEY, merchant_name TEXT, category_id TEXT, average_amount INTEGER,
-      amount_variance REAL NOT NULL DEFAULT 0, frequency TEXT, last_seen TEXT NOT NULL DEFAULT '2026-06-01',
-      next_expected TEXT, is_active INTEGER DEFAULT 1, is_confirmed INTEGER NOT NULL DEFAULT 0,
-      transaction_count INTEGER NOT NULL DEFAULT 0,
-      created_at TEXT DEFAULT '2026-06-01', updated_at TEXT DEFAULT '2026-06-01'
-    );
-    CREATE TABLE recurring_occurrence_adjustments (
-      id TEXT PRIMARY KEY, recurring_id TEXT NOT NULL, original_date TEXT NOT NULL, action TEXT NOT NULL,
-      adjusted_date TEXT, adjusted_amount INTEGER, note TEXT,
-      created_at TEXT DEFAULT '2026-06-01', updated_at TEXT DEFAULT '2026-06-01'
-    );
-    CREATE TABLE net_worth_snapshots (
-      id TEXT PRIMARY KEY, date TEXT, net_worth INTEGER, total_assets INTEGER, total_liabilities INTEGER,
-      liquid_assets INTEGER, investment_assets INTEGER, crypto_assets INTEGER,
-      breakdown TEXT DEFAULT '{}', is_estimated INTEGER NOT NULL DEFAULT 0,
-      created_at TEXT NOT NULL DEFAULT '2026-07-01');
-  `);
-  db.prepare("INSERT INTO accounts (id,account_name,institution_name) VALUES ('chk','Checking','Bank')").run();
-  db.prepare(`INSERT INTO categories (id,name,parent_id,is_income) VALUES
-    ('cat_food','Food',NULL,0),('cat_food_restaurants','Restaurants','cat_food',0),
-    ('cat_xfer','Transfers',NULL,0),('cat_xfer_out','Transfer Out','cat_xfer',0),
-    ('cat_ent','Entertainment',NULL,0),
-    ('cat_income','Income',NULL,1)`).run();
-  const ins = db.prepare(`INSERT INTO transactions (id,account_id,date,amount,merchant_name,category_id)
-    VALUES (?,?,?,?,?,?)`);
-  ins.run('t1','chk','2026-06-05',-2500,'Cafe','cat_food_restaurants');       // $25 expense
-  ins.run('t2','chk','2026-06-10',-1000,'Diner','cat_food_restaurants');      // $10 expense
-  ins.run('t3','chk','2026-06-01',100000,'Payroll','cat_income');             // $1000 income
-  ins.run('t4','chk','2026-06-15',-50000,'Move','cat_xfer_out');              // $500 transfer
+  const db = migratedTestDb();
+  insertAccount(db, { id: 'chk', account_name: 'Checking', institution_name: 'Bank' });
+  const ins = db.prepare(`INSERT INTO transactions (id,account_id,date,amount,merchant_name,original_name,category_id,created_at,updated_at)
+    VALUES (?,?,?,?,?,?,?, '2026-06-01', '2026-06-01')`);
+  ins.run('t1','chk','2026-06-05',-2500,'Cafe','Cafe','cat_food_restaurants');       // $25 expense
+  ins.run('t2','chk','2026-06-10',-1000,'Diner','Diner','cat_food_restaurants');     // $10 expense
+  ins.run('t3','chk','2026-06-01',100000,'Payroll','Payroll','cat_income_paycheck'); // $1000 income
+  ins.run('t4','chk','2026-06-15',-50000,'Move','Move','cat_xfer_out');              // $500 transfer
 
-  db.prepare("INSERT INTO budgets (id,category_id,amount) VALUES ('b1','cat_food',30000)").run(); // $300 budget on Food
-  db.prepare("INSERT INTO goals (id,name,type,target_amount,current_amount) VALUES ('g1','Emergency Fund','savings',300000,150000)").run();
+  db.prepare(`INSERT INTO budgets (id,category_id,amount,created_at,updated_at)
+    VALUES ('b1','cat_food',30000,'2026-06-01','2026-06-01')`).run(); // $300 budget on Food
+  db.prepare(`INSERT INTO goals (id,name,type,target_amount,current_amount,created_at,updated_at)
+    VALUES ('g1','Emergency Fund','savings',300000,150000,'2026-06-01','2026-06-01')`).run();
   db.prepare("INSERT INTO securities (id,ticker,name,type) VALUES ('s1','VTI','Vanguard Total Market','etf')").run();
-  db.prepare("INSERT INTO holdings (id,account_id,security_id,quantity,institution_price,institution_value,cost_basis,manual_cost_basis) VALUES ('h1','chk','s1',10,200,200000,150000,NULL)").run();
+  db.prepare(`INSERT INTO holdings (id,account_id,security_id,quantity,institution_price,institution_value,cost_basis,manual_cost_basis,updated_at)
+    VALUES ('h1','chk','s1',10,200,200000,150000,NULL,'2026-06-01')`).run();
   // Confirmed so the forecast surfaces it: buildRecurringForecast only projects patterns that are
   // confirmed or backed by at least 3 observed transactions.
-  db.prepare("INSERT INTO recurring_patterns (id,merchant_name,category_id,average_amount,frequency,next_expected,is_active,is_confirmed) VALUES ('r1','Netflix','cat_ent',1599,'monthly',date('now','+5 days'),1,1)").run();
-  db.prepare("INSERT INTO net_worth_snapshots (id,date,net_worth,total_assets,total_liabilities) VALUES ('n1',date('now'),300000,500000,200000)").run();
+  db.prepare(`INSERT INTO recurring_patterns (id,merchant_name,category_id,average_amount,frequency,last_seen,next_expected,is_active,is_confirmed,created_at,updated_at)
+    VALUES ('r1','Netflix','cat_ent',1599,'monthly','2026-06-01',date('now','+5 days'),1,1,'2026-06-01','2026-06-01')`).run();
+  db.prepare(`INSERT INTO net_worth_snapshots (id,date,net_worth,total_assets,total_liabilities,breakdown,created_at)
+    VALUES ('n1',date('now'),300000,500000,200000,'{}','2026-07-01')`).run();
   return db;
 }
 
@@ -122,7 +74,7 @@ test('spending_by_category rolls children up to the parent and excludes transfer
     categories: Array<{ category: string; spent: number }>;
   };
   assert.equal(r.total, 35); // $25 + $10, transfer excluded
-  assert.deepEqual(r.categories.map((c) => [c.category, c.spent]), [['Food', 35]]);
+  assert.deepEqual(r.categories.map((c) => [c.category, c.spent]), [['Food & Drink', 35]]);
 });
 
 test('monthly_cashflow computes income/expense/net in dollars, excluding transfers', (t) => {
@@ -148,12 +100,13 @@ test('get_budgets returns budget vs this-month actual, dollarized', (t) => {
   const db = setup();
   t.after(() => db.close());
   // A current-month expense (child category rolls up to the budgeted parent).
-  db.prepare("INSERT INTO transactions (id,account_id,date,amount,category_id) VALUES ('tb','chk',date('now'),-4000,'cat_food_restaurants')").run();
+  db.prepare(`INSERT INTO transactions (id,account_id,date,amount,category_id,created_at,updated_at)
+    VALUES ('tb','chk',date('now'),-4000,'cat_food_restaurants','2026-06-01','2026-06-01')`).run();
   const r = runAdvisorTool(db, 'get_budgets', {}) as {
     month: string;
     budgets: Array<{ category: string; budget: number; spent: number; remaining: number }>;
   };
-  const food = r.budgets.find((b) => b.category === 'Food');
+  const food = r.budgets.find((b) => b.category === 'Food & Drink');
   assert.equal(food?.budget, 300);
   assert.equal(food?.spent, 40);      // the current-month $40 expense (child category rolls up)
   assert.equal(food?.remaining, 260);

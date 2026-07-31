@@ -43,22 +43,12 @@ test('an asset balance is stored as-is with no warning', () => {
 // value. Balances recover on the next sync; the snapshot does not.
 
 function setupAccountsDb(): Database.Database {
-  const db = new Database(':memory:');
-  db.exec(`
-    CREATE TABLE accounts (
-      id TEXT PRIMARY KEY,
-      simplefin_account_id TEXT,
-      connection_type TEXT NOT NULL,
-      account_name TEXT NOT NULL,
-      current_balance INTEGER NOT NULL DEFAULT 0,
-      is_liability INTEGER NOT NULL DEFAULT 0,
-      currency TEXT NOT NULL DEFAULT 'USD',
-      updated_at TEXT NOT NULL DEFAULT '2026-07-01'
-    );
+  const db = migratedTestDb();
+  const ins = db.prepare(`
+    INSERT INTO accounts (id, simplefin_account_id, connection_type, account_name, type,
+                          current_balance, created_at, updated_at)
+    VALUES (?,?,'simplefin',?,'checking',?,'2026-07-01','2026-07-01')
   `);
-  const ins = db.prepare(
-    "INSERT INTO accounts (id, simplefin_account_id, connection_type, account_name, current_balance) VALUES (?,?,'simplefin',?,?)"
-  );
   ins.run('a_seen', 'sf_seen', 'Chase Checking', 429055);
   ins.run('a_absent', 'sf_absent', 'Wealthfront Cash', 100170);
   return db;
@@ -350,16 +340,10 @@ test('a real provider revision is still counted as modified', () => {
 // the portfolio total. coinbase.ts already zeroed its side; this brings SimpleFIN into line.
 
 function setupHoldingsDb(): Database.Database {
-  const db = new Database(':memory:');
-  db.exec(`
-    CREATE TABLE securities (id TEXT PRIMARY KEY, ticker TEXT, name TEXT, type TEXT, currency TEXT);
-    CREATE TABLE holdings (
-      id TEXT PRIMARY KEY, account_id TEXT NOT NULL, security_id TEXT NOT NULL,
-      quantity REAL NOT NULL, institution_price REAL NOT NULL, institution_value INTEGER NOT NULL,
-      cost_basis INTEGER, currency TEXT NOT NULL DEFAULT 'USD', updated_at TEXT NOT NULL,
-      UNIQUE(account_id, security_id)
-    );
-  `);
+  const db = migratedTestDb();
+  for (const id of ['acct', 'brokerage', 'roth']) {
+    insertAccount(db, { id, type: 'brokerage' });
+  }
   return db;
 }
 

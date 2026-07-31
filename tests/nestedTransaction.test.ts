@@ -7,6 +7,8 @@ import Database from 'better-sqlite3';
 // auto-applied draft throws, the worker catches it and continues. This pins the
 // better-sqlite3 semantics that make that safe: a caught failure in the inner
 // transaction rolls back only its own savepoint, not the enclosing transaction.
+// Deliberately NOT migratedTestDb(): `t` is not a stand-in for any production table. The subject
+// is better-sqlite3's savepoint behaviour, and a one-column scratch table is the whole fixture.
 test('a caught failure in a nested transaction rolls back only the inner savepoint', () => {
   const db = new Database(':memory:');
   try {

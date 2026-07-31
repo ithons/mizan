@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import Database from 'better-sqlite3';
+import { migratedTestDb, insertAccount } from './helpers/schema';
 import { isBelowBackfillFloor } from '../server/src/services/backfillFloor';
 
 test('no floor set never skips', () => {
@@ -21,16 +21,9 @@ test('the floor date itself and everything above it is kept', () => {
 // End-to-end proof against a real schema: a served transaction below an account's
 // floor must not survive, exactly as the sync loop applies the guard.
 test('guard drops sub-floor provider rows in a real insert loop', () => {
-  const db = new Database(':memory:');
-  db.exec(`
-    CREATE TABLE accounts (id TEXT PRIMARY KEY, backfill_floor_date TEXT);
-    CREATE TABLE transactions (
-      manually_categorized INTEGER NOT NULL DEFAULT 0,
-      id TEXT PRIMARY KEY, account_id TEXT, date TEXT, amount INTEGER,
-      source_type TEXT
-    );
-    INSERT INTO accounts (id, backfill_floor_date) VALUES ('a1', '2026-01-01');
-  `);
+  const db = migratedTestDb();
+  insertAccount(db, { id: 'a1' });
+  db.prepare("UPDATE accounts SET backfill_floor_date = '2026-01-01' WHERE id = 'a1'").run();
 
   const floor = (db.prepare('SELECT backfill_floor_date FROM accounts WHERE id = ?')
     .get('a1') as { backfill_floor_date: string | null }).backfill_floor_date;
@@ -45,7 +38,8 @@ test('guard drops sub-floor provider rows in a real insert loop', () => {
   for (const txn of served) {
     if (isBelowBackfillFloor(txn.date, floor)) { skipped++; continue; }
     db.prepare(
-      "INSERT INTO transactions (id, account_id, date, amount, source_type) VALUES (?, 'a1', ?, ?, 'simplefin')"
+      `INSERT INTO transactions (id, account_id, date, amount, source_type, created_at, updated_at)
+       VALUES (?, 'a1', ?, ?, 'simplefin', '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z')`
     ).run(txn.id, txn.date, txn.amount);
   }
 

@@ -1,32 +1,16 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import Database from 'better-sqlite3';
+import { migratedTestDb, insertAccount } from './helpers/schema';
 import { upsertCoinbaseHolding } from '../server/src/services/coinbase';
 
+// The hand-written schema this replaced declared `institution_value REAL` and `cost_basis REAL`;
+// production has both as INTEGER cents since migration 022, and both holdings foreign keys were
+// absent, so an account that does not exist could hold a position.
 function setupDb(): Database.Database {
-  const db = new Database(':memory:');
-  db.exec(`
-    CREATE TABLE securities (
-      id TEXT PRIMARY KEY,
-      ticker TEXT,
-      name TEXT NOT NULL,
-      type TEXT NOT NULL,
-      currency TEXT NOT NULL DEFAULT 'USD'
-    );
-
-    CREATE TABLE holdings (
-      id TEXT PRIMARY KEY,
-      account_id TEXT NOT NULL,
-      security_id TEXT NOT NULL,
-      quantity REAL NOT NULL,
-      institution_price REAL NOT NULL,
-      institution_value REAL NOT NULL,
-      cost_basis REAL,
-      currency TEXT NOT NULL DEFAULT 'USD',
-      updated_at TEXT NOT NULL,
-      UNIQUE(account_id, security_id)
-    );
-  `);
+  const db = migratedTestDb();
+  insertAccount(db, { id: 'acct_1', type: 'crypto_wallet', connection_type: 'coinbase' });
+  insertAccount(db, { id: 'acct_2', type: 'crypto_wallet', connection_type: 'coinbase' });
   return db;
 }
 

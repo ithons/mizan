@@ -12,6 +12,10 @@ const MIGRATION = fs.readFileSync(
 );
 
 // Minimal schema covering only what migration 033 touches.
+//
+// Deliberately NOT migratedTestDb(): this file drives migration 033 itself, and migratedTestDb()
+// has already applied it (and 039, which cleaned up after it). The eight per-coin accounts below
+// are the pre-033 state the migration consolidates, which no migrated database still holds.
 function setupDb(): Database.Database {
   const db = new Database(':memory:');
   db.exec(`

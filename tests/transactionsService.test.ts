@@ -1,39 +1,25 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import Database from 'better-sqlite3';
+import { migratedTestDb, insertAccount } from './helpers/schema';
 import { expandCategoryIds, listTransactions, type TransactionListFilters } from '../server/src/services/transactions';
 
-// Minimal schema for the query logic extracted out of routes/transactions.ts. Amounts
-// are integer cents (the DB contract); listTransactions returns cents, callers dollarize.
+// The query logic extracted out of routes/transactions.ts. Amounts are integer cents (the DB
+// contract); listTransactions returns cents, callers dollarize. `cat_food_restaurants` is a real
+// child of `cat_food` in the seeded taxonomy, so the parent-expansion test walks the tree
+// production has rather than one this file invented.
 function setupDb(): Database.Database {
-  const db = new Database(':memory:');
-  db.exec(`
-    CREATE TABLE accounts (id TEXT PRIMARY KEY, account_name TEXT, institution_name TEXT);
-    -- is_income is joined out on every list query so a positive amount inside an expense
-    -- category can be read as a refund rather than as income. It exists in the real schema and
-    -- was missing here, which is the divergence migratedTestDb() exists to prevent.
-    CREATE TABLE categories (id TEXT PRIMARY KEY, name TEXT, color TEXT, icon TEXT, parent_id TEXT, is_income INTEGER DEFAULT 0);
-    CREATE TABLE transactions (
-      manually_categorized INTEGER NOT NULL DEFAULT 0,
-      id TEXT PRIMARY KEY, account_id TEXT, date TEXT, amount INTEGER,
-      merchant_name TEXT, original_name TEXT, category_id TEXT, notes TEXT,
-      pending INTEGER DEFAULT 0, recurring_id TEXT, review_status TEXT DEFAULT 'open',
-      created_at TEXT, updated_at TEXT
-    );
-  `);
-  db.prepare('INSERT INTO accounts VALUES (?,?,?)').run('acc_a', 'Checking', 'Bank A');
-  db.prepare('INSERT INTO accounts VALUES (?,?,?)').run('acc_b', 'Savings', 'Bank B');
-  db.prepare('INSERT INTO categories VALUES (?,?,?,?,?,?)').run('cat_food', 'Food', '#f00', '🍔', null, 0);
-  db.prepare('INSERT INTO categories VALUES (?,?,?,?,?,?)').run('cat_dining', 'Dining', '#f80', '🍽', 'cat_food', 0);
-  db.prepare('INSERT INTO categories VALUES (?,?,?,?,?,?)').run('cat_income', 'Income', '#0f0', '💰', null, 1);
+  const db = migratedTestDb();
+  insertAccount(db, { id: 'acc_a', account_name: 'Checking', institution_name: 'Bank A' });
+  insertAccount(db, { id: 'acc_b', account_name: 'Savings', institution_name: 'Bank B', type: 'savings' });
 
   const ins = db.prepare(`INSERT INTO transactions
     (id, account_id, date, amount, merchant_name, original_name, category_id, notes, created_at, updated_at)
     VALUES (?,?,?,?,?,?,?,?,?,?)`);
   // amounts in cents
-  ins.run('t1', 'acc_a', '2026-07-01', -1500, 'Chipotle', 'CHIPOTLE', 'cat_dining', null, '2026-07-01T00:00:00Z', '2026-07-01T00:00:00Z');
+  ins.run('t1', 'acc_a', '2026-07-01', -1500, 'Chipotle', 'CHIPOTLE', 'cat_food_restaurants', null, '2026-07-01T00:00:00Z', '2026-07-01T00:00:00Z');
   ins.run('t2', 'acc_a', '2026-07-02', -4200, 'Whole Foods', 'WHOLEFOODS', 'cat_food', null, '2026-07-02T00:00:00Z', '2026-07-02T00:00:00Z');
-  ins.run('t3', 'acc_b', '2026-07-03', 500000, 'Employer', 'PAYROLL', 'cat_income', 'paycheck', '2026-07-03T00:00:00Z', '2026-07-03T00:00:00Z');
+  ins.run('t3', 'acc_b', '2026-07-03', 500000, 'Employer', 'PAYROLL', 'cat_income_paycheck', 'paycheck', '2026-07-03T00:00:00Z', '2026-07-03T00:00:00Z');
   ins.run('t4', 'acc_b', '2026-07-04', -999, 'Kiosk', 'KIOSK', null, null, '2026-07-04T00:00:00Z', '2026-07-04T00:00:00Z');
   return db;
 }
@@ -44,8 +30,12 @@ const base: Omit<TransactionListFilters, never> = {
 
 test('expandCategoryIds includes a category and all its descendants', () => {
   const db = setupDb();
-  assert.deepEqual(expandCategoryIds(db, ['cat_food']).sort(), ['cat_dining', 'cat_food']);
-  assert.deepEqual(expandCategoryIds(db, ['cat_dining']), ['cat_dining']);
+  assert.deepEqual(
+    expandCategoryIds(db, ['cat_food']).sort(),
+    ['cat_food', 'cat_food_alcohol', 'cat_food_bars', 'cat_food_coffee', 'cat_food_delivery',
+     'cat_food_groceries', 'cat_food_restaurants']
+  );
+  assert.deepEqual(expandCategoryIds(db, ['cat_food_restaurants']), ['cat_food_restaurants']);
 });
 
 test('lists all transactions with a total, newest first by default', () => {

@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import http from 'node:http';
 import express from 'express';
 import Database from 'better-sqlite3';
+import { migratedTestDb } from './helpers/schema';
 import { _setDbForTesting } from '../server/src/db/index';
 import accountsRouter from '../server/src/routes/accounts';
 
@@ -13,36 +14,13 @@ import accountsRouter from '../server/src/routes/accounts';
 // as dollars. A scaling regression in accountToDollars/dollarizeFields would fail here.
 
 function setupDb(): Database.Database {
-  const db = new Database(':memory:');
-  db.exec(`
-    CREATE TABLE accounts (
-      id TEXT PRIMARY KEY,
-      account_name TEXT NOT NULL,
-      institution_name TEXT NOT NULL DEFAULT '',
-      type TEXT NOT NULL,
-      current_balance INTEGER NOT NULL DEFAULT 0,
-      available_balance INTEGER,
-      credit_limit INTEGER,
-      currency TEXT NOT NULL DEFAULT 'USD',
-      is_manual INTEGER NOT NULL DEFAULT 0,
-      is_hidden INTEGER NOT NULL DEFAULT 0,
-      is_liability INTEGER NOT NULL DEFAULT 0,
-      sort_order INTEGER NOT NULL DEFAULT 0,
-      created_at TEXT NOT NULL,
-      updated_at TEXT NOT NULL
-    );
-  `);
+  const db = migratedTestDb();
   // Balances stored as integer cents (the DB contract).
-  db.prepare(`INSERT INTO accounts
-    (id, account_name, type, current_balance, available_balance, credit_limit, is_liability, sort_order, created_at, updated_at)
-    VALUES (?,?,?,?,?,?,?,?,?,?)`).run(
-    'acc_check', 'Checking', 'checking', 430719, 430719, null, 0, 0, '2026-07-01T00:00:00Z', '2026-07-01T00:00:00Z'
-  );
-  db.prepare(`INSERT INTO accounts
-    (id, account_name, type, current_balance, available_balance, credit_limit, is_liability, sort_order, created_at, updated_at)
-    VALUES (?,?,?,?,?,?,?,?,?,?)`).run(
-    'acc_card', 'Sapphire', 'credit', 352919, null, 1000000, 1, 1, '2026-07-01T00:00:00Z', '2026-07-01T00:00:00Z'
-  );
+  const insert = db.prepare(`INSERT INTO accounts
+    (id, connection_type, account_name, type, current_balance, available_balance, credit_limit, is_liability, sort_order, created_at, updated_at)
+    VALUES (?,'manual',?,?,?,?,?,?,?,?,?)`);
+  insert.run('acc_check', 'Checking', 'checking', 430719, 430719, null, 0, 0, '2026-07-01T00:00:00Z', '2026-07-01T00:00:00Z');
+  insert.run('acc_card', 'Sapphire', 'credit', 352919, null, 1000000, 1, 1, '2026-07-01T00:00:00Z', '2026-07-01T00:00:00Z');
   return db;
 }
 

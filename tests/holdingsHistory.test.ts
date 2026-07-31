@@ -1,37 +1,20 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import Database from 'better-sqlite3';
+import { migratedTestDb, insertAccount, TEST_NOW } from './helpers/schema';
 import { takeHoldingsSnapshot } from '../server/src/services/snapshot';
 
 function setupDb(): Database.Database {
-  const db = new Database(':memory:');
-  db.exec(`
-    CREATE TABLE holdings (
-      id TEXT PRIMARY KEY,
-      account_id TEXT NOT NULL,
-      security_id TEXT NOT NULL,
-      quantity REAL NOT NULL,
-      institution_price REAL NOT NULL,
-      institution_value REAL NOT NULL,
-      cost_basis REAL
-    );
-
-    CREATE TABLE holdings_history (
-      id TEXT PRIMARY KEY,
-      account_id TEXT NOT NULL,
-      security_id TEXT NOT NULL,
-      date TEXT NOT NULL,
-      quantity REAL NOT NULL,
-      institution_price REAL NOT NULL,
-      institution_value REAL NOT NULL,
-      cost_basis REAL,
-      created_at TEXT NOT NULL,
-      UNIQUE(account_id, security_id, date)
-    );
-
-    INSERT INTO holdings (id, account_id, security_id, quantity, institution_price, institution_value, cost_basis)
-    VALUES ('hold_1', 'acct_1', 'sec_vti', 10, 120, 1200, 1000);
-  `);
+  const db = migratedTestDb();
+  insertAccount(db, { id: 'acct_1', type: 'brokerage' });
+  db.prepare(
+    "INSERT INTO securities (id, ticker, name, type) VALUES ('sec_vti', 'VTI', 'Vanguard Total Market', 'etf')"
+  ).run();
+  db.prepare(`
+    INSERT INTO holdings
+      (id, account_id, security_id, quantity, institution_price, institution_value, cost_basis, updated_at)
+    VALUES ('hold_1', 'acct_1', 'sec_vti', 10, 120, 1200, 1000, ?)
+  `).run(TEST_NOW);
   return db;
 }
 

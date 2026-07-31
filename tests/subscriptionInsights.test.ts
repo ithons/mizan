@@ -2,62 +2,15 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import Database from 'better-sqlite3';
 import { addDays, format, subDays } from 'date-fns';
+import { migratedTestDb, insertAccount, TEST_NOW } from './helpers/schema';
 import { buildSubscriptionInsights } from '../server/src/services/subscriptionInsights';
 
+// The hand-written schema this replaced declared `average_amount` and `adjusted_amount` as REAL
+// (production has both as INTEGER cents since 022), and left `recurring_patterns.created_at` /
+// `updated_at` off entirely, both NOT NULL in production.
 function setupDb(): Database.Database {
-  const db = new Database(':memory:');
-
-  db.exec(`
-    CREATE TABLE categories (
-      id TEXT PRIMARY KEY,
-      name TEXT NOT NULL,
-      color TEXT,
-      is_income INTEGER NOT NULL DEFAULT 0
-    );
-
-    CREATE TABLE recurring_patterns (
-      id TEXT PRIMARY KEY,
-      merchant_name TEXT NOT NULL,
-      category_id TEXT,
-      average_amount REAL NOT NULL,
-      amount_variance REAL NOT NULL DEFAULT 0,
-      frequency TEXT NOT NULL,
-      last_seen TEXT NOT NULL,
-      next_expected TEXT NOT NULL,
-      is_active INTEGER NOT NULL DEFAULT 1,
-      is_confirmed INTEGER NOT NULL DEFAULT 0,
-      transaction_count INTEGER NOT NULL DEFAULT 0
-    );
-
-    CREATE TABLE transactions (
-      manually_categorized INTEGER NOT NULL DEFAULT 0,
-      id TEXT PRIMARY KEY,
-      recurring_id TEXT,
-      date TEXT NOT NULL,
-      amount REAL NOT NULL,
-      pending INTEGER NOT NULL DEFAULT 0
-    );
-
-    CREATE TABLE recurring_occurrence_adjustments (
-      id TEXT PRIMARY KEY,
-      recurring_id TEXT NOT NULL,
-      original_date TEXT NOT NULL,
-      action TEXT NOT NULL,
-      adjusted_date TEXT,
-      adjusted_amount REAL,
-      note TEXT,
-      created_at TEXT NOT NULL,
-      updated_at TEXT NOT NULL,
-      UNIQUE(recurring_id, original_date)
-    );
-  `);
-
-  db.prepare(`
-    INSERT INTO categories (id, name, color, is_income)
-    VALUES
-      ('income', 'Income', '#4ecba3', 1),
-      ('bills', 'Bills', '#e07070', 0)
-  `).run();
+  const db = migratedTestDb();
+  insertAccount(db, { id: 'acct' });
 
   const today = format(new Date(), 'yyyy-MM-dd');
   const inTwentyDays = format(addDays(new Date(), 20), 'yyyy-MM-dd');
@@ -72,15 +25,17 @@ function setupDb(): Database.Database {
       next_expected,
       is_active,
       is_confirmed,
-      transaction_count
+      transaction_count,
+      created_at,
+      updated_at
     )
-    VALUES (@id, @merchant_name, @category_id, @average_amount, @frequency, @last_seen, @next_expected, @is_active, @is_confirmed, @transaction_count)
+    VALUES (@id, @merchant_name, @category_id, @average_amount, @frequency, @last_seen, @next_expected, @is_active, @is_confirmed, @transaction_count, '${TEST_NOW}', '${TEST_NOW}')
   `);
 
   insertPattern.run({
     id: 'paycheck',
     merchant_name: 'MIT Payroll',
-    category_id: 'income',
+    category_id: 'cat_income_paycheck',
     average_amount: 250000,
     frequency: 'monthly',
     last_seen: today,
@@ -92,7 +47,7 @@ function setupDb(): Database.Database {
   insertPattern.run({
     id: 'rent',
     merchant_name: 'Rent',
-    category_id: 'bills',
+    category_id: 'cat_home_utilities',
     average_amount: 100000,
     frequency: 'monthly',
     last_seen: today,
@@ -104,7 +59,7 @@ function setupDb(): Database.Database {
   insertPattern.run({
     id: 'streaming',
     merchant_name: 'Streaming',
-    category_id: 'bills',
+    category_id: 'cat_home_utilities',
     average_amount: 1500,
     frequency: 'monthly',
     last_seen: today,
@@ -116,7 +71,7 @@ function setupDb(): Database.Database {
   insertPattern.run({
     id: 'cloud',
     merchant_name: 'Cloud Storage',
-    category_id: 'bills',
+    category_id: 'cat_home_utilities',
     average_amount: 12000,
     frequency: 'annual',
     last_seen: today,
@@ -128,7 +83,7 @@ function setupDb(): Database.Database {
   insertPattern.run({
     id: 'coffee',
     merchant_name: 'Coffee Club',
-    category_id: 'bills',
+    category_id: 'cat_home_utilities',
     average_amount: 1000,
     frequency: 'weekly',
     last_seen: today,
@@ -140,7 +95,7 @@ function setupDb(): Database.Database {
   insertPattern.run({
     id: 'trial',
     merchant_name: 'App Trial',
-    category_id: 'bills',
+    category_id: 'cat_home_utilities',
     average_amount: 800,
     frequency: 'monthly',
     last_seen: today,
@@ -152,7 +107,7 @@ function setupDb(): Database.Database {
   insertPattern.run({
     id: 'weak',
     merchant_name: 'Weak Pattern',
-    category_id: 'bills',
+    category_id: 'cat_home_utilities',
     average_amount: 4000,
     frequency: 'monthly',
     last_seen: today,
@@ -163,8 +118,8 @@ function setupDb(): Database.Database {
   });
 
   const insertTransaction = db.prepare(`
-    INSERT INTO transactions (id, recurring_id, date, amount, pending)
-    VALUES (?, ?, ?, ?, 0)
+    INSERT INTO transactions (id, account_id, recurring_id, date, amount, pending, created_at, updated_at)
+    VALUES (?, 'acct', ?, ?, ?, 0, '${TEST_NOW}', '${TEST_NOW}')
   `);
   insertTransaction.run('streaming_1', 'streaming', format(subDays(new Date(), 90), 'yyyy-MM-dd'), -1500);
   insertTransaction.run('streaming_2', 'streaming', format(subDays(new Date(), 60), 'yyyy-MM-dd'), -1500);

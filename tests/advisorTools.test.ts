@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import Database from 'better-sqlite3';
 import { format, subDays } from 'date-fns';
+import { migratedTestDb, insertAccount } from './helpers/schema';
 import { confirmAdvisorDraft } from '../server/src/services/advisorDrafts';
 import { analyzeAdvisorQuestion, buildAdvisorReadTools } from '../server/src/services/advisorTools';
 
@@ -40,296 +41,19 @@ function insertTransaction(
 }
 
 function setupAdvisorDb(): Database.Database {
-  const db = new Database(':memory:');
+  const db = migratedTestDb();
 
-  db.exec(`
-    CREATE TABLE categories (
-      id TEXT PRIMARY KEY,
-      name TEXT NOT NULL,
-      icon TEXT,
-      color TEXT,
-      parent_id TEXT,
-      is_income INTEGER NOT NULL DEFAULT 0,
-      is_investment INTEGER NOT NULL DEFAULT 0
-    );
-
-    CREATE TABLE accounts (
-      id TEXT PRIMARY KEY,
-      connection_id TEXT,
-      connection_type TEXT NOT NULL DEFAULT 'manual',
-      institution_name TEXT NOT NULL,
-      account_name TEXT NOT NULL,
-      type TEXT NOT NULL,
-      current_balance REAL NOT NULL DEFAULT 0,
-      is_hidden INTEGER NOT NULL DEFAULT 0,
-      is_liability INTEGER NOT NULL DEFAULT 0
-    );
-
-    CREATE TABLE plaid_items (
-      id TEXT PRIMARY KEY,
-      institution_name TEXT,
-      status TEXT NOT NULL,
-      last_synced_at TEXT
-    );
-
-    CREATE TABLE teller_items (
-      id TEXT PRIMARY KEY,
-      enrollment_id TEXT UNIQUE NOT NULL,
-      institution_name TEXT NOT NULL DEFAULT '',
-      last_synced_at TEXT,
-      status TEXT NOT NULL DEFAULT 'active',
-      created_at TEXT NOT NULL
-    );
-
-    CREATE TABLE advisor_drafts (
-      id TEXT PRIMARY KEY,
-      kind TEXT NOT NULL,
-      label TEXT NOT NULL,
-      summary TEXT NOT NULL,
-      route TEXT NOT NULL,
-      payload TEXT NOT NULL,
-      changes TEXT NOT NULL,
-      citations TEXT NOT NULL,
-      status TEXT NOT NULL DEFAULT 'open' CHECK(status IN ('open', 'confirmed', 'dismissed')),
-      created_at TEXT NOT NULL,
-      updated_at TEXT NOT NULL
-    );
-
-    CREATE TABLE advisor_actions (
-      id TEXT PRIMARY KEY,
-      kind TEXT NOT NULL,
-      label TEXT NOT NULL,
-      summary TEXT NOT NULL,
-      source TEXT NOT NULL,
-      payload TEXT NOT NULL,
-      created_at TEXT NOT NULL
-    );
-
-    CREATE TABLE simplefin_connections (
-      id TEXT PRIMARY KEY,
-      access_url TEXT UNIQUE NOT NULL,
-      last_synced_at TEXT,
-      status TEXT NOT NULL DEFAULT 'active',
-      created_at TEXT NOT NULL
-    );
-
-    CREATE TABLE coinbase_connections (
-      id TEXT PRIMARY KEY,
-      display_name TEXT,
-      status TEXT NOT NULL,
-      last_synced_at TEXT
-    );
-
-    CREATE TABLE transactions (
-      manually_categorized INTEGER NOT NULL DEFAULT 0,
-      category_source TEXT, category_action_id TEXT, category_previous_id TEXT,
-      id TEXT PRIMARY KEY,
-      account_id TEXT NOT NULL,
-      date TEXT NOT NULL,
-      amount REAL NOT NULL,
-      merchant_name TEXT,
-      original_name TEXT NOT NULL,
-      category_id TEXT,
-      pending INTEGER NOT NULL DEFAULT 0,
-      source_type TEXT NOT NULL DEFAULT 'manual',
-      recurring_id TEXT,
-      review_status TEXT NOT NULL DEFAULT 'open',
-      duplicate_group_id TEXT,
-      duplicate_status TEXT NOT NULL DEFAULT 'none',
-      transfer_pair_id TEXT,
-      transfer_status TEXT NOT NULL DEFAULT 'none',
-      created_at TEXT NOT NULL,
-      updated_at TEXT NOT NULL
-    );
-
-    CREATE TABLE merchant_rules (
-      id TEXT PRIMARY KEY,
-      pattern TEXT NOT NULL,
-      category_id TEXT NOT NULL,
-      created_at TEXT NOT NULL,
-      source TEXT NOT NULL DEFAULT 'human',
-      action_id TEXT,
-      updated_at TEXT,
-      retired_at TEXT
-    );
-    CREATE UNIQUE INDEX idx_merchant_rules_pattern_live
-      ON merchant_rules(lower(pattern)) WHERE retired_at IS NULL;
-    CREATE TABLE merchant_rule_revisions (
-      id TEXT PRIMARY KEY, rule_id TEXT NOT NULL, pattern TEXT NOT NULL,
-      from_category_id TEXT, to_category_id TEXT, source TEXT NOT NULL,
-      action_id TEXT, operation TEXT NOT NULL, created_at TEXT NOT NULL
-    );
-    CREATE TABLE transaction_category_revisions (
-      id TEXT PRIMARY KEY, transaction_id TEXT NOT NULL,
-      from_category_id TEXT, to_category_id TEXT, from_source TEXT, to_source TEXT,
-      action_id TEXT, revert_of TEXT, reverted_at TEXT, created_at TEXT NOT NULL
-    );
-
-    -- suggestMerchantRules reads skipped suggestions from here.
-    CREATE TABLE app_preferences (
-      key TEXT PRIMARY KEY,
-      value TEXT NOT NULL,
-      created_at TEXT NOT NULL,
-      updated_at TEXT NOT NULL
-    );
-
-    CREATE TABLE recurring_patterns (
-      id TEXT PRIMARY KEY,
-      merchant_name TEXT NOT NULL,
-      category_id TEXT,
-      average_amount REAL NOT NULL,
-      amount_variance REAL NOT NULL DEFAULT 0,
-      frequency TEXT NOT NULL,
-      last_seen TEXT NOT NULL,
-      next_expected TEXT NOT NULL,
-      is_active INTEGER NOT NULL DEFAULT 1,
-      is_confirmed INTEGER NOT NULL DEFAULT 0,
-      transaction_count INTEGER NOT NULL DEFAULT 0,
-      created_at TEXT NOT NULL,
-      updated_at TEXT NOT NULL
-    );
-
-    CREATE TABLE recurring_occurrence_adjustments (
-      id TEXT PRIMARY KEY,
-      recurring_id TEXT NOT NULL,
-      original_date TEXT NOT NULL,
-      action TEXT NOT NULL,
-      adjusted_date TEXT,
-      adjusted_amount REAL,
-      note TEXT,
-      created_at TEXT NOT NULL,
-      updated_at TEXT NOT NULL,
-      UNIQUE(recurring_id, original_date)
-    );
-
-    CREATE TABLE budgets (
-      id TEXT PRIMARY KEY,
-      category_id TEXT NOT NULL,
-      amount REAL NOT NULL,
-      period TEXT NOT NULL,
-      rollover INTEGER NOT NULL DEFAULT 0,
-      rollover_balance REAL NOT NULL DEFAULT 0,
-      created_at TEXT NOT NULL,
-      updated_at TEXT NOT NULL
-    );
-
-    CREATE TABLE budget_rollover_ledger (
-      id TEXT PRIMARY KEY,
-      budget_id TEXT NOT NULL,
-      month TEXT NOT NULL,
-      starting_rollover REAL NOT NULL,
-      budget_amount REAL NOT NULL,
-      actual_spend REAL NOT NULL,
-      ending_rollover REAL NOT NULL,
-      calculated_at TEXT NOT NULL,
-      UNIQUE(budget_id, month)
-    );
-
-    CREATE TABLE goals (
-      id TEXT PRIMARY KEY,
-      name TEXT NOT NULL,
-      type TEXT NOT NULL,
-      target_amount REAL NOT NULL,
-      current_amount REAL NOT NULL DEFAULT 0,
-      starting_amount REAL,
-      account_id TEXT,
-      target_date TEXT,
-      color TEXT,
-      is_archived INTEGER NOT NULL DEFAULT 0,
-      created_at TEXT NOT NULL,
-      updated_at TEXT NOT NULL
-    );
-
-    CREATE TABLE net_worth_snapshots (
-      is_estimated INTEGER NOT NULL DEFAULT 0,
-      id TEXT PRIMARY KEY,
-      date TEXT NOT NULL,
-      total_assets REAL NOT NULL DEFAULT 0,
-      total_liabilities REAL NOT NULL DEFAULT 0,
-      net_worth REAL NOT NULL DEFAULT 0,
-      breakdown TEXT NOT NULL DEFAULT '{}',
-      created_at TEXT NOT NULL
-    );
-
-    CREATE TABLE securities (
-      id TEXT PRIMARY KEY,
-      plaid_security_id TEXT,
-      ticker TEXT,
-      name TEXT NOT NULL,
-      type TEXT NOT NULL,
-      currency TEXT NOT NULL DEFAULT 'USD',
-      sector TEXT,
-      sector_source TEXT
-    );
-
-    CREATE TABLE holdings (
-      id TEXT PRIMARY KEY,
-      account_id TEXT NOT NULL,
-      security_id TEXT NOT NULL,
-      quantity REAL NOT NULL,
-      institution_price REAL NOT NULL,
-      institution_value REAL NOT NULL,
-      cost_basis REAL,
-      manual_cost_basis REAL,
-      manual_cost_basis_note TEXT,
-      manual_cost_basis_updated_at TEXT,
-      currency TEXT NOT NULL DEFAULT 'USD',
-      updated_at TEXT NOT NULL
-    );
-
-
-    CREATE TABLE data_import_runs (
-      id TEXT PRIMARY KEY,
-      source TEXT NOT NULL,
-      status TEXT NOT NULL,
-      rows_seen INTEGER NOT NULL,
-      rows_imported INTEGER NOT NULL,
-      rows_invalid INTEGER NOT NULL DEFAULT 0,
-      duplicate_candidates INTEGER NOT NULL DEFAULT 0,
-      transfer_candidates INTEGER NOT NULL DEFAULT 0,
-      warnings_count INTEGER NOT NULL DEFAULT 0,
-      errors_count INTEGER NOT NULL DEFAULT 0,
-      summary TEXT NOT NULL,
-      created_at TEXT NOT NULL
-    );
-  `);
-
-  db.prepare(`
-    INSERT INTO categories (id, name, color, parent_id, is_income, is_investment)
-    VALUES (?, ?, ?, ?, ?, ?)
-  `).run('cat_income_paycheck', 'Paycheck', '#4ecba3', null, 1, 0);
-  db.prepare(`
-    INSERT INTO categories (id, name, color, parent_id, is_income, is_investment)
-    VALUES (?, ?, ?, ?, ?, ?)
-  `).run('cat_food', 'Food', '#e07070', null, 0, 0);
-  db.prepare(`
-    INSERT INTO categories (id, name, color, parent_id, is_income, is_investment)
-    VALUES (?, ?, ?, ?, ?, ?)
-  `).run('cat_food_restaurants', 'Restaurants', '#e07070', 'cat_food', 0, 0);
-  for (const id of ['cat_xfer', 'cat_inv', 'cat_crypto']) {
-    db.prepare(`
-      INSERT INTO categories (id, name, color, parent_id, is_income, is_investment)
-      VALUES (?, ?, ?, NULL, 0, ?)
-    `).run(id, id, '#6b6b7a', id === 'cat_inv' ? 1 : 0);
-  }
-
-  db.prepare(`
-    INSERT INTO plaid_items (id, institution_name, status, last_synced_at)
-    VALUES ('item_1', 'Mizan Test Bank', 'active', ?)
-  `).run(TEST_NOW);
-
-  db.prepare(`
-    INSERT INTO accounts (
-      id, connection_id, connection_type, institution_name, account_name, type, current_balance, is_hidden, is_liability
-    )
-    VALUES ('acct_checking', 'item_1', 'plaid', 'Mizan Test Bank', 'Everyday Checking', 'checking', 2500, 0, 0)
-  `).run();
-  db.prepare(`
-    INSERT INTO accounts (
-      id, connection_id, connection_type, institution_name, account_name, type, current_balance, is_hidden, is_liability
-    )
-    VALUES ('acct_brokerage', 'item_1', 'plaid', 'Mizan Test Bank', 'Brokerage', 'brokerage', 1500, 0, 0)
-  `).run();
+  // `connection_type` is CHECK-constrained to coinbase/simplefin/manual, and the hand-written
+  // schema this replaced still declared the `plaid_items` and `teller_items` tables migration 014
+  // dropped and filed both accounts under a 'plaid' connection type production cannot store.
+  insertAccount(db, {
+    id: 'acct_checking', account_name: 'Everyday Checking', institution_name: 'Mizan Test Bank',
+    current_balance: 2500,
+  });
+  insertAccount(db, {
+    id: 'acct_brokerage', account_name: 'Brokerage', institution_name: 'Mizan Test Bank',
+    type: 'brokerage', current_balance: 1500,
+  });
 
   insertTransaction(db, {
     id: 'paycheck',
@@ -367,10 +91,10 @@ function setupAdvisorDb(): Database.Database {
   `).run(TEST_NOW, TEST_NOW);
 
   db.prepare(`
-    INSERT INTO securities (id, plaid_security_id, ticker, name, type, currency, sector, sector_source)
+    INSERT INTO securities (id, ticker, name, type, currency, sector, sector_source)
     VALUES
-      ('sec_vti', NULL, 'VTI', 'Vanguard Total Stock Market ETF', 'etf', 'USD', 'Broad Market', 'manual'),
-      ('sec_cash', NULL, 'CASH', 'Cash Sweep', 'cash', 'USD', NULL, NULL)
+      ('sec_vti', 'VTI', 'Vanguard Total Stock Market ETF', 'etf', 'USD', 'Broad Market', 'manual'),
+      ('sec_cash', 'CASH', 'Cash Sweep', 'cash', 'USD', NULL, NULL)
   `).run();
   db.prepare(`
     INSERT INTO holdings (
@@ -463,7 +187,7 @@ test('advisor budget analysis uses rollover-adjusted available amount', (t) => {
   );
 
   assert.equal(analysis.intent, 'budget');
-  assert.match(analysis.answer, /Food: projected \$100\.00 of \$220\.00, \$120\.00 remaining\./);
+  assert.match(analysis.answer, /Food & Drink: projected \$100\.00 of \$220\.00, \$120\.00 remaining\./);
   assert.match(analysis.answer, /Recent rollover ledger/);
   assert.ok(analysis.citations.some((citation) => citation.id === 'budget:budget_food'));
   assert.ok(analysis.citations.some((citation) => citation.id.startsWith('rollover-ledger:')));
@@ -631,7 +355,7 @@ test('advisor drafts and confirms a transaction category change', (t) => {
 
   const analysis = analyzeAdvisorQuestion(
     db,
-    'Categorize Mystery as Food',
+    'Categorize Mystery as Food & Drink',
     new Date(TEST_NOW)
   );
   const draft = analysis.drafts.find((item) => item.kind === 'categorize_transaction');
@@ -653,7 +377,7 @@ test('advisor drafts and confirms budget and goal updates', (t) => {
 
   const budgetAnalysis = analyzeAdvisorQuestion(
     db,
-    'Set Food budget to $200',
+    'Set Food & Drink budget to $200',
     new Date(TEST_NOW)
   );
   const budgetDraft = budgetAnalysis.drafts.find((item) => item.kind === 'update_budget');

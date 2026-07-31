@@ -15,78 +15,8 @@ import { insertAccount, insertTransaction, migratedTestDb } from './helpers/sche
 import type { AdvisorDraftAction } from '../shared/types';
 
 function setupBudgetDb(): Database.Database {
-  const db = new Database(':memory:');
-
-  db.exec(`
-    CREATE TABLE categories (
-      id TEXT PRIMARY KEY,
-      name TEXT NOT NULL,
-      color TEXT,
-      icon TEXT,
-      parent_id TEXT,
-      is_income INTEGER NOT NULL DEFAULT 0
-    );
-
-    CREATE TABLE budgets (
-      id TEXT PRIMARY KEY,
-      category_id TEXT NOT NULL,
-      amount REAL NOT NULL,
-      period TEXT NOT NULL DEFAULT 'monthly',
-      rollover INTEGER NOT NULL DEFAULT 0,
-      rollover_balance REAL NOT NULL DEFAULT 0,
-      created_at TEXT NOT NULL,
-      updated_at TEXT NOT NULL
-    );
-
-    CREATE TABLE transactions (
-      manually_categorized INTEGER NOT NULL DEFAULT 0,
-      id TEXT PRIMARY KEY,
-      category_id TEXT,
-      recurring_id TEXT,
-      date TEXT NOT NULL,
-      amount REAL NOT NULL,
-      pending INTEGER NOT NULL DEFAULT 0,
-      transfer_status TEXT NOT NULL DEFAULT 'none',
-      duplicate_status TEXT NOT NULL DEFAULT 'none'
-    );
-
-    CREATE TABLE recurring_patterns (
-      id TEXT PRIMARY KEY,
-      merchant_name TEXT NOT NULL,
-      category_id TEXT,
-      average_amount REAL NOT NULL,
-      amount_variance REAL NOT NULL DEFAULT 0,
-      frequency TEXT NOT NULL,
-      last_seen TEXT NOT NULL,
-      next_expected TEXT NOT NULL,
-      is_active INTEGER NOT NULL DEFAULT 1,
-      is_confirmed INTEGER NOT NULL DEFAULT 0,
-      transaction_count INTEGER NOT NULL DEFAULT 0,
-      created_at TEXT NOT NULL,
-      updated_at TEXT NOT NULL
-    );
-
-    CREATE TABLE budget_rollover_ledger (
-      id TEXT PRIMARY KEY,
-      budget_id TEXT NOT NULL,
-      month TEXT NOT NULL,
-      starting_rollover REAL NOT NULL,
-      budget_amount REAL NOT NULL,
-      actual_spend REAL NOT NULL,
-      ending_rollover REAL NOT NULL,
-      calculated_at TEXT NOT NULL,
-      UNIQUE(budget_id, month)
-    );
-  `);
-
-  db.prepare(`
-    INSERT INTO categories (id, name, color, icon, parent_id, is_income)
-    VALUES
-      ('cat_home', 'Home', '#e07070', NULL, NULL, 0),
-      ('cat_home_rent', 'Rent', '#e07070', NULL, 'cat_home', 0),
-      ('cat_food', 'Food', '#d4a44c', NULL, NULL, 0),
-      ('cat_income_paycheck', 'Paycheck', '#4ecba3', NULL, NULL, 1)
-  `).run();
+  const db = migratedTestDb();
+  insertAccount(db, { id: 'acct' });
 
   db.prepare(`
     INSERT INTO budgets (id, category_id, amount, period, rollover, rollover_balance, created_at, updated_at)
@@ -96,12 +26,12 @@ function setupBudgetDb(): Database.Database {
   `).run();
 
   db.prepare(`
-    INSERT INTO transactions (id, category_id, recurring_id, date, amount, pending)
+    INSERT INTO transactions (id, account_id, category_id, recurring_id, date, amount, pending, created_at, updated_at)
     VALUES
-      ('june_rent_partial', 'cat_home_rent', NULL, '2026-06-03', -400, 0),
-      ('june_food', 'cat_food', NULL, '2026-06-04', -100, 0),
-      ('june_pending_food', 'cat_food', NULL, '2026-06-05', -999, 1),
-      ('may_rent', 'cat_home_rent', NULL, '2026-05-03', -700, 0)
+      ('june_rent_partial', 'acct', 'cat_home_rent', NULL, '2026-06-03', -400, 0, '2026-06-03', '2026-06-03'),
+      ('june_food', 'acct', 'cat_food', NULL, '2026-06-04', -100, 0, '2026-06-04', '2026-06-04'),
+      ('june_pending_food', 'acct', 'cat_food', NULL, '2026-06-05', -999, 1, '2026-06-05', '2026-06-05'),
+      ('may_rent', 'acct', 'cat_home_rent', NULL, '2026-05-03', -700, 0, '2026-05-03', '2026-05-03')
   `).run();
 
   db.prepare(`
@@ -183,10 +113,10 @@ test('rollover budgets use prior posted spending as current month carryover', (t
   `).run();
 
   db.prepare(`
-    INSERT INTO transactions (id, category_id, recurring_id, date, amount, pending)
+    INSERT INTO transactions (id, account_id, category_id, recurring_id, date, amount, pending, created_at, updated_at)
     VALUES
-      ('april_food', 'cat_food', NULL, '2026-04-10', -450, 0),
-      ('may_food', 'cat_food', NULL, '2026-05-11', -300, 0)
+      ('april_food', 'acct', 'cat_food', NULL, '2026-04-10', -450, 0, '2026-04-10', '2026-04-10'),
+      ('may_food', 'acct', 'cat_food', NULL, '2026-05-11', -300, 0, '2026-05-11', '2026-05-11')
   `).run();
 
   const budgets = getMonthlyBudgetsWithProjection(db, 2026, 6, new Date('2026-06-15T12:00:00.000Z'));
@@ -601,11 +531,11 @@ test('budget spend excludes confirmed duplicates and transfers', (t) => {
 
   // Three rows Reports already excludes; budgets must agree or the same month shows two numbers.
   db.prepare(`
-    INSERT INTO transactions (id, category_id, recurring_id, date, amount, pending, transfer_status, duplicate_status)
+    INSERT INTO transactions (id, account_id, category_id, recurring_id, date, amount, pending, transfer_status, duplicate_status, created_at, updated_at)
     VALUES
-      ('june_food_dupe', 'cat_food', NULL, '2026-06-04', -100, 0, 'none', 'confirmed'),
-      ('june_food_xfer', 'cat_food', NULL, '2026-06-06', -250, 0, 'confirmed', 'none'),
-      ('june_food_xfer_maybe', 'cat_food', NULL, '2026-06-07', -175, 0, 'candidate', 'none')
+      ('june_food_dupe', 'acct', 'cat_food', NULL, '2026-06-04', -100, 0, 'none', 'confirmed', '2026-06-04', '2026-06-04'),
+      ('june_food_xfer', 'acct', 'cat_food', NULL, '2026-06-06', -250, 0, 'confirmed', 'none', '2026-06-06', '2026-06-06'),
+      ('june_food_xfer_maybe', 'acct', 'cat_food', NULL, '2026-06-07', -175, 0, 'candidate', 'none', '2026-06-07', '2026-06-07')
   `).run();
 
   const after = getMonthlyBudgetsWithProjection(db, 2026, 6, new Date('2026-06-15T12:00:00.000Z'))
@@ -614,8 +544,8 @@ test('budget spend excludes confirmed duplicates and transfers', (t) => {
 
   // Control: an ordinary row on the same day still counts, so the filter isn't dropping everything.
   db.prepare(`
-    INSERT INTO transactions (id, category_id, recurring_id, date, amount, pending, transfer_status, duplicate_status)
-    VALUES ('june_food_real', 'cat_food', NULL, '2026-06-08', -60, 0, 'none', 'none')
+    INSERT INTO transactions (id, account_id, category_id, recurring_id, date, amount, pending, transfer_status, duplicate_status, created_at, updated_at)
+    VALUES ('june_food_real', 'acct', 'cat_food', NULL, '2026-06-08', -60, 0, 'none', 'none', '2026-06-08', '2026-06-08')
   `).run();
 
   const withReal = getMonthlyBudgetsWithProjection(db, 2026, 6, new Date('2026-06-15T12:00:00.000Z'))
