@@ -514,22 +514,22 @@ a model that has no effort ladder is better than one that silently does nothing,
 defect Phase 6.0 removed for Haiku 4.5. A model that cannot cache a large prefix should say what that
 costs before the owner picks it, not after.
 
-- [ ] Provider abstraction over the three call sites, keeping the derive-from-the-model invariant
+- [x] Provider abstraction over the three call sites, keeping the derive-from-the-model invariant
       rather than adding a second source of truth beside it.
-- [ ] Per-provider credentials in `.mizan/credentials.json`, which is already AES-256-GCM encrypted
+- [x] Per-provider credentials in `.mizan/credentials.json`, which is already AES-256-GCM encrypted
       with the key in the OS keychain, so this needs no new secret-handling mechanism. `.env` override
       per provider, matching the existing Coinbase precedent.
-- [ ] Capability table extended with a provider dimension: caching mechanism, thinking, effort,
+- [x] Capability table extended with a provider dimension: caching mechanism, thinking, effort,
       structured output, tool-call shape, context window, output cap.
-- [ ] Degrade legibly. Every surface that exposes a knob asks the table whether the chosen model has
+- [x] Degrade legibly. Every surface that exposes a knob asks the table whether the chosen model has
       it, and says so when it does not.
-- [ ] The worker and the classifier pick per job, per the tiering already in `JOB_MODELS`. Cross-
+- [x] The worker and the classifier pick per job, per the tiering already in `JOB_MODELS`. Cross-
       provider tiering is a feature, not an accident: a cheap classifier on one provider and a
       reasoning model on another is a reasonable thing for the owner to want.
-- [ ] Tests drive the real SDK for each provider against a local server with the base URL pointed at
+- [x] Tests drive the real SDK for each provider against a local server with the base URL pointed at
       it, the way `tests/aiRequestShape.test.ts` already does for Anthropic, so the assertions are on
       the actual outgoing request body rather than on a mock.
-- [ ] **Say what changes.** The financial context is the same for every provider and every figure in
+- [x] **Say what changes.** The financial context is the same for every provider and every figure in
       it must stay true; nothing about the provider abstraction may weaken the "never a claim the code
       did not check" rule, which is currently enforced in prose in `aiContext.ts` and in the schema
       dictionary.
@@ -1081,3 +1081,79 @@ The three dead preference rows are **not yet gone** from the live database. Migr
 formed and runs at next server start; `schema_migrations` tops out at 053 and all three rows are still
 live, including `advisor_auto_apply_high_confidence = true`, which the model can read through
 `run_sql_query`. The code half is clean.
+
+---
+
+## Phase 10, landed 2026-07-31
+
+Two commits: `d34f98d` (SDKs, isolated per the dependency rule) and `d5d926a`. **1,352 tests pass**,
+both typechecks clean, `vite build` succeeds.
+
+Research first, build second: two spikes established what OpenAI and Gemini actually require before
+any interface was designed, because a training prior on any of these three SDKs is stale.
+
+**The seam was already right.** `MODEL_CAPABILITIES` and `buildModelRequestShape()` derive the request
+from the model, and `ADVISOR_MODELS` is derived from the same table. Phase 10 added a provider
+dimension to that table rather than a second source of truth beside it. `providerForModel` throws on
+an unknown id rather than guessing, which matters because all three SDKs widen their model parameter
+to `string`.
+
+**Three genuinely different caching mechanisms behind one interface, without the interface lying about
+any of them:**
+
+| provider | mechanism | minimum | lifetime |
+|---|---|---|---|
+| Anthropic | one `cache_control` breakpoint on the system text | 512 to 4096 tokens by model | 5 minutes |
+| OpenAI | explicit breakpoint on an `input_text` block plus a stable `prompt_cache_key` | 1024 tokens | 30 minutes minimum |
+| Gemini | an explicit cache OBJECT with a lifecycle, created and deleted per request | 4096 tokens | 600s, or until the request ends |
+
+Two things the spikes surfaced that a naive port would have got wrong. OpenAI's
+`prompt_cache_breakpoint` exists on `ResponseInputText` and NOT on anything `instructions` can carry,
+so moving the 18,000-character context into `input[0]` is forced rather than stylistic. And Gemini's
+`caches.create` bills the prefix at the full input rate, so a single round that reads it back once
+pays a write plus a read plus storage where an inline prompt pays one read: the cache is therefore
+built lazily, only on the first round that actually asks for a tool.
+
+**Cache accounting is inverted between providers and copying one line onto another would have
+overstated uncached input by the whole prefix.** Anthropic's `input_tokens` excludes the cache fields;
+OpenAI's `input_tokens` includes `cached_tokens`; Gemini's `promptTokenCount` includes
+`cachedContentTokenCount`. Each adapter reconciles into one `ProviderUsage`, and that reconciliation
+is a test rather than a comment.
+
+**Every surface degrades legibly.** The effort dial renders from the selected MODEL's ladder, so
+Gemini shows three rungs with a sentence saying so and a model with no ladder shows none. Gemini's
+`ThinkingLevel` is MINIMAL/LOW/MEDIUM/HIGH, so `xhigh` and `max` are refused rather than silently
+remapped onto `high`, which is the Phase 6.0 defect exactly. A model whose provider has no key is
+listed and disabled with the missing credential named, because hiding it would make the owner wonder
+where it went.
+
+Keys share the existing AES-256-GCM envelope with the key in the OS keychain. No key is logged,
+returned over the wire, or reachable by the wrong provider. `store: false` on both OpenAI paths keeps
+the financial context off their servers, which their default would not.
+
+### What verification caught
+
+- **Gemini chat usage never accumulated across tool rounds.** `usage = { ...usage, ...readUsage(...) }`
+  overwrites where the other two adapters add. Reproduced on a real two-round chat: reported 1,000
+  uncached input tokens where the truth was 6,000, and after 8 rounds only round 8 counted. **This is
+  the number that decides whether the design is affordable, and it erred by making the cache look
+  about 6x better than it is.** Every Gemini test was single-round.
+  The fix has a second trap in it: Gemini restates a running total per chunk rather than an increment,
+  so summing chunks overcounts. Last-wins within a round, accumulate across rounds, and a test pins
+  both halves.
+- **`ai_runs.model` recorded the compile-time default, not the model the pass called.** With a per-job
+  preference set to an OpenAI model, the request went to OpenAI and the audit row said Anthropic.
+  Migration 051's own header says that column exists so a retiering is visible in the history, and
+  Phase 10 shipped the retiering mechanism it could no longer see. Now resolved once and carried to
+  all three consumers, so there is no second resolution site that can disagree.
+- **The per-job model picker offered models whose provider had no key**, and the job then skipped
+  silently forever: the credential gate returns before the run row is written, so there was no
+  `ai_runs` row, nothing in the digest, nothing on any screen, one `console.log` an hour. The advisor
+  picker already disabled unconfigured models; the job picker did not.
+- **`$ref` and `$defs` were listed as hard errors under Anthropic's structured-output subset. They are
+  documented as supported.** Both propagated into the portable union, so a future schema using either
+  would have been rejected on all three providers for a reason none of them has.
+- The OpenAI reasoning-summary hazard was wider than reported: it hit all three call sites, and on the
+  two non-chat ones the summary was billed and never read.
+- Gemini's caching copy told the owner the cache is "created per conversation and deleted when it
+  ends", which is the wrong cost model for a cache created lazily inside one request.
