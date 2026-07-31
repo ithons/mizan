@@ -57,42 +57,58 @@ export function Select({ value, options, onChange, placeholder, clearable = true
     setOpen(false);
   };
 
+  /**
+   * A key this control consumes stops here.
+   *
+   * React 17+ attaches its listeners to the root container, so a synthetic `stopPropagation` also
+   * stops the native event before it reaches `window`. Screens with bare single-key shortcuts
+   * listen there, and the ledger's `a` and `x` write to the database: typing "am" to reach Amazon
+   * in the category filter must not also accept the AI draft under the ledger's cursor. Only keys
+   * this handler actually acts on are swallowed, so an unhandled key still reaches whoever wants
+   * it, and modified combinations (Cmd+K for the command palette) never enter this path at all.
+   */
+  const consume = (e: React.KeyboardEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+  };
+
   const onKeyDown = (e: React.KeyboardEvent) => {
     if (!open) {
       if (['ArrowDown', 'ArrowUp', 'Enter', ' '].includes(e.key)) {
-        e.preventDefault();
+        consume(e);
         setOpen(true);
       }
       return;
     }
     switch (e.key) {
       case 'ArrowDown':
-        e.preventDefault();
+        consume(e);
         setActiveIndex((i) => Math.min(allOptions.length - 1, i + 1));
         break;
       case 'ArrowUp':
-        e.preventDefault();
+        consume(e);
         setActiveIndex((i) => Math.max(0, i - 1));
         break;
       case 'Home':
-        e.preventDefault();
+        consume(e);
         setActiveIndex(0);
         break;
       case 'End':
-        e.preventDefault();
+        consume(e);
         setActiveIndex(allOptions.length - 1);
         break;
       case 'Enter':
       case ' ':
-        e.preventDefault();
+        consume(e);
         commit(activeIndex);
         break;
       case 'Escape':
-        e.preventDefault();
+        consume(e);
         setOpen(false);
         break;
       default: {
         if (e.key.length !== 1 || e.metaKey || e.ctrlKey || e.altKey) return;
+        consume(e);
         const now = Date.now();
         const t = typeahead.current;
         t.buffer = now - t.at < 500 ? t.buffer + e.key.toLowerCase() : e.key.toLowerCase();
