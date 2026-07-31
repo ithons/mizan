@@ -279,49 +279,49 @@ radius, and does not overwrite a number the owner set.
 Three SDK call sites exist. `routes/ai.ts` is already modern (streaming, adaptive thinking,
 `output_config.effort`, one cache breakpoint). The other two are on the pre-4.6 surface.
 
-- [ ] `aiWorker.ts:160` and `aiCategorySuggest.ts:62` — delete `temperature: 0.1`. A sampling param
+- [x] `aiWorker.ts:160` and `aiCategorySuggest.ts:62` — delete `temperature: 0.1`. A sampling param
       is a 400 on Sonnet 5 and Opus 5; it works today only because both call Haiku 4.5.
-- [ ] `aiWorker.ts:166` and `aiCategorySuggest.ts:75` — `response.content[0]` assumes a text block.
+- [x] `aiWorker.ts:166` and `aiCategorySuggest.ts:75` — `response.content[0]` assumes a text block.
       Both target models run adaptive thinking by default, so `content[0]` becomes a thinking block,
       `rawText` resolves to `''`, and **both paths silently return zero results with no exception**.
       Replace with `content.find(b => b.type === 'text')`. This is the more dangerous of the two
       breaks and it is silent.
-- [ ] `advisorSettings.ts:16-20` — `claude-opus-4-8` becomes `claude-opus-5`. Drop
+- [x] `advisorSettings.ts:16-20` — `claude-opus-4-8` becomes `claude-opus-5`. Drop
       `claude-haiku-4-5`: it is the one entry the unconditional `thinking: {type:'adaptive'}` +
       `output_config.effort` at `ai.ts:372-373` cannot serve.
-- [ ] The real invariant behind that: `ai.ts:372-373` builds `thinking` and `output_config` with no
+- [x] The real invariant behind that: `ai.ts:372-373` builds `thinking` and `output_config` with no
       reference to the model it read at `:344`. A whitelist assertion in a test is not a guard — it
       restates a hardcoded list and a future re-add edits both in one commit, which is exactly how
       033/039/040 decayed. The request shape has to be derived from the model.
-- [ ] `ADVISOR_EFFORTS` extends to `['low','medium','high','xhigh','max']`. Raise `max_tokens`
+- [x] `ADVISOR_EFFORTS` extends to `['low','medium','high','xhigh','max']`. Raise `max_tokens`
       (`ai.ts:369`, currently 8192) — thinking counts against it, and an 8-round tool loop at max
       effort is the same truncation failure already documented for the worker. Update
       `tests/advisorSettings.test.ts:37,40,54` in the same commit.
-- [ ] Handle `stop_reason === 'refusal'` before reading content, at all three sites. Nothing does
+- [x] Handle `stop_reason === 'refusal'` before reading content, at all three sites. Nothing does
       today, and both target models can return 200 with an empty content array.
-- [ ] Set an explicit `timeout` on the client (`anthropicClient.ts:57`). The worker's default
+- [x] Set an explicit `timeout` on the client (`anthropicClient.ts:57`). The worker's default
       10 minutes × 3 attempts blocks every subsequent review pass through the `workerRunning` guard.
-- [ ] Per-job assignment: Sonnet 5 medium as the baseline, Haiku 4.5 for bulk classification and
+- [x] Per-job assignment: Sonnet 5 medium as the baseline, Haiku 4.5 for bulk classification and
       near-lookup work, Opus 5 for self-audit and monthly synthesis.
-- [ ] **Do not** add `cache_control` to the worker. Its prefix is unstable by construction — it
+- [x] **Do not** add `cache_control` to the worker. Its prefix is unstable by construction — it
       interpolates `Last successful sync: <timestamp>`, rewritten by the very sync that fires the
       worker, plus 15 volatile transactions and 20 sync changes. Cache reads would be 0 on every call
       while writes bill 1.25×: a ~25% input-cost increase with no offset.
 
 **6.1 What the model can read.**
 
-- [ ] **`schemaDoc.ts`**: a curated semantic dictionary, versioned in the repo. Per-column units with
+- [x] **`schemaDoc.ts`**: a curated semantic dictionary, versioned in the repo. Per-column units with
       the REAL-dollar price exceptions named as exceptions; sign conventions (liabilities stored
       positive as owed **and now legitimately negative in credit**; refunds are positive rows inside
       expense categories and are not income); the literal text of the spend/income predicates to
       paste; enum meanings (`category_source` NULL means pre-provenance, not zero); time semantics
       (dates are local `yyyy-MM-dd`, `created_at` is ISO UTC, SQLite's `date('now')` is UTC and
       disagrees with our month boundaries, so today's local date is supplied as a literal).
-- [ ] Read-only SQL gets a wall-clock kill and a row cap. It is write-proof but not time-proof; model
+- [x] Read-only SQL gets a wall-clock kill and a row cap. It is write-proof but not time-proof; model
       SQL can currently freeze the single-process app.
-- [ ] New typed read tools: `get_merchant_rules`, `get_my_action_history`, `get_holding_history`,
+- [x] New typed read tools: `get_merchant_rules`, `get_my_action_history`, `get_holding_history`,
       `get_sync_runs`, `get_provenance_summary`, `get_transaction_full`, `get_reconciliation`.
-- [ ] `aiContext` gains the sections it never had: existing rules, provenance distribution (2,412 of
+- [x] `aiContext` gains the sections it never had: existing rules, provenance distribution (2,412 of
       2,579 rows are `category_source` NULL), its own recent actions and their outcomes, the
       reconciliation state, full temporal reach instead of a 3-month average and 15 rows.
 
@@ -593,3 +593,85 @@ accounts permanently.
 None of these were caught by tests, because each implementer's tests asserted that the defect case
 was detected. **What catches them is constructing the healthy case and proving silence.** That is now
 required of every detector and every piece of user-facing copy in this codebase.
+
+---
+
+## Phase 6.0 and 6.1, landed 2026-07-30
+
+Four commits: `83321bc`, `b1147c5`, `6fbc860`, `46e7ca7`. **752 tests pass**, both typechecks clean,
+`vite build` succeeds.
+
+**The request shape is derived from the model now.** `MODEL_CAPABILITIES` records, per model, whether
+it takes adaptive thinking, which effort levels it accepts, and whether it supports structured output.
+`buildModelRequestShape()` builds the request from that table and drops what the model rejects.
+`ADVISOR_MODELS` is derived from the same table, so the whitelist and the capability list cannot
+drift: they are one list. That is the actual invariant. A test asserting the contents of a whitelist
+would only restate a hardcoded list, and a future cost-motivated re-add edits both in one commit,
+which is exactly how migrations 033/039/040 decayed.
+
+Landed with it: `temperature: 0.1` deleted at both sites; `response.content[0]` replaced by a reader
+that takes every text block, so a leading thinking block is no longer mistaken for "no answer";
+`stop_reason === 'refusal'`, an empty content array, and tool-round exhaustion all now say what
+happened instead of returning silently; `claude-opus-4-8` became `claude-opus-5`; effort extended to
+the full five-level ladder; an explicit client timeout, because `workerRunning` turns one hang into
+every later review pass being skipped; and the worker's fence-strip-and-`JSON.parse` replaced by a
+structured output contract, with the Zod schema kept behind it because the JSON schema cannot express
+the cross-field rule that `kind === payload.kind`, and it is the payload that reaches a write path.
+
+The tests drive the **real SDK** against a local server with `ANTHROPIC_BASE_URL` pointed at it, so
+they assert on the actual outgoing request body rather than on a mock.
+
+**`schemaDoc.ts`** is the semantic dictionary: units with the REAL-dollar exceptions named as
+exceptions, sign conventions including a liability that may now be negative, the spend and income
+predicates generated from the real functions so they cannot drift, enum meanings including that
+`category_source` NULL means pre-provenance rather than zero, and the fact that SQLite's `date('now')`
+is UTC and disagrees with this app's month boundaries.
+
+Seven new typed read tools, each a thin wrapper over the service that already owns the aggregate.
+Model-authored SQL got a wall-clock kill and a row cap: it was write-proof but not time-proof, and the
+UI is served from the same process.
+
+**Two figures worth keeping.** `describe_schema` was 34,398 bytes per call and is 25,507, expanding
+only the three tables every spend query reads and naming the rest. `get_merchant_rules` for one
+merchant was 28,160 bytes because it returned all 236 rules; it is 1,136. A tool that returns 8.6k
+tokens when asked anything is a tool the model drowns in.
+
+**`get_transaction_full` was telling the model the wrong thing.** Its `counts_toward_totals` applied
+only `excludedFromTotalsSql` and omitted both `pending = 0` and the category-tree scope exclusion, so
+on the live July it claimed 112 of 120 rows counted when the real figure is 102: the eight $100
+Fidelity contributions, a $780 cash deposit and a $5 Venmo transfer all read as ordinary spend. It now
+evaluates the same generated predicate the doc publishes, and summing only the counted rows
+reproduces `getSpendingReport.total` and the cashflow income exactly.
+
+### The failure mode this round produced, five times
+
+Every one of the four tracks shipped at least one **claim that exceeded what the code checked**:
+
+- a clean bill of health that covered accounts the reconciliation never judged, so connecting a card
+  produced "no account carries an unexplained residual" while never naming it;
+- an investment note that told the model holdings were misfiled whenever an IRA held cash;
+- a sentence explaining a residual's sign that was backwards for two of the three accounts it labels
+  on the live ledger;
+- flow-conservation copy asserting "one side is stored with the wrong sign" as a cause, when the
+  detector establishes only that the rows are same-signed and unpaired;
+- and measured figures baked into a source comment that no re-run could reproduce.
+
+None of these are bugs in the ordinary sense and none would fail a test. They matter because this
+prompt is the model's whole picture of the owner's finances, and a confident false sentence in it is
+worse than an absent one. The rule now: **re-measure any figure you write into a comment, state the
+query beside it, or delete it.**
+
+### Also closed
+
+`rulesOutranking` implemented two of the four keys of the resolution order, so an equal-length rule
+pair could produce a single-rule write that the next whole-ledger re-check reverts, which is the
+self-reverting trap the surrounding comment claimed was impossible. The order now exists once, as a
+comparator, used by both paths. And `countMerchantRuleImpact` was called without the source the rule
+would be written with, so the blast radius the owner is shown ("would relabel N transactions") was
+computed as the wrong author: measured at 5 where the write relabels 0.
+
+**The matcher was not changed, and that is a measured conclusion rather than a dodge.** Over 236 rules
+x 1,297 distinct merchant names, every monotone tightening loses correct matches before it loses the
+Uber Eats false positive: all 113 reverse-containment pairs on this ledger are endorsed by the owner's
+own settled category and none disagree. The fix went where the evidence was instead, into precedence,
+and cost zero correct matches. 18 healthy proposals go from refused to allowed.
