@@ -327,16 +327,16 @@ Three SDK call sites exist. `routes/ai.ts` is already modern (streaming, adaptiv
 
 **6.2 What the model remembers.**
 
-- [ ] **Migration `ai_feedback`.** There is no record anywhere of the AI being wrong.
+- [x] **Migration `ai_feedback`.** There is no record anywhere of the AI being wrong.
       `undoAdvisorAction` writes nothing; `updateTransaction` clears `category_action_id` on a hand
       edit, which protects undo and simultaneously erases the evidence. Written from three call
       sites: undo, manual override (before clearing), draft dismissal. Highest-value single addition
       in the design.
-- [ ] **Migration `ai_memory`** (scope / subject / statement / kind / evidence_count /
+- [x] **Migration `ai_memory`** (scope / subject / statement / kind / evidence_count /
       superseded_by), visible, editable and deletable in Settings, carrying the evidence that
       produced each entry.
-- [ ] **Migrations `ai_runs`, `ai_incidents`, `ai_observations`, `ai_briefs`.**
-- [ ] **Transaction field provenance.** The sync work protected a hand-edited `merchant_name` from
+- [ ] **Migrations `ai_runs`, `ai_incidents`, `ai_observations`, `ai_briefs`.** Moved to 6.3: they only earn their place alongside the job framework and the guard harness that write them.
+- [x] **Transaction field provenance.** The sync work protected a hand-edited `merchant_name` from
       provider overwrite using the row's own pending state and deliberately did not extend that to
       `date` / `amount`: pinning a money field the institution later revises would leave the ledger
       permanently disagreeing with the balance it reconciles against, with nothing on screen saying
@@ -675,3 +675,82 @@ x 1,297 distinct merchant names, every monotone tightening loses correct matches
 Uber Eats false positive: all 113 reverse-containment pairs on this ledger are endorsed by the owner's
 own settled category and none disagree. The fix went where the evidence was instead, into precedence,
 and cost zero correct matches. 18 healthy proposals go from refused to allowed.
+
+---
+
+## Phase 6.2, landed 2026-07-31
+
+Three commits: `86c0017`, `34c8da4`, `89ac355`. **822 tests pass**, both typechecks clean,
+`vite build` succeeds. Migrations 047, 048, 049.
+
+**`ai_feedback` (047).** There was no record anywhere of the AI being wrong, and the reason was
+structural: `undoAdvisorAction` wrote nothing, and `updateTransaction` cleared `category_action_id`
+on a hand edit, which correctly protects undo and simultaneously erases the only evidence that the
+model's answer was rejected. It now records from three sites: undo, manual override (written before
+the clear), and draft dismissal. The row carries the merchant, what the model proposed and what the
+owner chose instead, because a feedback row saying only "wrong" is worth very little. No confidence,
+no score, no accuracy percentage: this is evidence, not a grade, and a test reads `PRAGMA table_info`
+to keep it that way.
+
+`stale` is nullable on purpose, and getting that right took a second pass. The first version computed
+it from `isDraftStillActionable`, which only judges 5 of the 11 draft kinds and whose `default:`
+branch returns "not judged" rather than "live". Six kinds were therefore recording `stale = 0`, which
+migration 047's own header forbids in as many words: "Defaulting that to 0 would assert a check the
+code did not perform." Liveness is now three states, and the six record NULL.
+
+**Transaction field provenance (048).** `date_source` / `amount_source` / `merchant_name_source` plus
+`transaction_field_revisions`, in the shape of migration 042. The requirement was never "let the
+owner pin `amount`": pinning a money field the institution later revises leaves the ledger
+permanently disagreeing with the balance it reconciles against. It is that **when the provider and
+the owner disagree, that is recorded and visible rather than silently resolved either way.** The
+overwrite still happens; the disagreement is now evidence.
+
+This is also what the mis-signed Fidelity rows were waiting on. They still are not corrected, and
+correcting them is now possible rather than indistinguishable from a report.
+
+**`ai_memory` (049)**, visible, editable and deletable in Settings, carried into the prompt marked as
+belief rather than measurement, with `superseded_by` so a belief that changed has a history.
+
+### The validator that was wrong in both directions
+
+The first version refused a statement carrying a derived figure. Verification found it refused
+**"Maxes out the 401(k) before adding anything to the taxable brokerage"** (the pattern matched `401`
+because `(` is a word boundary), along with `529`, `1099`, `403(b)`, "the 1st of each month" and "the
+15th of each month". It accepted **"Spends about four hundred dollars a month on groceries"**,
+"Keeps twelve thousand in the checking buffer" and "Carries 90 in revolving balance". The Settings
+panel told the owner "Amounts, percentages and rates are refused"; the migration header and the panel
+both promised a figure "cannot be read back as current", which `run_sql_query` disproves in one call
+since it has no table allowlist.
+
+**The validator is deleted rather than patched.** No pattern separates a durable disposition from a
+figure that will go stale, and a refusal the owner trusts and that is wrong in both directions is
+worse than none. Staleness is made harmless instead: every memory reaches the prompt with the date it
+was recorded and the observation count behind it, and the section tells the model to read each
+statement as of that date. Every piece of copy claiming a guarantee was rewritten to say what holds.
+
+### Flagged issues, swept
+
+Every item deferred during the rebuild was verified before being fixed, and two turned out to be
+misdescribed:
+
+- **A false sentence on a healthy balance sheet.** `Reports.tsx` computed `payable` by subtracting a
+  subtraction, so on a sheet where cash fully covers the debt `remaining` came back as float dust and
+  the page rendered "$0 would still be owed, with no cash left to reach it". Both halves false.
+  Measured at the owner's own liquid balance: **73,738 of 529,149** whole-cent sheets. The payoff is
+  settled in cents now, and a second reading defect surfaced while fixing it: whole-dollar formatting
+  rendered a 40-cent shortfall as "$0 would still be owed".
+- The two "stale" measured claims in `aiContext` turned out **not** to be stale. Both re-measure
+  exactly. The real error was that one illustrated its point with a figure from a window the function
+  does not cover.
+- The negative-total note's guard was roots-only while the tree prints children, so a window three
+  months from today hands the model `Entertainment / Movies` at -$15.48 with the explanation
+  suppressed. Fixed the guard.
+- `dataQuality` claimed "No account holds a settled transaction" while counting only visible ones.
+- A guard refusal named a category by raw id; `sync-empty` fired forever on a manual-only install;
+  `reconcileAccounts` could not distinguish "skipped" from "absent"; `budgetGroups.test.ts` built its
+  own schema by hand, and it had drifted (REAL where production has been INTEGER cents since
+  migration 022). All fixed. Seven em dashes swept.
+
+**One correction to my own brief:** the concrete example I passed on for the payoff defect
+(liquid $1,000, debt $10) does not reproduce; it returns exactly 0. The defect is real and the
+smallest reproducing pairs are liquid $0.08 / debt $0.01, and at the owner's scale $5,291.49 / $0.03.
