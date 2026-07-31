@@ -8,7 +8,7 @@ import { creditNote, isInCredit, signedAccountBalance } from '../../lib/accountB
 import { ACCOUNT_TYPE_LABELS } from '../../lib/constants';
 import { invalidateFinancialData } from '../../lib/queryInvalidation';
 import { useAppStore } from '../../store';
-import { Screen, ScreenHeader, SectionLabel, Row, TextButton, TrendChart } from '../../components/balance';
+import { Screen, ScreenHeader, SectionLabel, Card, Figure, Row, TextButton, TrendChart } from '../../components/balance';
 import { ConfirmRemoveModal } from '../../components/ConfirmRemoveModal';
 import { SkeletonRows } from '../../components/SkeletonLoader';
 import { AddManualAccountModal, EditAccountModal, MergeAccountModal } from './Modals';
@@ -76,8 +76,16 @@ export function Accounts() {
     queryFn: () => networthApi.history(12),
     retry: false,
   });
+  // `covered_accounts` is NULL on rows written before migration 044, and undefined there rather
+  // than zero: the chart draws a coverage change only where it has two counts to compare.
   const netWorthHistory = useMemo(
-    () => (snapshots ?? []).map((s) => ({ date: s.date, value: s.net_worth, estimated: Boolean(s.is_estimated) })),
+    () =>
+      (snapshots ?? []).map((s) => ({
+        date: s.date,
+        value: s.net_worth,
+        estimated: Boolean(s.is_estimated),
+        coverage: s.covered_accounts ?? undefined,
+      })),
     [snapshots]
   );
   const { data: syncHealth } = useQuery({ queryKey: ['sync', 'health'], queryFn: () => syncApi.health(), retry: false });
@@ -105,7 +113,7 @@ export function Accounts() {
   const visible = useMemo(() => (accounts ?? []).filter((a) => !a.is_hidden), [accounts]);
   const hidden = useMemo(() => (accounts ?? []).filter((a) => a.is_hidden), [accounts]);
   // Closed accounts stay in net-worth HISTORY but are kept out of the live sections and the
-  // current net-worth totals — surfaced in their own collapsed section instead.
+  // current net-worth totals, and surfaced in their own collapsed section instead.
   const closed = useMemo(() => visible.filter((a) => a.type === 'closed'), [visible]);
   const liveVisible = useMemo(() => visible.filter((a) => a.type !== 'closed'), [visible]);
 
@@ -211,34 +219,45 @@ export function Accounts() {
         className="mb-6"
       />
 
-      {/* 3-up summary */}
-      <div className="mb-6 grid flex-shrink-0 grid-cols-3 gap-3 lg:gap-4">
-        {[
-          { label: 'Assets', value: assets, tone: 'text-ink', note: null },
-          {
-            // Negated, so debt keeps reading as the subtraction it is. A net credit then comes out
-            // positive, which is exactly what it is, and the note underneath says which it is.
-            label: 'Liabilities',
-            value: -owed,
-            tone: owed > 0 ? 'text-clay' : owed < 0 ? 'text-sage-deep' : 'text-ink',
-            note: owed < 0 ? 'In credit' : null,
-          },
-          { label: 'Net worth', value: netWorth, tone: 'text-ink', note: null },
-        ].map((s) => (
-          <div key={s.label} className="rounded-xl border border-line-2 bg-card shadow-e1 p-4">
-            <div className="text-note text-muted">{s.label}</div>
-            <div className={`mt-1.5 font-serif text-figure leading-tight tabular-nums ${s.tone}`}>
-              {formatWholeCurrency(s.value)}
-            </div>
-            {s.note && <div className="mt-1 text-rule uppercase tracking-[0.09em] text-sage-deep">{s.note}</div>}
-          </div>
-        ))}
+      {/* Net worth is the subject; assets and liabilities are the two terms it is made of. */}
+      <div className="mb-8 flex-shrink-0 space-y-3 lg:space-y-4">
+        <Card padding="lg" elevation={2}>
+          <Figure scale="subject" label="Net worth">{formatWholeCurrency(netWorth)}</Figure>
+        </Card>
+        <div className="grid gap-3 sm:grid-cols-2 lg:gap-4">
+          <Card padding="lg">
+            <Figure scale="lead" label="Assets">{formatWholeCurrency(assets)}</Figure>
+          </Card>
+          <Card padding="lg">
+            {/* `owed` is a NET over liabilities, so it can land either side of zero and the word
+                above it cannot be hardcoded. Individual cards in credit are not enough to flip it:
+                on this ledger three of the five cards are in credit and the net is still owed,
+                because one card outweighs all three.
+
+                  sqlite3 .mizan/mizan.db "select account_name, current_balance from accounts
+                    where is_liability=1 and is_hidden=0 and type!='closed';"
+                  -> Chase Freedom Flex -27612 · Chase Sapphire 511502 · BofA Cash Rewards -582
+                     Capital One Savor 888 · Discover -56326        sum = 427870 cents
+
+                So today this renders "Liabilities $4,278.70 / you owe the banks". The label and the
+                state sentence are computed rather than written because the sign is the one thing
+                the eye skips, and the case where it flips is real. */}
+            <Figure
+              scale="lead"
+              label={owed < 0 ? 'Card credit' : 'Liabilities'}
+              value={-owed}
+              states={{ positive: 'the banks owe you', negative: 'you owe the banks', zero: 'nothing outstanding' }}
+            >
+              {formatWholeCurrency(Math.abs(owed))}
+            </Figure>
+          </Card>
+        </div>
       </div>
 
       {netWorthHistory.length >= 2 && (
         <div className="mb-8 flex-shrink-0">
           <SectionLabel className="mb-2">Net worth · last 12 months</SectionLabel>
-          <TrendChart history={netWorthHistory} height={90} />
+          <TrendChart history={netWorthHistory} height={90} label="Net worth" />
         </div>
       )}
 
@@ -301,17 +320,19 @@ export function Accounts() {
         {selected && (
           <div className="w-full flex-shrink-0 self-start border-t border-line-2 pt-6 lg:sticky lg:top-6 lg:w-[300px] lg:border-t-0 lg:pt-0">
             <div className="mb-4 flex items-baseline justify-between">
-              <span className="font-serif text-title text-ink">{selected.account_name}</span>
+              <span className="text-micro font-semibold uppercase tracking-[0.16em] text-muted-2">
+                {selected.account_name}
+              </span>
             </div>
-            <div className={`font-serif text-display tabular-nums ${balanceTone(selected)}`}>
+            <div className={`font-serif text-hero font-light leading-none tabular-nums ${balanceTone(selected)}`}>
               {formatWholeCurrency(signedAccountBalance(selected))}
             </div>
             {isInCredit(selected) && (
-              <div className="mt-1 text-note text-sage-deep">{creditNote(selected)}</div>
+              <div className="mt-2 text-note text-sage-deep">{creditNote(selected)}</div>
             )}
             <div className="mt-6">
               {[
-                { label: 'Institution', value: selected.institution_name || '—' },
+                { label: 'Institution', value: selected.institution_name || '–' },
                 { label: 'Type', value: ACCOUNT_TYPE_LABELS[selected.type] ?? selected.type },
                 { label: 'Connection', value: CONNECTION_LABELS[selected.connection_type] ?? 'Manual' },
                 { label: 'Updated', value: formatCompactRelative(selected.updated_at) },
@@ -327,7 +348,7 @@ export function Accounts() {
             </div>
             <div className="mt-6 flex flex-col items-start gap-3">
               <TextButton variant="primary" onClick={() => navigate(`/accounts/${selected.id}`)}>
-                View details →
+                View details
               </TextButton>
               <TextButton onClick={() => setEditing(selected)}>Edit account</TextButton>
               <TextButton onClick={() => toggleHidden.mutate(selected)}>

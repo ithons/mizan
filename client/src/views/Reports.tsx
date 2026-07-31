@@ -5,12 +5,19 @@ import { networthApi, reportsApi } from '../lib/api';
 import { readOwedTotal } from '../lib/accountBalance';
 import { ASSET_COLORS } from '../lib/chartColors';
 import { formatCurrency, formatWholeCurrency } from '../lib/formatters';
-import { Screen, ScreenHeader, SectionLabel, Select, TrendChart } from '../components/balance';
+import {
+  Screen, ScreenHeader, SectionLabel, Figure, Select, SignedBar, signedBarScale,
+  bySignedMagnitude, TrendChart,
+} from '../components/balance';
 import { QueryState } from '../components/QueryState';
 import type { NetWorthSnapshot, ReportComparisonMode, ReportMetricSummary } from '@shared/types';
 
-const LIABILITY_COLOR = '#b5654a'; // clay
-const INCOME_COLOR = '#5c7050'; // deep sage
+// Tokens, not hexes: `#b5654a` and `#5c7050` were light-theme literals that stayed put when the
+// ground went dark. These two are semantic rather than categorical -- liabilities and income are
+// the negative and positive poles this palette already names -- so they route to clay and sage
+// rather than to a slot in the categorical ramp.
+const LIABILITY_COLOR = 'var(--mz-clay-scale)';
+const INCOME_COLOR = 'var(--mz-sage-deep)';
 const [LIQUID_COLOR, EQUITY_COLOR, CRYPTO_COLOR, OTHER_COLOR] = ASSET_COLORS;
 
 const RANGES = [
@@ -184,13 +191,13 @@ function Metric({
   const fmt = (v: number) => (isPercent ? `${Math.round(v)}%` : formatWholeCurrency(v));
   return (
     <div>
-      <div className="text-note uppercase tracking-[0.12em] text-muted-2">{label}</div>
-      <div className="mt-1 font-serif text-figure text-ink tabular-nums">
-        {m.current === null ? <span className="text-muted">not yet</span> : fmt(m.current)}
+      <div className="mb-1.5 text-micro font-semibold uppercase tracking-[0.16em] text-muted-2">{label}</div>
+      <div className="font-serif text-display font-light leading-none text-ink tabular-nums">
+        {m.current === null ? <span className="text-body text-muted">not yet</span> : fmt(m.current)}
       </div>
       {m.delta !== null && m.delta !== 0 && (
         <div className={`mt-0.5 text-note tabular-nums ${good ? 'text-sage-deep' : 'text-clay'}`}>
-          {up ? '▲' : '▼'} {fmt(Math.abs(m.delta))}
+          {up ? '↑' : '↓'} {fmt(Math.abs(m.delta))}
         </div>
       )}
     </div>
@@ -261,13 +268,29 @@ export function Reports() {
     .sort((a, b) => b.sum - a.sum)
     .slice(0, 6);
 
-  const trendPoints = (history ?? []).map((s) => ({ date: s.date, value: s.net_worth, estimated: Boolean(s.is_estimated) }));
+  // `covered_accounts` is NULL on rows written before migration 044, and undefined there rather
+  // than zero: the chart draws a coverage change only where it has two counts to compare.
+  const trendPoints = (history ?? []).map((s) => ({
+    date: s.date,
+    value: s.net_worth,
+    estimated: Boolean(s.is_estimated),
+    coverage: s.covered_accounts ?? undefined,
+  }));
   const cashflowMax = Math.max(1, ...(cashflow?.months ?? []).flatMap((m) => [m.income, m.expenses]));
   // Show every category (previously capped at 8 with no way to see the rest, so the user could not
   // see their own spending breakdown, including the Uncategorized bucket).
-  const allSpending = spending?.categories ?? [];
-  const topSpending = showAllSpending ? allSpending : allSpending.slice(0, 8);
-  const spendingMax = Math.max(1, ...allSpending.map((c) => c.amount));
+  // Signed, and ordered accordingly. A category whose refunds outweigh its purchases comes back
+  // negative (July 2026 Shopping is -$1,203.63), so amount-descending buries the single largest
+  // movement of money at the bottom of a list headed "Spending by category". Spend ranks first,
+  // credits follow, and both are always shown regardless of the top-8 cut: a credit is never one
+  // of the eight largest expenses and would otherwise be invisible until the list was expanded.
+  const allSpending = [...(spending?.categories ?? [])].sort((a, b) => bySignedMagnitude(a.amount, b.amount));
+  const spendCategories = allSpending.filter((c) => c.amount >= 0);
+  const creditCategories = allSpending.filter((c) => c.amount < 0);
+  const topSpending = showAllSpending
+    ? allSpending
+    : [...spendCategories.slice(0, 8), ...creditCategories];
+  const spendingScale = signedBarScale(topSpending.map((c) => c.amount));
 
   return (
     <Screen size="wide" contained>
@@ -291,10 +314,10 @@ export function Reports() {
             label="net worth"
           >
             {snapshot && (
-              <div className="mb-3 font-serif text-display text-ink tabular-nums">{formatWholeCurrency(snapshot.net_worth)}</div>
+              <Figure scale="subject" className="mb-4">{formatWholeCurrency(snapshot.net_worth)}</Figure>
             )}
             {trendPoints.length >= 2
-              ? <TrendChart history={trendPoints} height={140} />
+              ? <TrendChart history={trendPoints} height={140} label="Net worth" />
               : <p className="text-body text-muted-2">Not enough snapshots yet for a trend; they accrue as you sync.</p>}
           </QueryState>
         </section>
@@ -442,15 +465,22 @@ export function Reports() {
                     <div key={c.category_id}>
                       <div className="mb-1 flex items-baseline justify-between text-body">
                         <span className="text-ink">{c.category_name}</span>
-                        <span className="tabular-nums text-muted">{formatWholeCurrency(c.amount)}</span>
+                        <span className={`tabular-nums ${c.amount < 0 ? 'text-sage-deep' : 'text-muted'}`}>
+                          {formatWholeCurrency(c.amount)}
+                        </span>
                       </div>
-                      <div className="h-4 w-full overflow-hidden rounded bg-rail">
-                        <div className="h-full" style={{ width: `${(c.amount / spendingMax) * 100}%`, background: c.color ?? LIQUID_COLOR }} />
-                      </div>
+                      <SignedBar value={c.amount} {...spendingScale} height={8} />
                     </div>
                   ))}
                 </div>
-                {allSpending.length > 8 && (
+                {creditCategories.length > 0 && (
+                  <p className="mt-3 text-note text-muted">
+                    {creditCategories.length === 1 ? 'One category is' : `${creditCategories.length} categories are`}{' '}
+                    net positive for this period: refunds and credits there outweighed the purchases, so the bar runs
+                    left of the zero rule.
+                  </p>
+                )}
+                {spendCategories.length > 8 && (
                   <button
                     type="button"
                     onClick={() => setShowAllSpending((v) => !v)}
@@ -490,7 +520,7 @@ export function Reports() {
                         <CategorySparkline values={s.values} color={s.color ?? LIQUID_COLOR} />
                         {delta !== 0 && (
                           <div className={`mt-1 text-note tabular-nums ${delta > 0 ? 'text-clay' : 'text-sage-deep'}`}>
-                            {delta > 0 ? '▲' : '▼'} {formatWholeCurrency(Math.abs(delta))} vs prior month
+                            {delta > 0 ? '↑' : '↓'} {formatWholeCurrency(Math.abs(delta))} vs prior month
                           </div>
                         )}
                       </div>
@@ -498,7 +528,7 @@ export function Reports() {
                   })}
                 </div>
                 <p className="mt-3 text-micro text-muted-2">
-                  {trends?.months[0]} → {trends?.months[trends.months.length - 1]}
+                  {trends?.months[0]} – {trends?.months[trends.months.length - 1]}
                 </p>
               </>
             ) : <p className="text-body text-muted-2">No categorized spending in the last {TREND_MONTHS} months.</p>}

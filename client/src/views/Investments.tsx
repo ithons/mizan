@@ -84,7 +84,7 @@ function HoldingModal({ holding, accountName, onClose }: { holding: Holding | nu
             {accountName ?? 'Investment account'} · {holding.quantity.toLocaleString('en-US', { maximumFractionDigits: 4 })} share
             {holding.quantity === 1 ? '' : 's'} @ {formatWholeCurrency(holding.institution_price)}
           </span>
-          <span className="font-serif text-figure tabular-nums text-ink">{formatWholeCurrency(holding.institution_value)}</span>
+          <span className="font-serif text-display font-light leading-none tabular-nums text-ink">{formatWholeCurrency(holding.institution_value)}</span>
         </div>
         {gain && (
           <div className={`text-body tabular-nums ${gain.gain >= 0 ? 'text-sage-deep' : 'text-clay'}`}>
@@ -151,7 +151,7 @@ export function Investments() {
 
   const allHoldings = holdings ?? [];
   const holdingsValue = allHoldings.reduce((s, h) => s + h.institution_value, 0);
-  // The institution's own account balance is the trusted total — it's what net worth and the
+  // The institution's own account balance is the trusted total: it's what net worth and the
   // snapshot-based trend below use. A provider's holdings list can sum to a slightly different
   // number than the balance it reports for the same account (e.g. a money-market sweep that
   // hasn't settled), so the headline uses the account balance and any gap is surfaced, rather
@@ -183,13 +183,13 @@ export function Investments() {
       <QueryErrorBanner items={failableQueries} className="mb-5" />
       <div className="mb-3 flex flex-shrink-0 items-end justify-between">
         <div>
-          <h1 className="font-serif text-display font-normal leading-tight text-ink">Investments</h1>
+          <h1 className="font-serif text-title font-normal leading-tight text-ink">Investments</h1>
           <div className="mt-1 text-body text-muted">
             {stats.unrealized != null ? (
               <>
                 Cost basis <span className="tabular-nums">{formatWholeCurrency(stats.knownCostBasis)}</span> ·{' '}
                 <span className={stats.unrealized >= 0 ? 'text-sage-deep' : 'text-clay'}>
-                  {stats.unrealized >= 0 ? '▲' : '▼'} {formatWholeCurrency(Math.abs(stats.unrealized))}
+                  {stats.unrealized >= 0 ? '↑' : '↓'} {formatWholeCurrency(Math.abs(stats.unrealized))}
                   {stats.returnPct != null && <> · {formatPercent(Math.abs(stats.returnPct))}</>}
                 </span>
                 {stats.missingCount > 0 && <> · basis missing on {stats.missingCount}</>}
@@ -202,8 +202,11 @@ export function Investments() {
         <div className="text-right">
           <div className="font-serif text-hero-lg font-light leading-none tabular-nums text-ink">{formatWholeCurrency(marketValue)}</div>
           {dayChange != null && (
-            <div className={`mt-1.5 text-body tabular-nums ${dayChange >= 0 ? 'text-sage' : 'text-clay'}`}>
-              {dayChange >= 0 ? '▲' : '▼'} {formatWholeCurrency(Math.abs(dayChange))} since last snapshot
+            // `sage-deep`, not `sage`: this is a money numeral on the paper ground, where sage
+            // measures 3.91:1 and fails AA for text. sage-deep is 4.93 light and 8.38 dark, which
+            // is what every other positive numeral in this view already uses.
+            <div className={`mt-1.5 text-body tabular-nums ${dayChange >= 0 ? 'text-sage-deep' : 'text-clay'}`}>
+              {dayChange >= 0 ? '↑' : '↓'} {formatWholeCurrency(Math.abs(dayChange))} since last snapshot
             </div>
           )}
         </div>
@@ -223,8 +226,13 @@ export function Investments() {
             </button>
           ))}
         </div>
+        {/*
+          No coverage is passed to the chart: `/api/reports/investments` serves date, value and
+          estimated only, and the whole-sheet `covered_accounts` counts accounts this series does
+          not draw, so handing it over would be a claim about the portfolio nothing here checked.
+        */}
         {history.length >= 2 ? (
-          <TrendChart history={history} />
+          <TrendChart history={history} label="Portfolio value" />
         ) : (
           <div className="flex h-[120px] items-center text-body text-muted-2">
             Portfolio history builds up from daily net worth snapshots as syncs run.
