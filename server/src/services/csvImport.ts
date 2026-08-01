@@ -265,11 +265,28 @@ export function commitCsvImport(
       const amountCents = toCents(row.amount);
       const originalName = row.original_name;
       const importRow = db.transaction(() => {
+        // NO AUTHOR MARKERS HERE, deliberately, and it is not an oversight left over from before
+        // migration 041. `manually_categorized = 1` and `category_source = 'human'` are read by
+        // four other queries as "the owner adjudicated THIS ROW", and a mapped column is one
+        // decision about a file, not a decision about each of its rows. Setting them here cost a
+        // detector: `transferCandidateRows` (transactionIntegrity.ts) gates on exactly that pair,
+        // so every imported row carrying a category went invisible to transfer pairing, and
+        // `applyMerchantRulesToExistingTransactions` / `recategorizeAll` (rules.ts) skip the same
+        // rows, so a rule the owner writes later would not sweep their imported history. On a copy
+        // of .mizan/mizan.db at migration 054, 2026-07-31, 4 of the 22 standing transfer pairs
+        // contain an imported leg and all 2,198 imported rows carry a category:
+        //   SELECT transfer_pair_id, group_concat(source_type) FROM transactions
+        //    WHERE transfer_pair_id IS NOT NULL GROUP BY 1;
+        //   SELECT source_type, COUNT(*), SUM(category_id IS NOT NULL) FROM transactions GROUP BY 1;
+        // Where the row came from is recorded, and it is recorded by the columns that mean it:
+        // `source_type = 'import'` and `is_manual = 1`. `review_status` is the one thing this path
+        // can say about the owner's attention, because they previewed the file and confirmed it.
         db.prepare(`
           INSERT INTO transactions
             (id, account_id, date, amount, merchant_name, original_name,
-             category_id, pending, notes, is_manual, source_type, created_at, updated_at)
-          VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, 1, 'import', ?, ?)
+             category_id, review_status,
+             pending, notes, is_manual, source_type, created_at, updated_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, 1, 'import', ?, ?)
         `).run(
           uuidv4(),
           accountId,
@@ -278,6 +295,7 @@ export function commitCsvImport(
           row.merchant_name,
           originalName,
           row.category_id,
+          row.category_id ? 'reviewed' : 'open',
           row.notes,
           now,
           now

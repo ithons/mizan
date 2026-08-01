@@ -570,6 +570,23 @@ export interface SyncHealthConnection {
   recommended_action: SyncHealthRecommendedAction;
 }
 
+/**
+ * The last sync run that reached a terminal state, read from `sync_runs`.
+ *
+ * It is on this payload because "did the run that wrote the current figures finish?" is a fact
+ * about the database, and the only place it was previously readable was the live SSE event, which
+ * exists for the length of one page session. A reload cleared it, so a balance sheet written by a
+ * partial run read as fully calibrated from then on.
+ */
+export interface SyncHealthLastRun {
+  id: string;
+  status: SyncRunStatus;
+  completed_at?: string | null;
+  message?: string | null;
+  /** The run ended 'partial' or 'failed': at least one stage did not complete. */
+  incomplete: boolean;
+}
+
 export interface SyncHealth {
   status: SyncHealthStatus;
   status_label: string;
@@ -580,6 +597,8 @@ export interface SyncHealth {
   fresh_count: number;
   never_synced_count: number;
   last_synced_at?: string | null;
+  /** Null when no run has finished yet. Never inferred from connection state. */
+  last_run: SyncHealthLastRun | null;
   connections: SyncHealthConnection[];
 }
 

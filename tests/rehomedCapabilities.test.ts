@@ -413,7 +413,17 @@ function renderLedger(transactions: Transaction[], drafts: AdvisorDraftAction[] 
   };
   const review: TransactionReviewSummary = {
     total_open: transactions.length,
-    queues: [{ id: 'uncategorized', label: 'Needs a category', count: 1, route: '/ledger' }],
+    // No `route`: the destination of a queue is the client's, not the server's. `QUEUE_DESTINATIONS`
+    // in views/Instrument.tsx is keyed exhaustively on TransactionReviewQueueId, so a new queue with
+    // nowhere to go is a compile error there rather than a dead row here. These four fields are what
+    // getTransactionReviewSummary actually publishes for this queue.
+    queues: [{
+      id: 'uncategorized',
+      label: 'Needs a category',
+      count: 1,
+      action_label: 'Review',
+      severity: 'attention',
+    }],
     rule_suggestions: [],
     recurring_candidates: [],
     duplicate_candidates: [],

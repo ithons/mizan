@@ -594,7 +594,10 @@ function conservationBreach(report: GuardedBatchReport<unknown>): AiJobInvariant
   if (report.status === 'clean') return null;
   const headlines = report.breaches.map((b) => `${b.headline}: ${b.detail}`).join(' ');
   const takenBack = [`${report.reverted_rows} category write(s)`];
-  if (report.reverted_rules > 0) takenBack.push(`${report.reverted_rules} rule retirement(s)`);
+  // "rule write(s)", not "rule retirement(s)": the harness takes back every operation the batch
+  // appended to `merchant_rule_revisions`, so this count can be a creation retired away as well as
+  // a retirement un-retired, and naming one of them would be a claim about which it was.
+  if (report.reverted_rules > 0) takenBack.push(`${report.reverted_rules} merchant rule write(s)`);
   const outcome = report.status === 'reverted'
     ? `the pass was reverted whole (${takenBack.join(' and ')} taken back)`
     : 'the revert did NOT run and the pass is still applied';

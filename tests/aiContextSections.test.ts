@@ -583,7 +583,7 @@ test('a category driven negative by refunds is explained, and an ordinary month 
   const plainCategory = insertCategory(ordinary, { name: 'Shopping Test' });
   insertTransaction(ordinary, { account_id: plainAccount, date: daysAgo(2), amount: -5000, category_id: plainCategory });
   const ordinaryContext = buildFinancialContext();
-  assert.match(ordinaryContext, /### Top Spending/);
+  assert.match(ordinaryContext, /### Category Movement/);
   assert.doesNotMatch(ordinaryContext, /refunds and credits exceeded purchases/);
   ordinary.close();
 
@@ -666,5 +666,190 @@ test('recent transactions carry the provenance of their category', () => {
   // No recorded source means no tag, and the legend says so rather than leaving it to be guessed.
   assert.match(context, /Dunkin - -\$5\.45 \(Coffee Test\)$/m);
   assert.match(context, /No tag means no provenance was recorded/);
+  db.close();
+});
+
+/* ── The category list the model reads, and what its ordering used to hide ──── */
+
+/**
+ * `ORDER BY total DESC LIMIT 8` over a SIGNED total is a filter on sign, not a ranking by size.
+ *
+ * A category whose refunds exceeded its purchases sorts below every ordinary one, so the cut
+ * removed exactly the rows the note underneath the list existed to explain, and the note was
+ * guarded on the already-sliced array so it could not fire either. Measured 2026-07-31 against a
+ * copy of `.mizan/mizan.db` at migration 054, for 2026-07-01 onward, the ten categories with
+ * activity ranked signed-descending were Food & Drink 73160, Travel 49625, Transport 41614,
+ * Subscriptions 16271, Pets 14029, Entertainment 9622, Health 8257, Home 1584, Transfers -97500,
+ * Shopping -102863. The eight printed summed to $2,141.62 under a Report Summary line reading
+ * "Spending: $1,112.99", and the largest single category movement of the month was not on the page.
+ */
+
+/** A day inside the current month that is never in the future, so the window always holds it. */
+function thisMonth(day: number): string {
+  const now = new Date();
+  const clamped = Math.min(day, now.getDate());
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(clamped).padStart(2, '0')}`;
+}
+
+function movementSection(context: string): string {
+  return context.split('### Category Movement')[1]?.split('\n###')[0] ?? '';
+}
+
+test('a net-refund category is not ranked off the list, however far negative it goes', () => {
+  const db = migratedTestDb();
+  _setDbForTesting(db);
+  const account = insertAccount(db, { type: 'checking', current_balance: 500000 });
+
+  // Eight ordinary categories, each larger than the last, plus one driven far negative. Under the
+  // old ordering the ninth could not survive a LIMIT 8 no matter how large its movement.
+  const ordinary = ['cat_food', 'cat_travel', 'cat_transport', 'cat_subscriptions', 'cat_pets', 'cat_ent', 'cat_health', 'cat_home'];
+  ordinary.forEach((category, index) => {
+    insertTransaction(db, { account_id: account, date: thisMonth(2), amount: -(index + 1) * 1000, category_id: category });
+  });
+  insertTransaction(db, { account_id: account, date: thisMonth(3), amount: -102_459, category_id: 'cat_shop' });
+  insertTransaction(db, { account_id: account, date: thisMonth(4), amount: 205_322, category_id: 'cat_shop' });
+
+  const section = movementSection(buildFinancialContext());
+  assert.match(section, /Shopping: -\$1,028\.63/, 'the largest movement of the month must be on the page');
+  assert.match(section, /refunds and credits exceeded purchases/);
+  db.close();
+});
+
+test('HEALTHY: an ordinary month carries no refund note and leaves nothing off', () => {
+  const db = migratedTestDb();
+  _setDbForTesting(db);
+  const account = insertAccount(db, { type: 'checking', current_balance: 500000 });
+  insertTransaction(db, { account_id: account, date: thisMonth(2), amount: -5_000, category_id: 'cat_food' });
+  insertTransaction(db, { account_id: account, date: thisMonth(3), amount: -2_500, category_id: 'cat_shop' });
+
+  const section = movementSection(buildFinancialContext());
+  assert.match(section, /Food & Drink: \$50\.00/);
+  assert.doesNotMatch(section, /refunds and credits exceeded purchases/);
+  assert.doesNotMatch(section, /not listed/);
+  db.close();
+});
+
+test('what is left off is counted and totalled rather than cut', () => {
+  const db = migratedTestDb();
+  _setDbForTesting(db);
+  const account = insertAccount(db, { type: 'checking', current_balance: 500000 });
+  const categories = ['cat_food', 'cat_travel', 'cat_transport', 'cat_subscriptions', 'cat_pets', 'cat_ent', 'cat_health', 'cat_home', 'cat_shop', 'cat_personal_care'];
+  categories.forEach((category, index) => {
+    insertTransaction(db, { account_id: account, date: thisMonth(2), amount: -(index + 1) * 1000, category_id: category });
+  });
+
+  const section = movementSection(buildFinancialContext());
+  // The two smallest of ten: $10.00 and $20.00.
+  assert.match(section, /2 smaller categories are not listed, together \$30\.00\./);
+  db.close();
+});
+
+test('the list covers the same rows as the Spending figure printed above it', () => {
+  const db = migratedTestDb();
+  _setDbForTesting(db);
+  const account = insertAccount(db, { type: 'checking', current_balance: 500000 });
+  insertTransaction(db, { account_id: account, date: thisMonth(2), amount: -73_160, category_id: 'cat_food' });
+  insertTransaction(db, { account_id: account, date: thisMonth(3), amount: -102_459, category_id: 'cat_shop' });
+  insertTransaction(db, { account_id: account, date: thisMonth(4), amount: 205_322, category_id: 'cat_shop' });
+  // A transfer, which Report Summary excludes. The old SQL did not, so the two lists differed by
+  // exactly this row on top of everything the ordering dropped.
+  insertTransaction(db, { account_id: account, date: thisMonth(5), amount: -97_500, category_id: 'cat_xfer_out' });
+
+  const context = buildFinancialContext();
+  const spending = /Spending: (-?\$[\d,]+\.\d\d)/.exec(context)?.[1];
+  const section = movementSection(context);
+
+  assert.equal(spending, '-$297.03', 'Food $731.60 less Shopping $1,028.63, transfer excluded');
+  assert.match(section, new RegExp(`they sum to the Spending figure there: ${spending?.replace(/[$.]/g, (c) => `\\${c}`)}`));
+  assert.doesNotMatch(section, /Transfers/, 'a transfer is not spending on either surface');
+  db.close();
+});
+
+/**
+ * ONE DEFINITION OF BUDGET USAGE, AND IT IS THE ONE /plan RENDERS.
+ *
+ * The Category Movement line used to compute its own: a query selecting `b.amount` keyed by
+ * `COALESCE(parent name, name)`, looked up by the ROOT category name `getSpendingReport` returns.
+ * So a budget set on a CHILD was printed against its whole parent's spend, two budgets under one
+ * parent collapsed to whichever the Map saw last, and `rollover_balance` was ignored, while
+ * `getMonthlyBudgetsWithProjection` rolls a budget's own descendants up and adds rollover. The
+ * model read a percentage /plan does not render. It reads /plan's now.
+ */
+function budgetOn(db: Database.Database, categoryId: string, amountCents: number, rolloverCents = 0): void {
+  db.prepare(`
+    INSERT INTO budgets (id, category_id, amount, period, rollover, rollover_balance, created_at, updated_at)
+    VALUES (?, ?, ?, 'monthly', ?, ?, ?, ?)
+  `).run(`bud_${categoryId}`, categoryId, amountCents, rolloverCents === 0 ? 0 : 1, rolloverCents, TEST_NOW, TEST_NOW);
+}
+
+test('a budget set on a child category is not compared against its whole parent', () => {
+  const db = migratedTestDb();
+  _setDbForTesting(db);
+  const account = insertAccount(db, { type: 'checking', current_balance: 500000 });
+  const parent = insertCategory(db, { name: 'Leisure Test' });
+  const child = insertCategory(db, { name: 'Concerts Test', parent_id: parent });
+  const sibling = insertCategory(db, { name: 'Cinema Test', parent_id: parent });
+
+  budgetOn(db, child, 10000);
+  insertTransaction(db, { account_id: account, date: daysAgo(2), amount: -5000, category_id: child });
+  // The sibling's spend belongs to the parent's movement total and to no budget at all.
+  insertTransaction(db, { account_id: account, date: daysAgo(1), amount: -40000, category_id: sibling });
+
+  const context = buildFinancialContext();
+  const section = context.split('### Category Movement')[1] ?? '';
+  assert.match(section, /Leisure Test: \$450\.00/, 'the movement total is still the parent root');
+  // The budget is the child's $100.00 against the child's $50.00, which is what /plan shows.
+  // Keyed by parent name against the parent's $450.00 it read 450%, on a budget covering none of it.
+  assert.doesNotMatch(section, /450%/);
+  assert.doesNotMatch(section, /budget on this category/, 'the parent carries no budget of its own');
+
+  db.close();
+});
+
+test('a budget with rollover is stated against the amount available, the way /plan states it', () => {
+  const db = migratedTestDb();
+  _setDbForTesting(db);
+  const account = insertAccount(db, { type: 'checking', current_balance: 500000 });
+  const category = insertCategory(db, { name: 'Groceries Test' });
+  budgetOn(db, category, 20000, 10000);
+  insertTransaction(db, { account_id: account, date: daysAgo(2), amount: -15000, category_id: category });
+
+  const context = buildFinancialContext();
+  const section = context.split('### Category Movement')[1] ?? '';
+  // $150.00 of $300.00 available ($200.00 budget + $100.00 carried), which is 50%. Over the bare
+  // $200.00 the old expression read 75% on a budget the owner is nowhere near.
+  assert.match(section, /budget on this category: \$150\.00 spent of \$300\.00 \(50%\)/);
+  assert.doesNotMatch(section, /75%/);
+
+  db.close();
+});
+
+test('HEALTHY: an ordinary budget on a root category reads exactly as it always did', () => {
+  const db = migratedTestDb();
+  _setDbForTesting(db);
+  const account = insertAccount(db, { type: 'checking', current_balance: 500000 });
+  const category = insertCategory(db, { name: 'Transport Test' });
+  budgetOn(db, category, 20000);
+  insertTransaction(db, { account_id: account, date: daysAgo(2), amount: -5000, category_id: category });
+
+  const context = buildFinancialContext();
+  const section = context.split('### Category Movement')[1] ?? '';
+  assert.match(section, /Transport Test: \$50\.00 \| budget on this category: \$50\.00 spent of \$200\.00 \(25%\)/);
+
+  db.close();
+});
+
+test('HEALTHY: a category with no budget carries no budget clause at all', () => {
+  const db = migratedTestDb();
+  _setDbForTesting(db);
+  const account = insertAccount(db, { type: 'checking', current_balance: 500000 });
+  const category = insertCategory(db, { name: 'Hobbies Test' });
+  insertTransaction(db, { account_id: account, date: daysAgo(2), amount: -5000, category_id: category });
+
+  const context = buildFinancialContext();
+  const section = context.split('### Category Movement')[1] ?? '';
+  assert.match(section, /Hobbies Test: \$50\.00$/m);
+  assert.doesNotMatch(section, /budget on this category/);
+
   db.close();
 });

@@ -5,10 +5,21 @@ import express from 'express';
 import Database from 'better-sqlite3';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { _setDbForTesting } from '../server/src/db/index';
+import { _setDbForTesting, runMigrationsOn } from '../server/src/db/index';
 import aiRouter from '../server/src/routes/ai';
 import { AUTONOMOUS_DRAFT_KINDS, DRAFT_KIND_AUTONOMY } from '../server/src/services/draftAutonomy';
-import { AiActionRow, describeAutonomyForOwner, undoActionToast } from '../client/src/views/settings/Settings';
+import { dismissAdvisorDraft } from '../server/src/services/advisorDrafts';
+import {
+  ACTIONS_PER_PAGE,
+  AiActionRow,
+  DeclinedProposalRow,
+  declinedProposalDetail,
+  describeAutonomyForOwner,
+  hiddenActionsNote,
+  restoreDeclinedToast,
+  undoActionToast,
+  type DeclinedProposalItem,
+} from '../client/src/views/settings/Settings';
 import { revertOffer, revertToast } from '../client/src/components/CommandPalette';
 import type {
   AdvisorAutonomyEntry,
@@ -298,4 +309,225 @@ test('the revert toast carries the rules, and names a shortfall instead of absor
   const short = revertToast(revertResult({ reverted_rows: 2, planned_rules: 3, reverted_rules: 1 }));
   assert.equal(short.type, 'info', 'a plan that fell short must not read as a success');
   assert.match(short.message, /2 rule\(s\) the plan counted could not be put back\./);
+});
+
+// ── Every action the panel says it shows ─────────────────────────────────────
+//
+// The panel is titled "Every action the AI applied to your data, and the ones you can put back",
+// and Undo lives on the row, so an action the list cannot reach is an action the owner cannot undo.
+// `listAdvisorActions` defaulted to 50 and `GET /api/ai/actions` passed no limit, so on a copy of
+// .mizan/mizan.db at migration 054 (2026-07-31) 92 of 142 recorded actions were unreachable.
+
+async function withSeededActions(count: number, fn: (baseUrl: string) => Promise<void>): Promise<void> {
+  const db = new Database(':memory:');
+  runMigrationsOn(db);
+  const insert = db.prepare(`
+    INSERT INTO advisor_actions (id, kind, label, summary, source, payload, created_at)
+    VALUES (?, 'categorize_transaction', ?, 'what it did', 'worker_auto', '{}', ?)
+  `);
+  for (let i = 0; i < count; i += 1) {
+    // Same timestamp on purpose: the ORDER BY has to be total, or a page boundary drops rows.
+    insert.run(`act_${i}`, `Action ${i}`, '2026-07-30T12:00:00.000Z');
+  }
+  _setDbForTesting(db);
+
+  const app = express();
+  app.use('/api/ai', aiRouter);
+  const server = http.createServer(app);
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+  try {
+    const addr = server.address();
+    if (!addr || typeof addr === 'string') throw new Error('no server address');
+    await fn(`http://127.0.0.1:${addr.port}`);
+  } finally {
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+    db.close();
+  }
+}
+
+test('the audit trail serves every action, not the newest page of them', async () => {
+  // Past the old cap of 50 and past the panel's own page size, which are now different things.
+  await withSeededActions(142, async (baseUrl) => {
+    const res = await fetch(`${baseUrl}/api/ai/actions`);
+    assert.equal(res.status, 200);
+    const body = (await res.json()) as { data: Array<{ id: string }> };
+    assert.equal(body.data.length, 142, 'an action the list cannot reach has no undo at all');
+    assert.equal(new Set(body.data.map((a) => a.id)).size, 142, 'and none of them is served twice');
+  });
+});
+
+test('a panel drawing fewer than it holds says so and offers the rest', () => {
+  assert.deepEqual(hiddenActionsNote(142, ACTIONS_PER_PAGE), {
+    showing: 'Showing 50 of 142',
+    more: 'Show the remaining 92',
+  });
+  // The healthy case: a ledger inside one page says nothing, because nothing is absent.
+  assert.equal(hiddenActionsNote(12, ACTIONS_PER_PAGE), null);
+  assert.equal(hiddenActionsNote(0, ACTIONS_PER_PAGE), null);
+  assert.equal(hiddenActionsNote(142, 142), null, 'once the rest are shown the note is gone');
+});
+
+// ── The suggestions the owner turned down ────────────────────────────────────
+//
+// Dismissing a draft became a standing block on the unattended write path
+// (`ownerDeclinedProposal`), and for a while nothing anywhere showed one: the card stopped being
+// drawn, the review count fell by one, and no response field named the reason. These hold the two
+// halves that make that decision the owner's rather than the app's: they can see it, and they can
+// take it back.
+
+const TEST_ISO = '2026-07-30T12:00:00.000Z';
+
+async function withDeclinedProposal(
+  fn: (baseUrl: string, db: Database.Database) => Promise<void>
+): Promise<void> {
+  const db = new Database(':memory:');
+  runMigrationsOn(db);
+  db.prepare(`
+    INSERT INTO accounts (id, account_name, type, current_balance, connection_type, is_manual, created_at, updated_at)
+    VALUES ('acc_1', 'Checking', 'checking', 0, 'manual', 1, ?, ?)
+  `).run(TEST_ISO, TEST_ISO);
+  db.prepare(`
+    INSERT INTO transactions (id, account_id, date, amount, original_name, merchant_name, pending, created_at, updated_at)
+    VALUES ('txn_1', 'acc_1', '2026-07-30', -450, 'BLUE BOTTLE', 'Blue Bottle', 0, ?, ?)
+  `).run(TEST_ISO, TEST_ISO);
+  db.prepare(`
+    INSERT INTO advisor_drafts (id, kind, label, summary, route, payload, changes, citations, status, created_at, updated_at)
+    VALUES ('draft_1', 'categorize_transaction', 'Categorize Blue Bottle', 'Blue Bottle looks like coffee',
+            '/transactions', '{"kind":"categorize_transaction","transaction_id":"txn_1","category_id":"cat_food"}',
+            '[]', '[]', 'open', ?, ?)
+  `).run(TEST_ISO, TEST_ISO);
+  dismissAdvisorDraft(db, 'draft_1');
+  _setDbForTesting(db);
+
+  const app = express();
+  app.use(express.json());
+  app.use('/api/ai', aiRouter);
+  const server = http.createServer(app);
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+  try {
+    const addr = server.address();
+    if (!addr || typeof addr === 'string') throw new Error('no server address');
+    await fn(`http://127.0.0.1:${addr.port}`, db);
+  } finally {
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+    db.close();
+  }
+}
+
+test('a dismissed suggestion is reachable over the wire, with what it was and whether it still blocks', async () => {
+  await withDeclinedProposal(async (baseUrl) => {
+    const res = await fetch(`${baseUrl}/api/ai/declined`);
+    assert.equal(res.status, 200);
+    const body = (await res.json()) as { data: DeclinedProposalItem[] };
+    assert.equal(body.data.length, 1, 'the decision the owner made is on a screen at all');
+    assert.equal(body.data[0].kind, 'categorize_transaction');
+    assert.equal(body.data[0].category_name, 'Food & Drink');
+    assert.equal(body.data[0].suppressing, true);
+    assert.equal(declinedProposalDetail(body.data[0]), 'Filing one transaction as Food & Drink');
+  });
+});
+
+test('the owner can take a decline back, and the draft comes with it', async () => {
+  await withDeclinedProposal(async (baseUrl, db) => {
+    const list = (await (await fetch(`${baseUrl}/api/ai/declined`)).json()) as { data: DeclinedProposalItem[] };
+    const res = await fetch(`${baseUrl}/api/ai/declined/${list.data[0].id}/restore`, { method: 'POST' });
+    assert.equal(res.status, 200);
+    const body = (await res.json()) as {
+      data: { ok: boolean; draft_reopened: boolean; queued: boolean };
+    };
+    assert.deepEqual(body.data, { ok: true, draft_reopened: true, queued: true });
+    assert.deepEqual(restoreDeclinedToast(body.data), {
+      type: 'success',
+      message: 'Restored. The suggestion is back in your review queue.',
+    });
+
+    const after = (await (await fetch(`${baseUrl}/api/ai/declined`)).json()) as { data: unknown[] };
+    assert.deepEqual(after.data, [], 'and the refusal is off the record');
+    assert.equal(
+      (db.prepare("SELECT status FROM advisor_drafts WHERE id = 'draft_1'").get() as { status: string }).status,
+      'open'
+    );
+  });
+});
+
+test('restoring an id that names no decline is a 404, not a quiet success', async () => {
+  await withDeclinedProposal(async (baseUrl) => {
+    const res = await fetch(`${baseUrl}/api/ai/declined/not-a-real-id/restore`, { method: 'POST' });
+    assert.equal(res.status, 404);
+  });
+});
+
+test('HEALTHY: an install that has dismissed nothing serves an empty list and draws no row', async () => {
+  const db = new Database(':memory:');
+  runMigrationsOn(db);
+  _setDbForTesting(db);
+  const app = express();
+  app.use('/api/ai', aiRouter);
+  const server = http.createServer(app);
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+  try {
+    const addr = server.address();
+    if (!addr || typeof addr === 'string') throw new Error('no server address');
+    const body = (await (await fetch(`http://127.0.0.1:${addr.port}/api/ai/declined`)).json()) as {
+      data: unknown[];
+    };
+    assert.deepEqual(body.data, [], 'nothing declined, nothing standing');
+  } finally {
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+    db.close();
+  }
+});
+
+test('the row says what it was about, including a category that no longer resolves', () => {
+  const base: DeclinedProposalItem = {
+    id: 'fb_1',
+    kind: 'categorize_transaction',
+    summary: 'Blue Bottle looks like coffee',
+    merchant_name: 'Blue Bottle',
+    pattern: null,
+    category_id: 'cat_food',
+    category_name: 'Food & Drink',
+    declined_at: TEST_ISO,
+    suppressing: true,
+  };
+
+  assert.equal(declinedProposalDetail(base), 'Filing one transaction as Food & Drink');
+  assert.equal(
+    declinedProposalDetail({ ...base, category_name: null }),
+    'Filing one transaction as a category that has since been deleted',
+    'a name that does not resolve is said, not dropped'
+  );
+  assert.equal(
+    declinedProposalDetail({ ...base, kind: 'retire_merchant_rule', category_id: null, category_name: null, pattern: 'Spotify' }),
+    'Retiring its own rule for "Spotify"'
+  );
+
+  const html = renderToStaticMarkup(
+    createElement(DeclinedProposalRow, { item: base, restorePending: false, onRestore: () => undefined })
+  );
+  assert.match(html, /Allow again/, 'the way back is on the row');
+  assert.match(html, /not repeated/);
+  assert.doesNotMatch(
+    renderToStaticMarkup(
+      createElement(DeclinedProposalRow, {
+        item: { ...base, suppressing: false },
+        restorePending: false,
+        onRestore: () => undefined,
+      })
+    ),
+    /not repeated/,
+    'a stale dismissal blocks nothing and must not claim to'
+  );
+});
+
+test('a restore the server could not fully deliver does not report that it did', () => {
+  assert.equal(restoreDeclinedToast({ draft_reopened: true, queued: false }).type, 'info');
+  assert.match(
+    restoreDeclinedToast({ draft_reopened: true, queued: false }).message,
+    /not in the queue/
+  );
+  assert.match(
+    restoreDeclinedToast({ draft_reopened: false, queued: false }).message,
+    /may raise it again on a later sync/
+  );
 });

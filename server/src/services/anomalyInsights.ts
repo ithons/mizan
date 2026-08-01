@@ -130,7 +130,9 @@ export function getAnomalyInsights(db: Database.Database, now = new Date()): Ran
         : `${topCategorySpike.category_name} spending is up ${percent(increase)} versus the prior 30 days.`,
       metric: money(toDollars(delta)),
       action_label: 'Open reports',
-      action_route: '/reports',
+      // `/reports` is a LEGACY_TARGETS entry that redirects to `/?window=this-month`. Emitted
+      // canonically so the served payload names a screen that exists; see routes/insights.ts.
+      action_route: '/?window=this-month',
     });
   }
 
@@ -144,7 +146,9 @@ export function getAnomalyInsights(db: Database.Database, now = new Date()): Ran
       message: `Income in the last 30 days is ${money(toDollars(income.current_income))}, down from ${money(toDollars(income.previous_income))} in the prior 30 days.`,
       metric: money(toDollars(gap)),
       action_label: 'Open reports',
-      action_route: '/reports',
+      // `/reports` is a LEGACY_TARGETS entry that redirects to `/?window=this-month`. Emitted
+      // canonically so the served payload names a screen that exists; see routes/insights.ts.
+      action_route: '/?window=this-month',
     });
   }
 

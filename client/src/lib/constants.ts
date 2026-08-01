@@ -37,4 +37,8 @@ export const INVESTMENT_TX_TYPE_LABELS: Record<string, string> = {
   other: 'Other',
 };
 
-export { CHART_COLORS as CATEGORY_COLORS } from './chartColors';
+// `export { CHART_COLORS as CATEGORY_COLORS }` used to live here and is deliberately gone. It had
+// no consumer, and the alias promised the opposite of what the value is: CHART_COLORS is eight
+// `var(--mz-series-N)` strings, which resolve only where a browser substitutes custom properties,
+// while `categories.color` persists a real hex. Import CHART_COLORS from './chartColors', where
+// that constraint is documented at the declaration.

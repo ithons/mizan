@@ -10,8 +10,130 @@ export const ALLOCATION_LENSES: Array<{ id: AllocationLens; label: string }> = [
   { id: 'symbol', label: 'Symbol' },
 ];
 
-import { CHART_COLORS as ALLOCATION_COLORS } from './chartColors';
+import { CHART_COLORS as ALLOCATION_COLORS, seriesColor } from './chartColors';
 export { ALLOCATION_COLORS };
+
+/** How many identities the ramp actually has. Past this the tail folds; it never wraps. */
+export const ALLOCATION_SLOTS = ALLOCATION_COLORS.length;
+
+/**
+ * The key namespace each lens groups under.
+ *
+ * The value half of a key is normalized (`lensKey`), so a group is decided by identity rather
+ * than by how the owner happened to type it.
+ */
+const LENS_PREFIX: Record<AllocationLens, string> = {
+  asset_type: 'asset',
+  sector: 'sector',
+  account_type: 'account',
+  tax_treatment: 'tax',
+  symbol: 'symbol',
+};
+
+/**
+ * A group key: the lens namespace plus a normalized token.
+ *
+ * Case folding is load-bearing. `sector` is a free-text field the owner types on the holding
+ * modal, so `Other` and `other` are the same sector and used not to be the same key: a portfolio
+ * whose largest sector was typed `Other` rendered `sector:Other` at slot 1 and the fold's
+ * `sector:other` at slot 8, two slices of one bar with the same label and different colours.
+ */
+function lensKey(lens: AllocationLens, value: string): string {
+  return `${LENS_PREFIX[lens]}:${value.trim().toLowerCase()}`;
+}
+
+/**
+ * Where a lens puts everything it could not give its own slot.
+ *
+ * Lens-scoped so the fold merges with a group that already means "other" under that lens
+ * (`security_type = 'other'` is a real asset class) instead of rendering a second row with the
+ * same name and a different colour.
+ */
+const LENS_OTHER_KEY: Record<AllocationLens, string> = {
+  asset_type: 'asset:other',
+  sector: 'sector:other',
+  account_type: 'account:other',
+  tax_treatment: 'tax:other',
+  symbol: 'symbol:other',
+};
+
+/**
+ * The key for "the provider sent no sector at all".
+ *
+ * NOT `sector:unavailable`, and not anything else `lensKey` can produce: that key means missing
+ * metadata, which is a different claim from "a real sector too small to plot", and since sector
+ * is free text an owner can type the word `Unavailable`. The sentinel carries characters the
+ * normalizer never emits, so no typed sector can land on it.
+ */
+const SECTOR_MISSING_KEY = 'sector:<none>';
+
+export interface PortfolioSeriesPoint {
+  date: string;
+  value: number;
+  estimated: boolean;
+  /**
+   * How many of the headline's accounts this point actually carries a balance for, as counted by
+   * `/api/reports/investments`. A point covering fewer is a sum over a different set of accounts,
+   * not a smaller portfolio.
+   */
+  covered_accounts: number;
+}
+
+export interface PortfolioDelta {
+  change: number;
+  /** The snapshot the change is measured from, so the screen can name the date it used. */
+  baseline: PortfolioSeriesPoint;
+}
+
+/**
+ * The headline measured against the series it sits on, or null when it cannot be.
+ *
+ * `/api/reports/investments` derives `portfolio_value` and every point of `history` from one
+ * account set, so these two numbers are comparable; before that they were not, and the screen
+ * printed a delta off a series the headline was not in. On the day this was found the headline
+ * moved $6.79 and the delta read $0, because the series excluded the crypto wallet the headline
+ * included.
+ *
+ * Membership is CHECKED, not inferred. Value equality (`newest.value === marketValue`) says only
+ * that two numbers match, which they also do by coincidence and which they can fail to do for
+ * two unrelated reasons at once; `portfolioAccountCount` against each point's `covered_accounts`
+ * is the actual question, and a point that does not cover the whole headline yields null rather
+ * than a delta measured across two different account sets.
+ *
+ * Straight after a sync the newest snapshot IS the headline, so the baseline is the snapshot
+ * before it. When the headline has moved since the last sync, that snapshot is the baseline and
+ * the delta is the movement the owner has not seen recorded yet. Taking the last two points
+ * unconditionally reports zero in the first case whenever the balances have not changed and
+ * hides live movement in the second.
+ *
+ * The ordering the route promises (`ORDER BY date ASC`, and `date` is UNIQUE on the table) is
+ * asserted here rather than assumed, because this function names the baseline's date in copy the
+ * owner reads: out of order, it would label a delta with the wrong day.
+ */
+export function getPortfolioDelta(
+  marketValue: number | null,
+  history: PortfolioSeriesPoint[],
+  portfolioAccountCount: number | null
+): PortfolioDelta | null {
+  if (marketValue == null || portfolioAccountCount == null || history.length === 0) return null;
+
+  for (let i = 1; i < history.length; i++) {
+    if (history[i].date <= history[i - 1].date) return null;
+  }
+
+  const covers = (point: PortfolioSeriesPoint): boolean =>
+    point.covered_accounts === portfolioAccountCount;
+
+  const newest = history[history.length - 1];
+  if (!covers(newest)) return null;
+
+  // Half a cent: these are dollars converted from integer cents, so equality is exact in
+  // practice and this only absorbs float representation.
+  const baseline = Math.abs(newest.value - marketValue) < 0.005 ? history[history.length - 2] : newest;
+  if (!baseline || !covers(baseline)) return null;
+
+  return { change: marketValue - baseline.value, baseline };
+}
 
 export const STARTER_ASSET_TARGETS = [
   { key: 'asset:etf', label: 'ETF', targetPct: 60 },
@@ -213,28 +335,28 @@ function getAllocationGroup(
 
   if (lens === 'asset_type') {
     const type = holding.security_type ?? 'unclassified';
-    return { key: `asset:${type}`, label: titleCase(type) };
+    return { key: lensKey(lens, type), label: titleCase(type) };
   }
 
   if (lens === 'sector') {
     const sector = holding.sector?.trim();
     return sector
-      ? { key: `sector:${sector}`, label: sector }
-      : { key: 'sector:unavailable', label: 'Sector unavailable' };
+      ? { key: lensKey(lens, sector), label: sector }
+      : { key: SECTOR_MISSING_KEY, label: 'Sector unavailable' };
   }
 
   if (lens === 'account_type') {
     const type = account?.type ?? 'other';
-    return { key: `account:${type}`, label: ACCOUNT_TYPE_LABELS[type] ?? titleCase(type) };
+    return { key: lensKey(lens, type), label: ACCOUNT_TYPE_LABELS[type] ?? titleCase(type) };
   }
 
   if (lens === 'tax_treatment') {
     const label = getTaxTreatmentLabel(account?.type);
-    return { key: `tax:${label}`, label };
+    return { key: lensKey(lens, label), label };
   }
 
   const symbol = holding.ticker ?? holding.security_name ?? 'Unlabeled security';
-  return { key: `symbol:${symbol}`, label: symbol };
+  return { key: lensKey(lens, symbol), label: symbol };
 }
 
 function getAllocationGroups(
@@ -264,11 +386,44 @@ function getAllocationGroups(
 }
 
 function withAllocationPct(groups: AllocationAccumulator[], total: number): AllocationSlice[] {
+  // `seriesColor`, not `ALLOCATION_COLORS[index % length]`. Modulo handed slot 1's colour to a
+  // ninth group, so two slices of the same bar claimed the same identity; past eight the ramp has
+  // nothing left to say, and `getAllocationSlices` folds rather than wraps. A caller that skips
+  // the fold gets a neutral, which is visibly not a series.
   return groups.map((slice, index) => ({
     ...slice,
     pct: (slice.value / total) * 100,
-    color: ALLOCATION_COLORS[index % ALLOCATION_COLORS.length],
+    color: seriesColor(index),
   }));
+}
+
+/**
+ * Groups past the ramp's last slot collapse into one, they do not wrap onto a used colour.
+ *
+ * The last slot is the fold, so `ALLOCATION_SLOTS - 1` groups keep their own identity. The fold
+ * is NOT always the smallest groups: a group whose key already means "other" under this lens is
+ * merged into it whatever its size, which is right (one row, one colour, one meaning) and means
+ * the fold can come out larger than anything kept. `security_type = 'other'` at 53% of a
+ * ten-class portfolio rendered last, after slices a twentieth its size, so the bar stopped
+ * reading largest-to-smallest. The re-sort is what keeps that promise; position in this list is
+ * not a claim about rank on its own.
+ */
+function foldToSlots(groups: AllocationAccumulator[], lens: AllocationLens): AllocationAccumulator[] {
+  if (groups.length <= ALLOCATION_SLOTS) return groups;
+
+  const otherKey = LENS_OTHER_KEY[lens];
+  const kept: AllocationAccumulator[] = [];
+  const folded: AllocationAccumulator = { key: otherKey, label: 'Other', value: 0, count: 0 };
+
+  for (const group of groups) {
+    if (kept.length < ALLOCATION_SLOTS - 1 && group.key !== otherKey) kept.push(group);
+    else {
+      folded.value += group.value;
+      folded.count += group.count;
+    }
+  }
+
+  return [...kept, folded].sort((a, b) => b.value - a.value);
 }
 
 export function getAllocationSlices(
@@ -279,23 +434,15 @@ export function getAllocationSlices(
   const total = holdings.reduce((sum, holding) => sum + holding.institution_value, 0);
   if (total <= 0) return [];
 
-  const sorted = getAllocationGroups(holdings, lens, accountById);
-  const visible = lens === 'symbol' && sorted.length > 8
-    ? [
-        ...sorted.slice(0, 7),
-        sorted.slice(7).reduce<AllocationAccumulator>(
-          (rest, slice) => ({
-            key: 'symbol:other',
-            label: 'Other',
-            value: rest.value + slice.value,
-            count: rest.count + slice.count,
-          }),
-          { key: 'symbol:other', label: 'Other', value: 0, count: 0 }
-        ),
-      ]
-    : sorted;
+  // A group worth nothing is not an allocation, and a group worth less than nothing is not a
+  // width on a bar drawn out of percentages. Sold positions are zeroed rather than deleted
+  // (services/simplefin.ts, services/coinbase.ts), so without this a sector the owner exited
+  // keeps a 0% row with its own colour on the bar forever, which is a standing line nobody can
+  // act on. It also keeps the fold honest: eight visible slices, not seven and a blank.
+  const groups = getAllocationGroups(holdings, lens, accountById).filter((group) => group.value > 0);
+  if (groups.length === 0) return [];
 
-  return withAllocationPct(visible, total);
+  return withAllocationPct(foldToSlots(groups, lens), total);
 }
 
 function driftSeverity(absDriftPct: number): AllocationDriftItem['severity'] {

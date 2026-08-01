@@ -281,11 +281,28 @@ export function createManualTransaction(
 
   let balanceChanged = false;
   const insertTransaction = db.transaction(() => {
+    // The author is recorded because this path knows it. A category on a manual transaction was
+    // typed into the form by the owner, row and category together, which is the same act
+    // `updateTransaction` records as `human` / `manually_categorized = 1` when they type one onto
+    // an existing row. The row used to be written with `category_source` NULL, which migration 041
+    // defines as "the author was never recorded". Both markers are set, for the reason every reader
+    // of them cites: a bulk pass can clear `manually_categorized` on its own, so a hand-made choice
+    // has to survive on either.
+    //
+    // WHAT THAT COSTS, stated because it is a decision and not a side effect. Four queries read
+    // this pair as "do not touch this row": `transferCandidateRows` (transactionIntegrity.ts) and
+    // three sweeps in rules.ts. So a hand-entered row WITH a category is not offered as a transfer
+    // leg, and a later merchant rule will not overwrite its category. Both follow from the same
+    // sentence that gate states, "the owner never made this choice", which here is false: they did.
+    // A hand-entered row with NO category sets neither marker and stays eligible for both.
+    // `commitCsvImport` deliberately does the opposite, and says why at its own INSERT: a mapped
+    // column is one decision about a file, not a decision about each row in it.
     db.prepare(`
       INSERT INTO transactions
         (id, account_id, date, amount, merchant_name, original_name,
-         category_id, pending, notes, is_manual, source_type, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, 1, 'manual', ?, ?)
+         category_id, category_source, manually_categorized, review_status,
+         pending, notes, is_manual, source_type, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, 1, 'manual', ?, ?)
     `).run(
       id,
       input.account_id,
@@ -294,6 +311,9 @@ export function createManualTransaction(
       input.merchant_name || null,
       input.original_name,
       categoryId,
+      categoryId ? 'human' : null,
+      categoryId ? 1 : 0,
+      categoryId ? 'reviewed' : 'open',
       input.notes || null,
       now,
       now

@@ -12,6 +12,7 @@ import {
   runPostSyncStages,
   terminalSyncEvent,
 } from '../server/src/services/syncManager';
+import type { SyncFinalizeDeps } from '../server/src/services/syncManager';
 import type { AccountBalanceChange } from '../server/src/services/balanceChanges';
 import type { TransactionIntegrityResult } from '../server/src/services/transactionIntegrity';
 import type { SyncEvent } from '../shared/types';
@@ -41,8 +42,8 @@ function insertProviderRunItem(db: Database.Database): void {
 }
 
 const emptyIntegrity: TransactionIntegrityResult = {
-  duplicates: { groupCount: 0, transactionCount: 0 },
-  transfers: { pairCount: 0, transactionCount: 0 },
+  duplicates: { groupCount: 0, transactionCount: 0, newGroupCount: 0, newTransactionCount: 0 },
+  transfers: { pairCount: 0, transactionCount: 0, newPairCount: 0 },
 };
 
 test('runPostSyncStages: all stages succeed, no deferred error', (t) => {
@@ -327,7 +328,10 @@ interface FinalizeSpy {
   order: string[];
   events: SyncEvent[];
   triggered: string[];
-  deps: Parameters<typeof finalizeSyncRun>[2];
+  // Not `Parameters<typeof finalizeSyncRun>[2]`: that argument is optional, so the derived type
+  // includes `undefined` and every `spy.deps.x = ...` below reads as possibly-unset. The spy always
+  // supplies all three.
+  deps: SyncFinalizeDeps;
 }
 
 function finalizeSpy(): FinalizeSpy {

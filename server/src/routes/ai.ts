@@ -26,6 +26,8 @@ import {
   confirmAdvisorDraftsByIds,
   dismissAdvisorDraft,
   listAdvisorActions,
+  listDeclinedProposals,
+  restoreDeclinedProposal,
   undoAdvisorAction,
 } from '../services/advisorDrafts';
 import { DRAFT_KIND_AUTONOMY } from '../services/draftAutonomy';
@@ -172,6 +174,36 @@ router.delete('/conversations/:id', (req: Request, res: Response, next: NextFunc
 router.get('/actions', (_req: Request, res: Response, next: NextFunction): void => {
   try {
     res.json({ data: listAdvisorActions(getDb()) });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// GET /api/ai/declined - every proposal the owner dismissed, and which ones still suppress.
+//
+// Dismissing a draft is not just a status flip: `ownerDeclinedProposal` reads the record back and
+// refuses the same proposal on the unattended path forever. That is a standing decision, so it needs
+// a surface, and this is it. Unlimited for the same reason /actions is.
+router.get('/declined', (_req: Request, res: Response, next: NextFunction): void => {
+  try {
+    res.json({ data: listDeclinedProposals(getDb()) });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// POST /api/ai/declined/:id/restore - take one decline back.
+//
+// State-changing, so it is a POST and the origin check applies (middleware/localGuard.ts).
+router.post('/declined/:id/restore', (req: Request, res: Response, next: NextFunction): void => {
+  try {
+    const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+    const result = restoreDeclinedProposal(getDb(), id);
+    if (!result.ok) {
+      res.status(404).json({ error: 'No declined suggestion with that id' });
+      return;
+    }
+    res.json({ data: result });
   } catch (err) {
     next(err);
   }

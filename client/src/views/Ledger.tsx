@@ -43,6 +43,7 @@ import {
   filterChips,
   indexDrafts,
   readSchedule,
+  suggestedChipCount,
   withCategoryOverride,
   type LedgerFilter,
   type LedgerRowHandlers,
@@ -228,7 +229,8 @@ export function Ledger() {
 
   const chips = filterChips({
     uncategorized: summary?.queues.find((q) => q.id === 'uncategorized')?.count ?? 0,
-    suggested: drafts.transactionIds.length,
+    // Every open draft, not only the ones that are about a row. See `suggestedChipCount`.
+    suggested: suggestedChipCount(drafts),
     duplicates: (summary?.duplicate_candidates ?? []).reduce((n, g) => n + g.transaction_ids.length, 0),
     transfers: (summary?.transfer_candidates ?? []).length * 2,
   });

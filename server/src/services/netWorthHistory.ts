@@ -153,6 +153,14 @@ const INVESTMENT_TYPES = new Set(['brokerage', 'ira_traditional', 'ira_roth']);
  * Accounts deleted since the snapshot was taken are counted in `other` rather than guessed at. The
  * previous behaviour of treating an unknown account as a non-liability asset is what made a removed
  * credit card read as money you had.
+ *
+ * IT HAS NO PRODUCTION CALLER RIGHT NOW. `/api/reports/investments` was the last one and resolves
+ * its own portfolio set, because this INVESTMENT_TYPES bucketing puts `crypto_wallet` in a
+ * separate bucket from the accounts that screen totals. Verified by
+ * `grep -rn deriveAssetBuckets server client shared scripts tests` on 2026-07-31: the only hits
+ * outside this file are two comments and `tests/creditPosition.test.ts`. So this is a definition
+ * of "investment assets" that no surface reads, and nothing will fail if it drifts from the one
+ * that is on screen. Re-home it or delete it; do not cite it as authoritative.
  */
 export function deriveAssetBuckets(
   db: Database.Database,

@@ -11,9 +11,9 @@ import type {
 } from '../../../shared/types';
 import { getDb } from '../db/index';
 import { toDollars, toDollarsOrNull } from './money';
-import { excludedFromTotalsSql, expenseSideSql } from './transactionFilters';
 import { calculateGoalProgress } from './goalProgress';
 import { buildRecurringForecast } from './recurringForecast';
+import { getMonthlyBudgetsWithProjection } from './budgetProjection';
 import { getCashflowReport, getReportSummary, getSpendingReport } from './reporting';
 import { getTransactionReviewSummary } from './transactionReview';
 import { getSyncHealth } from './syncHealth';
@@ -1027,51 +1027,91 @@ export function buildFinancialContext(): string {
     }
   }
 
-  // ── Top Spending Categories (this month) ────────────────────────────────
-  const thisMonthSpending = db.prepare(`
-    SELECT
-      COALESCE(pc.name, c.name, 'Uncategorized') AS category,
-      SUM(-t.amount) AS total
-    FROM transactions t
-    LEFT JOIN categories c ON c.id = t.category_id
-    LEFT JOIN categories pc ON pc.id = c.parent_id
-    WHERE t.date >= ?
-      AND t.pending = 0
-      AND ${expenseSideSql('t', 'c')}
-      AND ${excludedFromTotalsSql('t')}
-    GROUP BY COALESCE(pc.id, c.id, 'uncategorized')
-    ORDER BY total DESC
-    LIMIT 8
-  `).all(thisMonthStart) as Array<{ category: string; total: number }>;
+  /*
+   * ── Category movement (this month) ──────────────────────────────────────
+   *
+   * THE ORDERING WAS THE FILTER. This block ran its own SQL with `ORDER BY total DESC LIMIT 8`,
+   * and a signed total sorts every net-refund category to the bottom, so the truncation dropped
+   * exactly the categories the note underneath it existed to explain. The note was then guarded on
+   * the already-sliced array, so it could not fire either: a negative category could only reach the
+   * guard by surviving a cut that ranks it last. Measured 2026-07-31 against a copy of
+   * `.mizan/mizan.db` at migration 054, for 2026-07-01 onward, the ten categories with activity
+   * ranked signed-descending are Food & Drink 73160, Travel 49625, Transport 41614,
+   * Subscriptions 16271, Pets 14029, Entertainment 9622, Health 8257, Home 1584, then
+   * Transfers -97500 and Shopping -102863. The top eight are printed and sum to 214162 cents,
+   * $2,141.62, directly under a Report Summary line reading "Spending: $1,112.99", and the largest
+   * single category movement of the month is the one that is not there.
+   *
+   * Two changes. The population is `getSpendingReport`, the same function Report Summary is built
+   * from, so transfers, investment and crypto flows are excluded here as they are there and the two
+   * lists cover one set of rows. And the rank is by SIZE of movement, so a category cannot be
+   * dropped for the sign of its total; what is left off is counted and totalled rather than
+   * silently cut.
+   */
+  const CATEGORY_MOVEMENT_LIMIT = 8;
+  const monthSpending = getSpendingReport(db, {
+    startDate: thisMonthStart,
+    endDate: format(today, 'yyyy-MM-dd'),
+    parentOnly: true,
+  });
+  const movements = monthSpending.categories
+    .filter((category) => category.amount !== 0)
+    .sort((a, b) => Math.abs(b.amount) - Math.abs(a.amount));
+  const shown = movements.slice(0, CATEGORY_MOVEMENT_LIMIT);
+  const omitted = movements.slice(CATEGORY_MOVEMENT_LIMIT);
 
-  // Budget context
-  const budgets = db.prepare(`
-    SELECT b.amount, c.name AS category_name,
-      COALESCE(pc.name, c.name) AS parent_category
-    FROM budgets b
-    JOIN categories c ON c.id = b.category_id
-    LEFT JOIN categories pc ON pc.id = c.parent_id
-    WHERE b.period = 'monthly'
-  `).all() as Array<{ amount: number; category_name: string; parent_category: string }>;
-  // budgets.amount and thisMonthSpending.total are inline-SQL cents; dollarize for display.
-  const budgetMap = new Map(budgets.map((b) => [b.parent_category || b.category_name, toDollars(b.amount)]));
+  /**
+   * BUDGET FIGURES COME FROM THE FUNCTION /plan RENDERS, NOT FROM A SECOND QUERY.
+   *
+   * The SQL that used to sit here selected `b.amount` keyed by `COALESCE(pc.name, c.name)` and was
+   * looked up by the ROOT category name `getSpendingReport({ parentOnly: true })` returns. Three
+   * ways that disagreed with /plan, none of them visible in the output:
+   *   - a budget set on a CHILD category was keyed under its parent's name and printed against the
+   *     parent's whole spend, which is a bigger population than the budget covers;
+   *   - two budgets under one parent collapsed to whichever the Map saw last;
+   *   - `rollover_balance` was ignored, so a rolled-over budget's percentage was over the wrong
+   *     denominator. `availableBudgetAmount` in client/src/lib/budgetMath.ts is `amount +
+   *     rollover_balance`, and that is what the owner reads.
+   * `getMonthlyBudgetsWithProjection` is the one that answers all three, and the model now reads
+   * exactly what /plan does. Keyed by category id, so a name cannot decide which budget is meant.
+   */
+  const monthBudgets = getMonthlyBudgetsWithProjection(db, today.getFullYear(), today.getMonth() + 1);
+  const budgetByCategoryId = new Map(monthBudgets.map((budget) => [budget.category_id, budget]));
 
-  if (thisMonthSpending.length > 0) {
+  if (shown.length > 0) {
     lines.push('');
-    lines.push(`### Top Spending - ${format(today, 'MMMM')}`);
-    // Printed only when a category actually went negative, so an ordinary month carries no note.
-    // A refund is a positive row inside an expense category and nets that category's spend down;
-    // without this the model reads "-$1,203.63 spent, 241% of budget" as being far under budget.
-    if (thisMonthSpending.some((row) => row.total < 0)) {
+    lines.push(`### Category Movement - ${format(today, 'MMMM')}`);
+    lines.push(
+      `  Every category with activity this month, ranked by the SIZE of its movement so a net-refund category cannot be ranked off the list. Same rows as Report Summary above, and they sum to the Spending figure there: ${fmt(toDollars(monthSpending.total))} across ${movements.length} ${movements.length === 1 ? 'category' : 'categories'}.`
+    );
+    // Guarded on the whole month, not on the printed slice. A negative category that did not make
+    // the cut is still a negative the model will meet in the omitted total below.
+    if (movements.some((category) => category.amount < 0)) {
       lines.push(
         '  A negative total means refunds and credits exceeded purchases in that category this month. Any budget percentage shown beside a negative total is negative for the same reason and does not mean the budget was underspent.'
       );
     }
-    for (const row of thisMonthSpending) {
-      const total = toDollars(row.total);
-      const budget = budgetMap.get(row.category);
-      const budgetStr = budget ? ` | budget: ${fmt(total)}/${fmt(budget)} (${Math.round((total / budget) * 100)}%)` : '';
-      lines.push(`  ${row.category}: ${fmt(total)}${budgetStr}`);
+    for (const category of shown) {
+      const total = toDollars(category.amount);
+      const budget = budgetByCategoryId.get(category.category_id);
+      // `spent` and `available` are the budget's own, over its own descendants and including
+      // rollover, which is the pair /plan prints. They are NOT the movement total to their left:
+      // that is the spending report's root total over this month to date. Two populations, so two
+      // figures, each said out loud rather than one of them borrowed for a percentage of the other.
+      let budgetStr = '';
+      if (budget) {
+        const spent = toDollars(budget.spent ?? 0);
+        const available = toDollars(budget.amount + (budget.rollover ? budget.rollover_balance : 0));
+        const percent = available > 0 ? ` (${Math.round((spent / available) * 100)}%)` : '';
+        budgetStr = ` | budget on this category: ${fmt(spent)} spent of ${fmt(available)}${percent}`;
+      }
+      lines.push(`  ${category.category_name}: ${fmt(total)}${budgetStr}`);
+    }
+    if (omitted.length > 0) {
+      const omittedTotal = omitted.reduce((sum, category) => sum + category.amount, 0);
+      lines.push(
+        `  ${omitted.length} smaller ${omitted.length === 1 ? 'category is' : 'categories are'} not listed, together ${fmt(toDollars(omittedTotal))}.`
+      );
     }
   }
 
@@ -1259,6 +1299,18 @@ export function buildFinancialContext(): string {
 
     lines.push('');
     lines.push(`### Investment Portfolio - ${fmt(totalPortfolio)}${totalReturn != null ? ` (${pct(totalReturn)} total return)` : ''}`);
+    // The exclusion, printed, because a source comment is not something either audience reads.
+    // Two surfaces count "the portfolio" differently on purpose: this one leaves crypto out
+    // because the Net Worth section above already reports it as its own bucket, while the
+    // Investments screen's headline includes it, because the holdings list on that screen shows
+    // the coins. Both figures were true and neither said so, so the app answered "what is my
+    // investment portfolio worth" with two numbers and nothing anyone reads explained the gap.
+    // Silent when there is no crypto: then this figure and that headline are over one set.
+    if (crypto > 0) {
+      lines.push(
+        `  Excludes crypto, which the Net Worth section above reports separately as ${fmt(crypto)}. The Investments screen totals crypto into its portfolio headline, so a figure quoted from that screen is not this one.`
+      );
+    }
     // Three totals over the same money, all of which legitimately differ: the Net Worth section
     // sums ACCOUNT BALANCES selected by account type, this section sums HOLDING VALUES, and the
     // accounts those holdings actually sit in are a third set. A model reading two of them had no

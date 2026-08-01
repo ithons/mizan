@@ -4,8 +4,10 @@ import type {
   SyncHealth,
   SyncHealthConnection,
   SyncHealthFreshness,
+  SyncHealthLastRun,
   SyncHealthRecommendedAction,
   SyncHealthStatus,
+  SyncRunStatus,
 } from '../../../shared/types';
 
 const STALE_AFTER_DAYS = 3;
@@ -143,7 +145,40 @@ export function classifySyncConnection(
   };
 }
 
-export function summarizeSyncHealth(connections: SyncHealthConnection[]): SyncHealth {
+/**
+ * The last run that reached a terminal state.
+ *
+ * `status = 'running'` is excluded because a run in flight has not said anything yet, and reading
+ * it as incomplete would put every instrument on this data into a degraded state for the four
+ * seconds a sync takes. Ordered by `completed_at` and then `started_at`, so a row whose
+ * `completed_at` is somehow absent still orders sensibly rather than sorting to the top as NULL.
+ */
+export function readLastSyncRun(db: Database.Database): SyncHealthLastRun | null {
+  const row = db.prepare(`
+    SELECT id, status, completed_at, message
+    FROM sync_runs
+    WHERE status <> 'running'
+    ORDER BY COALESCE(completed_at, started_at) DESC, started_at DESC
+    LIMIT 1
+  `).get() as
+    | { id: string; status: SyncRunStatus; completed_at: string | null; message: string | null }
+    | undefined;
+
+  if (!row) return null;
+
+  return {
+    id: row.id,
+    status: row.status,
+    completed_at: row.completed_at,
+    message: row.message,
+    incomplete: row.status === 'partial' || row.status === 'failed',
+  };
+}
+
+export function summarizeSyncHealth(
+  connections: SyncHealthConnection[],
+  lastRun: SyncHealthLastRun | null = null
+): SyncHealth {
   const staleCount = connections.filter((connection) => connection.is_stale).length;
   const attentionCount = connections.filter((connection) => connection.needs_attention).length;
   const freshCount = connections.filter((connection) => connection.freshness === 'fresh').length;
@@ -164,7 +199,11 @@ export function summarizeSyncHealth(connections: SyncHealthConnection[]): SyncHe
   } else if (attentionCount > 0) {
     status = 'attention';
     statusLabel = 'Needs attention';
-    statusDetail = `${attentionCount} connection${attentionCount === 1 ? '' : 's'} need action before Mizān can fully trust the data.`;
+    // The verb agrees, because on the live database this row reads at count one and said
+    // "1 connection need action".
+    statusDetail = attentionCount === 1
+      ? '1 connection needs action before Mizān can fully trust the data.'
+      : `${attentionCount} connections need action before Mizān can fully trust the data.`;
   } else if (staleCount > 0) {
     status = 'stale';
     statusLabel = 'Stale';
@@ -181,6 +220,7 @@ export function summarizeSyncHealth(connections: SyncHealthConnection[]): SyncHe
     fresh_count: freshCount,
     never_synced_count: neverSyncedCount,
     last_synced_at: syncedDates.at(-1) ?? null,
+    last_run: lastRun,
     connections,
   };
 }
@@ -220,5 +260,5 @@ export function getSyncHealth(db: Database.Database): SyncHealth {
   `).all() as SyncHealthConnectionRow[];
 
   const connections = [...simplefinRows, ...coinbaseRows].map((row) => classifySyncConnection(row));
-  return summarizeSyncHealth(connections);
+  return summarizeSyncHealth(connections, readLastSyncRun(db));
 }

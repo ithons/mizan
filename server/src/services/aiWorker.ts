@@ -286,6 +286,14 @@ export interface PromptTransaction {
   original_name: string;
   amount: number;
   date: string;
+  /**
+   * Categories the owner has already declined FOR THIS ROW, comma separated, or null for none.
+   *
+   * Carried to the model rather than used to drop the row, because the block it stands for is per
+   * (row, category): see `ownerDeclinedProposal`. Dropping the row hid it from every category,
+   * including the ones nothing would refuse.
+   */
+  declined_categories: string | null;
 }
 
 export interface PromptRefilableTransaction extends PromptTransaction {
@@ -313,7 +321,10 @@ export interface BackgroundReviewPromptInput {
 }
 
 function transactionLine(t: PromptTransaction): string {
-  return `- id: "${t.id}", date: ${t.date}, amount: ${toDollars(t.amount)}, merchant: "${t.merchant_name || t.original_name}"`;
+  const declined = t.declined_categories
+    ? `, already declined for this row: "${t.declined_categories}"`
+    : '';
+  return `- id: "${t.id}", date: ${t.date}, amount: ${toDollars(t.amount)}, merchant: "${t.merchant_name || t.original_name}"${declined}`;
 }
 
 /**
@@ -333,6 +344,8 @@ Allowed 'kind' values: ${DRAFT_KINDS.map((k) => `'${k}'`).join(', ')}.
 ${ID_RULE}
 
 ${describeAutonomyForPrompt(DRAFT_KINDS)} Categorization is reversible in one click and every row records that you set it, so prefer acting to hedging: a wrong category is cheap and visible. If a merchant is genuinely ambiguous, leave it uncategorized rather than guessing, because a wrong rule keeps applying itself to future transactions. 'create_merchant_rule' payloads must include "apply_existing": true.
+
+Where a transaction below lists categories already declined for this row, the user has refused those exact categories for that exact row and the write path refuses them again. Any other category is still open, and the row still needs one.
 
 A 'retire_merchant_rule' draft takes back one of YOUR OWN rules. It is refused unless the rule is yours and currently files zero transactions, so use it for a rule that sits live and inert because one of the user's own rules outranks it everywhere. Never propose retiring a rule to make room for a different one: create the replacement and let precedence decide.
 
@@ -409,6 +422,23 @@ function readUsage(usage: ProviderUsage): AiJobUsage {
 }
 
 /**
+ * The categories the owner has declined for one transaction, comma separated, or NULL for none.
+ *
+ * A correlated subquery rather than a join so it can be dropped into either collection query
+ * unchanged: both hand the same fact to the model and neither may act on it, because acting on it
+ * is the write path's job and the write path matches at a finer grain than a row.
+ */
+const DECLINED_CATEGORIES_SQL = `(
+  SELECT group_concat(DISTINCT dc.name)
+    FROM ai_feedback df
+    JOIN categories dc ON dc.id = df.proposed_category_id
+   WHERE df.signal = 'draft_dismissed'
+     AND df.proposal_kind = 'categorize_transaction'
+     AND df.transaction_id = t.id
+     AND COALESCE(df.stale, 0) <> 1
+)`;
+
+/**
  * Rows a MACHINE filed that the model may refile.
  *
  * This is the widening, and its whole safety is in the WHERE clause, so read it before
@@ -442,9 +472,19 @@ export function refilableTransactions(db: Database.Database): PromptRefilableTra
   // On the owner's ledger today the clause removes nothing: the unlimited pool is 19 rows with it
   // and 19 without, because no row there carries an AI revision and a machine label at once. It is
   // a bound on a loop that has not run yet, not a repair of one that has.
+  //   declined_categories  what the owner has already refused FOR THIS ROW, named rather than
+  //     acted on. This clause used to be a NOT EXISTS that removed the row outright, which is a
+  //     wider statement than the block it was standing in for: `ownerDeclinedProposal` matches the
+  //     transaction AND the proposed category, so declining "file this as Food" leaves "file this
+  //     as Groceries" perfectly applicable, and the pass could no longer offer it. Two surfaces
+  //     disagreeing about what one dismissal meant is how a row the owner still wants filed
+  //     disappears from the model while sitting in the owner's own uncategorized queue.
+  //     `stale = 1` dismissals are omitted for the reason `ownerDeclinedProposal` gives: declining
+  //     a late suggestion is not declining the merchant.
   return db.prepare(`
     SELECT t.id, t.merchant_name, t.original_name, t.amount, t.date,
-           t.category_id, c.name AS category_name, t.category_source
+           t.category_id, c.name AS category_name, t.category_source,
+           ${DECLINED_CATEGORIES_SQL} AS declined_categories
     FROM transactions t
     JOIN categories c ON c.id = t.category_id
     WHERE t.pending = 0
@@ -457,6 +497,40 @@ export function refilableTransactions(db: Database.Database): PromptRefilableTra
     ORDER BY t.date DESC
     LIMIT 15
   `).all() as PromptRefilableTransaction[];
+}
+
+/**
+ * The model's own live rules, the only ones it may propose retiring.
+ *
+ * Owner rules are deliberately absent: `checkRuleIsRetirableByAi` refuses them, and listing what
+ * will be refused invites the proposal it refuses. Exported for the same reason
+ * `refilableTransactions` is: the exclusion below is the interesting part and a test that copies the
+ * SQL into itself proves only that the copy agrees with itself.
+ */
+export function retirableOwnRules(db: Database.Database): PromptRule[] {
+  return db.prepare(`
+    SELECT r.id, r.pattern, c.name AS category_name
+    FROM merchant_rules r
+    LEFT JOIN categories c ON c.id = r.category_id
+    WHERE r.retired_at IS NULL AND r.source = 'ai'
+      -- A rule the owner declined to have retired, matched on THIS RULE'S ID, read back out of the
+      -- payload of the draft the dismissal names. It used to match the recorded pattern, which does
+      -- not identify a rule: the live-pattern unique index is partial, so a rule retired since and
+      -- a live rule may share one, and a no about the first hid the second from the model entirely.
+      -- Same identity ownerDeclinedProposal enforces at the write; see declinedRetirement.
+      AND NOT EXISTS (
+        SELECT 1 FROM ai_feedback f
+         JOIN advisor_drafts d ON d.id = f.draft_id
+         WHERE f.signal = 'draft_dismissed'
+           AND f.proposal_kind = 'retire_merchant_rule'
+           -- CASE rather than a bare json_extract, which RAISES on a payload that is not JSON:
+           -- see declinedRetirement. One unreadable draft row must not stop the pass.
+           AND (CASE WHEN json_valid(d.payload) THEN json_extract(d.payload, '$.rule_id') END) = r.id
+           AND COALESCE(f.stale, 0) <> 1
+      )
+    ORDER BY r.created_at DESC
+    LIMIT 25
+  `).all() as PromptRule[];
 }
 
 /**
@@ -488,12 +562,17 @@ export const collectBackgroundReview: AiJobCollect = async ({ db, assignment, ru
   // was hallucinating fake transaction ids and human-readable category names instead
   // of real category_id values, so every such draft failed to apply.
   const uncategorizedTransactions = db.prepare(`
-    SELECT id, merchant_name, original_name, amount, date
-    FROM transactions
+    SELECT t.id, t.merchant_name, t.original_name, t.amount, t.date,
+           -- What the owner declined for this row, named for the model rather than used to remove
+           -- the row. Same clause and same argument as refilableTransactions: the block is per
+           -- (row, category), so a row-wide exclusion silenced proposals nothing would refuse and
+           -- left the row in the owner's uncategorized queue with no chance of ever being offered.
+           ${DECLINED_CATEGORIES_SQL} AS declined_categories
+    FROM transactions t
     -- Matches transactionReview.ts getCounts(): 'reviewed' is set as a side effect of
     -- categorization, so gating on 'open' hid the whole imported backlog from the worker.
-    WHERE category_id IS NULL AND pending = 0 AND review_status <> 'dismissed'
-    ORDER BY date DESC
+    WHERE t.category_id IS NULL AND t.pending = 0 AND t.review_status <> 'dismissed'
+    ORDER BY t.date DESC
     LIMIT 15
   `).all() as PromptTransaction[];
   const uncategorizedCount = reviewSummary.queues.find(q => q.id === 'uncategorized')?.count ?? 0;
@@ -501,17 +580,8 @@ export const collectBackgroundReview: AiJobCollect = async ({ db, assignment, ru
   // 1b. Rows a MACHINE filed that the model may refile. See refilableTransactions.
   const recategorizable = refilableTransactions(db);
 
-  // 1c. The model's OWN live rules, so it can name one to retire. Owner rules are deliberately
-  // absent: `checkRuleIsRetirableByAi` refuses them, and listing what will be refused invites the
-  // proposal it refuses.
-  const ownRules = db.prepare(`
-    SELECT r.id, r.pattern, c.name AS category_name
-    FROM merchant_rules r
-    LEFT JOIN categories c ON c.id = r.category_id
-    WHERE r.retired_at IS NULL AND r.source = 'ai'
-    ORDER BY r.created_at DESC
-    LIMIT 25
-  `).all() as PromptRule[];
+  // 1c. The model's OWN live rules, so it can name one to retire.
+  const ownRules = retirableOwnRules(db);
 
   const categories = db.prepare(`
     SELECT id, name FROM categories ORDER BY sort_order

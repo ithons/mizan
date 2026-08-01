@@ -17,7 +17,7 @@ import { revertableRevisionsForAction } from './categoryWrites';
 import { merchantMatchesRulePattern } from './rules';
 import { getHoldingHistory } from './investmentMetadata';
 import { getSyncRunDetail, listSyncRuns } from './syncHistory';
-import { reconcileAccounts } from './reconciliation';
+import { reconcileAccounts, unreconciledResidual } from './reconciliation';
 import { buildSchemaDoc, describeTables, getCategoryProvenance, transactionReportInclusion } from './schemaDoc';
 import type { AdvisorToolSpec } from './aiProviders/types';
 import type { AdvisorDraftAction, AdvisorDraftPayload } from '../../../shared/types';
@@ -66,7 +66,7 @@ export const ADVISOR_TOOLS: Anthropic.Tool[] = [
   {
     name: 'spending_by_category',
     description:
-      'Total spending grouped by top-level category over an optional date range, largest first. Amounts are positive dollars spent. Matches the Reports page exactly: transfers, investment and crypto flows, pending rows, and transactions the user resolved as duplicates are all excluded.',
+      'Net spending grouped by top-level category over an optional date range, largest first. Amounts are dollars and are SIGNED: a category whose refunds and credits exceeded its purchases in the window is negative, and `total` is the signed sum of them all. percent_of_total is null whenever any category is negative or the total is not positive, because a share of a signed total does not add to 100; read share_note for which of those it was. Matches the Reports page exactly: transfers, investment and crypto flows, pending rows, and transactions the user resolved as duplicates are all excluded.',
     input_schema: {
       type: 'object',
       properties: {
@@ -329,6 +329,19 @@ function listTransactionsTool(db: Database.Database, input: ToolInput): unknown 
   };
 }
 
+/**
+ * A share of a signed total is not a share of anything.
+ *
+ * `SpendingReport.percentage` is `amount / total`, and `total` is the SIGNED sum: a category whose
+ * refunds exceeded its purchases subtracts from it. Handing those out as `percent_of_total` made
+ * the positive categories' shares sum well past 100. Measured 2026-07-31 against a copy of
+ * `.mizan/mizan.db` at migration 054, for 2026-07-01 onward: the total is 111299 cents while
+ * Shopping is -102863, so the eight positive categories alone published 192.3% between them.
+ *
+ * A percentage is therefore emitted only when the denominator is a quantity: a positive total with
+ * no negative part. Otherwise every share is null and the payload says which fact made it so, so
+ * the model reads an absence rather than inferring one from a missing key.
+ */
 function spendingByCategoryTool(db: Database.Database, input: ToolInput): unknown {
   const top = Math.min(Math.max(Number(input.top) || 10, 1), 50);
   const report = getSpendingReport(db, {
@@ -337,12 +350,30 @@ function spendingByCategoryTool(db: Database.Database, input: ToolInput): unknow
     parentOnly: true,
   });
 
+  const negativeCategories = report.categories.filter((category) => category.amount < 0);
+  const sharesAreMeaningful = report.total > 0 && negativeCategories.length === 0;
+  const shareNote = sharesAreMeaningful
+    ? null
+    : report.total <= 0
+      ? 'percent_of_total is null: the window\'s total spending is not positive, so there is no quantity to take a share of.'
+      : `percent_of_total is null: ${negativeCategories
+          .map((category) => category.category_name)
+          .join(', ')} net negative in this window (refunds and credits exceeded purchases), so the total is a signed sum and shares of it would not add to 100.`;
+
   return {
     total: toDollars(report.total),
+    // Named rather than left to the reader: `total` is the signed sum, so it is smaller than the
+    // sum of the positive categories whenever any category netted negative.
+    total_is_signed_sum: true,
+    negative_categories: negativeCategories.map((category) => ({
+      category: category.category_name,
+      net: toDollars(category.amount),
+    })),
+    share_note: shareNote,
     categories: report.categories.slice(0, top).map((category) => ({
       category: category.category_name,
       spent: toDollars(category.amount),
-      percent_of_total: Math.round(category.percentage * 10) / 10,
+      percent_of_total: sharesAreMeaningful ? Math.round(category.percentage * 10) / 10 : null,
     })),
   };
 }
@@ -704,6 +735,10 @@ const RECONCILIATION_FIELD_MEANINGS: Record<string, string> = {
   window_count: 'How many measured snapshot pairs this account appears in. Estimated snapshots are excluded entirely.',
   unreconciled:
     'The subset of accounts whose adjusted_residual is beyond tolerance. Empty means nothing is unexplained beyond tolerance; it does not mean every number is right.',
+  unreconciled_residual:
+    'Dollars of adjusted_residual summed over the accounts in unreconciled, and nothing else, as a MAGNITUDE: each account contributes the absolute size of its own adjusted_residual, so two accounts unexplained in opposite directions add up rather than cancelling. This is the size of what is unexplained, and because every listed account cleared a $5.00 floor to be listed it is 0.00 exactly when unreconciled is empty. It carries no direction; read each account\'s own adjusted_residual for that.',
+  residual_all_accounts:
+    'Dollars of raw residual summed over EVERY judged account, including the market-driven ones that are never unreconciled and the boundary artifact adjusted_residual removes. It is NOT the size of a gap and is routinely large while unreconciled is empty. Read unreconciled_residual for that.',
 };
 
 function getReconciliationTool(db: Database.Database, input: ToolInput): unknown {
@@ -713,11 +748,17 @@ function getReconciliationTool(db: Database.Database, input: ToolInput): unknown
 
   return {
     measured_snapshot_count: report.measured_snapshot_count,
-    total_residual: toDollars(report.total_residual),
+    // `total_residual` used to be published here bare, so the model was handed
+    // `total_residual: 1347.48` beside `unreconciled: []` and had to guess which one was the
+    // finding. It summed raw `residual` over every account, which is the market-driven price moves
+    // and the horizon-cut boundary the `unreconciled` filter removes on purpose. Both populations
+    // are now named.
+    unreconciled_residual: toDollars(unreconciledResidual(report)),
+    residual_all_accounts: toDollars(report.total_residual),
     unreconciled: report.unreconciled.map(dollarize),
     accounts: report.accounts.map(dollarize),
     reading:
-      'adjusted_residual is the figure judged; boundary_amount is the part explained by where the horizon was cut and is reported separately rather than netted away silently. Market-driven accounts are never listed as unreconciled because a price move is not a gap in the ledger.',
+      'adjusted_residual is the figure judged; boundary_amount is the part explained by where the horizon was cut and is reported separately rather than netted away silently. Market-driven accounts are never listed as unreconciled because a price move is not a gap in the ledger. unreconciled_residual is the total of what is unexplained; residual_all_accounts is a wider sum that includes both exemptions and is not a gap.',
     field_meanings: RECONCILIATION_FIELD_MEANINGS,
   };
 }

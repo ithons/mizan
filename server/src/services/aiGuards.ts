@@ -6,7 +6,7 @@ import { revertAction } from './categoryWrites';
 import { readLatestSnapshot } from './netWorthHistory';
 import { buildRecurringForecast } from './recurringForecast';
 import { getIncomeReport, getReportSummary, getSpendingReport } from './reporting';
-import { unretireMerchantRule } from './rules';
+import { retireMerchantRule, unretireMerchantRule } from './rules';
 import { transactionReportInclusion } from './schemaDoc';
 
 /**
@@ -22,6 +22,18 @@ import { transactionReportInclusion } from './schemaDoc';
  * and reported itself 'reverted' with the rule still gone. `merchant_rule_revisions` is the batch's
  * other write log and it is walked here too, so the completeness check sees everything the batch
  * wrote and the word "whole" is one the code establishes.
+ *
+ * AND IT IS EVERY OPERATION IN THAT LOG, NOT THE ONE THAT WAS FIXED FIRST. Un-retiring was added on
+ * its own, so the mirror case stayed open for exactly as long: a batch that CREATED a rule and then
+ * breached reverted its categorizations, left the new rule live and matching future transactions,
+ * and wrote "reverted whole" onto the incident and into `ai_runs.invariant_breach`. Rule writes are
+ * now undone by the state the rule was in BEFORE the batch first touched it, which the log's first
+ * operation for that rule names: 'create' means it did not exist, 'retire' means it was live,
+ * 'unretire' means it was retired. A 'rename' or a 'recategorize' names no prior state the log
+ * records, so it is reported as standing and the whole revert is refused rather than reported
+ * complete. Undoing a creation is a retirement, not a delete: retiring takes the rule out of every
+ * live path and frees its pattern, which is the whole of what creating it did, and it leaves the
+ * rule's own history readable instead of erasing that the pass happened.
  *
  * WHY "A FIGURE MOVED" IS THE WRONG BREACH CONDITION. A categorization change is SUPPOSED to move
  * per-category totals. That is its entire purpose. A guard keyed on movement fires on every healthy
@@ -216,9 +228,10 @@ export interface GuardedBatchReport<T> {
    */
   reverted_rows: number;
   /**
-   * Merchant rules the revert un-retired. 0 unless `status` is 'reverted'. Counted apart from
-   * `reverted_rows` because it is not a row of the owner's ledger, and reported at all because a
-   * batch reported "reverted whole" while a rule stayed retired is the defect this exists to stop.
+   * Merchant rule writes the revert took back: a retirement un-retired, a creation retired away.
+   * 0 unless `status` is 'reverted'. Counted apart from `reverted_rows` because a rule is not a row
+   * of the owner's ledger, and reported at all because a batch reported "reverted whole" while one
+   * of its rule writes stayed standing is the defect this exists to stop.
    */
   reverted_rules: number;
   /** Category writes the batch made that no action id can revert. Non-zero blocks the revert. */
@@ -772,72 +785,185 @@ function maxRuleRevisionRowid(db: Database.Database): number {
   return row.floor;
 }
 
+/** Where a rule stood. `absent` means no row carried the id at all. */
+type RuleState = 'absent' | 'live' | 'retired';
+
 /**
- * Rules the batch retired that are still retired.
+ * One rule the batch wrote, and the state it was in before the batch first touched it.
  *
- * The state of the rule is what is asked, not the shape of the log: an un-retire appends its own
- * revision and clears `retired_at`, so a restored rule drops out of this count without the query
- * having to reason about which revision is newest.
+ * `target` is null when the log names no prior state: `rename` records the pattern the rule now
+ * carries and not the one it replaced, and `recategorize` is not reachable from an autonomous batch
+ * at all (`upsertMerchantRule` defaults `allowRecategorize` to false for `source: 'ai'`). Both are
+ * therefore reported as standing rather than guessed at, which refuses the revert instead of
+ * completing one that left a rule redefined.
  */
-function standingRetirementCount(db: Database.Database, ruleRevisionFloor: number): number {
-  const row = db
-    .prepare(`
-      SELECT COUNT(DISTINCT v.rule_id) AS count
-      FROM merchant_rule_revisions v
-      JOIN merchant_rules m ON m.id = v.rule_id
-      WHERE v.rowid > ? AND v.operation = 'retire' AND m.retired_at IS NOT NULL
-    `)
-    .get(ruleRevisionFloor) as { count: number };
-  return row.count;
+interface BatchRuleWrite {
+  ruleId: string;
+  pattern: string;
+  target: RuleState | null;
 }
 
-interface RetirementRestore {
+function stateBeforeOperation(operation: string): RuleState | null {
+  switch (operation) {
+    case 'create': return 'absent';
+    case 'retire': return 'live';
+    case 'unretire': return 'retired';
+    default: return null;
+  }
+}
+
+/**
+ * Every rule the batch wrote, read from the FIRST revision the batch appended for each one.
+ *
+ * The window is half-open on both ends on purpose. `floor` is the log's high-water mark before the
+ * batch ran; `ceiling` is its mark after the batch and before the undo, so the retirements and
+ * un-retirements the undo itself appends cannot be mistaken for writes the batch made. The old
+ * retirement-only query got away without a ceiling because it asked about state rather than the log;
+ * retiring a rule the batch created appends a 'retire' row, and without the ceiling the completeness
+ * check would read the undo's own write as a batch retirement still standing.
+ *
+ * Keyed on the log rather than on the batch's action ids, deliberately: a rule write is undone by
+ * the rule's own state, which needs no action id to attribute, so scoping by id would strand exactly
+ * the write whose action the harness failed to discover.
+ */
+function batchRuleWrites(
+  db: Database.Database,
+  floor: number,
+  ceiling: number
+): BatchRuleWrite[] {
+  const rows = db
+    .prepare(`
+      SELECT rule_id, pattern, operation
+      FROM merchant_rule_revisions
+      WHERE rowid > ? AND rowid <= ?
+      ORDER BY rowid
+    `)
+    .all(floor, ceiling) as Array<{ rule_id: string; pattern: string; operation: string }>;
+
+  const first = new Map<string, BatchRuleWrite>();
+  for (const row of rows) {
+    if (first.has(row.rule_id)) continue;
+    first.set(row.rule_id, {
+      ruleId: row.rule_id,
+      pattern: row.pattern,
+      target: stateBeforeOperation(row.operation),
+    });
+  }
+  return [...first.values()];
+}
+
+function ruleState(db: Database.Database, ruleId: string): RuleState {
+  const row = db
+    .prepare('SELECT retired_at FROM merchant_rules WHERE id = ?')
+    .get(ruleId) as { retired_at: string | null } | undefined;
+  if (row === undefined) return 'absent';
+  return row.retired_at === null ? 'live' : 'retired';
+}
+
+/**
+ * Whether the rule is back where the batch found it.
+ *
+ * `absent` is the one target the app cannot literally restore, and it does not pretend to: a rule
+ * row is never deleted, because its revisions are the only record of what happened to it. Retiring
+ * it is the whole of the behavioural inverse of creating it (it matches nothing, it holds no
+ * pattern, it is out of `loadOrderedMerchantRules`), so a retired rule counts as satisfied and a
+ * live one does not.
+ */
+function ruleWriteSatisfied(target: RuleState, state: RuleState): boolean {
+  if (target === 'absent') return state !== 'live';
+  return state === target;
+}
+
+/** How the batch's rule writes are described to the owner, per target state. */
+const RULE_WRITE_NOUN: Readonly<Record<'live' | 'absent' | 'retired' | 'unknown', string>> = {
+  live: 'merchant rule retirement',
+  absent: 'merchant rule creation',
+  retired: 'merchant rule restoration',
+  unknown: 'merchant rule redefinition',
+};
+
+function ruleWriteNoun(write: BatchRuleWrite): string {
+  return RULE_WRITE_NOUN[write.target ?? 'unknown'];
+}
+
+/** Rule writes the batch made that are still in effect. */
+function standingRuleWrites(
+  db: Database.Database,
+  floor: number,
+  ceiling: number
+): BatchRuleWrite[] {
+  return batchRuleWrites(db, floor, ceiling).filter(
+    (write) => write.target === null || !ruleWriteSatisfied(write.target, ruleState(db, write.ruleId))
+  );
+}
+
+interface RuleWriteUndo {
   restored: number;
   /** Why a rule could not be put back. Named, never absorbed into a count that reads as success. */
   failures: string[];
 }
 
 /**
- * Put back every rule the batch retired.
+ * Put every rule the batch wrote back the way the batch found it.
  *
- * Keyed on the revision floor rather than on the batch's action ids, deliberately. A retirement is
- * undone by clearing `retired_at`, which needs no action id to attribute, so scoping this by id
- * would strand exactly the retirement whose action the harness failed to discover. The floor is the
- * batch, and `standingRetirementCount` afterwards is what decides whether the undo was complete.
+ * ORDER IS PART OF THE ANSWER, NOT A DETAIL. Only one live rule may hold a pattern
+ * (`idx_merchant_rules_pattern_live`), so a batch that retires a rule and writes a replacement over
+ * its freed pattern can only be undone in one order: retire the replacement first, then the original
+ * has somewhere to come back to. Undoing in the order the log happens to sort by left that outcome
+ * to a uuid comparison, which meant the same batch reverted whole or refused depending on which id
+ * sorted first. Creations and restorations are therefore taken back before retirements are.
  *
- * The one refusal that can survive a healthy batch is `pattern_taken`: a replacement rule now holds
- * the pattern, and reviving the old one would be a second, unasked change to whichever rule the
- * owner has now. That is reported and left standing, which fails the completeness check and rolls
- * the whole undo back, rather than being quietly counted as done.
+ * `pattern_taken` survives as a named failure rather than a swallowed one, and it is what
+ * `unretireMerchantRule` returns when reviving a rule would be a second, unasked change to whichever
+ * rule the owner has now. Nothing a single batch can write reaches it once creations come off first,
+ * because the only writer between the retirement and this undo is the batch itself; it is reported
+ * because the alternative is a revert that counts a rule it did not restore.
  */
-function restoreRuleRetirements(
+function undoRuleWrites(
   db: Database.Database,
-  ruleRevisionFloor: number,
+  floor: number,
+  ceiling: number,
   now: string
-): RetirementRestore {
-  const retirements = db
-    .prepare(`
-      SELECT DISTINCT v.rule_id AS rule_id, v.pattern AS pattern
-      FROM merchant_rule_revisions v
-      JOIN merchant_rules m ON m.id = v.rule_id
-      WHERE v.rowid > ? AND v.operation = 'retire' AND m.retired_at IS NOT NULL
-      ORDER BY v.rule_id
-    `)
-    .all(ruleRevisionFloor) as Array<{ rule_id: string; pattern: string }>;
+): RuleWriteUndo {
+  const outcome: RuleWriteUndo = { restored: 0, failures: [] };
+  const byId = (a: BatchRuleWrite, b: BatchRuleWrite): number =>
+    a.ruleId < b.ruleId ? -1 : a.ruleId > b.ruleId ? 1 : 0;
+  const all = batchRuleWrites(db, floor, ceiling);
+  const writes = [
+    ...all.filter((write) => write.target === null).sort(byId),
+    ...all.filter((write) => write.target === 'absent' || write.target === 'retired').sort(byId),
+    ...all.filter((write) => write.target === 'live').sort(byId),
+  ];
 
-  const outcome: RetirementRestore = { restored: 0, failures: [] };
-  for (const retirement of retirements) {
-    const result = unretireMerchantRule(db, retirement.rule_id, { source: 'ai', actionId: null, now });
-    if (result.ok) {
-      outcome.restored += 1;
+  for (const write of writes) {
+    if (write.target === null) {
+      outcome.failures.push(`"${write.pattern}" could not be put back: the batch renamed or recategorized it, and the revision log records what it holds now rather than what it held before.`);
       continue;
     }
-    if (result.reason === 'pattern_taken') {
-      outcome.failures.push(`"${retirement.pattern}" could not be un-retired: another live rule now holds that pattern.`);
-    } else if (result.reason === 'not_found') {
-      outcome.failures.push(`"${retirement.pattern}" could not be un-retired: the rule row is gone.`);
+
+    const state = ruleState(db, write.ruleId);
+    if (ruleWriteSatisfied(write.target, state)) continue;
+
+    if (write.target === 'live') {
+      const result = unretireMerchantRule(db, write.ruleId, { source: 'ai', actionId: null, now });
+      if (result.ok) {
+        outcome.restored += 1;
+      } else if (result.reason === 'pattern_taken') {
+        outcome.failures.push(`"${write.pattern}" could not be un-retired: another live rule now holds that pattern.`);
+      } else if (result.reason === 'not_found') {
+        outcome.failures.push(`"${write.pattern}" could not be un-retired: the rule row is gone.`);
+      }
+      // 'not_retired' cannot reach here: a live rule already satisfies a 'live' target.
+      continue;
     }
-    // 'not_retired' cannot reach here: the query only returns rules that are still retired.
+
+    // Target 'absent' or 'retired', and the rule is live: retire it. `retireMerchantRule` returns
+    // false only for a rule that is missing or already retired, neither of which reaches here.
+    if (retireMerchantRule(db, write.ruleId, { source: 'ai', actionId: null, now })) {
+      outcome.restored += 1;
+    } else {
+      outcome.failures.push(`"${write.pattern}" could not be retired back out: no live rule carries its id.`);
+    }
   }
   return outcome;
 }
@@ -884,15 +1010,23 @@ interface BatchRevert {
   rules: number;
 }
 
-/** "2 category writes", "1 merchant rule retirement", or both, for one sentence about a batch. */
-function describeStanding(categoryWrites: number, retirements: number): string {
+/** "3 merchant rule retirements", grouped so a mixed batch names each kind it left behind. */
+function describeRuleWrites(writes: readonly BatchRuleWrite[]): string[] {
+  const counts = new Map<string, number>();
+  for (const write of writes) {
+    const noun = ruleWriteNoun(write);
+    counts.set(noun, (counts.get(noun) ?? 0) + 1);
+  }
+  return [...counts].map(([noun, count]) => `${count} ${noun}${count === 1 ? '' : 's'}`);
+}
+
+/** "2 category writes", "1 merchant rule creation", or both, for one sentence about a batch. */
+function describeStanding(categoryWrites: number, rules: readonly BatchRuleWrite[]): string {
   const parts: string[] = [];
   if (categoryWrites > 0) {
     parts.push(`${categoryWrites} category write${categoryWrites === 1 ? '' : 's'}`);
   }
-  if (retirements > 0) {
-    parts.push(`${retirements} merchant rule retirement${retirements === 1 ? '' : 's'}`);
-  }
+  parts.push(...describeRuleWrites(rules));
   return parts.join(' and ');
 }
 
@@ -910,13 +1044,14 @@ function describeStanding(categoryWrites: number, retirements: number): string {
  * so a log the revert cannot converge on falls through to the completeness check instead of
  * spinning.
  *
- * RULE RETIREMENTS ARE THE BATCH'S OTHER WRITE, and they are undone here rather than left to a
- * caller. `revertAction` walks `transaction_category_revisions` only, so a batch of one
- * categorization and one retirement used to come back 'reverted' with the rule still retired and a
- * completeness check that could not see it. Both logs are consumed, and both are counted.
+ * RULE WRITES ARE THE BATCH'S OTHER WRITE, and they are undone here rather than left to a caller.
+ * `revertAction` walks `transaction_category_revisions` only, so a batch of one categorization and
+ * one rule write used to come back 'reverted' with the rule change still standing and a completeness
+ * check that could not see it. Both logs are consumed, and both are counted. Every operation in the
+ * rule log counts, not only the retirement that was fixed first: see the header.
  *
  * The completeness check reads the same append-only logs the revert walks: afterwards, no category
- * write and no retirement the batch made may still be standing. If one is, the throw rolls the whole
+ * write and no rule write the batch made may still be standing. If one is, the throw rolls the whole
  * undo back and the batch stays fully applied, which is a state that can at least be reasoned about.
  */
 function revertBatch(
@@ -924,6 +1059,7 @@ function revertBatch(
   actionIds: readonly string[],
   revisionFloor: number,
   ruleRevisionFloor: number,
+  ruleRevisionCeiling: number,
   now: string
 ): BatchRevert {
   const undo = db.transaction((): BatchRevert => {
@@ -939,14 +1075,14 @@ function revertBatch(
       standing = remaining;
     }
 
-    const retirements = restoreRuleRetirements(db, ruleRevisionFloor, now);
-    const standingRules = standingRetirementCount(db, ruleRevisionFloor);
+    const ruleUndo = undoRuleWrites(db, ruleRevisionFloor, ruleRevisionCeiling, now);
+    const standingRules = standingRuleWrites(db, ruleRevisionFloor, ruleRevisionCeiling);
 
-    if (standing > 0 || standingRules > 0) {
-      const why = retirements.failures.length > 0 ? ` ${retirements.failures.join(' ')}` : '';
+    if (standing > 0 || standingRules.length > 0) {
+      const why = ruleUndo.failures.length > 0 ? ` ${ruleUndo.failures.join(' ')}` : '';
       throw new Error(`The revert left the batch with ${describeStanding(standing, standingRules)} still standing, so it was rolled back and the batch is still fully applied.${why}`);
     }
-    return { rows, rules: retirements.restored };
+    return { rows, rules: ruleUndo.restored };
   });
   return undo();
 }
@@ -987,6 +1123,9 @@ export function runGuardedCategoryBatch<T>(
   const knownActions = new Set(advisorActionIds(db));
 
   const outcome = batch.run();
+  // Pinned before anything is undone: the undo appends its own rows to `merchant_rule_revisions`,
+  // and without a ceiling the completeness check would read them back as writes the batch made.
+  const ruleRevisionCeiling = maxRuleRevisionRowid(db);
 
   const discovered = advisorActionIds(db).filter((id) => !knownActions.has(id));
   const actionIds = [...new Set([...(outcome.actionIds ?? []), ...discovered])];
@@ -1000,7 +1139,7 @@ export function runGuardedCategoryBatch<T>(
   ];
   const moves = categoryMoves(before, after);
   const unrevertableRows = unrevertableRowCount(db, revisionFloor, actionIds);
-  const standingRetirements = standingRetirementCount(db, ruleRevisionFloor);
+  const standingRules = standingRuleWrites(db, ruleRevisionFloor, ruleRevisionCeiling);
 
   if (breaches.length === 0) {
     return {
@@ -1056,8 +1195,8 @@ export function runGuardedCategoryBatch<T>(
 
   // What a refusal leaves behind, so the incident names it rather than describing only the half the
   // refusal was about.
-  const alsoStanding = standingRetirements > 0
-    ? ` ${standingRetirements} merchant rule retirement${standingRetirements === 1 ? '' : 's'} the batch made ${standingRetirements === 1 ? 'is' : 'are'} also left standing.`
+  const alsoStanding = standingRules.length > 0
+    ? ` ${describeRuleWrites(standingRules).join(' and ')} the batch made ${standingRules.length === 1 ? 'is' : 'are'} also left standing.`
     : '';
 
   if (actionIds.length === 0) {
@@ -1072,14 +1211,14 @@ export function runGuardedCategoryBatch<T>(
 
   let reverted: BatchRevert;
   try {
-    reverted = revertBatch(db, actionIds, revisionFloor, ruleRevisionFloor, now);
+    reverted = revertBatch(db, actionIds, revisionFloor, ruleRevisionFloor, ruleRevisionCeiling, now);
   } catch (error) {
     return failed(error instanceof Error ? error.message : String(error));
   }
 
   const restored = headlinesMatch(captureHeadlines(db, capture), before);
   // `reverted_rows` is category writes and only category writes, which is what migration 050's
-  // column says it is. `ai_incidents` has no column for rules, so the retirement count travels on
+  // column says it is. `ai_incidents` has no column for rules, so the rule-write count travels on
   // the report and reaches the record through `ai_runs.invariant_breach`, which aiJobs writes.
   resolveIncident(db, incidentId, {
     status: 'reverted',

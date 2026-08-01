@@ -338,12 +338,16 @@ function promptInput(
     context: 'Net worth: $1.00',
     categories: [{ id: 'cat_health', name: 'Health' }],
     uncategorized: [
-      { id: 'txn_new', merchant_name: 'Trupanion', original_name: 'TRUPANION', amount: -3902, date: '2026-07-29' },
+      {
+        id: 'txn_new', merchant_name: 'Trupanion', original_name: 'TRUPANION', amount: -3902,
+        date: '2026-07-29', declined_categories: null,
+      },
     ],
     refilable: [
       {
         id: 'txn_refile', merchant_name: 'Trupanion', original_name: 'TRUPANION', amount: -3902,
         date: '2026-07-28', category_name: 'Shopping', category_source: 'rule',
+        declined_categories: null,
       },
     ],
     ownRules: [{ id: 'rule_1', pattern: 'Trupanion', category_name: 'Health' }],

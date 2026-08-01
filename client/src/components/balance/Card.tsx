@@ -14,13 +14,25 @@ const paddings = {
  * smudge. That mechanism inverts on a ground of L* 13.0: a dark shadow on a dark surface is
  * invisible, and a ladder built on it collapses into one rung. Value separation takes over.
  *
- * Each step therefore raises the surface and the border together, and both ladders run AWAY from
- * their own ground, so the same word means the same thing in both themes:
+ * This is the ladder as it ships, CIE L* from the triplets in `client/src/index.css`. One class
+ * per step, so a step names ONE token and both themes get whatever that token is declared as; the
+ * theme swap happens inside the token, not here:
  *
- *            light (paper L* 87.8)            dark (paper L* 13.0)
- *   e1       card 96.0    · line-2 76.8       card 19.3     · line 27.9
- *   e2       card-alt 98.6 · line-3 72.8      card-alt 21.9 · line-2 33.9
- *   e3       card-alt 98.6 · line-3 72.8      card-alt 21.9 · line-3 40.2
+ *            light (paper L* 87.8)             dark (paper L* 13.0)
+ *   e1       card 96.0     · line-2 76.8       card 19.3     · line-2 33.9
+ *   e2       card-alt 98.6 · line-2 76.8       card-alt 21.9 · line-2 33.9
+ *   e3       card-alt 98.6 · line-3 72.8       card-alt 21.9 · line-3 40.2
+ *
+ * So the two halves alternate rather than move together: e1 to e2 is a surface step (+2.6 L* in
+ * both themes) on a held border, and e2 to e3 is a border step (-4.0 L* light, +6.3 dark) on a
+ * held surface. Both ladders still run AWAY from their own ground in both halves, which is the
+ * property that makes the same word mean the same thing in either theme.
+ *
+ * This docstring used to describe a different ladder: e1 on `line` and e2 on `line-3` in one theme
+ * against `line-2` in the other. `className` is one string for both themes, so no arrangement of
+ * these three classes could have produced it, and nothing in the built CSS ever did.
+ * `tests/cardElevation.test.ts` re-derives every figure above from `index.css` and reads the token
+ * names out of `elevations` below, so the table cannot drift from the classes again.
  *
  * e3 stops raising the surface on purpose. `card-white` is the next rung and on the dark theme it
  * sits at L* 31.3, where `clay` measures 3.41:1 and `muted-2` 3.30:1 -- both below AA. A dialog

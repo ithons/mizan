@@ -92,7 +92,7 @@ function importRun(): DataImportRun {
 function transaction(overrides: Partial<Transaction> = {}): Transaction {
   return {
     id: overrides.id ?? 'tx_1',
-    plaid_transaction_id: overrides.plaid_transaction_id ?? 'plaid_tx_1',
+    simplefin_transaction_id: overrides.simplefin_transaction_id ?? 'sf_tx_1',
     coinbase_transaction_id: overrides.coinbase_transaction_id ?? null,
     account_id: overrides.account_id ?? 'acct_checking',
     date: overrides.date ?? '2026-06-28',
@@ -104,7 +104,7 @@ function transaction(overrides: Partial<Transaction> = {}): Transaction {
     notes: overrides.notes ?? 'Dinner supplies',
     is_manual: overrides.is_manual ?? false,
     recurring_id: overrides.recurring_id ?? null,
-    source_type: overrides.source_type ?? 'plaid',
+    source_type: overrides.source_type ?? 'simplefin',
     source_detail: overrides.source_detail ?? null,
     duplicate_group_id: overrides.duplicate_group_id ?? null,
     duplicate_status: overrides.duplicate_status ?? 'none',
@@ -124,10 +124,10 @@ function transaction(overrides: Partial<Transaction> = {}): Transaction {
 function account(overrides: Partial<Account> = {}): Account {
   return {
     id: overrides.id ?? 'acct_checking',
-    plaid_account_id: overrides.plaid_account_id ?? 'plaid_acct_1',
+    simplefin_account_id: overrides.simplefin_account_id ?? 'sf_acct_1',
     coinbase_account_id: overrides.coinbase_account_id ?? null,
     connection_id: overrides.connection_id ?? 'item_1',
-    connection_type: overrides.connection_type ?? 'plaid',
+    connection_type: overrides.connection_type ?? 'simplefin',
     institution_name: overrides.institution_name ?? 'Test Bank',
     account_name: overrides.account_name ?? 'Rewards Checking',
     type: overrides.type ?? 'checking',
@@ -317,7 +317,7 @@ function netWorthEvidence(overrides: Partial<ReportNetWorthEvidence> = {}): Repo
 function syncRun(overrides: Partial<SyncRun> = {}): SyncRun {
   return {
     id: overrides.id ?? 'sync_run_1',
-    scope: overrides.scope ?? 'plaid_all',
+    scope: overrides.scope ?? 'simplefin_all',
     status: overrides.status ?? 'partial',
     started_at: overrides.started_at ?? '2026-06-30T12:00:00.000Z',
     completed_at: overrides.completed_at ?? '2026-06-30T12:00:10.000Z',
@@ -342,7 +342,7 @@ function syncRunDetail(overrides: Partial<SyncRunDetail> = {}): SyncRunDetail {
     items: overrides.items ?? [{
       id: 'sync_item_1',
       run_id: base.id,
-      provider: 'plaid',
+      provider: 'simplefin',
       connection_id: 'item_1',
       institution_name: 'Test Bank',
       status: 'reauth_required',
@@ -471,9 +471,9 @@ test('sync run advisor prompt captures provider status and detected changes', ()
   assert.equal(prompt.params?.changedTransactions, 16);
   assert.equal(prompt.params?.providerCount, 1);
   assert.equal(prompt.params?.changeCount, 1);
-  assert.match(prompt.prompt, /plaid_all sync run/);
+  assert.match(prompt.prompt, /simplefin_all sync run/);
   assert.match(prompt.prompt, /12 added, 3 updated, 1 removed, 2 skipped/);
-  assert.match(prompt.prompt, /Test Bank plaid reauth_required/);
+  assert.match(prompt.prompt, /Test Bank simplefin reauth_required/);
   assert.match(prompt.prompt, /Imported City Market transaction/);
 });
 
@@ -648,7 +648,7 @@ test('account advisor prompt captures balance context and data freshness', () =>
   assert.equal(prompt.params?.availableBalance, null);
   assert.equal(prompt.params?.creditLimit, 5000);
   assert.equal(prompt.params?.isLiability, true);
-  assert.match(prompt.prompt, /hidden credit liability connected by plaid/);
+  assert.match(prompt.prompt, /hidden credit liability connected by simplefin/);
   assert.match(prompt.prompt, /current balance is \$420\.50/);
   assert.match(prompt.prompt, /last updated at 2026-06-30T12:00:00.000Z/);
 });

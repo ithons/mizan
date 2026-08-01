@@ -7,6 +7,9 @@ import type {
   CategoryTrendReport,
   Insight,
   ReportComparisonMode,
+  TransactionReviewQueueId,
+  TransactionReviewQueueSummary,
+  TransactionReviewSummary,
 } from '@shared/types';
 import {
   accountsApi,
@@ -16,6 +19,7 @@ import {
   networthApi,
   recurringApi,
   reportsApi,
+  syncApi,
   transactionsApi,
 } from '../lib/api';
 import { formatCurrency, formatWholeCurrency } from '../lib/formatters';
@@ -99,6 +103,74 @@ function RailRow({ to, label, value, tone }: { to: string; label: string; value:
       <span className={`whitespace-nowrap font-mono tabular-nums ${tone ?? 'text-ink'}`}>{value}</span>
     </Link>
   );
+}
+
+/**
+ * What is actually waiting, taken from the queues the server counted.
+ *
+ * The rail used to render ONE row for the whole of review: it was labelled "Uncategorized", it
+ * carried `total_open` (every queue summed), and it linked to `/ledger?uncategorized=1`. Measured
+ * against a private copy of `.mizan/mizan.db` at migration `054_drop_dead_preferences.sql` on
+ * 2026-07-31, via `GET /api/transactions/review`:
+ *
+ *   total_open 7 · ai_insights 7 · uncategorized 0 · rule_suggestions 0 · pending 0 ·
+ *   recurring_candidates 0 · duplicate_candidates 0 · transfer_candidates 0
+ *   SELECT COUNT(*) FROM transactions WHERE category_id IS NULL   ->  0
+ *
+ * So the most prominent call to action on the primary screen named a queue that was empty, counted
+ * a different queue, and sent the owner to a filter holding none of it. Each row now carries one
+ * queue's own label and its own count and goes where that queue is decided.
+ *
+ * The map is a total `Record` over the id union rather than a lookup with a fallback: a queue added
+ * to `transactionReview.ts` that nothing here can route to is a compile error, not a row that
+ * silently lands on `/`.
+ */
+const QUEUE_DESTINATIONS: Record<TransactionReviewQueueId, string | null> = {
+  // Every open draft renders inline on the row it is about, and the ledger's "Suggested" chip is
+  // this queue: `filterChips` counts it from the same `ai_drafts` array this count comes from.
+  ai_insights: '/ledger',
+  // The one deep link the ledger answers (`searchParams.get('uncategorized') === '1'`): it sets the
+  // chip and widens the range to all time, because the backlog is older than any default window.
+  uncategorized: '/ledger?uncategorized=1',
+  // `RulesSection`, inside Settings' "Categories & rules" panel. There is no deep link to that
+  // panel, so this lands on the screen that holds it rather than on the list itself.
+  rule_suggestions: '/settings',
+  // Patterns still awaiting a verdict: the ones with an occurrence in the window sit above today's
+  // rule, and `unscheduledCandidates` puts the rest in the schedule block beside it.
+  recurring_candidates: '/ledger',
+  duplicate_candidates: '/ledger',
+  transfer_candidates: '/ledger',
+  // Not offered, for the same reason `getTransactionReviewSummary` leaves it out of `total_open`:
+  // a pending authorization posts on its own and there is no decision to make about it.
+  pending: null,
+};
+
+/** Severity to ink. An AI suggestion is not an alarm, and clay is the colour of money going out. */
+const QUEUE_TONES: Record<TransactionReviewQueueSummary['severity'], string | undefined> = {
+  attention: 'text-clay',
+  warning: 'text-gold',
+  info: undefined,
+};
+
+export interface WaitingRow {
+  id: TransactionReviewQueueId;
+  label: string;
+  count: number;
+  to: string;
+  tone?: string;
+}
+
+/**
+ * An empty queue produces no row, so a ledger with nothing outstanding produces no rail at all
+ * rather than a strip reading zero: "you are all clear" is a claim, and this screen does not make
+ * claims it would have to keep checking.
+ */
+export function readWaiting(summary: TransactionReviewSummary | undefined): WaitingRow[] {
+  return (summary?.queues ?? []).flatMap((queue) => {
+    const to = QUEUE_DESTINATIONS[queue.id];
+    if (queue.count <= 0 || to === null || to === undefined) return [];
+    return [{ id: queue.id, label: queue.label, count: queue.count, to, tone: QUEUE_TONES[queue.severity] }];
+  });
 }
 
 /** One labelled bar in a list that shares a scale. The numeral is always shown, never a tooltip. */
@@ -341,6 +413,49 @@ export function Instrument() {
     queryFn: () => reportsApi.networthAttribution(range),
     retry: false,
   });
+  /*
+   * A DEGRADATION THAT ONLY EXISTS DURING THE SESSION THAT SAW IT IS NOT A DEGRADATION.
+   *
+   * `syncStatus === 'error'` is Zustand state set by the SSE `sync_complete` handler when the run
+   * came back 'partial'. It is initialised to 'idle' on mount, so it says nothing at all about a
+   * run that finished before this page was opened: reload the app after a partial sync and the beam
+   * reads fully calibrated on a sheet a partial run wrote.
+   *
+   * Measured 2026-07-31 against a copy of `.mizan/mizan.db` at migration 054, taken with
+   * `sqlite3 .mizan/mizan.db ".backup /tmp/copy.db"` and queried read-only:
+   *
+   *   SELECT id, status, completed_at, message FROM sync_runs
+   *   WHERE status <> 'running' ORDER BY COALESCE(completed_at, started_at) DESC LIMIT 1;
+   *   -- 1ad2346d | partial | 2026-07-31T18:48:51.403Z | Sync finished with issues
+   *   SELECT date, is_estimated, covered_accounts, total_accounts, created_at
+   *   FROM net_worth_snapshots ORDER BY date DESC LIMIT 1;
+   *   -- 2026-07-31 | 0 | 14 | 14 | 2026-07-31T18:48:51.393Z
+   *
+   * The sheet's `created_at` is ten milliseconds before the run's `completed_at`, so that partial
+   * run is the run that wrote it. What failed inside it is why coverage cannot stand in for this:
+   *
+   *   SELECT provider, status, accounts_seen, error_message FROM sync_run_items
+   *   WHERE run_id = '1ad2346d-dd6a-4e4a-856a-f719a1f94db5';
+   *   -- simplefin | failed | 0 | Request failed with status code 402
+   *   -- coinbase, transaction-integrity, auto-categorization, net-worth-reconstruction | succeeded
+   *
+   * SimpleFIN returned nothing, so thirteen of the fourteen balances in that sheet are whatever the
+   * previous run left, and the sheet still recorded `covered_accounts = total_accounts = 14`,
+   * because coverage counts accounts the snapshot included and not accounts a provider refreshed.
+   * `sync_runs` is the only place that distinction is durable, so it is read rather than remembered.
+   * The live SSE event still counts: it is the only signal during the run that wrote the sheet under
+   * the reader's eyes.
+   *
+   * This query is in `failableQueries` below, and that is load-bearing rather than tidy. A dead
+   * `GET /api/sync/health` leaves `last_run` undefined, which reads as "the run finished" and would
+   * silently restore the fully-calibrated face this whole comment is about. The banner is what
+   * says the check did not run; the beam must not imply it did.
+   */
+  const syncHealthQ = useQuery({
+    queryKey: ['sync', 'health'],
+    queryFn: () => syncApi.health(),
+    retry: false,
+  });
 
   // A dead request must not render as a quiet zero: the banner names what is missing.
   const failableQueries = [
@@ -358,6 +473,7 @@ export function Instrument() {
     { query: merchantsQ, label: 'merchants' },
     { query: trendsQ, label: 'spending by month' },
     { query: attributionQ, label: 'what moved net worth' },
+    { query: syncHealthQ, label: 'sync health' },
   ];
 
   const snapshot = snapshotQ.data;
@@ -368,13 +484,15 @@ export function Instrument() {
   // still in flight are different states, and "no balance sheet has been recorded yet" is false
   // during the second.
   const sheetLoading = snapshotQ.isLoading;
+  // `syncIncomplete` is the durable half of the reading; see `syncHealthQ` above for what the two
+  // terms are and what a failed health request is allowed to imply (nothing).
   const calibration = readCalibration({
     sheetDate: snapshot?.date ?? null,
     today,
     isEstimated: Boolean(snapshot?.is_estimated),
     coveredAccounts: snapshot?.covered_accounts ?? null,
     totalAccounts: snapshot?.total_accounts ?? null,
-    syncIncomplete: syncStatus === 'error',
+    syncIncomplete: syncStatus === 'error' || Boolean(syncHealthQ.data?.last_run?.incomplete),
   });
 
   // The current sheet and the ones behind it, in the one shape both standing readings take. The
@@ -442,13 +560,13 @@ export function Instrument() {
   const topGoal = (goalsQ.data ?? []).find((g) => !g.is_archived && g.target_amount > 0 && g.remaining_amount > 0);
   const draft: AdvisorDraftAction | undefined = reviewQ.data?.ai_drafts?.[0];
   const insight: Insight | undefined = insightsQ.data?.[0];
-  const reviewCount = reviewQ.data?.total_open ?? 0;
+  const waiting = readWaiting(reviewQ.data);
   const recentAiCount = (aiActionsQ.data ?? []).filter(
     (a) => differenceInCalendarDays(new Date(), parseISO(a.created_at)) <= 1
   ).length;
   // Omitted entirely when nothing is waiting, rather than rendering an empty strip: "you are all
   // clear" is a claim, and absence of a prompt is not one.
-  const needsYou = Boolean(topGoal || oldestOverdue || nextBill || draft || insight) || reviewCount > 0;
+  const needsYou = Boolean(topGoal || oldestOverdue || nextBill || draft || insight) || waiting.length > 0;
 
   const confirmDraft = useMutation({
     mutationFn: (d: AdvisorDraftAction) => aiApi.confirmDraft(d),
@@ -653,9 +771,9 @@ export function Instrument() {
               {topGoal && (
                 <RailRow to="/plan" label={topGoal.name} value={`${formatWholeCurrency(topGoal.remaining_amount)} to go`} />
               )}
-              {reviewCount > 0 && (
-                <RailRow to="/ledger?uncategorized=1" label="Uncategorized" value={`${reviewCount}`} tone="text-clay" />
-              )}
+              {waiting.map((queue) => (
+                <RailRow key={queue.id} to={queue.to} label={queue.label} value={`${queue.count}`} tone={queue.tone} />
+              ))}
             </div>
 
             {(draft || insight) && (

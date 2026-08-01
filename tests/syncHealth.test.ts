@@ -11,7 +11,7 @@ const NOW = new Date('2026-06-30T12:00:00.000Z');
 function row(overrides: Partial<SyncHealthConnectionRow>): SyncHealthConnectionRow {
   return {
     id: 'conn_1',
-    provider: 'plaid',
+    provider: 'simplefin',
     institution_name: 'Test Bank',
     status: 'active',
     last_synced_at: '2026-06-30T08:00:00.000Z',
@@ -82,6 +82,7 @@ test('summarizes global sync health by most urgent state', () => {
     fresh_count: 0,
     never_synced_count: 0,
     last_synced_at: null,
+    last_run: null,
     connections: [],
   });
 

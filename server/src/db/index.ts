@@ -15,7 +15,15 @@ let _db: Database.Database | null = null;
 let _readonlyDb: Database.Database | null = null;
 let _readonlyDbPath = DB_PATH;
 
-export function _setDbForTesting(testDb: Database.Database) {
+/**
+ * Point the module-level singleton at a test database, or hand it back.
+ *
+ * `null` is a supported argument, not a hole: a test that overrides the singleton has to release it
+ * again in its `finally`, or every later test in the process keeps reading the closed in-memory
+ * database it installed. `getDb()` treats a null `_db` as "not yet opened" and opens the real file
+ * on the next call, which is the same state the process started in.
+ */
+export function _setDbForTesting(testDb: Database.Database | null) {
   _db = testDb;
 }
 

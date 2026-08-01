@@ -921,7 +921,46 @@ test('a breach in a batch that retired a rule takes the retirement back too', (t
   assert.deepEqual(operations.map((r) => r.operation), ['create', 'retire', 'unretire']);
 });
 
-test('a retirement the harness cannot put back refuses the whole revert and says which rule', (t) => {
+/**
+ * A batch that retires a rule and writes a replacement over its freed pattern.
+ *
+ * Only one live rule may hold a pattern, so this is the one shape whose undo has a forced order:
+ * the replacement has to come off before the original has anywhere to come back to. Undoing in the
+ * order `merchant_rule_revisions` happened to sort by left the outcome to a uuid comparison, and
+ * this same batch reverted whole or refused with "another live rule now holds that pattern"
+ * depending on which id sorted first. It is run twice here, over two independent ledgers, because
+ * one run cannot distinguish a decided order from a lucky one.
+ */
+test('a batch that retires a rule and replaces it comes back whole, whichever id sorts first', (t) => {
+  for (const attempt of [1, 2]) {
+    const fx = fixture();
+    t.after(() => fx.db.close());
+
+    const ruleId = retirableAiRule(fx);
+    const row = spendRow(fx, { amount: -2_500 });
+    const categorizeAction = insertAdvisorAction(fx.db);
+    const retireAction = insertAdvisorAction(fx.db, { kind: 'retire_merchant_rule' });
+    let replacementId = '';
+
+    const report = guarded(fx.db, () => {
+      categorize(fx.db, categorizeAction, [{ id: row, categoryId: 'cat_food' }]);
+      retireMerchantRule(fx.db, ruleId, { source: 'ai', actionId: retireAction });
+      replacementId = upsertMerchantRule(fx.db, 'Trupanion', 'cat_shop', TEST_NOW, {
+        source: 'human',
+      }).ruleId as string;
+      fx.db.prepare('UPDATE transactions SET amount = ? WHERE id = ?').run(-9_900, row);
+      return { actionIds: [categorizeAction, retireAction] };
+    });
+
+    assert.equal(report.status, 'reverted', `attempt ${attempt}`);
+    assert.equal(report.reverted_rows, 1);
+    assert.equal(report.reverted_rules, 2, 'the replacement came off and the original went back');
+    assert.equal(ruleIsRetired(fx, ruleId), false, 'the rule the batch retired is live again');
+    assert.equal(ruleIsRetired(fx, replacementId), true, 'the rule the batch created is not');
+  }
+});
+
+test('a rule write the harness cannot put back refuses the whole revert and says which rule', (t) => {
   const fx = fixture();
   t.after(() => fx.db.close());
 
@@ -933,9 +972,10 @@ test('a retirement the harness cannot put back refuses the whole revert and says
   const report = guarded(fx.db, () => {
     categorize(fx.db, categorizeAction, [{ id: row, categoryId: 'cat_food' }]);
     retireMerchantRule(fx.db, ruleId, { source: 'ai', actionId: retireAction });
-    // The retirement freed the pattern and something took it. Reviving the old rule would be a
-    // second, unasked change to whichever rule the owner has now, so undo cannot complete.
-    upsertMerchantRule(fx.db, 'Trupanion', 'cat_shop', TEST_NOW, { source: 'human' });
+    // The rule row is gone, so there is nothing to un-retire and nothing to invent in its place.
+    // Nothing in the app deletes a rule; this is the harness being held to what it can prove rather
+    // than to what it expects.
+    fx.db.prepare('DELETE FROM merchant_rules WHERE id = ?').run(ruleId);
     fx.db.prepare('UPDATE transactions SET amount = ? WHERE id = ?').run(-9_900, row);
     return { actionIds: [categorizeAction, retireAction] };
   });
@@ -947,12 +987,11 @@ test('a retirement the harness cannot put back refuses the whole revert and says
   const incident = listAiIncidents(fx.db)[0];
   assert.equal(incident.revert_status, 'failed');
   assert.match(incident.revert_error ?? '', /1 merchant rule retirement still standing/);
-  assert.match(incident.revert_error ?? '', /another live rule now holds that pattern/);
+  assert.match(incident.revert_error ?? '', /the rule row is gone/);
 
   // All or nothing: the category write is still applied rather than half undone.
   const settled = fx.db.prepare('SELECT category_id FROM transactions WHERE id = ?').get(row);
   assert.deepEqual(settled, { category_id: 'cat_food' });
-  assert.equal(ruleIsRetired(fx, ruleId), true);
 });
 
 test('a refusal for a different reason still names the retirement it leaves standing', (t) => {
@@ -997,6 +1036,150 @@ test('a rule the batch did not touch is left alone by the revert', (t) => {
   assert.equal(report.status, 'reverted');
   assert.equal(report.reverted_rules, 0);
   assert.equal(ruleIsRetired(fx, bystander), true, 'the revert reaches the batch and stops there');
+});
+
+// ── Rule creations are part of the batch too ─────────────────────────────────
+
+/**
+ * The mirror of the retirement case, and the one that stayed open after it was fixed.
+ *
+ * `create_merchant_rule` is autonomous, so an ordinary pass writes a rule and sweeps rows under it.
+ * Un-retiring was taught to the harness on its own, so a batch that CREATED a rule and then breached
+ * reverted the categorizations, left the new rule live and matching every future transaction, and
+ * reported 'reverted' with `headlines_restored` true. Undoing a creation is a retirement: the rule
+ * files nothing, frees its pattern, and keeps its own history.
+ */
+function ruleIsLive(fx: Fixture, ruleId: string): boolean {
+  const row = fx.db
+    .prepare('SELECT retired_at FROM merchant_rules WHERE id = ?')
+    .get(ruleId) as { retired_at: string | null } | undefined;
+  return row !== undefined && row.retired_at === null;
+}
+
+test('HEALTHY: a pass that also writes a new AI rule is silent, and the rule stays live', (t) => {
+  const fx = fixture();
+  t.after(() => fx.db.close());
+
+  const row = spendRow(fx, { amount: -2_500 });
+  const ruleAction = insertAdvisorAction(fx.db, { kind: 'create_merchant_rule' });
+
+  const report = guarded(fx.db, () => {
+    const rule = upsertMerchantRule(fx.db, 'Trupanion', 'cat_pets', TEST_NOW, {
+      source: 'ai',
+      actionId: ruleAction,
+    });
+    assert.equal(rule.status, 'created');
+    categorize(fx.db, ruleAction, [{ id: row, categoryId: 'cat_pets' }]);
+    return { actionIds: [ruleAction] };
+  });
+
+  assert.equal(report.status, 'clean');
+  assert.deepEqual(report.breaches, []);
+  assert.equal(report.reverted_rules, 0);
+  assert.equal(listAiIncidents(fx.db).length, 0);
+
+  const created = fx.db
+    .prepare("SELECT id FROM merchant_rules WHERE pattern = 'Trupanion'")
+    .get() as { id: string };
+  assert.equal(ruleIsLive(fx, created.id), true, 'a clean pass is not undone, so the rule stays');
+});
+
+test('a breach in a batch that created a rule takes the rule back too', (t) => {
+  const fx = fixture();
+  t.after(() => fx.db.close());
+
+  const row = spendRow(fx, { amount: -2_500 });
+  const ruleAction = insertAdvisorAction(fx.db, { kind: 'create_merchant_rule' });
+  let ruleId = '';
+
+  const report = guarded(fx.db, () => {
+    ruleId = upsertMerchantRule(fx.db, 'Trupanion', 'cat_pets', TEST_NOW, {
+      source: 'ai',
+      actionId: ruleAction,
+    }).ruleId as string;
+    categorize(fx.db, ruleAction, [{ id: row, categoryId: 'cat_pets' }]);
+    // The unexplained movement: an amount no reclassification can produce.
+    fx.db.prepare('UPDATE transactions SET amount = ? WHERE id = ?').run(-9_900, row);
+    return { actionIds: [ruleAction] };
+  });
+
+  assert.equal(report.status, 'reverted');
+  assert.equal(report.reverted_rows, 1);
+  assert.equal(report.reverted_rules, 1, 'the rule the batch created is counted, not assumed');
+
+  const settled = fx.db.prepare('SELECT category_id FROM transactions WHERE id = ?').get(row);
+  assert.deepEqual(settled, { category_id: null });
+  assert.equal(ruleIsLive(fx, ruleId), false, 'the rule the batch created no longer files anything');
+
+  // Its history still explains what happened to it: nothing is deleted.
+  const operations = fx.db
+    .prepare('SELECT operation FROM merchant_rule_revisions WHERE rule_id = ? ORDER BY rowid')
+    .all(ruleId) as Array<{ operation: string }>;
+  assert.deepEqual(operations.map((r) => r.operation), ['create', 'retire']);
+
+  // And the pattern is free again, so the owner writing their own "Trupanion" rule is not blocked
+  // by one a reverted pass left behind.
+  const replacement = upsertMerchantRule(fx.db, 'Trupanion', 'cat_shop', TEST_NOW, { source: 'human' });
+  assert.equal(replacement.status, 'created');
+});
+
+test('a refusal names a rule creation it leaves standing, and leaves it live', (t) => {
+  const fx = fixture();
+  t.after(() => fx.db.close());
+
+  spendRow(fx, { amount: -30_000, category_id: 'cat_pets' });
+  let ruleId = '';
+
+  // No advisor action anywhere, so the id-based revert cannot start. The creation is still a write
+  // the batch made, and an incident that mentioned only the missing action would under-report it.
+  const report = guarded(fx.db, () => {
+    ruleId = upsertMerchantRule(fx.db, 'Trupanion', 'cat_pets', TEST_NOW, {
+      source: 'ai',
+      actionId: null,
+    }).ruleId as string;
+    fx.db.prepare("UPDATE categories SET parent_id = 'cat_xfer' WHERE id = 'cat_pets'").run();
+    return { actionIds: [] };
+  });
+
+  assert.equal(report.status, 'revert_failed');
+  const incident = listAiIncidents(fx.db)[0];
+  assert.match(incident.revert_error ?? '', /no advisor action/);
+  assert.match(incident.revert_error ?? '', /1 merchant rule creation the batch made is also left standing/);
+  assert.equal(ruleIsLive(fx, ruleId), true, 'nothing was reverted, and the row says so');
+});
+
+test('a rename the batch made refuses the revert rather than reporting it whole', (t) => {
+  const fx = fixture();
+  t.after(() => fx.db.close());
+
+  // Written before the batch, so the batch's own first write to it is the rename.
+  const ruleId = retirableAiRule(fx, 'trupanion');
+  const row = spendRow(fx, { amount: -2_500 });
+  const actionId = insertAdvisorAction(fx.db);
+
+  const report = guarded(fx.db, () => {
+    // Same category, different casing: `upsertMerchantRule` rewrites the pattern and logs a rename,
+    // and the log records the pattern the rule now carries rather than the one it replaced.
+    const renamed = upsertMerchantRule(fx.db, 'Trupanion', 'cat_pets', TEST_NOW, { source: 'ai', actionId });
+    assert.equal(renamed.status, 'unchanged');
+    categorize(fx.db, actionId, [{ id: row, categoryId: 'cat_food' }]);
+    fx.db.prepare('UPDATE transactions SET amount = ? WHERE id = ?').run(-9_900, row);
+    return { actionIds: [actionId] };
+  });
+
+  assert.equal(report.status, 'revert_failed');
+  assert.equal(report.reverted_rules, 0);
+  const incident = listAiIncidents(fx.db)[0];
+  assert.match(incident.revert_error ?? '', /1 merchant rule redefinition/);
+  assert.match(incident.revert_error ?? '', /records what it holds now rather than what it held before/);
+
+  // All or nothing: the category write is still applied rather than half undone.
+  const settled = fx.db.prepare('SELECT category_id FROM transactions WHERE id = ?').get(row);
+  assert.deepEqual(settled, { category_id: 'cat_food' });
+  const pattern = fx.db
+    .prepare('SELECT pattern FROM merchant_rules WHERE id = ?')
+    .get(ruleId) as { pattern: string };
+  assert.equal(pattern.pattern, 'Trupanion');
 });
 
 test('the guard refuses to run inside an open transaction', (t) => {

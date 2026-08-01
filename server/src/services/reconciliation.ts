@@ -126,8 +126,43 @@ export interface ReconciliationReport {
    * drift the first time the skip condition changes. Point that reader at this field.
    */
   skipped: SkippedAccount[];
+  /**
+   * Raw `residual` summed over EVERY judged account. Not the size of what is unexplained, and it
+   * is not safe to publish under a name that suggests it is. See `unreconciledResidual` below.
+   */
   total_residual: number;
   measured_snapshot_count: number;
+}
+
+/**
+ * The residual this report actually judges: `adjusted_residual` over the accounts that failed the
+ * `unreconciled` test, and nothing else.
+ *
+ * IT IS A MAGNITUDE, AND THAT IS WHAT MAKES THE ZERO MEAN ANYTHING. The signed sum published under
+ * this name before could cancel. Constructed on a `migratedTestDb()` fixture with two snapshots and
+ * no transactions: Checking A adjusted_residual 99900, Checking B adjusted_residual -99900,
+ * `unreconciled` holding both, and the signed sum returning 0. The model was handed
+ * `unreconciled_residual: 0` beside a two-account list carrying $999.00 of unexplained movement
+ * each way, under a sentence saying 0.00 means the list is empty.
+ *
+ * Summing `Math.abs` makes that sentence true rather than deleting it: every account in
+ * `unreconciled` cleared `Math.abs(adjusted_residual) > RESIDUAL_TOLERANCE_CENTS` to get there, so
+ * a non-empty list cannot total zero and an empty one totals nothing else. The cost is that
+ * direction is not readable off the total; it is on each account's own `adjusted_residual`.
+ *
+ * `total_residual` sums raw `residual` over every account, which is the two things the filter above
+ * deliberately removes: a market-driven account's residual IS its price move, and `boundary_amount`
+ * is the horizon-cut artifact `adjusted_residual` subtracts. Publishing it next to `unreconciled`
+ * reads as the size of the gap, and the two disagree on a clean ledger. Re-derived 2026-07-31
+ * against a copy of `.mizan/mizan.db` at migration 054 taken with `.backup`, `reconcileAccounts(db)`
+ * over 14 accounts returns `total_residual` 134748 cents ($1,347.48) with `unreconciled` empty:
+ * 81656 of it is the three market-driven accounts (Fidelity Individual, Coinbase, Fidelity Roth
+ * IRA) and the remaining 53092 is boundary on Chase Checking and Chase Sapphire, whose
+ * `adjusted_residual` is 0. Every judged account's `adjusted_residual` is either exempt or exactly
+ * zero, so this returns 0.
+ */
+export function unreconciledResidual(report: ReconciliationReport): number {
+  return report.unreconciled.reduce((sum, account) => sum + Math.abs(account.adjusted_residual), 0);
 }
 
 /**

@@ -312,8 +312,8 @@ export function runPostSyncStages(
   }
 
   let integrity: TransactionIntegrityResult = {
-    duplicates: { groupCount: 0, transactionCount: 0 },
-    transfers: { pairCount: 0, transactionCount: 0 },
+    duplicates: { groupCount: 0, transactionCount: 0, newGroupCount: 0, newTransactionCount: 0 },
+    transfers: { pairCount: 0, transactionCount: 0, newPairCount: 0 },
   };
   try {
     integrity = stages.refreshTransactionIntegrity(db);
@@ -323,20 +323,30 @@ export function runPostSyncStages(
       institution_name: 'Transaction integrity',
       status: 'succeeded',
     });
-    if (integrity.duplicates.groupCount > 0) {
+    // A `detected` row is an event, so it is written for what THIS run found. Emitting on the
+    // standing count instead meant an unresolved candidate rewrote the same row every hour and the
+    // panel's history filled with a finding the owner had already seen and could only silence by
+    // resolving it. The standing counts still reach `sync_runs` below, where they describe state.
+    // Emitted on the transaction count, not the group count, because that is the grain the
+    // detector can promise exactly once: a copy joining a group the owner already resolved nothing
+    // about is a row they have not seen, and it does not make the group new.
+    if (integrity.duplicates.newTransactionCount > 0) {
+      const { newTransactionCount, newGroupCount } = integrity.duplicates;
       recordSyncChange(db, integrityItem.id, {
         entity_type: 'integrity',
         entity_id: null,
         change_type: 'detected',
-        description: `${integrity.duplicates.groupCount} duplicate group(s) need review`,
+        description:
+          `${newTransactionCount} transaction(s) newly flagged as possible duplicates, ` +
+          `in ${newGroupCount} group(s)`,
       });
     }
-    if (integrity.transfers.pairCount > 0) {
+    if (integrity.transfers.newPairCount > 0) {
       recordSyncChange(db, integrityItem.id, {
         entity_type: 'integrity',
         entity_id: null,
         change_type: 'detected',
-        description: `${integrity.transfers.pairCount} transfer pair(s) need review`,
+        description: `${integrity.transfers.newPairCount} new transfer pair(s) need review`,
       });
     }
   } catch (err) {

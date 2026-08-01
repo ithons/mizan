@@ -99,19 +99,50 @@ function queueCount(reviewSummary: TransactionReviewSummary, id: string): number
   return reviewSummary.queues.find((queue) => queue.id === id)?.count ?? 0;
 }
 
+/**
+ * The queues this row is allowed to speak for, and every one it counts.
+ *
+ * `total_open` sums every queue except `pending` (see transactionReview.ts), and this list used to
+ * omit `ai_insights` while `total_open` included it. On the live database that is the whole row.
+ * Re-derived 2026-07-31 against a copy of `.mizan/mizan.db` at migration 054 taken with `.backup`,
+ * running `getTransactionReviewSummary` and `getDataQualitySummary` over the copy:
+ *
+ *   queues -> ai_insights 7, uncategorized 0, rule_suggestions 0, pending 0,
+ *             recurring_candidates 0, duplicate_candidates 0, transfer_candidates 0
+ *   total_open -> 7
+ *
+ * so the panel reported a backlog whose entire content it could not name and fell through to
+ * "7 review items need attention". A count with no noun is not something an owner can act on.
+ *
+ * SEVEN, NOT FIFTEEN, AND THE DIFFERENCE IS NOT COSMETIC. `SELECT COUNT(*) FROM advisor_drafts
+ * WHERE status = 'open'` on the same copy returns 15 (`GROUP BY kind` -> categorize_transaction 14,
+ * update_goal_target 1), but `isDraftStillActionable` drops the drafts whose premise no longer
+ * holds before the queue is counted, so 15 is a table count and 7 is the number the panel printed.
+ * Writing the table count here as the printed figure is the derived-as-fact failure this file
+ * exists to stop.
+ *
+ * Keeping the list beside the ids it reads is still two places; the guard is a test that walks
+ * `TransactionReviewSummary.queues` and fails on any id this list does not cover, so a queue added
+ * to the summary cannot go unnamed here again.
+ */
+const REVIEW_QUEUE_NOUNS: ReadonlyArray<readonly [string, string]> = [
+  ['ai_insights', 'AI suggestion'],
+  ['uncategorized', 'uncategorized transaction'],
+  ['rule_suggestions', 'rule suggestion'],
+  ['pending', 'pending transaction'],
+  ['recurring_candidates', 'recurring candidate'],
+  ['duplicate_candidates', 'possible duplicate'],
+  ['transfer_candidates', 'detected transfer'],
+];
+
+export const REVIEW_QUEUE_IDS_NAMED: ReadonlyArray<string> = REVIEW_QUEUE_NOUNS.map(([id]) => id);
+
 function transactionReviewIssue(reviewSummary: TransactionReviewSummary): WeightedIssue | null {
   if (reviewSummary.total_open <= 0) return null;
 
   const uncategorized = queueCount(reviewSummary, 'uncategorized');
-  const parts = [
-    [uncategorized, 'uncategorized transaction'],
-    [queueCount(reviewSummary, 'rule_suggestions'), 'rule suggestion'],
-    [queueCount(reviewSummary, 'pending'), 'pending transaction'],
-    [queueCount(reviewSummary, 'recurring_candidates'), 'recurring candidate'],
-    [queueCount(reviewSummary, 'duplicate_candidates'), 'possible duplicate'],
-    [queueCount(reviewSummary, 'transfer_candidates'), 'detected transfer'],
-  ] as const;
-  const named = parts
+  const named = REVIEW_QUEUE_NOUNS
+    .map(([id, noun]) => [queueCount(reviewSummary, id), noun] as const)
     .filter(([count]) => count > 0)
     .map(([count, noun]) => counted(count, noun));
 
@@ -121,7 +152,11 @@ function transactionReviewIssue(reviewSummary: TransactionReviewSummary): Weight
     named.length > 0
       ? sentence(joinCounted(named), 'needs', 'need', 'review before reports can be fully trusted.')
       : sentence(counted(reviewSummary.total_open, 'review item'), 'needs', 'need', 'attention.'),
-    '/review',
+    // `/review` redirected to `/ledger?uncategorized=1`, a filter that holds none of the AI
+    // suggestions and, on the measured state above, no rows at all: the row's only action landed on
+    // an empty list. `/ledger` is the screen every queue named here is worked on, and it carries a
+    // chip per queue including "Model suggests".
+    '/ledger',
     reviewSummary.total_open > 10 || uncategorized > 5 ? 'warning' : 'info',
     Math.min(25, Math.ceil(reviewSummary.total_open * 1.5))
   );

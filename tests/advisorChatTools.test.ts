@@ -100,8 +100,12 @@ test('get_budgets returns budget vs this-month actual, dollarized', (t) => {
   const db = setup();
   t.after(() => db.close());
   // A current-month expense (child category rolls up to the budgeted parent).
+  // `date('now')` is UTC and `getMonthlyBudgetsWithProjection` takes its month from `new Date()`,
+  // which is local, so on the last evening of a month west of UTC the row landed in the NEXT month
+  // and `spent` came back 0. Observed 2026-07-31 20:20 local: the row was written 2026-08-01 while
+  // the budget window was July. 'localtime' puts the row in the month the assertion is about.
   db.prepare(`INSERT INTO transactions (id,account_id,date,amount,category_id,created_at,updated_at)
-    VALUES ('tb','chk',date('now'),-4000,'cat_food_restaurants','2026-06-01','2026-06-01')`).run();
+    VALUES ('tb','chk',date('now','localtime'),-4000,'cat_food_restaurants','2026-06-01','2026-06-01')`).run();
   const r = runAdvisorTool(db, 'get_budgets', {}) as {
     month: string;
     budgets: Array<{ category: string; budget: number; spent: number; remaining: number }>;
@@ -192,7 +196,7 @@ import { listAdvisorActions } from '../server/src/services/advisorDrafts';
 import { revertableRevisionsForAction } from '../server/src/services/categoryWrites';
 import { getHoldingHistory } from '../server/src/services/investmentMetadata';
 import { getSyncRunDetail, listSyncRuns, recordSyncRunItem, startSyncRun } from '../server/src/services/syncHistory';
-import { reconcileAccounts } from '../server/src/services/reconciliation';
+import { reconcileAccounts, unreconciledResidual } from '../server/src/services/reconciliation';
 import { getSpendingReport } from '../server/src/services/reporting';
 import { getCategoryProvenance } from '../server/src/services/schemaDoc';
 import { getTransactionById } from '../server/src/services/transactions';
@@ -615,12 +619,14 @@ test('get_reconciliation reports the service figures, converted to dollars once'
 
   const service = reconcileAccounts(db, {});
   const tool = runAdvisorTool(db, 'get_reconciliation', {}) as {
-    total_residual: number;
+    unreconciled_residual: number;
+    residual_all_accounts: number;
     unreconciled: unknown[];
     accounts: Array<{ account_id: string; residual: number; adjusted_residual: number; boundary_amount: number }>;
   };
 
-  assert.equal(tool.total_residual, toDollars(service.total_residual));
+  assert.equal(tool.residual_all_accounts, toDollars(service.total_residual));
+  assert.equal(tool.unreconciled_residual, toDollars(unreconciledResidual(service)));
   assert.equal(tool.accounts.length, service.accounts.length);
   for (const account of service.accounts) {
     const reported = tool.accounts.find((a) => a.account_id === account.account_id);
@@ -655,6 +661,99 @@ test('every derived reconciliation field the tool emits is defined in the same p
     if (selfEvident.has(field)) continue;
     assert.ok(tool.field_meanings[field], `${field} is emitted with no definition the model can read`);
   }
+});
+
+/**
+ * A number beside an empty list reads as the size of what is unexplained.
+ *
+ * `total_residual` sums raw `residual` over EVERY judged account, which is the two things the
+ * `unreconciled` filter removes on purpose: a market-driven account's residual IS its price move,
+ * and `boundary_amount` is the horizon-cut artifact `adjusted_residual` subtracts. Measured
+ * 2026-07-31 against a copy of `.mizan/mizan.db` at migration 054, `reconcileAccounts(db)` over 14
+ * accounts returned `total_residual` 134748 cents ($1,347.48) with `unreconciled` empty: $816.56 of
+ * it the three market-driven accounts, $530.92 boundary on Chase Checking and Chase Sapphire, and
+ * every judged account's `adjusted_residual` either exempt or exactly zero.
+ */
+
+test('HEALTHY: an empty unreconciled list is reported beside a zero, not beside a residual', (t) => {
+  const db = migratedTestDb();
+  t.after(() => db.close());
+
+  const { checking } = seedReconciliation(db);
+  insertTransaction(db, { account_id: checking, date: '2026-07-15', amount: 50000 });
+
+  const tool = runAdvisorTool(db, 'get_reconciliation', {}) as {
+    unreconciled_residual: number;
+    residual_all_accounts: number;
+    unreconciled: unknown[];
+  };
+
+  // The brokerage fell $1,000 on a price move with no transaction at all: the wide sum carries it.
+  assert.deepEqual(tool.unreconciled, []);
+  assert.equal(tool.residual_all_accounts, -1000);
+  assert.equal(tool.unreconciled_residual, 0, 'nothing unexplained must total zero');
+});
+
+test('a real gap is reported in the figure that is about gaps', (t) => {
+  const db = migratedTestDb();
+  t.after(() => db.close());
+
+  // Checking rose $500 with nothing in the ledger to explain it.
+  seedReconciliation(db);
+
+  const tool = runAdvisorTool(db, 'get_reconciliation', {}) as {
+    unreconciled_residual: number;
+    unreconciled: Array<{ account_name: string }>;
+  };
+
+  assert.equal(tool.unreconciled.length, 1);
+  assert.equal(tool.unreconciled[0].account_name, 'Checking');
+  assert.equal(tool.unreconciled_residual, 500);
+});
+
+/**
+ * TWO GAPS POINTING OPPOSITE WAYS ARE TWO GAPS, NOT NO GAP.
+ *
+ * `unreconciledResidual` summed `adjusted_residual` signed, under a field_meanings sentence saying
+ * the figure is "the size of what is unexplained" and "0.00 exactly when unreconciled is empty".
+ * On this fixture the signed sum returned 0 beside a two-account `unreconciled`, which is the same
+ * defect class the field was split out to fix: a number that reads as the size of the gap and is
+ * not. It sums magnitudes now, and the biconditional the sentence promises is real because every
+ * listed account cleared RESIDUAL_TOLERANCE_CENTS to be listed at all.
+ */
+test('two unreconciled accounts of opposite sign do not cancel to a clean bill of health', (t) => {
+  const db = migratedTestDb();
+  t.after(() => db.close());
+
+  const a = insertAccount(db, { account_name: 'Checking A' });
+  const b = insertAccount(db, { account_name: 'Checking B' });
+  const snapshot = db.prepare(`
+    INSERT INTO net_worth_snapshots
+      (id, date, total_assets, total_liabilities, net_worth, breakdown, is_estimated, created_at)
+    VALUES (?, ?, ?, 0, ?, ?, 0, '2026-07-30T00:00:00.000Z')
+  `);
+  // Both accounts move $999.00 with nothing in the ledger, one up and one down. Net worth is
+  // unchanged across the horizon, which is exactly why a signed total read as "nothing wrong".
+  snapshot.run('nw_a', '2026-06-30', 200000, 200000, JSON.stringify({ [a]: 100000, [b]: 100000 }));
+  snapshot.run('nw_b', '2026-07-30', 200000, 200000, JSON.stringify({ [a]: 199900, [b]: 100 }));
+
+  const report = reconcileAccounts(db, {});
+  assert.equal(report.unreconciled.length, 2, 'both accounts are unexplained');
+  assert.deepEqual(
+    report.unreconciled.map((account) => account.adjusted_residual).sort((x, y) => x - y),
+    [-99900, 99900]
+  );
+  assert.equal(unreconciledResidual(report), 199800, 'the sizes add, they do not cancel');
+
+  const tool = runAdvisorTool(db, 'get_reconciliation', {}) as {
+    unreconciled_residual: number;
+    unreconciled: unknown[];
+    field_meanings: Record<string, string>;
+  };
+  assert.equal(tool.unreconciled.length, 2);
+  assert.equal(tool.unreconciled_residual, 1998);
+  assert.notEqual(tool.unreconciled_residual, 0, 'a non-empty list may never publish 0.00');
+  assert.match(tool.field_meanings.unreconciled_residual ?? '', /MAGNITUDE/);
 });
 
 test('a healthy ledger reconciles silently, and a price move is not called a gap', (t) => {

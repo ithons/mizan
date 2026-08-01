@@ -2,7 +2,13 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { format, subDays } from 'date-fns';
 import type Database from 'better-sqlite3';
-import { getDataQualitySummary, summarizeDataQuality } from '../server/src/services/dataQuality';
+import {
+  REVIEW_QUEUE_IDS_NAMED,
+  getDataQualitySummary,
+  summarizeDataQuality,
+} from '../server/src/services/dataQuality';
+import { getTransactionReviewSummary } from '../server/src/services/transactionReview';
+import { indexDrafts, suggestedChipCount } from '../client/src/views/ledger/spine';
 import { getReportSummary } from '../server/src/services/reporting';
 import {
   insertAccount,
@@ -27,6 +33,13 @@ function baseSyncHealth(overrides: Partial<SyncHealth> = {}): SyncHealth {
     fresh_count: 1,
     never_synced_count: 0,
     last_synced_at: '2026-06-30T12:00:00.000Z',
+    last_run: {
+      id: 'sync_run_1',
+      status: 'succeeded',
+      completed_at: '2026-06-30T12:00:00.000Z',
+      message: 'Sync complete',
+      incomplete: false,
+    },
     connections: [],
     ...overrides,
   };
@@ -62,6 +75,7 @@ function baseReviewSummary(counts: Partial<Record<QueueId, number>> = {}): Trans
     recurring_candidates: [],
     duplicate_candidates: [],
     transfer_candidates: [],
+    ai_drafts: [],
   };
 }
 
@@ -138,7 +152,7 @@ test('critical issues sort ahead of warnings and notes', () => {
   ]);
   assert.deepEqual(summary.issues.map((issue) => issue.route), [
     '/investments',
-    '/review',
+    '/ledger',
     '/bills',
   ]);
   assert.ok(!summary.issues.some((issue) => 'weight' in issue), 'weight must not be serialized');
@@ -410,7 +424,7 @@ test('a single uncategorized transaction is reported, once, and reads correctly'
     issues[0].message,
     '1 uncategorized transaction needs review before reports can be fully trusted.'
   );
-  assert.equal(issues[0].route, '/review');
+  assert.equal(issues[0].route, '/ledger');
 });
 
 // ─── The manual-only install ──────────────────────────────────────────────────
@@ -517,4 +531,207 @@ test('a broken connection still reports, ledger or not', (t) => {
   // Silence about `sync-empty` is about an install with no connection, not about ignoring one that
   // is failing: a broken connection is actionable and clears when the owner reconnects.
   assert.deepEqual(getDataQualitySummary(db).issues.map((issue) => issue.id), ['sync-attention']);
+});
+
+// ─── A count with no noun, linked to a filter that holds none of it ───────────
+//
+// `total_open` in transactionReview.ts sums every queue except `pending`, and `ai_insights` is one
+// of them. The naming list in dataQuality.ts did not include it, so an install whose only open work
+// was AI suggestions got a row that counted them and could not say what they were. Re-derived
+// 2026-07-31 against a copy of `.mizan/mizan.db` at migration 054 taken with `.backup`, by running
+// `getTransactionReviewSummary` over the copy, that was the entire live state: uncategorized 0,
+// pending 0, rule suggestions 0, recurring candidates 0, duplicate groups 0, transfer pairs 0,
+// ai_insights 7, total_open 7. The panel printed "7 review items need attention".
+//
+// `SELECT COUNT(*) FROM advisor_drafts WHERE status = 'open'` on the same copy returns 15
+// (categorize_transaction 14, update_goal_target 1). That is a table count, not the printed figure:
+// `isDraftStillActionable` drops the drafts whose premise no longer holds before the queue counts
+// them. The two numbers are both real and they are about different things.
+
+function openDraft(db: Database.Database, id: string, transactionId: string): void {
+  db.prepare(`
+    INSERT INTO advisor_drafts (id, kind, label, summary, route, payload, changes, citations, status, created_at, updated_at)
+    VALUES (?, 'categorize_transaction', 'Categorize', 'Categorize this row', '/ledger', ?, '[]', '[]', 'open', ?, ?)
+  `).run(
+    id,
+    JSON.stringify({ kind: 'categorize_transaction', transaction_id: transactionId, category_id: 'cat_shop' }),
+    TODAY.toISOString(),
+    TODAY.toISOString()
+  );
+}
+
+test('a backlog made only of AI suggestions names them and links where they are worked', (t) => {
+  const db = freshlySyncedDb();
+  t.after(() => db.close());
+
+  const checking = insertAccount(db, { account_name: 'Checking', current_balance: 300000 });
+  // Categorized, so no other queue can fire and this row is unambiguously about the drafts.
+  const row = insertTransaction(db, {
+    account_id: checking,
+    date: daysAgo(2),
+    amount: -2750,
+    merchant_name: 'Unfamiliar Shop',
+    category_id: 'cat_food',
+  });
+  openDraft(db, 'draft_1', row);
+
+  const issues = getDataQualitySummary(db).issues;
+  assert.equal(issues.length, 1);
+  assert.equal(issues[0].id, 'transaction-review');
+  assert.equal(
+    issues[0].message,
+    '1 AI suggestion needs review before reports can be fully trusted.',
+    'a count with no noun is not something an owner can act on'
+  );
+  // `/review` redirects to `/ledger?uncategorized=1`, which holds no draft and, on the state above,
+  // no row at all. `/ledger` carries a chip per queue, including "Model suggests".
+  assert.equal(issues[0].route, '/ledger');
+});
+
+/**
+ * THE ROW COUNTS ONE POPULATION AND SENDS THE OWNER TO A CHIP THAT COUNTS ANOTHER.
+ *
+ * `ai_insights` is `summary.ai_drafts` entire, whatever kind each draft is. `/ledger`'s
+ * "Model suggests" chip was `indexDrafts(...).transactionIds.length`, and `indexDrafts` pushes
+ * every draft that is not `categorize_transaction` into `otherDrafts` instead. So a queue holding
+ * only a `create_merchant_rule` draft was advertised as "1 AI suggestion needs review", routed to
+ * `/ledger`, and met there by a chip reading 0: the same "the action lands on an empty list" defect
+ * the route change was made to close, moved to a different draft kind.
+ *
+ * The chip is the whole of the split now. This asserts the identity that makes it so, over a draft
+ * kind that lands on the side the chip used to drop.
+ */
+test('the ledger chip counts every draft the review queue counts, not only the row-shaped ones', (t) => {
+  const db = freshlySyncedDb();
+  t.after(() => db.close());
+
+  const checking = insertAccount(db, { account_name: 'Checking', current_balance: 300000 });
+  insertTransaction(db, {
+    account_id: checking,
+    date: daysAgo(2),
+    amount: -2750,
+    merchant_name: 'Known Shop',
+    category_id: 'cat_food',
+  });
+  db.prepare(`
+    INSERT INTO advisor_drafts (id, kind, label, summary, route, payload, changes, citations, status, created_at, updated_at)
+    VALUES ('draft_rule', 'create_merchant_rule', 'New rule', 'File Known Shop as Shopping', '/ledger', ?, '[]', '[]', 'open', ?, ?)
+  `).run(
+    JSON.stringify({
+      kind: 'create_merchant_rule',
+      pattern: 'Known Shop',
+      category_id: 'cat_shop',
+      apply_existing: false,
+    }),
+    TODAY.toISOString(),
+    TODAY.toISOString()
+  );
+
+  const summary = getTransactionReviewSummary(db);
+  const queueCount = summary.queues.find((queue) => queue.id === 'ai_insights')?.count ?? 0;
+  assert.equal(queueCount, 1, 'the queue counts the rule draft');
+
+  const drafts = indexDrafts(summary.ai_drafts);
+  assert.equal(drafts.transactionIds.length, 0, 'and it is not a row-shaped draft');
+  assert.equal(
+    suggestedChipCount(drafts),
+    queueCount,
+    'the chip the panel sends the owner to must not read 0 while the panel reads 1'
+  );
+
+  const issues = getDataQualitySummary(db).issues;
+  assert.equal(issues.length, 1);
+  assert.equal(issues[0].message, '1 AI suggestion needs review before reports can be fully trusted.');
+  assert.equal(issues[0].route, '/ledger');
+});
+
+/**
+ * HEALTHY: the identity is not an accident of one draft kind. With the ordinary mix, the two halves
+ * of the split still add up to the queue and neither is dropped.
+ */
+test('HEALTHY: a mixed backlog of drafts adds up to the queue count on both screens', (t) => {
+  const db = freshlySyncedDb();
+  t.after(() => db.close());
+
+  const checking = insertAccount(db, { account_name: 'Checking', current_balance: 300000 });
+  const row = insertTransaction(db, {
+    account_id: checking,
+    date: daysAgo(2),
+    amount: -2750,
+    merchant_name: 'Unfamiliar Shop',
+    category_id: 'cat_food',
+  });
+  openDraft(db, 'draft_1', row);
+  db.prepare(`
+    INSERT INTO advisor_drafts (id, kind, label, summary, route, payload, changes, citations, status, created_at, updated_at)
+    VALUES ('draft_rule', 'create_merchant_rule', 'New rule', 'File Unfamiliar Shop as Shopping', '/ledger', ?, '[]', '[]', 'open', ?, ?)
+  `).run(
+    JSON.stringify({
+      kind: 'create_merchant_rule',
+      pattern: 'Unfamiliar Shop',
+      category_id: 'cat_shop',
+      apply_existing: false,
+    }),
+    TODAY.toISOString(),
+    TODAY.toISOString()
+  );
+
+  const summary = getTransactionReviewSummary(db);
+  const queueCount = summary.queues.find((queue) => queue.id === 'ai_insights')?.count ?? 0;
+  const drafts = indexDrafts(summary.ai_drafts);
+
+  assert.equal(queueCount, 2);
+  assert.equal(drafts.transactionIds.length, 1);
+  assert.equal(drafts.otherDrafts.length, 1);
+  assert.equal(suggestedChipCount(drafts), queueCount);
+  assert.equal(
+    getDataQualitySummary(db).issues[0].message,
+    '2 AI suggestions need review before reports can be fully trusted.'
+  );
+});
+
+test('AI suggestions are named alongside the other queues, not instead of them', (t) => {
+  const db = freshlySyncedDb();
+  t.after(() => db.close());
+
+  const checking = insertAccount(db, { account_name: 'Checking', current_balance: 300000 });
+  const categorized = insertTransaction(db, {
+    account_id: checking,
+    date: daysAgo(3),
+    amount: -1000,
+    merchant_name: 'Known Shop',
+    category_id: 'cat_food',
+  });
+  insertTransaction(db, {
+    account_id: checking,
+    date: daysAgo(2),
+    amount: -2750,
+    merchant_name: 'Unfamiliar Shop',
+    category_id: null,
+  });
+  openDraft(db, 'draft_1', categorized);
+
+  const issues = getDataQualitySummary(db).issues;
+  assert.equal(issues.length, 1);
+  assert.equal(
+    issues[0].message,
+    '1 AI suggestion, 1 uncategorized transaction need review before reports can be fully trusted.'
+  );
+});
+
+/**
+ * The list of nouns and the list of queues are two places, so this is the thing that stops them
+ * drifting: every id `getTransactionReviewSummary` reports must have a noun to be named by.
+ */
+test('every review queue the summary reports has a noun this panel can name it with', (t) => {
+  const db = freshlySyncedDb();
+  t.after(() => db.close());
+
+  const reported = getTransactionReviewSummary(db).queues.map((queue) => queue.id);
+  for (const id of reported) {
+    assert.ok(
+      REVIEW_QUEUE_IDS_NAMED.includes(id),
+      `queue "${id}" is counted into total_open with no noun in dataQuality.ts`
+    );
+  }
 });

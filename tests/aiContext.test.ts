@@ -19,6 +19,13 @@ function baseSyncHealth(overrides: Partial<SyncHealth> = {}): SyncHealth {
     fresh_count: 1,
     never_synced_count: 0,
     last_synced_at: '2026-06-30T12:00:00.000Z',
+    last_run: {
+      id: 'sync_run_1',
+      status: 'succeeded',
+      completed_at: '2026-06-30T12:00:00.000Z',
+      message: 'Sync complete',
+      incomplete: false,
+    },
     connections: [],
     ...overrides,
   };
@@ -97,6 +104,7 @@ function baseReviewSummary(overrides: Partial<TransactionReviewSummary> = {}): T
     recurring_candidates: [],
     duplicate_candidates: [],
     transfer_candidates: [],
+    ai_drafts: [],
     ...overrides,
   };
 }

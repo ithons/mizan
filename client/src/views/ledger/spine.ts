@@ -268,6 +268,18 @@ export function indexDrafts(drafts: AdvisorDraftAction[]): DraftIndex {
   return { byTransaction, otherDrafts, transactionIds };
 }
 
+/**
+ * What the "Model suggests" chip counts: BOTH halves of the split above.
+ *
+ * The data-quality panel counts the `ai_insights` queue, which is `ai_drafts` entire, and routes
+ * the owner here. Counting `transactionIds` alone meant a queue holding one `create_merchant_rule`
+ * draft read "1 AI suggestion needs review" on the panel and 0 on the chip it sent them to.
+ * Exported and asserted rather than inlined so the two cannot drift apart again.
+ */
+export function suggestedChipCount(index: DraftIndex): number {
+  return index.transactionIds.length + index.otherDrafts.length;
+}
+
 function findCategoryName(categories: Category[], id: string): string | null {
   for (const category of categories) {
     if (category.id === id) return category.name;

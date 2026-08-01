@@ -71,7 +71,10 @@ function press(scene: Omit<KeyboardScene, 'armedPrefix'>, strokes: Array<string 
   const out: Sequence = { ran: [], owners: [], consumed: [] };
   for (const raw of strokes) {
     const stroke: Keystroke = typeof raw === 'string' ? { key: raw } : raw;
-    const res = resolveKeystroke({ ...scene, armedPrefix: armed }, stroke);
+    // Annotated, not inferred: `armed` is fed back in from the previous resolution, so an inferred
+    // scene makes the resolution's type depend on itself.
+    const sceneNow: KeyboardScene = { ...scene, armedPrefix: armed };
+    const res = resolveKeystroke(sceneNow, stroke);
     armed = res.armed;
     out.consumed.push(res.kind === 'run' || res.kind === 'spend');
     if (res.kind === 'run') {

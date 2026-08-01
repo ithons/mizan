@@ -122,7 +122,12 @@
  *   3. gold sat at OKLCh h 78.8 against paper's h 84.6, so the caution color was a saturated
  *      version of the background's own hue and read as ambient. It now sits at h 57.7, roughly
  *      23 degrees clear of the neutral family, and is dark enough in light mode to be read as
- *      text (it is used as text in five places, at 2.18:1 before).
+ *      text. It is used as text at TWELVE call sites, not the five this line used to claim:
+ *        grep -rnE 'text-(gold|warning)' client/src | grep -vE ':[0-9]+: \*'
+ *        -> 12 on 2026-07-31, being 7 `text-gold` and 5 `text-warning` (the legacy alias, same
+ *           triplet). The trailing grep drops prose in block comments, including this line.
+ *      What it measured before the rebuild is not re-derivable from this file, because the old
+ *      triplets are gone from it, so no figure for that is stated here.
  * ============================================================================================
  * MEASURED CONTRAST (WCAG 2.1, computed from these exact triplets, not estimated)
  *
@@ -148,8 +153,39 @@
  * deliberately non-text, same as before. Today.tsx uses `text-faint` on two small strings; that
  * is the view violating the token contract, not the token.
  *
- * `muted-2` on `rail` is 3.67:1 light. `rail` is a fill (nav, selected row, code chip, bar
- * track) and every call site pairs it with `text-ink`; do not start putting secondary text on it.
+ * `rail` is chrome, not a text ground. It is the navigation's own fill, the selected row in the
+ * sync panel, a code chip and a chat bubble, two text inputs, the active row of both pickers, and
+ * the ground under several settings panels. It is NOT a bar track: `ProgressBar` uses `track`.
+ *
+ * Of the tones set on it in shipping code, four clear AA on both themes and four clear it only on
+ * dark (light / dark, from these triplets):
+ *     ink 9.45 / 14.60   ·   ink-soft 6.13 / 10.20   ·   muted 4.60 / 7.60   ·   estimate 5.32 / 8.90
+ *     muted-2 3.67 / 6.46   ·   sage-deep 3.99 / 9.18   ·   clay 4.43 / 6.68   ·   gold 3.71 / 8.10
+ *
+ * The second line is not a prohibition this app observes, and saying it was is the sentence that
+ * used to sit here. Counted 2026-07-31 by walking every `bg-rail` element under client/src and
+ * reading the tones inside it, skipping descendants that declare a ground of their own: 22 call
+ * sites that day, and 9 OF THEM set one of those four on a light rail. SyncActivityPanel twice
+ * (once through `statusTone`'s inline `color`, which resolves to sage-deep, gold or clay),
+ * AdvisorMemorySection twice, DataSection four times, Settings once. tests/railGround.test.ts runs
+ * that same walk, names every one of the nine with the tone it sets, and fails both on a tenth and
+ * on an entry that has been fixed and not deleted. The total is a dated reading and moves as views
+ * are added; the nine is the number that is held. Do not add one; the four safe tones are there.
+ *
+ * The accounts list is the site that was fixed rather than recorded, because what it put on `rail`
+ * was a money numeral: it filled its SELECTED row with `rail` and set a balance, a merchant line
+ * and a caption on it, and it uses `card` now (worst pair in either theme 4.96).
+ * tests/navigation.test.ts and tests/accountsRowContrast.test.ts recompute the figures above.
+ *
+ * `pill-bg` is the same kind of ground and is likewise not clean. `clay` on it is 4.74 / 4.93 and
+ * `muted` 4.92 / 5.61, but `muted-2` is 3.92 / 4.77 (CategoryPill's uncategorized state) and
+ * `sage-deep` 4.27 / 6.78 (CategoriesSection's Badge), both at 11.5px where no exemption applies.
+ * `gold` on it is 3.97 / 5.98, which is why the two Accounts caution pills left it.
+ *
+ * `well` is the hover wash and is likewise not a secondary-text ground: `muted-2` on `well` is
+ * 4.02 light / 4.14 dark. `Row` applies it on hover and focus to every list row in the app, so a
+ * row whose resting ground is safe still crosses below AA for as long as the pointer is on it.
+ * That is the primitive's to settle, and it is recorded here rather than left unstated.
  * ============================================================================================
  * NEUTRAL LADDER (CIE L*)
  *   light  rail 80.2 | line-3 72.8 | track 74.1 | line-2 76.8 | line 81.7 | well 83.5 |
@@ -211,12 +247,38 @@
 
   --mz-info-c: 77 117 152;
 
-  /* The categorical identity ramp is NOT here. A category colour is persisted user data
+  /* The CATEGORY identity ramp is NOT here. A category colour is persisted user data
      (`categories.color`, a hex string in SQLite), so the value that renders is always the stored
      hex and never a token: a token copy could only ever be a second list to keep in sync. It lives
      once, in CATEGORY_PRESET_COLORS in client/src/views/settings/CategoriesSection.tsx, with the
      method and the validator report beside it. tests/categoryRamp.test.ts fails if a copy
      reappears in this file or in tailwind.config.js. */
+
+  /* The SERIES ramp, which is the opposite case and therefore does live here.
+     A chart series has no stored colour: the Investments allocation bar and its legend paint slot
+     N of a sorted list, so the colour is derived at render time and has to follow the theme. It
+     could not: `chartColors.ts` held ten literal hexes chosen for warm paper, and the toggle left
+     them where they were.
+
+     Slot order is the colour-vision-deficiency mechanism and is not decoration. These eight were
+     searched under the dataviz six checks against BOTH grounds -- paper #e5dbca light, #262119
+     dark -- holding OKLCH chroma to 0.105-0.145 so they still read as this palette rather than as
+     a default chart pack. Measured on the adjacent pairlist, which is the one stacked bars and
+     legends take: worst CVD dE 12.8 light / 13.1 dark (target 8), worst normal-vision dE 20.8 /
+     20.9 (floor 15), and all sixteen values clear 3:1 on their own ground. Eight cannot clear the
+     all-pairs floors -- no eight can -- so every legend row carries its label and its percentage
+     beside the swatch, and identity is never colour alone.
+
+     tests/seriesPalette.test.ts recomputes all of that from these declarations. Re-order or
+     re-step them and it fails; that is the point. */
+  --mz-series-1-c: 59 96 14;
+  --mz-series-2-c: 111 83 156;
+  --mz-series-3-c: 29 125 87;
+  --mz-series-4-c: 41 77 163;
+  --mz-series-5-c: 145 69 58;
+  --mz-series-6-c: 40 130 173;
+  --mz-series-7-c: 155 108 10;
+  --mz-series-8-c: 131 49 96;
 
   /* Keyed to ink-soft rather than black: a neutral black shadow over warm paper composites to a
      desaturated grey-beige that reads as smudge, while the paper's own chroma reads as shade. */
@@ -285,6 +347,17 @@
   --mz-review-border: rgb(var(--mz-review-border-c));
   --mz-review-text: rgb(var(--mz-review-text-c));
   --mz-review-active: rgb(var(--mz-review-active-c));
+
+  /* Composed once, like every other alias: the allocation bar and legend reference these from a
+     `style` prop, where a channel triplet is not a colour. Theming swaps only the triplets above. */
+  --mz-series-1: rgb(var(--mz-series-1-c));
+  --mz-series-2: rgb(var(--mz-series-2-c));
+  --mz-series-3: rgb(var(--mz-series-3-c));
+  --mz-series-4: rgb(var(--mz-series-4-c));
+  --mz-series-5: rgb(var(--mz-series-5-c));
+  --mz-series-6: rgb(var(--mz-series-6-c));
+  --mz-series-7: rgb(var(--mz-series-7-c));
+  --mz-series-8: rgb(var(--mz-series-8-c));
 
   /* Legacy aliases so not-yet-converted components inherit the Balance look. These carry channel
      forms too: ConfirmRemoveModal uses `bg-negative/10 border-negative/30`, which was one of the
@@ -379,6 +452,16 @@
 
     --mz-info-c: 123 164 201;
 
+    /* Same eight hues, re-stepped for the dark band (OKLCH L 0.49-0.66), not an automatic flip. */
+    --mz-series-1-c: 81 120 43;
+    --mz-series-2-c: 122 97 164;
+    --mz-series-3-c: 43 148 105;
+    --mz-series-4-c: 70 110 199;
+    --mz-series-5-c: 188 78 63;
+    --mz-series-6-c: 41 143 191;
+    --mz-series-7-c: 183 131 31;
+    --mz-series-8-c: 167 75 126;
+
     /* Near-black at high alpha: an ink-soft shadow is lighter than a dark ground, so the light
        theme's warm shadow would have glowed instead of shading.
 
@@ -441,6 +524,15 @@
   --mz-review-active-c: 88 63 34;
 
   --mz-info-c: 123 164 201;
+
+  --mz-series-1-c: 81 120 43;
+  --mz-series-2-c: 122 97 164;
+  --mz-series-3-c: 43 148 105;
+  --mz-series-4-c: 70 110 199;
+  --mz-series-5-c: 188 78 63;
+  --mz-series-6-c: 41 143 191;
+  --mz-series-7-c: 183 131 31;
+  --mz-series-8-c: 167 75 126;
 
   --mz-e1: 0 1px 2px rgb(0 0 0 / 0.40);
   --mz-e2: 0 4px 12px -2px rgb(0 0 0 / 0.52), 0 2px 4px -2px rgb(0 0 0 / 0.40);

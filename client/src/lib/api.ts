@@ -513,7 +513,29 @@ export const reportsApi = {
     const q = new URLSearchParams();
     if (params?.startDate) q.set('startDate', params.startDate);
     if (params?.endDate) q.set('endDate', params.endDate);
-    return apiFetch<{ total_value: number; history: Array<{ date: string; value: number; estimated: boolean }>; allocation: Array<{ security_type: string; total_value: number }>; holdings: unknown[] }>(`/api/reports/investments?${q.toString()}`);
+    // Every figure here is over `portfolio_account_ids`, one account set resolved on the server,
+    // so the headline and the chart under it cannot mean different portfolios and the screen
+    // filters its holdings list against that set rather than re-deriving membership.
+    //
+    // Same accounts is not the same number, and the screen does not claim it is. `portfolio_value`
+    // is today's balances; the last point of `history` is the newest snapshot. They agree only
+    // when that snapshot was taken after the last balance change AND carries every account in the
+    // set, and when they do not agree the difference is movement the ledger has not recorded yet,
+    // which is exactly what the delta under the headline reports and names a date for. A window
+    // (`startDate`/`endDate`) cuts the series and never the headline, so a windowed chart ending
+    // below the headline is the window, not a disagreement.
+    //
+    // The three balance figures are deliberately separate. `portfolio_value` is the headline;
+    // `invested_balance` is the part of it sitting in accounts that hold a position, which is the
+    // only figure `holdings_value` can be reconciled against (an IRA funded and not yet invested
+    // is an ordinary account, not a discrepancy); `crypto_value` is the part of it in crypto
+    // wallets, which the screen prints because Cmd+K reports a crypto-free portfolio figure.
+    //
+    // `covered_accounts` per point is how many of those accounts that snapshot recorded. It is
+    // not always all of them: `takeSnapshot` writes a breakdown entry only for visible accounts,
+    // so a point taken before an account existed covers fewer, and a sum over a different set is
+    // a different quantity rather than a smaller portfolio.
+    return apiFetch<{ portfolio_value: number; holdings_value: number; invested_balance: number; crypto_value: number; portfolio_account_ids: string[]; history: Array<{ date: string; value: number; estimated: boolean; covered_accounts: number }>; allocation: Array<{ security_type: string; total_value: number }>; holdings: unknown[] }>(`/api/reports/investments?${q.toString()}`);
   },
 };
 
@@ -792,6 +814,32 @@ export const aiApi = {
   // action created stays.
   undoAction: (id: string) =>
     apiFetch<AiActionUndoResult>(`/api/ai/actions/${id}/undo`, { method: 'POST' }),
+  // Suggestions the owner dismissed. Dismissing one stops the background worker applying that same
+  // proposal again, which is a standing decision the app otherwise showed nowhere: the draft simply
+  // stopped being drawn. `suppressing` is false for a dismissal the server judged stale, which
+  // blocks nothing and is listed anyway because the owner still made it.
+  listDeclined: () =>
+    apiFetch<
+      Array<{
+        id: string;
+        kind: string;
+        summary: string | null;
+        merchant_name: string | null;
+        pattern: string | null;
+        category_id: string | null;
+        category_name: string | null;
+        declined_at: string;
+        suppressing: boolean;
+      }>
+    >('/api/ai/declined'),
+  // Deletes the record of the refusal and reopens the draft it named, when that row still exists.
+  // `queued` is the server's own check that the reopened draft passes the review queue's filter,
+  // not an assumption that it does.
+  restoreDeclined: (id: string) =>
+    apiFetch<{ ok: boolean; draft_reopened: boolean; queued: boolean }>(
+      `/api/ai/declined/${id}/restore`,
+      { method: 'POST' }
+    ),
   getProfile: () => apiFetch<{ profile: string }>('/api/ai/profile'),
   saveProfile: (profile: string) =>
     apiFetch<{ profile: string }>('/api/ai/profile', {

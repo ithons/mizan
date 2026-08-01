@@ -39,18 +39,66 @@ function accountMeta(a: Account): string {
   return `${CONNECTION_LABELS[a.connection_type] ?? 'Manual'} · ${verb} ${formatCompactRelative(a.updated_at)}`;
 }
 
-// The badge reflects the shared connection's health, so every account on a connection shows the same state.
+/**
+ * The badge reflects the shared connection's health, so every account on a connection shows the
+ * same state.
+ *
+ * It carries its own ground, so its ratios are against that ground and not against the row's.
+ * Re-derived from the triplets in `client/src/index.css` (WCAG 2.1, sRGB), light / dark:
+ *
+ *   clay on pill-bg           4.74 / 4.93   the "Reconnect" pill, AA on both themes
+ *   gold on pill-bg           3.97 / 5.98   what the two caution pills used to be, sub-AA on light
+ *   review-text on review-bg  4.93 / 5.53   the pair the palette already declares for caution
+ *
+ * `text-rule` is 11px, so the large-text exemption does not apply and 4.5:1 is the bar.
+ *
+ * The two caution states moved onto the review pair rather than recolouring `gold`, and the reason
+ * is not that `gold` is fine elsewhere. It is not: on light it measures 3.71 on `rail`, 3.09 on
+ * `track` and 4.07 on `well`, so `pill-bg` is the fourth ground it fails rather than the only one,
+ * and `DataSection.tsx` sets `text-gold` on `rail` today. The reason is that `gold` is load-bearing
+ * elsewhere as an ink and moving the token would move all of it. Counted 2026-07-31 with (the
+ * second `grep` drops this block's own prose)
+ *
+ *   grep -rnE 'text-(gold|warning)' client/src | grep -vE ':[0-9]+: \*'
+ *   -> 13 that day, being 7 `text-gold` and 6 `text-warning`, the legacy alias for the same triplet
+ *
+ * That is a dated reading of a figure that moves as views are added, and the command is beside it
+ * so it can be re-run rather than trusted. What does not move is the shape: gold is an ink across
+ * eight modules, so recolouring the token is never a local change, and changing one pill's ground
+ * changes one pill.
+ *
+ * The `review` pair is not borrowed from the AI. It is what this palette uses for an open question
+ * the owner has not settled, and only two of its five call sites are about the model:
+ * `ledger/rows.tsx` puts a row's "possible duplicate", "possible transfer" and "pending" flags on
+ * it, and `Ledger.tsx` tints the selected review filter chip with it. `set_aside` deliberately
+ * does NOT take it, because a decision the owner already made is not an open question. A connection
+ * that has never synced or has gone stale is that same open question, which is why these two pills
+ * take it and the "Reconnect" pill, which is a failure rather than a question, stays on `clay`.
+ *
+ * What this does NOT claim: that `pill-bg` is now clean. Two other call sites still set sub-AA ink
+ * on it at `text-micro` (11.5px), measured from the same triplets, light / dark:
+ *   `CategoryPill.tsx` uncategorized  `text-muted-2`  3.92 / 4.77
+ *   `CategoriesSection.tsx` Badge tone 'sage'  `text-sage-deep`  4.27 / 6.78
+ * Neither is this file's, both are recorded rather than passed over, and
+ * `tests/accountsRowContrast.test.ts` recomputes every figure above from the CSS.
+ */
+const BADGE_BASE = 'flex-shrink-0 rounded border px-1.5 py-px text-rule';
+const BADGE_CAUTION = `${BADGE_BASE} border-review-border bg-review-bg text-review-text`;
+
 function SyncBadge({ conn }: { conn?: SyncHealthConnection }) {
   if (!conn) return null;
-  const base = 'flex-shrink-0 rounded border border-pill-border bg-pill-bg px-1.5 py-px text-rule';
   if (conn.freshness === 'attention') {
-    return <span className={`${base} text-clay`} title={conn.status_detail}>Reconnect</span>;
+    return (
+      <span className={`${BADGE_BASE} border-pill-border bg-pill-bg text-clay`} title={conn.status_detail}>
+        Reconnect
+      </span>
+    );
   }
   if (conn.freshness === 'never') {
-    return <span className={`${base} text-gold`} title={conn.status_detail}>Never synced</span>;
+    return <span className={BADGE_CAUTION} title={conn.status_detail}>Never synced</span>;
   }
   if (conn.freshness === 'stale') {
-    return <span className={`${base} text-gold`} title={conn.status_detail}>Stale</span>;
+    return <span className={BADGE_CAUTION} title={conn.status_detail}>Stale</span>;
   }
   return null;
 }
@@ -161,12 +209,61 @@ export function Accounts() {
     onError: (err: Error) => addToast({ type: 'error', message: err.message }),
   });
 
+  /**
+   * The selected row's fill is a SURFACE, not chrome.
+   *
+   * It was `bg-rail`. `rail` is the navigation's ground, a track and a code chip; `index.css` says
+   * of it "every call site pairs it with `text-ink`; do not start putting secondary text on it",
+   * and this row puts a money numeral, a merchant line and a caption on it. Every tone the row can
+   * carry, against each ground it can get, re-derived from the triplets in `client/src/index.css`
+   * (WCAG 2.1, sRGB), light / dark:
+   *
+   *                  rail            card            paper (unselected)
+   *   ink            9.45 / 14.60    14.46 / 11.21   11.66 / 13.34
+   *   muted          4.60 /  7.60     7.04 /  5.84    5.67 /  6.95   the initial in the avatar
+   *   muted-2        3.67 /  6.46     5.61 /  4.96    4.52 /  5.90   the sync/institution line
+   *   sage-deep      3.99 /  9.18     6.11 /  7.05    4.93 /  8.38   a card in credit, and its note
+   *   clay           4.43 /  6.68     6.78 /  5.13    5.47 /  6.10   a balance that is owed
+   *
+   * Three of the five failed AA on light, and two of those three are the money numeral itself
+   * (`sage-deep` 3.99, `clay` 4.43) with the row's secondary line (`muted-2` 3.67) below them. On
+   * `card` the worst pair in either theme is 4.96. Nothing here is large text: the numeral is
+   * `text-sub` and the rest is smaller.
+   *
+   * Selection now reads as a raised surface plus a `sage` edge (4.85 / 5.85 against `card`, well
+   * clear of the 3:1 that a non-text boundary needs), because `card` on `paper` is only 1.24 / 1.19
+   * and a surface step alone is not a selection signal. `tests/accountsRowContrast.test.ts`
+   * recomputes every figure above from the CSS and fails if a tone in this row stops clearing AA.
+   *
+   * The table above is the row at rest and at full strength. Two things it does not cover, measured
+   * and left alone rather than passed over in silence:
+   *
+   *   - `Row`'s own `hover:bg-well` / `focus-visible:bg-well` replaces the ground for as long as the
+   *     pointer is on the row, and `muted-2` on `well` is 4.02 / 4.14. That is every `Row` on every
+   *     screen, so it belongs to the primitive and not to this view.
+   *   - `dimmed` is `opacity-55`, which the closed and hidden sections apply to the whole row.
+   *     Composited over the ground beneath it that puts EVERY tone below AA, `ink` included:
+   *     on light/paper ink 3.34, muted 2.32, muted-2 2.10, sage-deep 2.21, clay 2.38. No opacity
+   *     fixes it, because `muted-2` on `paper` is 4.52 at full strength and any alpha below 1 takes
+   *     it under; a de-emphasis that keeps AA has to be a different tone rather than a veil. Both
+   *     sections are behind an explicit "show" toggle and both say what they hold, so this is
+   *     recorded here and in `tests/accountsRowContrast.test.ts` rather than fixed in passing.
+   *
+   * The veil composites the SELECTION too, and that part is not recorded, it is fixed. `opacity` on
+   * the element applies to its `box-shadow`, so the `ring-sage` edge above went down with the text:
+   * at 55% over the veiled card fill it measures 1.97 light and 3.07 dark, against a surface step
+   * of 1.13 light and 1.10 dark, so on light nothing at all marked which row the detail panel was
+   * describing. Both closed and hidden rows keep the same `onClick`, so a veiled row can be the
+   * selected one; `renderRow(a, true)` is where that happens. A selected row is therefore not
+   * dimmed. De-emphasis is for rows the owner is not looking at, and the one they just clicked is
+   * the row they are looking at, so this costs nothing that the veil was there to buy.
+   */
   const renderRow = (a: Account, dimmed = false) => (
     <Row
       key={a.id}
       onClick={() => setSelectedId(a.id === selectedId ? null : a.id)}
-      className={`justify-between px-3 py-3.5 ${dimmed ? 'opacity-55' : ''} ${
-        selectedId === a.id ? 'bg-rail' : ''
+      className={`justify-between px-3 py-3.5 ${dimmed && selectedId !== a.id ? 'opacity-55' : ''} ${
+        selectedId === a.id ? 'bg-card ring-1 ring-inset ring-sage' : ''
       }`}
     >
       <div className="flex min-w-0 items-center gap-3.5">
@@ -332,7 +429,7 @@ export function Accounts() {
             )}
             <div className="mt-6">
               {[
-                { label: 'Institution', value: selected.institution_name || '–' },
+                { label: 'Institution', value: selected.institution_name || 'Not recorded' },
                 { label: 'Type', value: ACCOUNT_TYPE_LABELS[selected.type] ?? selected.type },
                 { label: 'Connection', value: CONNECTION_LABELS[selected.connection_type] ?? 'Manual' },
                 { label: 'Updated', value: formatCompactRelative(selected.updated_at) },

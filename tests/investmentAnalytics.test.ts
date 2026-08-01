@@ -1,9 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  ALLOCATION_SLOTS,
   getAllocationQualityLabel,
   getAllocationDrift,
   getAllocationSlices,
+  getPortfolioDelta,
   getConcentrationSummary,
   getCostBasisStats,
   getInvestmentDataQualitySummary,
@@ -14,7 +16,6 @@ import type { Account, Holding, InvestmentTransaction } from '../shared/types';
 function account(id: string, type: Account['type']): Account {
   return {
     id,
-    plaid_account_id: null,
     coinbase_account_id: null,
     connection_id: null,
     connection_type: 'manual',
@@ -64,7 +65,6 @@ function holding(overrides: Partial<Holding>): Holding {
 function investmentTransaction(overrides: Partial<InvestmentTransaction>): InvestmentTransaction {
   return {
     id: overrides.id ?? 'tx',
-    plaid_investment_transaction_id: null,
     account_id: overrides.account_id ?? 'acct_taxable',
     date: overrides.date ?? '2026-06-30',
     type: overrides.type ?? 'buy',
@@ -329,4 +329,198 @@ test('investment data quality escalates missing core holding data', () => {
     'sector-missing',
     'no-investment-transactions',
   ]);
+});
+
+test('a ninth group folds into Other rather than wrapping onto slot one', () => {
+  // `ALLOCATION_COLORS[index % length]` gave the ninth group the first group's colour, so one bar
+  // carried two slices claiming the same identity and the legend named both of them.
+  const holdings = Array.from({ length: 11 }, (_, i) =>
+    holding({ id: `h${i}`, ticker: `SYM${i}`, institution_value: 1000 - i * 10 })
+  );
+
+  const slices = getAllocationSlices(holdings, 'symbol', new Map());
+  const folded = slices.find((slice) => slice.label === 'Other');
+
+  assert.equal(slices.length, ALLOCATION_SLOTS);
+  assert.equal(new Set(slices.map((slice) => slice.color)).size, ALLOCATION_SLOTS);
+  // Nothing is lost to the fold: the tail's value and count both survive in it.
+  assert.equal(folded?.value, 930 + 920 + 910 + 900);
+  assert.equal(folded?.count, 4);
+  assert.equal(Math.round(slices.reduce((sum, slice) => sum + slice.pct, 0)), 100);
+});
+
+test('the fold merges with a group that already means Other under that lens', () => {
+  // `security_type = 'other'` is a real asset class. Folding beside it would render two rows
+  // labelled Other in different colours, and their percentages would not add up to the group.
+  const holdings = [
+    ...Array.from({ length: 9 }, (_, i) =>
+      holding({ id: `h${i}`, security_type: `type_${i}`, institution_value: 1000 - i })
+    ),
+    holding({ id: 'genuinely_other', security_type: 'other', institution_value: 5000 }),
+  ];
+
+  const slices = getAllocationSlices(holdings, 'asset_type', new Map());
+
+  assert.equal(slices.filter((slice) => slice.label === 'Other').length, 1);
+  assert.equal(slices.length, ALLOCATION_SLOTS);
+  // The genuine `other` holding plus the two groups that did not fit.
+  assert.equal(slices.find((slice) => slice.label === 'Other')?.value, 5000 + 993 + 992);
+});
+
+test('a bar reads largest to smallest even when the fold is the largest group', () => {
+  // The fold takes whatever already means "other" under the lens, whatever its size, so it is
+  // NOT always the smallest groups. At 53% of this portfolio it was still drawn last, after
+  // slices a twentieth its size, and the bar stopped meaning what its order says it means.
+  const holdings = [
+    holding({ id: 'other', security_type: 'other', institution_value: 5000 }),
+    ...Array.from({ length: 9 }, (_, i) =>
+      holding({ id: `h${i}`, security_type: `type_${i}`, institution_value: 1000 - i * 100 })
+    ),
+  ];
+
+  const slices = getAllocationSlices(holdings, 'asset_type', new Map());
+
+  assert.equal(slices[0].label, 'Other');
+  assert.ok(slices[0].pct > 50, `fold is the majority of the bar: ${slices[0].pct}`);
+  for (let i = 1; i < slices.length; i++) {
+    assert.ok(
+      slices[i - 1].value >= slices[i].value,
+      `slice ${i} (${slices[i].value}) is larger than the one before it (${slices[i - 1].value})`
+    );
+  }
+});
+
+test('a sector typed Other is the fold, not a second slice with the same name', () => {
+  // `sector` is free text the owner types on the holding modal. `sector:Other` and the fold's
+  // `sector:other` were different keys, so one bar carried two slices labelled Other in two
+  // different colours, with the larger one nowhere near the row that named it.
+  const holdings = [
+    holding({ id: 'big', sector: 'Other', institution_value: 5000 }),
+    ...Array.from({ length: 9 }, (_, i) =>
+      holding({ id: `h${i}`, sector: `Sector ${i}`, institution_value: 1000 - i * 100 })
+    ),
+  ];
+
+  const slices = getAllocationSlices(holdings, 'sector', new Map());
+  const labels = slices.map((slice) => slice.label);
+
+  assert.deepEqual(labels.filter((label, i) => labels.indexOf(label) !== i), []);
+  assert.equal(slices.filter((slice) => slice.label.toLowerCase() === 'other').length, 1);
+  assert.equal(new Set(slices.map((slice) => slice.color)).size, slices.length);
+});
+
+test('two spellings of one sector are one group', () => {
+  const slices = getAllocationSlices([
+    holding({ id: 'a', sector: 'Technology', institution_value: 600 }),
+    holding({ id: 'b', sector: 'technology', institution_value: 400 }),
+  ], 'sector', new Map());
+
+  assert.equal(slices.length, 1);
+  assert.equal(slices[0].value, 1000);
+  assert.equal(slices[0].count, 2);
+});
+
+test('a sector typed Unavailable is not relabelled as missing metadata', () => {
+  // "The provider sent no sector" and "the owner typed the word unavailable" are different
+  // claims, and normalizing free text is exactly how they would collide.
+  const slices = getAllocationSlices([
+    holding({ id: 'typed', sector: 'Unavailable', institution_value: 600 }),
+    holding({ id: 'missing', sector: null, institution_value: 400 }),
+  ], 'sector', new Map());
+
+  assert.deepEqual(
+    slices.map((slice) => [slice.label, slice.value]),
+    [['Unavailable', 600], ['Sector unavailable', 400]]
+  );
+});
+
+test('a position marked to zero does not take a slice of the bar', () => {
+  // Sold positions are zeroed rather than deleted, so without this an exited sector keeps a 0%
+  // row with its own colour on the bar forever, and there is nothing the owner can do about it.
+  const slices = getAllocationSlices([
+    holding({ id: 'held', sector: 'Technology', institution_value: 1000 }),
+    holding({ id: 'sold', sector: 'Energy', institution_value: 0 }),
+  ], 'sector', new Map());
+
+  assert.deepEqual(slices.map((slice) => slice.label), ['Technology']);
+});
+
+test('eight groups or fewer keep their own slot', () => {
+  const holdings = Array.from({ length: 8 }, (_, i) =>
+    holding({ id: `h${i}`, ticker: `SYM${i}`, institution_value: 100 })
+  );
+
+  const slices = getAllocationSlices(holdings, 'symbol', new Map());
+
+  assert.equal(slices.length, 8);
+  assert.equal(slices.some((slice) => slice.label === 'Other'), false);
+});
+
+/** A history point covering the whole portfolio, which is what an ordinary snapshot does. */
+function point(date: string, value: number, over = 3, estimated = false) {
+  return { date, value, estimated, covered_accounts: over };
+}
+
+test('the portfolio delta measures the headline against a named snapshot', () => {
+  const history = [point('2026-07-29', 2444.62), point('2026-07-30', 2445.89), point('2026-07-31', 2436.21)];
+
+  // Straight after a sync the newest snapshot IS the headline, so it cannot be the baseline:
+  // that is what printed "$0" while the headline moved.
+  const settled = getPortfolioDelta(2436.21, history, 3);
+  assert.equal(settled?.baseline.date, '2026-07-30');
+  assert.equal(Number(settled?.change.toFixed(2)), -9.68);
+
+  // Balances that moved since the last sync measure against that sync.
+  const moved = getPortfolioDelta(2443.0, history, 3);
+  assert.equal(moved?.baseline.date, '2026-07-31');
+  assert.equal(Number(moved?.change.toFixed(2)), 6.79);
+});
+
+test('the portfolio delta reports nothing rather than a delta it cannot support', () => {
+  assert.equal(getPortfolioDelta(null, [point('2026-07-31', 2436.21)], 3), null);
+  assert.equal(getPortfolioDelta(2436.21, [], 3), null);
+  // One snapshot, and it is the headline: there is no earlier value to measure from.
+  assert.equal(getPortfolioDelta(2436.21, [point('2026-07-31', 2436.21)], 3), null);
+  // No account set to check membership against is not the same as a set of none.
+  assert.equal(getPortfolioDelta(2436.21, [point('2026-07-30', 2400), point('2026-07-31', 2436.21)], null), null);
+});
+
+test('a delta is refused when the newest point does not cover the whole headline', () => {
+  // Disconnecting Coinbase sets is_hidden = 1 and leaves current_balance, and `takeSnapshot`
+  // writes a breakdown entry only for visible accounts. A headline over three accounts against a
+  // point over two is a comparison of two different quantities: it printed a standing
+  // "+$391.17 since Jul 31" every day, on a portfolio that had not moved at all.
+  const history = [point('2026-07-30', 2445.89, 3), point('2026-07-31', 2045.04, 2)];
+
+  assert.equal(getPortfolioDelta(2436.21, history, 3), null);
+
+  // The same series once the newest point covers the set again: the delta comes back.
+  const covered = [point('2026-07-30', 2445.89, 3), point('2026-07-31', 2436.21, 3)];
+  assert.equal(getPortfolioDelta(2436.21, covered, 3)?.baseline.date, '2026-07-30');
+});
+
+test('a delta is refused when the baseline it would name does not cover the headline', () => {
+  // An account opened yesterday: the newest snapshot has it, the one before does not, and the
+  // difference between them is an account appearing rather than money arriving.
+  const history = [point('2026-07-30', 2045.04, 2), point('2026-07-31', 2436.21, 3)];
+
+  assert.equal(getPortfolioDelta(2436.21, history, 3), null);
+});
+
+test('a delta is refused on a series that is not in date order', () => {
+  // The route serves `ORDER BY date ASC` and `net_worth_snapshots.date` is UNIQUE, so this
+  // should be unreachable. It is checked rather than assumed because the baseline's date is
+  // printed to the owner: out of order, the copy names the wrong day.
+  assert.equal(getPortfolioDelta(2436.21, [point('2026-07-31', 2436.21), point('2026-07-30', 2445.89)], 3), null);
+  assert.equal(getPortfolioDelta(2436.21, [point('2026-07-30', 2445.89), point('2026-07-30', 2436.21)], 3), null);
+});
+
+test('the delta carries whether its baseline was measured or reconstructed', () => {
+  const delta = getPortfolioDelta(2436.21, [
+    point('2026-07-30', 2400, 3, true),
+    point('2026-07-31', 2436.21, 3),
+  ], 3);
+
+  assert.equal(delta?.baseline.date, '2026-07-30');
+  assert.equal(delta?.baseline.estimated, true);
 });

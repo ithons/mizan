@@ -1006,6 +1006,263 @@ function confirmSectorMetadata(
  */
 export type DraftLiveness = 'live' | 'lapsed' | 'not_judged';
 
+/** A dismissal on record that is about the same proposal as the payload in hand. */
+export interface DeclinedProposal {
+  /** `advisor_drafts.id` of the draft the owner dismissed. */
+  draftId: string | null;
+  declinedAt: string;
+}
+
+/**
+ * The identity of a proposal, as `ai_feedback` records it: kind plus the thing it is about.
+ *
+ * Null for the kinds a dismissal cannot be matched on. `ai_feedback` keeps the transaction, the
+ * proposed category and the proposed pattern, which covers every kind that applies unattended, and
+ * nothing more is invented here so a match is always something the row actually says.
+ *
+ * `retire_merchant_rule` is NOT here, because none of those three columns identifies a rule. See
+ * `declinedRetirement`.
+ */
+interface ProposalIdentity {
+  transactionId: string | null;
+  categoryId: string | null;
+  pattern: string | null;
+}
+
+function proposalIdentity(payload: AdvisorDraftPayload): ProposalIdentity | null {
+  switch (payload.kind) {
+    case 'categorize_transaction':
+      return { transactionId: payload.transaction_id, categoryId: payload.category_id, pattern: null };
+    case 'create_merchant_rule':
+      // The pattern AND the category, because a rule is both. Declining "file Spotify under
+      // Entertainment" is not declining "file Spotify under Subscriptions", and matching on the
+      // pattern alone would silence the second proposal on the strength of a no to the first.
+      return { transactionId: null, categoryId: payload.category_id, pattern: payload.pattern.trim() };
+    default:
+      return null;
+  }
+}
+
+/**
+ * A dismissal on record about the retirement of THIS rule, matched on the rule's id.
+ *
+ * IT USED TO MATCH ON THE PATTERN, which does not identify a rule. `idx_merchant_rules_pattern_live`
+ * is partial (`WHERE retired_at IS NULL`), so any number of retired rules and one live rule may
+ * carry the same pattern, and "the pattern is what the rule is" was a claim the schema contradicts.
+ * A dismissal about a rule the owner has since retired therefore suppressed the retirement of a
+ * DIFFERENT, later rule with the same text, permanently and invisibly.
+ *
+ * `ai_feedback` has no rule column, so the rule id is read back out of the payload of the draft the
+ * dismissal names. That row survives: `supersedeRegeneratedDrafts` (aiJobs.ts) deletes only
+ * `status = 'open'` drafts, and nothing else in the server deletes from `advisor_drafts`. When it is
+ * gone anyway, this returns null and the proposal is merely re-offered, which is the safe direction
+ * to fail in: the owner sees a suggestion again rather than never seeing one they never refused.
+ */
+function declinedRetirement(db: Database.Database, ruleId: string): DeclinedProposal | null {
+  const row = db.prepare(`
+    SELECT f.draft_id, f.created_at
+    FROM ai_feedback f
+    JOIN advisor_drafts d ON d.id = f.draft_id
+    WHERE f.signal = 'draft_dismissed'
+      AND f.proposal_kind = 'retire_merchant_rule'
+      AND COALESCE(f.stale, 0) <> 1
+      -- CASE, not a bare json_extract: a payload that is not JSON makes json_extract RAISE, and one
+      -- unreadable draft row would take this guard and the worker's rule list down with it. The
+      -- rest of this file treats an unparseable payload as a row nothing can be concluded from
+      -- (see dismissedDraftEvidence and safeJsonParse), and so does this. CASE cannot be reordered
+      -- around the validity test the way an AND term can.
+      AND (CASE WHEN json_valid(d.payload) THEN json_extract(d.payload, '$.rule_id') END) = ?
+    ORDER BY f.created_at DESC, f.rowid DESC
+    LIMIT 1
+  `).get(ruleId) as { draft_id: string | null; created_at: string } | undefined;
+
+  if (!row) return null;
+  return { draftId: row.draft_id, declinedAt: row.created_at };
+}
+
+/**
+ * Whether the owner has already declined this exact proposal (migration 047).
+ *
+ * `ai_feedback` was built as the record of the owner disagreeing with the model, and for as long as
+ * nothing read it the record was write-only: dismissing a draft flipped a status, wrote a row, and
+ * taught nothing. The worker re-proposed the same suggestion on the next pass and, for an autonomous
+ * kind, applied it unattended. Declining is now a fact the write paths read.
+ *
+ * WHAT COUNTS AS THE SAME PROPOSAL is the kind plus the thing it is about, never the draft id: a
+ * fresh pass mints a new uuid for a draft it re-proposes, so matching by id would match nothing.
+ * "The thing it is about" is spelled out per kind rather than left to a reader's guess, because
+ * three of the four columns available are wider than the proposal they stand in for:
+ *   categorize_transaction  the row AND the proposed category. Declining one category for a row is
+ *     not declining the row, and the model may propose a different one.
+ *   create_merchant_rule    the pattern AND the category, case- and whitespace-insensitive.
+ *   retire_merchant_rule    the rule id, out of the dismissed draft's own payload. See
+ *     `declinedRetirement`; the pattern is not the rule.
+ * Every other kind matches nothing and is never blocked here.
+ *
+ * THE OWNER CAN TAKE IT BACK. A decline is durable, not permanent: `listDeclinedProposals` puts
+ * every one of these rows on a screen and `restoreDeclinedProposal` removes one. Without that this
+ * function would be a silent, unappealable veto, which is the standing-finding-you-cannot-act-on
+ * failure with the sign flipped.
+ *
+ * WHY `stale = 1` IS EXCLUDED. A dismissal of a draft whose premise had already lapsed says the
+ * model was late, not that it was wrong about the merchant, which is the distinction `stale` was
+ * added to keep (see `recordDraftDismissalFeedback`). Reading it as a refusal would let one stale
+ * suggestion silence a later correct one. NULL is included: the question was not answerable, but the
+ * owner still declined, and their decision is not a claim this code has to verify.
+ */
+export function ownerDeclinedProposal(
+  db: Database.Database,
+  payload: AdvisorDraftPayload
+): DeclinedProposal | null {
+  if (payload.kind === 'retire_merchant_rule') return declinedRetirement(db, payload.rule_id);
+
+  const identity = proposalIdentity(payload);
+  if (identity === null) return null;
+
+  const row = db.prepare(`
+    SELECT draft_id, created_at
+    FROM ai_feedback
+    WHERE signal = 'draft_dismissed'
+      AND proposal_kind = ?
+      AND COALESCE(stale, 0) <> 1
+      AND transaction_id IS ?
+      AND proposed_category_id IS ?
+      AND lower(trim(COALESCE(proposed_pattern, ''))) = lower(trim(?))
+    ORDER BY created_at DESC, rowid DESC
+    LIMIT 1
+  `).get(
+    payload.kind,
+    identity.transactionId,
+    identity.categoryId,
+    identity.pattern ?? ''
+  ) as { draft_id: string | null; created_at: string } | undefined;
+
+  if (!row) return null;
+  return { draftId: row.draft_id, declinedAt: row.created_at };
+}
+
+/** One recorded decline, as the owner needs to read it back. */
+export interface DeclinedProposalRecord {
+  /** `ai_feedback.id`, which is what `restoreDeclinedProposal` takes. */
+  id: string;
+  kind: string;
+  summary: string | null;
+  merchant_name: string | null;
+  pattern: string | null;
+  /**
+   * The category the model proposed and its name. The name is null when the category no longer
+   * exists, which is a different fact from "this proposal named no category" and is why both are
+   * carried: a screen that showed only the name could not tell them apart.
+   */
+  category_id: string | null;
+  category_name: string | null;
+  declined_at: string;
+  /**
+   * Whether the write paths still read this row as a refusal. `stale = 1` rows do not suppress
+   * anything (see `ownerDeclinedProposal`) and are still listed, because they are still something
+   * the owner did and a list that hid them would be a second invisible filter.
+   */
+  suppressing: boolean;
+}
+
+/**
+ * Every proposal the owner has declined, newest first.
+ *
+ * WHY THIS EXISTS. `ownerDeclinedProposal` turned a dismissal into a standing block on a write
+ * path, and for a while nothing anywhere showed one: the draft stopped being drawn, `total_open`
+ * went down by one, and no field on any response named the reason. `listAiFeedback` had no
+ * production caller, `aiDigest` joins `ai_feedback` on `action_id` and a dismissal has none, and no
+ * client code referenced the table at all. A suggestion that silently stops appearing forever, with
+ * nothing to look at and nothing to undo, is worse than the nag the block was added to end.
+ *
+ * Unbounded by default for the same reason `listAdvisorActions` is: the panel decides how many rows
+ * to draw and says so, and a cap chosen here would be one nothing surfaces.
+ */
+export function listDeclinedProposals(
+  db: Database.Database,
+  limit: number | null = null
+): DeclinedProposalRecord[] {
+  const rows = db.prepare(`
+    SELECT f.id,
+           f.proposal_kind AS kind,
+           f.proposal_summary AS summary,
+           f.merchant_name,
+           f.proposed_pattern AS pattern,
+           f.proposed_category_id AS category_id,
+           c.name AS category_name,
+           f.created_at AS declined_at,
+           COALESCE(f.stale, 0) AS stale
+    FROM ai_feedback f
+    LEFT JOIN categories c ON c.id = f.proposed_category_id
+    WHERE f.signal = 'draft_dismissed'
+    ORDER BY f.created_at DESC, f.rowid DESC
+    LIMIT ?
+  `).all(limit ?? -1) as Array<Omit<DeclinedProposalRecord, 'suppressing'> & { stale: number }>;
+
+  return rows.map(({ stale, ...row }) => ({ ...row, suppressing: stale !== 1 }));
+}
+
+/** What taking a decline back actually managed, each part checked rather than assumed. */
+export interface RestoreDeclinedProposalResult {
+  ok: boolean;
+  reason?: 'not_found';
+  /** The dismissed draft row was put back to 'open'. False when the worker's row is long gone. */
+  draft_reopened: boolean;
+  /** The reopened draft passes `isDraftStillActionable`, so the review queue will draw it. */
+  queued: boolean;
+}
+
+/**
+ * Take back one decline.
+ *
+ * The `ai_feedback` row is deleted rather than flagged: it is the record of a refusal, and a
+ * refusal the owner has withdrawn is not one. Nothing else joins to it (the digest reads
+ * `action_id`, which a dismissal never carries), so there is no orphan to leave behind.
+ *
+ * The draft the dismissal named is put back to 'open' when it still exists, so the suggestion
+ * returns now rather than whenever the next pass happens to regenerate it. Whether the queue will
+ * actually draw it is then asked, not assumed: the premise may have lapsed for some other reason
+ * while the decline stood, and reporting `queued: true` on a draft `isDraftStillActionable` refuses
+ * would be exactly the kind of unchecked claim this file keeps being burned by.
+ */
+export function restoreDeclinedProposal(
+  db: Database.Database,
+  feedbackId: string
+): RestoreDeclinedProposalResult {
+  const restore = db.transaction((): RestoreDeclinedProposalResult => {
+    const row = db.prepare(`
+      SELECT id, draft_id FROM ai_feedback WHERE id = ? AND signal = 'draft_dismissed'
+    `).get(feedbackId) as { id: string; draft_id: string | null } | undefined;
+
+    if (!row) return { ok: false, reason: 'not_found', draft_reopened: false, queued: false };
+
+    db.prepare('DELETE FROM ai_feedback WHERE id = ?').run(row.id);
+
+    if (row.draft_id === null) return { ok: true, draft_reopened: false, queued: false };
+
+    const reopened = db.prepare(`
+      UPDATE advisor_drafts SET status = 'open', updated_at = ?
+      WHERE id = ? AND status = 'dismissed'
+    `).run(new Date().toISOString(), row.draft_id);
+
+    if (reopened.changes === 0) return { ok: true, draft_reopened: false, queued: false };
+
+    const draft = db.prepare('SELECT payload FROM advisor_drafts WHERE id = ?')
+      .get(row.draft_id) as { payload: string } | undefined;
+    const parsed = AdvisorDraftPayloadSchema.safeParse(
+      safeJsonParse<unknown>(draft?.payload ?? 'null', null, `advisor_drafts.payload for ${row.draft_id}`)
+    );
+
+    return {
+      ok: true,
+      draft_reopened: true,
+      queued: parsed.success && isDraftStillActionable(db, parsed.data),
+    };
+  });
+
+  return restore();
+}
+
 /**
  * Whether an open draft's premise is still true.
  *
@@ -1020,8 +1277,37 @@ export type DraftLiveness = 'live' | 'lapsed' | 'not_judged';
  *
  * Checked on read rather than fixed by a one-off cleanup, because a cleanup would decay the same
  * way: this is the invariant, not a repair.
+ *
+ * A PROPOSAL THE OWNER HAS ALREADY DECLINED HAS NO PREMISE LEFT, whatever else is still true of the
+ * ledger, so that is asked first and for every kind. This is the one filter in the queue that is the
+ * OWNER'S decision rather than a guard's opinion, which is why it hides the draft where
+ * `checkMerchantRuleWritable` deliberately does not: re-offering a suggestion someone already said
+ * no to every hour is the nag `ai_feedback` exists to end, and the same answer refused at confirm
+ * time would just be the nag with an extra click.
+ *
+ * HIDDEN IS NOT VANISHED. A draft removed for that reason is removed by a decision the owner made,
+ * and the decision itself is on a screen: `listDeclinedProposals` is what Settings draws and
+ * `restoreDeclinedProposal` is the way back. A suppression with no surface and no undo would be
+ * worse than the nag, not better.
  */
 export function draftLiveness(
+  db: Database.Database,
+  payload: AdvisorDraftPayload
+): DraftLiveness {
+  if (ownerDeclinedProposal(db, payload) !== null) return 'lapsed';
+  return premiseLiveness(db, payload);
+}
+
+/**
+ * Whether the LEDGER still supports this proposal, ignoring what the owner has said about it.
+ *
+ * Split out from `draftLiveness` because `stale` on an `ai_feedback` row means one specific thing
+ * (migration 047: "the premise had already lapsed before the owner acted"), and folding the owner's
+ * own earlier decline into the same verdict made the code assert that from its own suppression: a
+ * second, genuine refusal of a still-live suggestion was recorded as `stale = 1`, i.e. as the model
+ * merely being late. Any reader filtering `stale = 1` as "late" would discount a repeated no.
+ */
+function premiseLiveness(
   db: Database.Database,
   payload: AdvisorDraftPayload
 ): DraftLiveness {
@@ -1126,6 +1412,31 @@ function proposedCategoryOf(payload: AdvisorDraftPayload): string | null {
   }
 }
 
+/**
+ * The merchant pattern the proposal is about, which is not always one the payload carries.
+ *
+ * `create_merchant_rule` states its own, and there it is half of the proposal's identity.
+ * `retire_merchant_rule` names a rule id, and `ai_feedback` has no rule column, so the rule's
+ * pattern is read out of `merchant_rules` and recorded here as the readable description of what was
+ * declined: it is what the declined-proposals panel prints. It is NOT the identity, because a
+ * pattern does not identify a rule (`declinedRetirement` says why); the id is taken from the
+ * dismissed draft's own payload instead. Null when the rule row is already gone, because inventing
+ * a pattern for it would be a claim about a rule nobody can look at.
+ */
+function proposedPatternOf(db: Database.Database, payload: AdvisorDraftPayload): string | null {
+  switch (payload.kind) {
+    case 'create_merchant_rule':
+      return payload.pattern;
+    case 'retire_merchant_rule': {
+      const rule = db.prepare('SELECT pattern FROM merchant_rules WHERE id = ?')
+        .get(payload.rule_id) as { pattern: string } | undefined;
+      return rule?.pattern ?? null;
+    }
+    default:
+      return null;
+  }
+}
+
 /** 1 lapsed, 0 live, null when nothing judged it. Never defaults an unasked question to 0. */
 function staleFlag(liveness: DraftLiveness | null): number | null {
   if (liveness === null || liveness === 'not_judged') return null;
@@ -1150,9 +1461,11 @@ function dismissedDraftEvidence(db: Database.Database, draft: OpenDraftRow): Dra
     kind: draft.kind,
     summary: draft.summary,
     proposedCategoryId: payload === null ? null : proposedCategoryOf(payload),
-    proposedPattern: payload?.kind === 'create_merchant_rule' ? payload.pattern : null,
+    proposedPattern: payload === null ? null : proposedPatternOf(db, payload),
     transactionId: payload?.kind === 'categorize_transaction' ? payload.transaction_id : null,
-    stale: staleFlag(payload === null ? null : draftLiveness(db, payload)),
+    // `premiseLiveness`, not `draftLiveness`: see its header. A dismissal recorded while an earlier
+    // dismissal of the same proposal is on file is still a refusal of a live suggestion.
+    stale: staleFlag(payload === null ? null : premiseLiveness(db, payload)),
   };
 }
 
@@ -1315,13 +1628,43 @@ export function undoAdvisorAction(db: Database.Database, actionId: string): Undo
   return undo();
 }
 
-export function listAdvisorActions(db: Database.Database, limit = 50): AdvisorActionLog[] {
+/**
+ * The audit trail, newest first. `limit` null means every action on record, which is the default.
+ *
+ * IT USED TO DEFAULT TO 50, and `GET /api/ai/actions` took no limit, so the panel titled "Every
+ * action the AI applied to your data, and the ones you can put back" showed the newest 50 and
+ * nothing said the rest existed. Measured against a copy of .mizan/mizan.db at migration 054 on
+ * 2026-07-31: `SELECT COUNT(*) FROM advisor_actions` is 142, so 92 of them (65%) were past the cap.
+ * Undo is per action and reachable only from that list, so an action past it was an action the owner
+ * could not put back at all.
+ *
+ * Unbounded here rather than paged over the wire because the boundary this list has to respect is
+ * the owner's, not the transport's, and the transport is not under strain. Measured 2026-07-31
+ * against the running dev server, which is the figure that matters because it is what crosses the
+ * wire:
+ *   curl -s -o /tmp/actions.json -w "http=%{http_code} bytes=%{size_download}" \
+ *     http://127.0.0.1:3001/api/ai/actions            -> http=200 bytes=38554, 142 rows, 142 ids
+ * The six columns themselves are 28,320 bytes of that; the rest is JSON framing, so quoting the
+ * column figure as the payload understates it by 27 percent. On a copy of .mizan/mizan.db at
+ * migration 054:
+ *   SELECT SUM(LENGTH(id)+LENGTH(kind)+LENGTH(label)+LENGTH(COALESCE(summary,''))
+ *              +LENGTH(source)+LENGTH(created_at)) FROM advisor_actions;   -> 28320
+ * A page size chosen here would be another cap nothing surfaces. The panel decides how many to draw
+ * at once and says how many there are, which is a statement about a screen and not about the record.
+ *
+ * `advisorChatTools` passes its own limit and is unaffected: a model reading the trail is answering
+ * a question about recent activity, not offering an undo control for each row.
+ */
+export function listAdvisorActions(
+  db: Database.Database,
+  limit: number | null = null
+): AdvisorActionLog[] {
   return db.prepare(`
     SELECT id, kind, label, summary, source, created_at
     FROM advisor_actions
     ORDER BY created_at DESC, rowid DESC
     LIMIT ?
-  `).all(limit) as AdvisorActionLog[];
+  `).all(limit ?? -1) as AdvisorActionLog[];
 }
 
 /**
@@ -1354,6 +1697,24 @@ export function confirmAdvisorDraft(
       .map((issue) => `${issue.path.join('.')}: ${issue.message}`)
       .join('; ');
     throw new Error(`Invalid draft payload: ${detail}`);
+  }
+
+  // THE OWNER'S OWN NO IS A BOUND ON THE UNATTENDED PATH, and only on it. A pass that re-proposes
+  // something the owner has already dismissed does not get to apply it while they are not looking.
+  // The refusal is a `DraftRefusedError`, so `persistProposals` counts it as refused and still
+  // writes the draft row: what the model suggested stays on record even though `draftLiveness`
+  // keeps it out of the queue. The owner confirming the same thing by hand is them changing their
+  // mind, which is theirs to do, so 'user_confirm' never reaches this. Without it, `ai_feedback`
+  // recorded every dismissal and no write path read one: the next pass proposed it again, and for
+  // an autonomous kind applied it.
+  if (source === 'worker_auto') {
+    const declined = ownerDeclinedProposal(db, parsedPayload.data);
+    if (declined !== null) {
+      throw new DraftRefusedError(
+        'owner_declined',
+        `you dismissed this same proposal on ${declined.declinedAt.slice(0, 10)}, so it was not applied again on its own.`
+      );
+    }
   }
 
   // Generated before the handlers run, not after: the categorization paths stamp it onto every

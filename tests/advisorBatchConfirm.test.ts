@@ -577,7 +577,16 @@ test('drafts of other kinds are judged on their own premise, not on the rule gua
     isDraftStillActionable(db, { kind: 'categorize_transaction', transaction_id: txn, category_id: food }),
     true
   );
-  assert.equal(isDraftStillActionable(db, { kind: 'update_budget', category_id: food, amount: 100 }), true);
+  assert.equal(
+    isDraftStillActionable(db, {
+      kind: 'update_budget',
+      category_id: food,
+      amount: 100,
+      period: 'monthly',
+      rollover: false,
+    }),
+    true
+  );
 });
 
 test('a categorization the owner made by hand refuses the same way, without an action', (t) => {

@@ -1,5 +1,5 @@
 import { Router, Request, Response, NextFunction } from 'express';
-import { differenceInCalendarDays, format, parseISO } from 'date-fns';
+import { differenceInCalendarDays, parseISO } from 'date-fns';
 import { getDb } from '../db/index';
 import { calculateGoalProgress } from '../services/goalProgress';
 import { getDataQualitySummary } from '../services/dataQuality';
@@ -7,12 +7,12 @@ import { buildRecurringForecast } from '../services/recurringForecast';
 import { suggestMerchantRules } from '../services/rules';
 import { getAnomalyInsights } from '../services/anomalyInsights';
 import { computeSafeToSpend } from '../services/safeToSpend';
-import { reconcileAccounts } from '../services/reconciliation';
+import { reconcileAccounts, unreconciledResidual } from '../services/reconciliation';
 import { findFlowConservationViolations } from '../services/flowConservation';
 import { getMonthlyBudgetsWithProjection } from '../services/budgetProjection';
+import { getSyncHealth } from '../services/syncHealth';
 import { toDollars } from '../services/money';
-import { excludedFromTotalsSql } from '../services/transactionFilters';
-import type { Insight, InsightSeverity } from '../../../shared/types';
+import type { Insight, InsightSeverity, SyncHealthConnection } from '../../../shared/types';
 
 const router = Router();
 
@@ -25,23 +25,11 @@ interface AccountSummary {
   liquid_assets: number;
 }
 
-interface ConnectionRow {
-  institution_name: string | null;
-  last_synced_at: string | null;
-  status: string;
-}
-
 interface ReviewQueueRow {
   posted_transactions: number;
   uncategorized_transactions: number;
-  merchant_rules: number;
+  live_merchant_rules: number;
   detected_recurring: number;
-}
-
-interface BudgetPressureRow {
-  category_name: string;
-  amount: number;
-  spent: number;
 }
 
 interface GoalInsightRow {
@@ -78,6 +66,20 @@ function addInsight(insights: ScoredInsight[], insight: ScoredInsight): void {
   insights.push(insight);
 }
 
+/**
+ * EVERY `action_route` NAMES A SCREEN THAT EXISTS.
+ *
+ * The nav holds at six routes and `client/src/App.tsx` keeps `LEGACY_TARGETS` so an old bookmark
+ * still lands. This file was emitting a mix of both: `/plan` on two budget rows beside
+ * `/transactions`, `/bills` and `/goals` on six others, with `anomalyInsights.ts` emitting
+ * `/reports`. The redirects meant nothing was broken, which is exactly why it could sit half
+ * converted. They are all canonical now, each at the destination its own legacy entry redirects to
+ * (`/transactions` and `/bills` -> `/ledger`, `/goals` -> `/plan`, `/reports` ->
+ * `/?window=this-month`), so the served payload and the router agree without a hop.
+ *
+ * `tests/insightsRoute.test.ts` walks the served rows against `LEGACY_TARGETS` itself, so adding a
+ * row that points at a retired path fails rather than quietly relying on the redirect.
+ */
 function toPublicInsight(insight: ScoredInsight): Insight {
   return {
     id: insight.id,
@@ -90,13 +92,15 @@ function toPublicInsight(insight: ScoredInsight): Insight {
   };
 }
 
-function ageInDays(iso: string | null): number | null {
-  if (!iso) return null;
-
-  const parsed = parseISO(iso);
-  if (Number.isNaN(parsed.getTime())) return null;
-
-  return differenceInCalendarDays(new Date(), parsed);
+/**
+ * Name the connections a row is about, at most two, and say so when there are more.
+ *
+ * `institution_name` is already the classifier's resolved name (it falls back per provider), so
+ * this never invents one.
+ */
+function nameConnections(connections: SyncHealthConnection[]): string {
+  const named = connections.slice(0, 2).map((connection) => connection.institution_name).join(', ');
+  return connections.length > 2 ? `${named} and others` : named;
 }
 
 // GET /reconciliation - does the ledger explain each account's balance?
@@ -124,7 +128,14 @@ router.get('/reconciliation', (_req: Request, res: Response, next: NextFunction)
       data: {
         accounts: report.accounts.map(toDollarFields),
         unreconciled: report.unreconciled.map(toDollarFields),
-        total_residual: toDollars(report.total_residual),
+        // The figure judged, over the accounts judged, as a magnitude: see `unreconciledResidual`,
+        // which sums `Math.abs` precisely so two accounts unexplained in opposite directions cannot
+        // cancel to a clean bill of health. `total_residual` sums raw `residual` over every account,
+        // including the market-driven ones the filter exempts and the boundary artifact
+        // `adjusted_residual` removes, so it can be large beside an empty `unreconciled`. Both are
+        // published, each under a name that says which population it covers.
+        unreconciled_residual: toDollars(unreconciledResidual(report)),
+        residual_all_accounts: toDollars(report.total_residual),
         measured_snapshot_count: report.measured_snapshot_count,
         flow_conservation: flowConservation,
       },
@@ -198,45 +209,48 @@ router.get('/', (_req: Request, res: Response, next: NextFunction): void => {
       });
     }
 
-    const simplefinConnections = db.prepare(`
-      SELECT 'SimpleFIN' AS institution_name, last_synced_at, status
-      FROM simplefin_connections
-      WHERE status != 'removed'
-    `).all() as ConnectionRow[];
-    const coinbaseConnections = db.prepare(`
-      SELECT display_name AS institution_name, last_synced_at, status
-      FROM coinbase_connections
-    `).all() as ConnectionRow[];
-    const connections = [...simplefinConnections, ...coinbaseConnections];
-    const brokenConnections = connections.filter((connection) => connection.status !== 'active');
-    const staleConnections = connections.filter((connection) => {
-      if (connection.status !== 'active') return false;
-      const age = ageInDays(connection.last_synced_at);
-      return age === null || age >= 3;
-    });
+    /*
+     * ONE CLASSIFICATION OF A CONNECTION, NOT TWO.
+     *
+     * This block used to run its own pair of queries and its own rule, and it disagreed with
+     * `syncHealth` about the same row in both directions. It said "N connections cannot sync until
+     * reconnected" for every status that is not 'active', so a `sync_error` (which `classifyStatus`
+     * calls "Retry this sync. If it fails again, reconnect the institution.") was reported as a
+     * login that had expired: a cause nothing here established. It also read
+     * `coinbase_connections` unfiltered where `getSyncHealth` drops `disconnected` rows, so a
+     * connection the owner had disconnected counted as blocked on one surface and did not exist on
+     * the other. The live database is exactly this case: `simplefin_primary` sits at `sync_error`.
+     *
+     * The classifier is now asked, and only what it decided is stated.
+     */
+    const syncHealth = getSyncHealth(db);
+    const attentionConnections = syncHealth.connections.filter((c) => c.needs_attention);
+    const staleConnections = syncHealth.connections.filter((c) => c.is_stale);
 
-    if (brokenConnections.length > 0) {
+    if (attentionConnections.length > 0) {
       addInsight(insights, {
-        id: 'sync-reconnect',
+        id: 'sync-attention',
         severity: 'critical',
         rank: 0,
         title: 'Connection needs attention',
-        message: `${brokenConnections.length} connection${brokenConnections.length === 1 ? '' : 's'} cannot sync until reconnected.`,
-        metric: `${brokenConnections.length} blocked`,
+        message: attentionConnections.length === 1
+          ? `${attentionConnections[0].institution_name}: ${attentionConnections[0].status_detail}`
+          : `${attentionConnections
+              .map((c) => `${c.institution_name} (${c.status_label})`)
+              .join(', ')} need action before these balances can be trusted.`,
+        metric: `${attentionConnections.length} to fix`,
         action_label: 'Fix sync',
         action_route: '/accounts',
       });
     } else if (staleConnections.length > 0) {
-      const names = staleConnections
-        .slice(0, 2)
-        .map((connection) => connection.institution_name || 'Connection')
-        .join(', ');
       addInsight(insights, {
         id: 'sync-stale',
         severity: 'warning',
         rank: 20,
         title: 'Sync is getting stale',
-        message: `${names}${staleConnections.length > 2 ? ' and others' : ''} have not synced in at least 3 days.`,
+        message: staleConnections.length === 1
+          ? `${staleConnections[0].institution_name}: ${staleConnections[0].status_detail}`
+          : `${nameConnections(staleConnections)} should be synced before relying on current totals.`,
         metric: `${staleConnections.length} stale`,
         action_label: 'Review',
         action_route: '/accounts',
@@ -249,7 +263,10 @@ router.get('/', (_req: Request, res: Response, next: NextFunction): void => {
         -- Must match the uncategorized predicate in services/transactionReview.ts getCounts(),
         -- or this insight and the review badge disagree about the same number.
         (SELECT COUNT(*) FROM transactions WHERE pending = 0 AND category_id IS NULL AND review_status <> 'dismissed') AS uncategorized_transactions,
-        (SELECT COUNT(*) FROM merchant_rules) AS merchant_rules,
+        -- retired_at IS NULL is the whole difference between "rules that exist" and "rules that
+        -- run". Migration 045 retired two AI rules that contended with the owner's, and this count
+        -- kept reporting them: the row read "236 merchant rules are active" where 234 were.
+        (SELECT COUNT(*) FROM merchant_rules WHERE retired_at IS NULL) AS live_merchant_rules,
         (
           SELECT COUNT(*)
           FROM recurring_patterns
@@ -269,15 +286,15 @@ router.get('/', (_req: Request, res: Response, next: NextFunction): void => {
         message: `${reviewQueue.uncategorized_transactions} posted transaction${reviewQueue.uncategorized_transactions === 1 ? '' : 's'} are uncategorized, which weakens budgets and reports.`,
         metric: percent(ratio),
         action_label: 'Review',
-        action_route: '/transactions',
+        action_route: '/ledger',
       });
-    } else if (reviewQueue.posted_transactions > 0 && reviewQueue.merchant_rules > 0) {
+    } else if (reviewQueue.posted_transactions > 0 && reviewQueue.live_merchant_rules > 0) {
       addInsight(insights, {
         id: 'rules-working',
         severity: 'positive',
         rank: 70,
         title: 'Categorization is clean',
-        message: `All posted transactions are categorized and ${reviewQueue.merchant_rules} merchant rule${reviewQueue.merchant_rules === 1 ? '' : 's'} are active.`,
+        message: `All posted transactions are categorized and ${reviewQueue.live_merchant_rules} merchant rule${reviewQueue.live_merchant_rules === 1 ? ' is' : 's are'} live.`,
         action_label: 'Rules',
         action_route: '/settings',
       });
@@ -292,7 +309,7 @@ router.get('/', (_req: Request, res: Response, next: NextFunction): void => {
         message: `${reviewQueue.detected_recurring} detected pattern${reviewQueue.detected_recurring === 1 ? '' : 's'} should be confirmed or dismissed so forecasts stay honest.`,
         metric: `${reviewQueue.detected_recurring} pending`,
         action_label: 'Confirm',
-        action_route: '/bills',
+        action_route: '/ledger',
       });
     }
 
@@ -315,54 +332,46 @@ router.get('/', (_req: Request, res: Response, next: NextFunction): void => {
     }
 
     const now = new Date();
-    const monthStart = format(new Date(now.getFullYear(), now.getMonth(), 1), 'yyyy-MM-dd');
-    const monthEnd = format(new Date(now.getFullYear(), now.getMonth() + 1, 0), 'yyyy-MM-dd');
-    const currentMonth = format(now, 'yyyy-MM');
 
     for (const anomaly of getAnomalyInsights(db, now)) {
       addInsight(insights, anomaly);
     }
 
-    const budgetRows = db.prepare(`
-      WITH RECURSIVE budget_categories(root_id, category_id) AS (
-        SELECT id, id FROM categories
-        UNION ALL
-        SELECT bc.root_id, c.id
-        FROM categories c
-        JOIN budget_categories bc ON c.parent_id = bc.category_id
-      )
-      SELECT
-        c.name AS category_name,
-        b.amount,
-        COALESCE(SUM(ABS(t.amount)), 0) AS spent
-      FROM budgets b
-      JOIN categories c ON c.id = b.category_id
-      LEFT JOIN budget_categories bc ON bc.root_id = b.category_id
-      LEFT JOIN transactions t
-        ON t.category_id = bc.category_id
-       AND t.date BETWEEN ? AND ?
-       AND t.amount < 0
-       AND t.pending = 0
-       AND ${excludedFromTotalsSql('t')}
-      WHERE b.period = 'monthly' OR b.period = ?
-      GROUP BY b.id
-      ORDER BY spent / NULLIF(b.amount, 0) DESC
-      LIMIT 1
-    `).all(monthStart, monthEnd, currentMonth) as BudgetPressureRow[];
-    const tightestBudget = budgetRows[0];
+    /*
+     * ONE DEFINITION OF BUDGET SPEND, AND IT IS THE SHARED SERVICE'S.
+     *
+     * This block ran its own copy of the /plan query with one clause changed:
+     * `SUM(ABS(t.amount))` behind `t.amount < 0`, where `getMonthlyBudgetsWithProjection` sums
+     * `SUM(-t.amount)` over every row. The two are equal for a pure-outflow month and differ by
+     * exactly the refunds otherwise, which is the defect `transactionFilters.spendAmountSql`
+     * exists to stop. Measured 2026-07-31 against a copy of `.mizan/mizan.db` at migration 054,
+     * for 2026-07: this route computed Shopping at 102459 cents against a 50000 cent budget and
+     * rendered "Shopping is at 204.9% of its monthly budget", while /plan computed -102863 cents
+     * on the same rows. July's Shopping credits exceeded its purchases by $1,028.63; there was no
+     * overspend to report.
+     *
+     * A signed total can be negative, so the two thresholds below are one-sided by construction:
+     * a net-refund month lands far under 80 and this stays silent, which is the healthy case.
+     */
+    const monthlyBudgets = getMonthlyBudgetsWithProjection(db, now.getFullYear(), now.getMonth() + 1, now);
+    const tightestBudget = monthlyBudgets
+      .filter((budget) => budget.amount > 0)
+      .sort((a, b) => (b.spent ?? 0) / b.amount - (a.spent ?? 0) / a.amount)[0];
 
-    if (tightestBudget && tightestBudget.amount > 0) {
-      const used = (tightestBudget.spent / tightestBudget.amount) * 100;
+    if (tightestBudget) {
+      const spent = tightestBudget.spent ?? 0;
+      const used = (spent / tightestBudget.amount) * 100;
+      const categoryName = tightestBudget.category_name ?? 'This budget';
       if (used >= 100) {
         addInsight(insights, {
           id: 'budget-over',
           severity: 'warning',
           rank: 25,
           title: 'Budget is over plan',
-          message: `${tightestBudget.category_name} is at ${percent(used)} of its monthly budget.`,
-          metric: `${money(toDollars(tightestBudget.spent))} / ${money(toDollars(tightestBudget.amount))}`,
+          message: `${categoryName} is at ${percent(used)} of its monthly budget.`,
+          metric: `${money(toDollars(spent))} / ${money(toDollars(tightestBudget.amount))}`,
           action_label: 'Open budget',
-          action_route: '/budget',
+          action_route: '/plan',
         });
       } else if (used >= 80) {
         addInsight(insights, {
@@ -370,10 +379,10 @@ router.get('/', (_req: Request, res: Response, next: NextFunction): void => {
           severity: 'info',
           rank: 45,
           title: 'Budget is getting tight',
-          message: `${tightestBudget.category_name} has used ${percent(used)} of its monthly budget.`,
-          metric: `${money(toDollars(tightestBudget.amount - tightestBudget.spent))} left`,
+          message: `${categoryName} has used ${percent(used)} of its monthly budget.`,
+          metric: `${money(toDollars(tightestBudget.amount - spent))} left`,
           action_label: 'Open budget',
-          action_route: '/budget',
+          action_route: '/plan',
         });
       }
     }
@@ -392,7 +401,7 @@ router.get('/', (_req: Request, res: Response, next: NextFunction): void => {
         message: `Scheduled recurring activity would take liquid cash below zero over the next 30 days.`,
         metric: money(liquidAssets + forecastNet),
         action_label: 'Open bills',
-        action_route: '/bills',
+        action_route: '/ledger',
       });
     } else if (forecast.occurrences.length > 0 && forecastNet < 0) {
       addInsight(insights, {
@@ -403,7 +412,7 @@ router.get('/', (_req: Request, res: Response, next: NextFunction): void => {
         message: `Known recurring bills exceed recurring income by ${money(Math.abs(forecastNet))} over the next 30 days.`,
         metric: money(forecastNet),
         action_label: 'Open bills',
-        action_route: '/bills',
+        action_route: '/ledger',
       });
     }
 
@@ -448,7 +457,7 @@ router.get('/', (_req: Request, res: Response, next: NextFunction): void => {
           message: `${soonestOpenGoal.goal.name} has ${money(soonestOpenGoal.remaining)} remaining${daysUntilTarget >= 0 ? ` with ${daysUntilTarget} days left` : ''}.`,
           metric: percent(soonestOpenGoal.percentComplete),
           action_label: 'Open goals',
-          action_route: '/goals',
+          action_route: '/plan',
         });
       }
     } else {
@@ -472,7 +481,7 @@ router.get('/', (_req: Request, res: Response, next: NextFunction): void => {
           title: 'Goal is close',
           message: `${almostDone.goal.name} is ${percent(almostDone.percentComplete)} complete with ${money(almostDone.remaining)} left.`,
           action_label: 'Open goals',
-          action_route: '/goals',
+          action_route: '/plan',
         });
       }
     }

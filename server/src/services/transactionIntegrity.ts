@@ -34,14 +34,58 @@ interface TransferRow {
   is_transfer_category: number;
 }
 
+/**
+ * STANDING AND NEW ARE DIFFERENT NUMBERS, AND ONLY ONE OF THEM IS AN EVENT.
+ *
+ * `groupCount`/`pairCount` are what detection currently holds: every unresolved candidate, whether
+ * it was found this run or eight weeks ago. The sync panel's `detected` row was emitted from those,
+ * so an unresolved candidate wrote an identical "3 transfer pair(s) need review" into `sync_changes`
+ * every hour, forever, and the only way to stop it was to resolve the candidate. That is the
+ * standing finding rule 3 forbids: a run in which nothing happened has to be silent.
+ *
+ * `newGroupCount`/`newPairCount` count only the groups and pairs this run created, so an unchanged
+ * ledger reports zero and the panel says nothing. The standing figures stay on the result because
+ * `sync_runs.duplicate_candidates` / `transfer_candidates` are columns about state, not about the
+ * run, and the review queue reads them as such.
+ *
+ * NEWNESS IS DECIDED ON MEMBER IDS, NOT ON THE GROUP KEY.
+ *
+ * `duplicate_group_id` is `dup_${shortHash(key)}` and the key carries `date`, `amount`, `pending`,
+ * the normalized merchant and the normalized `original_name`. Every one of those is a field
+ * `upsertSimplefinTransaction` overwrites from the provider, so keying newness off the group id
+ * reported a fresh finding for a candidate the owner had already seen every time the provider
+ * amended a member. Measured on a `migratedTestDb()` fixture holding one pending duplicate pair:
+ * a second run over the unchanged ledger returned newGroupCount 0, `UPDATE transactions SET
+ * pending = 0` returned newGroupCount 1 with the id moving dup_bac414ef9eaf8e48 ->
+ * dup_9f6f1c4f3f63f44a, and renaming the merchant returned newGroupCount 1 again. The same fixture
+ * was silent on none of it. It also missed the opposite case: a third identical row joining an
+ * established group left the key untouched, so `newGroupCount` stayed 0 and nothing was reported
+ * for a transaction the owner had never been shown.
+ *
+ * So a run reports what it newly FLAGGED. `newTransactionCount` is the number of rows this run put
+ * into `duplicate_status = 'candidate'` that were not already there, and `newGroupCount` is the
+ * number of emitted groups holding at least one of them. An amendment that leaves the member set
+ * alone is silent whatever it does to the key, and a new copy joining an old group is reported once.
+ *
+ * The bound, stated rather than implied: a candidate that stops being one and later becomes one
+ * again is reported again. A pair posting one leg at a time does exactly that, because the
+ * intermediate state has the two rows disagreeing on `pending` and holds no group at all. Both legs
+ * posting in one sync, which is the shape a provider batch has, is silent.
+ */
 export interface DuplicateDetectionResult {
   groupCount: number;
   transactionCount: number;
+  /** Groups holding at least one transaction this run newly flagged. */
+  newGroupCount: number;
+  /** Transactions this run flagged as candidates that were not candidates before it. */
+  newTransactionCount: number;
 }
 
 export interface TransferDetectionResult {
   pairCount: number;
   transactionCount: number;
+  /** Pairs that did not exist before this run. */
+  newPairCount: number;
 }
 
 export interface TransactionIntegrityResult {
@@ -71,6 +115,17 @@ function placeholders(values: unknown[]): string {
 }
 
 export function refreshDuplicateCandidates(db: Database.Database): DuplicateDetectionResult {
+  // Read before the reset below wipes it. These are the rows the owner has already been shown as
+  // possible duplicates; anything outside this set that comes back a candidate is what this run
+  // found. See the note on DuplicateDetectionResult for why this is member ids and not the group id.
+  const knownCandidateIds = new Set(
+    (db.prepare(`
+      SELECT id
+      FROM transactions
+      WHERE duplicate_status = 'candidate' AND duplicate_group_id IS NOT NULL
+    `).all() as Array<{ id: string }>).map((row) => row.id)
+  );
+
   db.prepare(`
     UPDATE transactions
     SET duplicate_group_id = NULL,
@@ -126,6 +181,8 @@ export function refreshDuplicateCandidates(db: Database.Database): DuplicateDete
 
   let groupCount = 0;
   let transactionCount = 0;
+  let newGroupCount = 0;
+  let newTransactionCount = 0;
 
   for (const [key, group] of groups) {
     if (group.length < 2) continue;
@@ -141,9 +198,12 @@ export function refreshDuplicateCandidates(db: Database.Database): DuplicateDete
 
     groupCount++;
     transactionCount += ids.length;
+    const freshlyFlagged = ids.filter((id) => !knownCandidateIds.has(id)).length;
+    newTransactionCount += freshlyFlagged;
+    if (freshlyFlagged > 0) newGroupCount++;
   }
 
-  return { groupCount, transactionCount };
+  return { groupCount, transactionCount, newGroupCount, newTransactionCount };
 }
 
 export function getDuplicateCandidateGroups(
@@ -405,9 +465,17 @@ export function refreshTransferCandidates(db: Database.Database): TransferDetect
     claimTransferLeg(db, id, next.pairId, next.categoryId, now);
   }
 
+  // `existing` was read before any of the writes above, so this is the set of pairs that were
+  // already standing when this run began. A pair id is a hash of its two transaction ids, so a
+  // re-detected pair keeps its id and is correctly not new.
+  const knownPairIds = new Set(
+    [...existing.values()].map((state) => state.pairId).filter((id): id is string => id !== null)
+  );
+
   return {
     pairCount: pairs.length,
     transactionCount: pairs.length * 2,
+    newPairCount: pairs.filter((pair) => !knownPairIds.has(pair.pairId)).length,
   };
 }
 

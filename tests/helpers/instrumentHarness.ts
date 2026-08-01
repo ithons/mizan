@@ -14,6 +14,7 @@ import type {
   ReportSummary,
   SafeToSpend,
   SpendingReport,
+  SyncHealth,
   TopMerchantsReport,
   TransactionReviewSummary,
 } from '../../shared/types';
@@ -269,7 +270,8 @@ export const ATTRIBUTION: NetWorthAttribution = {
   ],
 };
 
-const REVIEW: TransactionReviewSummary = {
+/** Nothing waiting, which is the case the "What needs you" rail has to be silent on. */
+export const REVIEW: TransactionReviewSummary = {
   total_open: 0,
   queues: [],
   rule_suggestions: [],
@@ -289,12 +291,71 @@ export interface Overrides {
   trends?: CategoryTrendReport;
   /** Null is the shape the server sends when the window holds fewer than two measured sheets. */
   attribution?: NetWorthAttribution | null;
+  /** The review queues. Defaults to REVIEW, which is every queue empty. */
+  review?: TransactionReviewSummary;
+  /**
+   * What `GET /api/sync/health` reports. The beam reads `last_run.incomplete` from it, because the
+   * only other signal for "the run that wrote this sheet did not finish" was a live SSE event that
+   * a reload cleared. Defaults to a run that finished, so nothing here degrades by accident.
+   */
+  syncHealth?: SyncHealth;
+  /**
+   * `GET /api/sync/health` returning an error rather than a body.
+   *
+   * The calibration input is a boolean, so an absent `last_run` reads exactly like a run that
+   * finished. That is the direction a degradation signal must not fail in, and the only way to see
+   * it is to put the query in its error state rather than to leave it unseeded (an unseeded key
+   * renders as loading, which is a third thing).
+   */
+  syncHealthFailed?: boolean;
 }
+
+export const SYNC_HEALTH_OK: SyncHealth = {
+  status: 'healthy',
+  status_label: 'Fresh',
+  status_detail: 'All connected institutions are fresh enough for reports and advisor context.',
+  connection_count: 1,
+  stale_count: 0,
+  attention_count: 0,
+  fresh_count: 1,
+  never_synced_count: 0,
+  last_synced_at: '2026-07-31T18:48:51.403Z',
+  last_run: {
+    id: 'run_ok',
+    status: 'succeeded',
+    completed_at: '2026-07-31T18:48:51.403Z',
+    message: 'Sync complete',
+    incomplete: false,
+  },
+  connections: [],
+};
+
+/**
+ * The live shape of the defect: `sync_runs` newest row on a copy of `.mizan/mizan.db` at migration
+ * 054 is `status = 'partial'`, completed 2026-07-31T18:48:51.403Z, "Sync finished with issues".
+ */
+export const SYNC_HEALTH_PARTIAL: SyncHealth = {
+  ...SYNC_HEALTH_OK,
+  last_run: {
+    id: '1ad2346d-dd6a-4e4a-856a-f719a1f94db5',
+    status: 'partial',
+    completed_at: '2026-07-31T18:48:51.403Z',
+    message: 'Sync finished with issues',
+    incomplete: true,
+  },
+};
 
 export function render(windowId: WindowId, overrides: Overrides = {}): string {
   const range = windowRange(windowId, new Date());
   const client = new QueryClient({
-    defaultOptions: { queries: { retry: false, staleTime: Infinity, gcTime: Infinity } },
+    // `retryOnMount: false` is what makes a FAILED query observable here at all. TanStack's
+    // `createResult` folds `fetchState` over any query it would fetch on mount, and that overwrites
+    // `status: 'error'` with `status: 'pending'` whenever `data` is undefined, so a seeded failure
+    // renders as a spinner and never as an error. Turning retry-on-mount off leaves the error
+    // standing, which is the state the real app reaches one render later, once the request has
+    // actually come back. It changes nothing for a query that has data, which is every other one
+    // seeded below.
+    defaultOptions: { queries: { retry: false, retryOnMount: false, staleTime: Infinity, gcTime: Infinity } },
   });
 
   // Seeded rather than fetched: renderToString is synchronous, so an unseeded key would fire a
@@ -306,7 +367,19 @@ export function render(windowId: WindowId, overrides: Overrides = {}): string {
   client.setQueryData(['recurring', 'forecast', 30], FORECAST);
   client.setQueryData(['goals'], []);
   client.setQueryData(['insights'], []);
-  client.setQueryData(['transactions', 'review'], REVIEW);
+  client.setQueryData(['transactions', 'review'], overrides.review ?? REVIEW);
+  if (overrides.syncHealthFailed) {
+    // A cached error, not a missing key: `useQuery` reads it as `isError` without ever fetching,
+    // which is what a server render can observe.
+    client.getQueryCache().build(client, { queryKey: ['sync', 'health'] }).setState({
+      status: 'error',
+      error: new Error('Failed to fetch'),
+      fetchStatus: 'idle',
+      errorUpdatedAt: Date.now(),
+    });
+  } else {
+    client.setQueryData(['sync', 'health'], overrides.syncHealth ?? SYNC_HEALTH_OK);
+  }
   client.setQueryData(['ai-actions'], []);
   client.setQueryData(['networth', 'history', 12], overrides.recent ?? RECENT_SHEETS);
   client.setQueryData(['networth', 'history', range], snapshot ? [snapshot] : []);

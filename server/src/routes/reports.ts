@@ -17,9 +17,51 @@ import type {
   SpendingReport,
 } from '../../../shared/types';
 import { dollarizeFields, toDollars } from '../services/money';
-import { deriveAssetBuckets } from '../services/netWorthHistory';
 
 const router = Router();
+
+/** Accounts the Investments screen is about: anything holding a position now, or typed as one. */
+const PORTFOLIO_ACCOUNT_TYPES = ['brokerage', 'ira_traditional', 'ira_roth', 'crypto_wallet'];
+
+interface SnapshotPortfolio {
+  /** Integer cents, summed over the portfolio accounts this breakdown carried a number for. */
+  value: number;
+  /** How many of them that was. Fewer than the whole set means the point is not the whole hero. */
+  covered: number;
+}
+
+/**
+ * The portfolio's value inside one snapshot, or null when the row cannot be read.
+ *
+ * Null rather than 0: an unparseable breakdown is a snapshot this code could not read, and
+ * plotting it as zero would draw a portfolio that emptied and refilled. The caller drops the
+ * point instead, so the series only carries dates whose balances were actually recovered.
+ *
+ * `covered` is returned beside the value because a sum over a subset of the accounts is not a
+ * smaller portfolio, it is a different quantity. `takeSnapshot` writes a breakdown entry only for
+ * `is_hidden = 0` accounts, and an account can be created, hidden or unhidden between snapshots,
+ * so a breakdown carrying four of five portfolio accounts is routine and the difference must not
+ * be read as money moving.
+ */
+function portfolioInSnapshot(breakdownJson: string, accountIds: Set<string>): SnapshotPortfolio | null {
+  let breakdown: unknown;
+  try {
+    breakdown = JSON.parse(breakdownJson);
+  } catch {
+    return null;
+  }
+  if (typeof breakdown !== 'object' || breakdown === null) return null;
+
+  let value = 0;
+  let covered = 0;
+  for (const [accountId, entry] of Object.entries(breakdown as Record<string, unknown>)) {
+    if (!accountIds.has(accountId)) continue;
+    if (typeof entry !== 'number' || !Number.isFinite(entry)) continue;
+    value += entry;
+    covered += 1;
+  }
+  return { value, covered };
+}
 
 // The reporting service returns every money total in integer cents. These helpers
 // dollarize the money fields of each report at this route boundary. Percentages
@@ -238,16 +280,80 @@ router.get('/investments', (req: Request, res: Response, next: NextFunction): vo
     const db = getDb();
     const { startDate, endDate } = req.query as Record<string, string>;
 
-    // Current allocation by security type
+    // One definition of "the portfolio", used by every figure this endpoint serves and by the
+    // account set the screen renders its holdings list over.
+    //
+    // The screen used to carry two. The headline summed the balances of accounts holding a
+    // position ($2,436.21 on the live ledger); the chart directly beneath it, labelled
+    // "Portfolio value", plotted `deriveAssetBuckets(...).investment`, whose INVESTMENT_TYPES
+    // set leaves `crypto_wallet` in its own bucket, so it ended at $2,045.04. The gap was the
+    // Coinbase wallet exactly, nothing on the screen said so, and the "since last snapshot"
+    // delta under the headline was computed off the crypto-free series: it read $0 on a day
+    // the headline moved. Crypto belongs in whichever total the holdings list shows, and this
+    // list shows it, so `crypto_value` is served beside the headline and the screen prints the
+    // split rather than leaving it to a source comment.
+    //
+    // `is_hidden = 0` is not decoration: it is the predicate `takeSnapshot` writes a breakdown
+    // entry under (services/snapshot.ts). Without it the headline counted an account no future
+    // snapshot can ever carry, so disconnecting Coinbase (routes/coinbase.ts sets is_hidden = 1
+    // and leaves current_balance) left $391.17 in the headline, out of the series, and standing
+    // in the delta as movement every day.
+    //
+    // What this set CANNOT do is decide membership for a past snapshot: it is today's accounts
+    // table, applied to every breakdown ever written. Retyping a brokerage to `savings` changes
+    // what every historical point means, and nothing here detects that. `covered_accounts`
+    // narrows the damage to what can be checked, which is whether a point carries all of the
+    // accounts the headline sums, not whether that was the right set on the day.
+    const portfolioAccounts = db.prepare(`
+      SELECT
+        a.id,
+        a.type,
+        a.current_balance,
+        EXISTS (SELECT 1 FROM holdings h WHERE h.account_id = a.id) AS holds_position
+      FROM accounts a
+      WHERE a.is_liability = 0
+        AND a.is_hidden = 0
+        AND (a.type IN (${PORTFOLIO_ACCOUNT_TYPES.map(() => '?').join(', ')})
+             OR EXISTS (SELECT 1 FROM holdings h2 WHERE h2.account_id = a.id))
+      ORDER BY a.id
+    `).all(...PORTFOLIO_ACCOUNT_TYPES) as Array<{
+      id: string;
+      type: string;
+      current_balance: number;
+      holds_position: number;
+    }>;
+    const portfolioAccountIds = portfolioAccounts.map((account) => account.id);
+    const portfolioAccountIdSet = new Set(portfolioAccountIds);
+    const portfolioValue = portfolioAccounts.reduce((sum, account) => sum + account.current_balance, 0);
+    // The balances of the accounts that actually hold something. This, not `portfolioValue`, is
+    // what a position list can be reconciled against: an IRA funded and not yet invested makes
+    // the two totals disagree with every holding sitting exactly where it should, which is an
+    // ordinary account and must not raise a note. The rest of the headline is reported as
+    // uninvested balance, which explains the same difference without accusing anything.
+    const investedBalance = portfolioAccounts
+      .filter((account) => account.holds_position === 1)
+      .reduce((sum, account) => sum + account.current_balance, 0);
+    const cryptoValue = portfolioAccounts
+      .filter((account) => account.type === 'crypto_wallet')
+      .reduce((sum, account) => sum + account.current_balance, 0);
+
+    // `IN ()` is not valid SQLite, so an empty portfolio has to be spelled as a false predicate
+    // rather than an empty list.
+    const inPortfolio = portfolioAccountIds.length > 0
+      ? `h.account_id IN (${portfolioAccountIds.map(() => '?').join(', ')})`
+      : '0';
+
+    // Current allocation by security type, over the same accounts as every other figure here.
     const allocation = (db.prepare(`
       SELECT
         s.type AS security_type,
         SUM(h.institution_value) AS total_value
       FROM holdings h
       JOIN securities s ON s.id = h.security_id
+      WHERE ${inPortfolio}
       GROUP BY s.type
       ORDER BY total_value DESC
-    `).all() as Array<Record<string, unknown>>).map((row) =>
+    `).all(...portfolioAccountIds) as Array<Record<string, unknown>>).map((row) =>
       dollarizeFields(row, ['total_value'])
     );
 
@@ -268,10 +374,18 @@ router.get('/investments', (req: Request, res: Response, next: NextFunction): vo
         END AS unrealized_gain
       FROM holdings h
       JOIN securities s ON s.id = h.security_id
+      WHERE ${inPortfolio}
       ORDER BY h.institution_value DESC
-    `).all() as Array<Record<string, unknown>>).map((row) =>
+    `).all(...portfolioAccountIds) as Array<Record<string, unknown>>).map((row) =>
       dollarizeFields(row, ['institution_value', 'cost_basis', 'manual_cost_basis', 'unrealized_gain'])
     );
+
+    // What the positions in those same accounts add up to. It can differ from the balances (an
+    // unsettled sweep), and the screen says so rather than picking one silently, so both sides
+    // have to come from the same account set to be comparable at all.
+    const heldValue = (db.prepare(
+      `SELECT SUM(h.institution_value) AS total FROM holdings h WHERE ${inPortfolio}`
+    ).get(...portfolioAccountIds) as { total: number | null }).total ?? 0;
 
     // Portfolio value over time from net worth snapshots. Investment transaction
     // volume is not portfolio value and should not drive a value-history chart.
@@ -296,33 +410,44 @@ router.get('/investments', (req: Request, res: Response, next: NextFunction): vo
     // that column was frozen from the account types in force when the row was written. Both Fidelity
     // accounts were auto-typed `checking` before being corrected, so the stored column still says
     // $0.00 for two days when the portfolio held $1,661.66.
-    const snapshots = (db.prepare(`
+    const snapshots = db.prepare(`
       SELECT date, breakdown, is_estimated
       FROM net_worth_snapshots
       ${where}
       ORDER BY date ASC
-    `).all(...params) as Array<{ date: string; breakdown: string; is_estimated: number }>).map((row) => ({
-      date: row.date,
-      value: deriveAssetBuckets(db, row.breakdown).investment,
-      is_estimated: row.is_estimated,
-    }));
+    `).all(...params) as Array<{ date: string; breakdown: string; is_estimated: number }>;
 
-    // Total portfolio value
-    const totalValue = db.prepare(
-      'SELECT SUM(institution_value) AS total FROM holdings'
-    ).get() as { total: number | null };
+    interface HistoryPoint {
+      date: string;
+      value: number;
+      estimated: boolean;
+      covered_accounts: number;
+    }
 
-    const history = (snapshots as Array<{ date: string; value: number; is_estimated: number }>).map(
-      (snapshot) => ({
-        date: snapshot.date,
-        value: toDollars(snapshot.value),
-        estimated: snapshot.is_estimated === 1,
+    const history = snapshots
+      .map((snapshot): HistoryPoint | null => {
+        const point = portfolioInSnapshot(snapshot.breakdown, portfolioAccountIdSet);
+        return point === null
+          ? null
+          : {
+            date: snapshot.date,
+            value: toDollars(point.value),
+            estimated: snapshot.is_estimated === 1,
+            covered_accounts: point.covered,
+          };
       })
-    );
+      .filter((point): point is HistoryPoint => point !== null);
 
+    // `portfolio_account_ids` is served rather than a count so the screen filters its holdings
+    // list against the same set instead of re-deriving membership from account types on the
+    // client. There have been four hand-maintained copies of a set in this codebase before.
     res.json({
       data: {
-        total_value: toDollars(totalValue.total || 0),
+        portfolio_value: toDollars(portfolioValue),
+        holdings_value: toDollars(heldValue),
+        invested_balance: toDollars(investedBalance),
+        crypto_value: toDollars(cryptoValue),
+        portfolio_account_ids: portfolioAccountIds,
         allocation,
         holdings,
         history,

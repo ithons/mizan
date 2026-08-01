@@ -28,12 +28,19 @@ export interface TrendPoint {
    * True when the point is reconstructed rather than observed. Net-worth history before the
    * first real sync is estimated by undoing transactions off today's balances, which cannot
    * see what it has no record of: a credit card's payments, or any month the ledger does not
-   * reach. In the stored series the last estimated month reads $3,868.92 against $1,068.29
-   * measured 29 days later. Drawing that as the same solid line as a measured balance is the
-   * chart asserting something it does not know.
+   * reach. Drawing that as the same solid line as a measured balance is the chart asserting
+   * something it does not know.
    *
-   *   SELECT date, net_worth/100.0, is_estimated FROM net_worth_snapshots ORDER BY date;
-   *   -- 2026-06-01 3868.92 1 | 2026-06-30 1068.29 0
+   * The two ends of that join, re-measured 2026-07-31 against a copy of `.mizan/mizan.db` at
+   * migration 054. `backfillSnapshots` recomputes every estimated row on each run, so the figure
+   * previously written here ($3,868.92 for 2026-06-01) is one the query no longer returns:
+   *
+   *   SELECT date, net_worth / 100.0, is_estimated FROM net_worth_snapshots
+   *   WHERE date IN ('2026-06-01', '2026-06-30');
+   *   -- 2026-06-01 5521.48 1 | 2026-06-30 1068.29 0
+   *
+   * The last estimated month reads $5,521.48 against $1,068.29 measured 29 days later: a gap of
+   * $4,453.19 that is a guess meeting a measurement, not money moving.
    */
   estimated?: boolean;
   /**
@@ -42,13 +49,18 @@ export interface TrendPoint {
    * quantity as much as a change of money: the stored series steps 11 accounts to 14 across
    * 2026-07-23 to 2026-07-24. Omit it rather than guess.
    *
-   * Omission is itself a state the chart has to handle rather than read as agreement. Migration
-   * 044 recorded a count only on measured rows, so every estimated row in this database carries
-   * NULL, and the 2026-06-01 estimate meets the 2026-06-30 measurement with a count on one end
-   * only:
+   * Omission is itself a state the chart has to handle rather than read as agreement, and the
+   * column is nullable, so the handling stays whatever this database happens to hold today.
+   * Re-measured 2026-07-31 against a copy of `.mizan/mizan.db` at migration 054:
    *
    *   SELECT COUNT(*) FROM net_worth_snapshots WHERE is_estimated = 1 AND covered_accounts IS NULL;
-   *   -- 5, which is every estimated row there is
+   *   -- 0
+   *   SELECT COUNT(*) FROM net_worth_snapshots WHERE is_estimated = 1;
+   *   -- 16
+   *
+   * So no such row exists here now; the "5, which is every estimated row there is" written here
+   * before reproduces neither half. `backfillSnapshots` writes a count on every row it recomputes,
+   * which is why the one-ended segment this paragraph described has since closed.
    *
    * A segment with a count on neither end makes no coverage claim and is left alone; a segment
    * with a count on exactly one end knows only that it cannot compare them.
@@ -200,9 +212,18 @@ const TICK_FACTORS = [1, 2, 2.5, 5, 10];
  *
  * Picking a step from `span / 4` alone is not enough here, because a domain straddling zero
  * spends part of its span on each side and a step that divides the span four ways can land twice.
- * The stored net-worth domain runs −$1,061.49 to $5,569.12 (`SELECT MIN(net_worth), MAX(net_worth)
- * FROM net_worth_snapshots`, in cents), where a $5,000 step prints $0 and $5,000 and nothing else,
- * so the scale would be calibrated by two marks. Requiring three drops it to $2,500.
+ *
+ * Re-measured 2026-07-31 against a copy of `.mizan/mizan.db` at migration 054. The figures written
+ * here before (−$1,061.49 to $5,569.12) reproduce neither bound; the second is the largest MEASURED
+ * row, and the query named beside it covers estimated rows too:
+ *
+ *   SELECT MIN(net_worth), MAX(net_worth) FROM net_worth_snapshots;   -- -307647 | 614061
+ *
+ * so the stored domain runs −$3,076.47 to $6,140.61. The argument is unchanged on it: over that
+ * domain a $5,000 step lands on $0 and $5,000 and nothing else, calibrating the scale by two
+ * marks, while $2,500 lands on −$2,500, $0, $2,500 and $5,000, and `trendGeometry` over those 32
+ * rows returns exactly those four `valueTicks`. `tests/trendChart.test.ts` pins the same rule
+ * against its own earlier 20-row capture of this series, where it resolves to three.
  */
 function tickStep(lo: number, hi: number): number {
   const span = hi - lo;
@@ -221,15 +242,23 @@ function tickStep(lo: number, hi: number): number {
  * The gap beyond which a segment stops being interpolation and becomes invention.
  *
  * Three times the series' own 75th-percentile spacing. The percentile rather than the median
- * because these series are routinely bimodal: the stored net-worth series is five monthly
- * estimates followed by fifteen sync-cadence readings, so its gaps run 28 to 31 days at one end
- * and 1 to 7 days at the other, and its median gap is 2 days. A median-based limit would shatter
- * the monthly half into isolated points. The upper quartile lands in the coarse cadence, which is
- * the spacing the series actually has to justify.
+ * because these series are routinely bimodal: monthly reconstruction at one end, sync cadence at
+ * the other. A median-based limit would shatter the monthly half into isolated points. The upper
+ * quartile lands in the coarse cadence, which is the spacing the series actually has to justify.
  *
- * On the stored series that gives 84 days against a widest gap of 31, so nothing is withheld and
- * the whole line is drawn. The rule bites only once history reaches back past the app's own
- * cadence, which is what scripts/backfill/rebuild.ts extends it to.
+ * Re-derived 2026-07-31 against a copy of `.mizan/mizan.db` at migration 054 taken with `.backup`:
+ *
+ *   SELECT COUNT(*), SUM(is_estimated) FROM net_worth_snapshots;   -- 32 rows, 16 estimated
+ *   WITH s AS (SELECT date, LAG(date) OVER (ORDER BY date) prev FROM net_worth_snapshots)
+ *   SELECT CAST(julianday(date) - julianday(prev) AS INT) d, COUNT(*)
+ *   FROM s WHERE prev IS NOT NULL GROUP BY d ORDER BY d;
+ *   -- 1x9, 2x2, 3x1, 4x2, 7x1, 28x1, 29x1, 30x5, 31x8, 274x1
+ *
+ * So 31 gaps, median 28 days, not 2. Running the real `trendGeometry` over those 32 rows returns
+ * joinLimitDays 93 against a widest DRAWN gap of 31: the 274-day gap from 2024-07-01 to 2025-04-01
+ * is over the limit and is withheld, so the line does break and the earlier claim that "nothing is
+ * withheld and the whole line is drawn" is false on this database. The rule is already biting,
+ * which is what it is for.
  *
  * Under four gaps there is no cadence to measure, so nothing is withheld.
  */
@@ -280,9 +309,20 @@ function timeTicks(first: Date, last: Date, x: (t: number) => number): TrendTime
  * Two things this deliberately does not do. It does not scale to the series' own extremes, so a
  * $40 wobble and the stored series' $2,550.52 fall of 2026-07-13 to 2026-07-14 no longer draw the
  * same picture: zero is always inside the domain and always printed, and every reading is a
- * distance from it. And it does not space points by array index, so the 31 days between the
- * stored series' widest drawn step occupy 31 times the width of its 1-day steps rather than the
- * same width.
+ * distance from it. And it does not space points by array index, so the 31 days of the stored
+ * series' widest DRAWN step occupy 31 times the width of its 1-day steps rather than the same
+ * width. Its widest step of any kind is 274 days and is not drawn at all; see `joinLimit`.
+ *
+ * Both figures re-derived 2026-07-31 against a copy of `.mizan/mizan.db` at migration 054 taken
+ * with `.backup`. The fall is the largest step between two measured rows:
+ *
+ *   WITH s AS (SELECT date, net_worth, LAG(net_worth) OVER (ORDER BY date) p,
+ *                     LAG(date) OVER (ORDER BY date) pd FROM net_worth_snapshots)
+ *   SELECT pd, date, net_worth - p FROM s WHERE p IS NOT NULL ORDER BY 3 ASC LIMIT 2;
+ *   -- 2026-06-01 -> 2026-06-30  -445319   (is_estimated 1 -> 0, a guess meeting a measurement)
+ *   -- 2026-07-13 -> 2026-07-14  -255052   (0 -> 0, money that actually moved)
+ *
+ * and `trendGeometry` over those 32 rows reports maxDrawnGapDays 31.
  *
  * It also makes no assumption about where reconstructed points sit. An earlier version split the
  * series at a single estimated/measured boundary; `backfillSnapshots` writes an estimated row for
@@ -409,8 +449,12 @@ export function trendGeometry(history: TrendPoint[], marks: TrendMark[]): TrendG
 
   // A point the trace never reaches has to be drawn on its own or it silently disappears, which
   // would trade one false claim for another: a reading isolated by a long gap is still a reading
-  // the ledger justified. The stored series has none today (widest gap 31 days against an 84-day
-  // limit), and gets one as soon as history reaches back past the app's own daily cadence.
+  // the ledger justified. The stored series has exactly one today, and this is the code path that
+  // keeps it on screen. Running the real `trendGeometry` over the 32 stored rows on 2026-07-31,
+  // against a copy of `.mizan/mizan.db` at migration 054 taken with `.backup`, returns
+  // joinLimitDays 93, breaks [{2024-07-01 -> 2025-04-01, 274 days}] and
+  // isolated [{date 2024-07-01, index 0}]: the oldest reconstructed point stands alone on the left
+  // because the 274-day gap after it is over the join limit.
   const isolated: TrendIsolate[] = [];
   const terminals: number[] = [];
   for (let i = 0; i < history.length; i++) {
@@ -532,10 +576,15 @@ function StrokeKey({ kinds }: { kinds: TrendSegmentKind[] }) {
 /**
  * The spacing below which two points are closer than a mouse can separate them, as a percentage
  * of the plot. Measured at 750px of plot in the Reports column, 1% is 7.5px and a hover target is
- * half that, since `nearest` splits the distance between neighbours. The stored net-worth series
- * runs 0.55% at its tightest, about 4px, and puts fifteen of its twenty points inside the last
- * 16.4% of the width. Arrow-key stepping is already exact; below this the reader has to be told
- * it exists, because the mouse no longer is.
+ * half that, since `nearest` splits the distance between neighbours. Arrow-key stepping is already
+ * exact; below this the reader has to be told it exists, because the mouse no longer is.
+ *
+ * Re-derived 2026-07-31 by running `trendGeometry` over the 32 rows of `net_worth_snapshots` on a
+ * copy of `.mizan/mizan.db` at migration 054 taken with `.backup`, and converting `xs` to percent
+ * with the same `x / VIEW_W * 100` the component uses: the tightest step is 0.129% of the plot,
+ * about 1px at 750px of width, and 19 of the 32 points sit inside the last 16.4%. The "0.55% and
+ * fifteen of twenty" written here before reproduces neither number, on a series that is now 32
+ * rows and reaches back to 2024-07-01.
  */
 const CROWDED_STEP_PCT = 1;
 

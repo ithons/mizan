@@ -3,9 +3,16 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { format, subMonths } from 'date-fns';
 import type { Holding } from '@shared/types';
 import { accountsApi, investmentsApi, reportsApi } from '../lib/api';
-import { formatWholeCurrency, formatPercent } from '../lib/formatters';
+import { formatWholeCurrency, formatPercent, formatDateShort } from '../lib/formatters';
 import { parseDecimalInput } from '../lib/numberInput';
-import { ALLOCATION_LENSES, getAllocationSlices, getCostBasisStats, holdingGain, type AllocationLens } from '../lib/investmentAnalytics';
+import {
+  ALLOCATION_LENSES,
+  getAllocationSlices,
+  getCostBasisStats,
+  getPortfolioDelta,
+  holdingGain,
+  type AllocationLens,
+} from '../lib/investmentAnalytics';
 import { useAppStore } from '../store';
 import { Modal } from '../components/Modal';
 import { QueryErrorBanner } from '../components/QueryErrorBanner';
@@ -127,6 +134,71 @@ function HoldingModal({ holding, accountName, onClose }: { holding: Holding | nu
   );
 }
 
+export interface InvestmentNotesInput {
+  /** The headline: every visible portfolio account's balance. */
+  portfolioValue: number | null;
+  /** The part of it held by accounts that carry at least one position. */
+  investedBalance: number | null;
+  /** What those positions add up to. */
+  holdingsValue: number | null;
+  /** The part of the headline held in crypto wallets. */
+  cryptoValue: number | null;
+}
+
+export interface InvestmentNotes {
+  crypto: string | null;
+  uninvested: string | null;
+  reconciliation: string | null;
+}
+
+/**
+ * The three sentences under the headline, or null for each one there is nothing to say about.
+ *
+ * Pure and exported so the silence can be tested. Each of these fired, or failed to fire, on an
+ * ordinary healthy ledger at some point:
+ *
+ * - `reconciliation` compares positions against the balances of the accounts HOLDING those
+ *   positions, never against the headline. Compared against the headline, an IRA funded and not
+ *   yet invested reported the whole of its cash as a discrepancy, which is an ordinary account
+ *   doing nothing wrong. `aiContext.ts` names that same case as ordinary in so many words.
+ * - `uninvested` is what explains that money instead, and it accuses nothing: it says where the
+ *   difference between the headline and this list is, in the one place the owner would otherwise
+ *   have to work it out by subtraction.
+ * - `crypto` exists because two surfaces of this app count the portfolio differently on purpose.
+ *   Cmd+K reports a crypto-free portfolio figure, since its net-worth section reports crypto as
+ *   its own bucket; this headline includes it, because the list below includes the coins. Both
+ *   were true, and until now the only thing saying so was a source comment neither audience reads.
+ *
+ * The dollar thresholds are the rounding the copy itself uses: these figures come from integer
+ * cents, and a sentence about a difference the reader cannot see in the numerals beside it is
+ * noise. Crypto is judged at half a cent because it is a component, not a difference.
+ */
+export function investmentNotes({
+  portfolioValue,
+  investedBalance,
+  holdingsValue,
+  cryptoValue,
+}: InvestmentNotesInput): InvestmentNotes {
+  const uninvested =
+    portfolioValue != null && investedBalance != null ? portfolioValue - investedBalance : null;
+  const gap = holdingsValue != null && investedBalance != null ? holdingsValue - investedBalance : null;
+
+  return {
+    crypto:
+      portfolioValue != null && cryptoValue != null && Math.abs(cryptoValue) >= 0.005
+        ? `Includes ${formatWholeCurrency(cryptoValue)} crypto · investment accounts ${formatWholeCurrency(portfolioValue - cryptoValue)}`
+        : null,
+    uninvested:
+      uninvested != null && Math.abs(uninvested) >= 1
+        ? `${formatWholeCurrency(uninvested)} of the balance above sits in accounts holding no positions, so it is not in this list.`
+        : null,
+    reconciliation:
+      gap != null && holdingsValue != null && investedBalance != null && Math.abs(gap) >= 1
+        ? `Holdings sum to ${formatWholeCurrency(holdingsValue)}, ${formatWholeCurrency(Math.abs(gap))} ${gap > 0 ? 'above' : 'below'} the ${formatWholeCurrency(investedBalance)} your institutions report for the accounts those positions sit in. The balance is the figure used for net worth.`
+        : null,
+  };
+}
+
 export function Investments() {
   const [range, setRange] = useState<RangeId>('1Y');
   const months = RANGES.find((r) => r.id === range)!.months;
@@ -139,6 +211,9 @@ export function Investments() {
   const reportQ = useQuery({
     queryKey: ['reports-investments', range],
     queryFn: () => reportsApi.investments(startDate ? { startDate } : undefined),
+    // The headline now comes out of this response, and only the series depends on the range.
+    // Without this, switching 1M/1Y blanks the headline for a round trip.
+    placeholderData: (previous) => previous,
   });
   const report = reportQ.data;
 
@@ -149,32 +224,42 @@ export function Investments() {
     { query: reportQ, label: 'investment report' },
   ];
 
+  // Headline, reconciliation, series and the list below them all come from the server's one
+  // portfolio account set, so the number above the chart, the number the chart ends at and the
+  // rows the owner can add up describe the same accounts. They did not: the headline included
+  // the Coinbase wallet and the series excluded it, and no note on the screen could fire to
+  // explain the $391.17 between them. Rendering nothing derived until the response lands is
+  // deliberate; a placeholder assembled from a different set is how the two definitions got here.
+  const marketValue = report?.portfolio_value ?? null;
+  const notes = investmentNotes({
+    portfolioValue: marketValue,
+    investedBalance: report?.invested_balance ?? null,
+    holdingsValue: report?.holdings_value ?? null,
+    cryptoValue: report?.crypto_value ?? null,
+  });
+
   const allHoldings = holdings ?? [];
-  const holdingsValue = allHoldings.reduce((s, h) => s + h.institution_value, 0);
-  // The institution's own account balance is the trusted total: it's what net worth and the
-  // snapshot-based trend below use. A provider's holdings list can sum to a slightly different
-  // number than the balance it reports for the same account (e.g. a money-market sweep that
-  // hasn't settled), so the headline uses the account balance and any gap is surfaced, rather
-  // than a holdings sum that silently disagrees with net worth and its own chart.
-  const heldAccountIds = new Set(allHoldings.map((h) => h.account_id));
-  const accountsWithHoldings = (accounts ?? []).filter((a) => heldAccountIds.has(a.id));
-  const trustedValue = accountsWithHoldings.length
-    ? accountsWithHoldings.reduce((s, a) => s + a.current_balance, 0)
-    : holdingsValue;
-  const reconciliationGap = holdingsValue - trustedValue; // positive => holdings exceed balances
-  const marketValue = trustedValue;
-  const stats = useMemo(() => getCostBasisStats(allHoldings), [allHoldings]);
+  // Until the response lands there is no set to judge membership against, so the list shows what
+  // it has rather than claiming a portfolio it cannot see is empty. `/api/investments/holdings`
+  // serves every position, including those of an account that has been disconnected or archived,
+  // whose balance is deliberately out of the headline.
+  const portfolioHoldings = useMemo(() => {
+    if (!report) return allHoldings;
+    const ids = new Set(report.portfolio_account_ids);
+    return allHoldings.filter((h) => ids.has(h.account_id));
+  }, [allHoldings, report]);
+  const stats = useMemo(() => getCostBasisStats(portfolioHoldings), [portfolioHoldings]);
 
   const history = report?.history ?? [];
-  const dayChange = history.length >= 2 ? history[history.length - 1].value - history[history.length - 2].value : null;
+  const delta = getPortfolioDelta(marketValue, history, report?.portfolio_account_ids.length ?? null);
 
   const [lens, setLens] = useState<AllocationLens>('asset_type');
   const [selectedHolding, setSelectedHolding] = useState<Holding | null>(null);
 
   const slices = useMemo(() => {
     const accountById = new Map((accounts ?? []).map((a) => [a.id, a]));
-    return getAllocationSlices(allHoldings, lens, accountById);
-  }, [allHoldings, accounts, lens]);
+    return getAllocationSlices(portfolioHoldings, lens, accountById);
+  }, [portfolioHoldings, accounts, lens]);
 
   const accountNameById = useMemo(() => new Map((accounts ?? []).map((a) => [a.id, a.account_name])), [accounts]);
 
@@ -195,20 +280,29 @@ export function Investments() {
                 {stats.missingCount > 0 && <> · basis missing on {stats.missingCount}</>}
               </>
             ) : (
-              `${allHoldings.length} holding${allHoldings.length === 1 ? '' : 's'}`
+              `${portfolioHoldings.length} holding${portfolioHoldings.length === 1 ? '' : 's'}`
             )}
           </div>
         </div>
         <div className="text-right">
-          <div className="font-serif text-hero-lg font-light leading-none tabular-nums text-ink">{formatWholeCurrency(marketValue)}</div>
-          {dayChange != null && (
+          {marketValue != null && (
+            <div className="font-serif text-hero-lg font-light leading-none tabular-nums text-ink">{formatWholeCurrency(marketValue)}</div>
+          )}
+          {delta != null && (
             // `sage-deep`, not `sage`: this is a money numeral on the paper ground, where sage
             // measures 3.91:1 and fails AA for text. sage-deep is 4.93 light and 8.38 dark, which
             // is what every other positive numeral in this view already uses.
-            <div className={`mt-1.5 text-body tabular-nums ${dayChange >= 0 ? 'text-sage-deep' : 'text-clay'}`}>
-              {dayChange >= 0 ? '↑' : '↓'} {formatWholeCurrency(Math.abs(dayChange))} since last snapshot
+            //
+            // The baseline is named rather than called "last snapshot": which snapshot it is
+            // depends on whether the newest one already carries today's balances, and a label
+            // that hides that is a claim the screen did not check.
+            <div className={`mt-1.5 text-body tabular-nums ${delta.change >= 0 ? 'text-sage-deep' : 'text-clay'}`}>
+              {delta.change >= 0 ? '↑' : '↓'} {formatWholeCurrency(Math.abs(delta.change))} since{' '}
+              {delta.baseline.estimated ? 'the estimated ' : ''}
+              {formatDateShort(delta.baseline.date)}
             </div>
           )}
+          {notes.crypto && <div className="mt-1 text-note tabular-nums text-muted-2">{notes.crypto}</div>}
         </div>
       </div>
 
@@ -227,12 +321,22 @@ export function Investments() {
           ))}
         </div>
         {/*
-          No coverage is passed to the chart: `/api/reports/investments` serves date, value and
-          estimated only, and the whole-sheet `covered_accounts` counts accounts this series does
-          not draw, so handing it over would be a claim about the portfolio nothing here checked.
+          The coverage passed here is the endpoint's own per-point count of PORTFOLIO accounts,
+          not the snapshot row's whole-sheet `covered_accounts`, which counts accounts this series
+          does not draw. Where it changes, two consecutive points are sums over different sets of
+          accounts, and TrendChart withholds the join rather than drawing the difference as money
+          moving: an account created mid-history, or hidden and unhidden, does exactly that.
         */}
         {history.length >= 2 ? (
-          <TrendChart history={history} label="Portfolio value" />
+          <TrendChart
+            history={history.map((point) => ({
+              date: point.date,
+              value: point.value,
+              estimated: point.estimated,
+              coverage: point.covered_accounts,
+            }))}
+            label="Portfolio value"
+          />
         ) : (
           <div className="flex h-[120px] items-center text-body text-muted-2">
             Portfolio history builds up from daily net worth snapshots as syncs run.
@@ -244,15 +348,13 @@ export function Investments() {
         {/* Holdings */}
         <div className="min-w-0 flex-1">
           <SectionLabel className="mb-2">Holdings</SectionLabel>
-          {Math.abs(reconciliationGap) >= 1 && (
-            <div className="mb-2 text-note leading-relaxed text-muted-2">
-              Holdings sum to <span className="tabular-nums">{formatWholeCurrency(holdingsValue)}</span>,{' '}
-              <span className="tabular-nums">{formatWholeCurrency(Math.abs(reconciliationGap))}</span>{' '}
-              {reconciliationGap > 0 ? 'above' : 'below'} the account balance your institution reports. The
-              balance is the figure used for net worth.
-            </div>
+          {notes.uninvested && (
+            <div className="mb-2 text-note leading-relaxed tabular-nums text-muted-2">{notes.uninvested}</div>
           )}
-          {allHoldings
+          {notes.reconciliation && (
+            <div className="mb-2 text-note leading-relaxed tabular-nums text-muted-2">{notes.reconciliation}</div>
+          )}
+          {portfolioHoldings
             .slice()
             .sort((a, b) => b.institution_value - a.institution_value)
             .map((h) => {
@@ -281,7 +383,7 @@ export function Investments() {
                 </div>
               );
             })}
-          {allHoldings.length === 0 && (
+          {portfolioHoldings.length === 0 && (
             <div className="py-6 text-body-lg text-muted">No holdings yet. They appear after a SimpleFIN or Coinbase sync.</div>
           )}
         </div>

@@ -39,6 +39,7 @@ type PanelId =
   | 'advisor_memory'
   | 'advisor_model'
   | 'ai_actions'
+  | 'ai_declined'
   | null;
 
 function SettingsRow({
@@ -245,6 +246,34 @@ const CREDENTIAL_SOURCE_LABEL: Record<string, string> = {
   none: 'no credential found',
 };
 
+/**
+ * How many actions this panel draws before the owner asks for more.
+ *
+ * A drawing decision, and the panel says so out loud. The number it replaces was a server-side
+ * `LIMIT 50` with no page after it: on the owner's ledger 92 of 142 recorded actions were past it,
+ * and Undo lives on the row, so those 92 had no reachable undo at all. This one has a control
+ * beneath it and a count beside it, so nothing is silently absent.
+ */
+export const ACTIONS_PER_PAGE = 50;
+
+/**
+ * What the panel says about the actions it is NOT drawing, or null when it is drawing them all.
+ *
+ * Split out and exported because "the list is capped" and "the owner is told the list is capped"
+ * are two different facts, and only the second one makes the rest reachable. The cap this replaces
+ * lived on the server, said nothing, and offered no way through.
+ */
+export function hiddenActionsNote(
+  total: number,
+  shown: number
+): { showing: string; more: string } | null {
+  if (shown >= total) return null;
+  return {
+    showing: `Showing ${shown} of ${total}`,
+    more: `Show the remaining ${total - shown}`,
+  };
+}
+
 function AiActionsPanel({ open, onToggle }: { open: boolean; onToggle: () => void }) {
   const qc = useQueryClient();
   const { addToast } = useAppStore();
@@ -257,6 +286,7 @@ function AiActionsPanel({ open, onToggle }: { open: boolean; onToggle: () => voi
   // No table, no Undo: offering to put something back is a promise, and until the boundary has
   // loaded there is nothing here that knows which actions the server can keep it for.
   const undoable = undoableKinds(autonomy?.kinds ?? []);
+  const [shown, setShown] = useState(ACTIONS_PER_PAGE);
 
   const undo = useMutation({
     mutationFn: (id: string) => aiApi.undoAction(id),
@@ -268,6 +298,10 @@ function AiActionsPanel({ open, onToggle }: { open: boolean; onToggle: () => voi
     onError: (err: Error) => addToast({ type: 'error', message: err.message }),
   });
 
+  const total = actions?.length ?? 0;
+  const visible = actions?.slice(0, shown) ?? [];
+  const hidden = hiddenActionsNote(total, visible.length);
+
   return (
     <>
       <SettingsRow
@@ -278,17 +312,187 @@ function AiActionsPanel({ open, onToggle }: { open: boolean; onToggle: () => voi
       />
       {open && (
         <ExpandedPanel>
-          {(!actions || actions.length === 0) ? (
+          {total === 0 ? (
             <p className="text-body text-muted-2">No AI actions yet.</p>
           ) : (
+            <>
+              <div className="space-y-2.5">
+                {visible.map((a) => (
+                  <AiActionRow
+                    key={a.id}
+                    action={a}
+                    undoable={undoable.has(a.kind)}
+                    undoPending={undo.isPending}
+                    onUndo={(id) => undo.mutate(id)}
+                  />
+                ))}
+              </div>
+              {hidden && (
+                <div className="mt-3 flex items-center justify-between text-note text-muted-2">
+                  <span>{hidden.showing}</span>
+                  <button
+                    type="button"
+                    onClick={() => setShown(total)}
+                    className="border-b border-line-3 pb-0.5 text-muted transition-colors hover:text-ink"
+                  >
+                    {hidden.more}
+                  </button>
+                </div>
+              )}
+            </>
+          )}
+        </ExpandedPanel>
+      )}
+    </>
+  );
+}
+
+export type DeclinedProposalItem = Awaited<ReturnType<typeof aiApi.listDeclined>>[number];
+
+/**
+ * What one dismissed suggestion was about, in the owner's words rather than the model's.
+ *
+ * Pure and exported so the copy can be asserted. Every branch says only what the row carries: a
+ * proposal whose category has since been deleted reads as that, and is not quietly rendered as a
+ * proposal about nothing, because `category_id` set with `category_name` null is a different fact
+ * from `category_id` null.
+ */
+export function declinedProposalDetail(item: DeclinedProposalItem): string {
+  const category = item.category_id === null
+    ? null
+    : item.category_name ?? 'a category that has since been deleted';
+
+  switch (item.kind) {
+    case 'categorize_transaction':
+      return category === null
+        ? 'Filing one transaction'
+        : `Filing one transaction as ${category}`;
+    case 'create_merchant_rule':
+      return category === null
+        ? `A rule for "${item.pattern ?? 'a merchant'}"`
+        : `A rule filing "${item.pattern ?? 'a merchant'}" as ${category}`;
+    case 'retire_merchant_rule':
+      return item.pattern === null
+        ? 'Retiring one of its own rules'
+        : `Retiring its own rule for "${item.pattern}"`;
+    default:
+      return item.kind.replace(/_/g, ' ');
+  }
+}
+
+/**
+ * What restoring one actually did, said only as far as the server checked it.
+ *
+ * Three outcomes, not two: the draft row can be reopened and drawable, reopened and still filtered
+ * out for some other reason, or long since deleted by a later worker pass. Collapsing them into
+ * "it's back" would promise a card the owner may never see.
+ */
+export function restoreDeclinedToast(result: {
+  draft_reopened: boolean;
+  queued: boolean;
+}): { type: 'success' | 'info'; message: string } {
+  if (result.queued) {
+    return { type: 'success', message: 'Restored. The suggestion is back in your review queue.' };
+  }
+  if (result.draft_reopened) {
+    return {
+      type: 'info',
+      message: 'Cleared. The suggestion was put back but something else about it has changed since, so it is not in the queue.',
+    };
+  }
+  return {
+    type: 'info',
+    message: 'Cleared. The original suggestion is gone, so the AI may raise it again on a later sync.',
+  };
+}
+
+export function DeclinedProposalRow({
+  item,
+  restorePending,
+  onRestore,
+}: {
+  item: DeclinedProposalItem;
+  restorePending: boolean;
+  onRestore: (id: string) => void;
+}) {
+  return (
+    <div className="flex items-start justify-between gap-3 border-b border-line pb-2.5 last:border-0">
+      <div className="min-w-0">
+        <div className="text-body-lg text-ink">{declinedProposalDetail(item)}</div>
+        {item.summary && <div className="mt-0.5 text-note text-muted-2">{item.summary}</div>}
+      </div>
+      <div className="flex flex-shrink-0 items-start gap-3">
+        <div className="text-right text-micro text-muted-2">
+          <div className={item.suppressing ? 'text-warning' : 'text-muted-2'}>
+            {item.suppressing ? 'not repeated' : 'was already out of date'}
+          </div>
+          <div>{formatCompactRelative(item.declined_at)}</div>
+        </div>
+        <button
+          type="button"
+          disabled={restorePending}
+          onClick={() => onRestore(item.id)}
+          className="mt-0.5 whitespace-nowrap border-b border-line-3 pb-0.5 text-note text-muted transition-colors hover:text-ink disabled:opacity-40"
+        >
+          Allow again
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * The suggestions the owner turned down, and the way back.
+ *
+ * Dismissing a draft does more than close a card: `ownerDeclinedProposal` reads the record and the
+ * background worker is refused that same proposal from then on. For a while nothing in the app
+ * showed one. The card stopped being drawn, the review count fell by one, no response field named
+ * the reason, and there was no path back at all, which made an ordinary click into a permanent,
+ * invisible veto. This panel is that surface, and it is drawn whether or not a provider key is
+ * configured, because a decline outlives the key and can block a category delete.
+ */
+function DeclinedProposalsPanel({ open, onToggle }: { open: boolean; onToggle: () => void }) {
+  const qc = useQueryClient();
+  const { addToast } = useAppStore();
+  const { data: declined } = useQuery({
+    queryKey: ['ai-declined'],
+    queryFn: () => aiApi.listDeclined(),
+    enabled: open,
+  });
+
+  const restore = useMutation({
+    mutationFn: (id: string) => aiApi.restoreDeclined(id),
+    onSuccess: (res) => {
+      addToast(restoreDeclinedToast(res));
+      qc.invalidateQueries({ queryKey: ['ai-declined'] });
+      // The review queue and its counts are derived from the drafts this may have reopened.
+      qc.invalidateQueries({ queryKey: ['transaction-review'] });
+    },
+    onError: (err: Error) => addToast({ type: 'error', message: err.message }),
+  });
+
+  const items = declined ?? [];
+
+  return (
+    <>
+      <SettingsRow
+        title="Suggestions you turned down"
+        sub="The AI does not raise these again on its own. Allow one again to undo that."
+        trailing={<span className="text-muted">{open ? 'Hide' : 'Review'}</span>}
+        onClick={onToggle}
+      />
+      {open && (
+        <ExpandedPanel>
+          {items.length === 0 ? (
+            <p className="text-body text-muted-2">You have not turned down any suggestions.</p>
+          ) : (
             <div className="space-y-2.5">
-              {actions.map((a) => (
-                <AiActionRow
-                  key={a.id}
-                  action={a}
-                  undoable={undoable.has(a.kind)}
-                  undoPending={undo.isPending}
-                  onUndo={(id) => undo.mutate(id)}
+              {items.map((item) => (
+                <DeclinedProposalRow
+                  key={item.id}
+                  item={item}
+                  restorePending={restore.isPending}
+                  onRestore={(id) => restore.mutate(id)}
                 />
               ))}
             </div>
@@ -626,6 +830,8 @@ export function Settings() {
     else if (section === 'coinbase') setOpenPanel('coinbase');
     else if (section === 'data' || section === 'import') setOpenPanel('import');
     else if (section === 'ai_actions') setOpenPanel('ai_actions');
+    // The category delete refusal names this panel, so it has to be linkable by name.
+    else if (section === 'ai_declined') setOpenPanel('ai_declined');
   }, [searchParams]);
 
   const { data: credentials } = useQuery({ queryKey: ['credential-status'], queryFn: () => settingsApi.getCredentials() });
@@ -686,7 +892,7 @@ export function Settings() {
             }
             trailing={
               <span className="text-muted tabular-nums">
-                {setupPlan ? `${setupPlan.completedCount} of ${setupPlan.totalCount}` : '–'}
+                {setupPlan ? `${setupPlan.completedCount} of ${setupPlan.totalCount}` : '-'}
               </span>
             }
             onClick={() => toggle('setup')}
@@ -762,6 +968,13 @@ export function Settings() {
           {aiContext?.configured && (
             <AiActionsPanel open={openPanel === 'ai_actions'} onToggle={() => toggle('ai_actions')} />
           )}
+          {/* Ungated on purpose, unlike the panel above it: a decline keeps standing after a key is
+              removed, and it is the only remedy for the delete blocker a declined proposal puts on
+              a category. */}
+          <DeclinedProposalsPanel
+            open={openPanel === 'ai_declined'}
+            onToggle={() => toggle('ai_declined')}
+          />
           <AdvisorContextEditor
             open={openPanel === 'advisor_profile'}
             onToggle={() => toggle('advisor_profile')}

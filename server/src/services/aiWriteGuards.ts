@@ -54,7 +54,9 @@ export type GuardRejectionReason =
   | 'human_authored'
   | 'rule_not_found'
   | 'owner_authored_rule'
-  | 'rule_holds_transactions';
+  | 'rule_holds_transactions'
+  /** The owner already declined this exact proposal; see `ownerDeclinedProposal` in advisorDrafts. */
+  | 'owner_declined';
 
 const ok: GuardResult = { ok: true };
 

@@ -10,13 +10,21 @@ import { trendCaptions, trendGeometry, type TrendPoint } from '../client/src/com
  * on screen said which was which. And its x-axis was an array index, so a 31-day step and a 1-day
  * step occupied the same width.
  *
- * STORED_NET_WORTH below is the whole of what the database holds, not a reconstruction of it:
+ * STORED_NET_WORTH below is a CAPTURE of what the database held, not a reconstruction of it, and
+ * not what it holds now. It was taken with
  *
  *   SELECT date, net_worth, is_estimated, covered_accounts
  *     FROM net_worth_snapshots ORDER BY date;
- *   -- 20 rows: 5 estimated 2026-02-01..2026-06-01, every one with covered_accounts NULL,
- *   --          then 15 measured 2026-06-30..2026-07-30, 11 accounts through 2026-07-23 and
- *   --          14 from 2026-07-24.
+ *
+ * and was 20 rows: 5 estimated 2026-02-01..2026-06-01, every one with covered_accounts NULL, then
+ * 15 measured 2026-06-30..2026-07-30, 11 accounts through 2026-07-23 and 14 from 2026-07-24.
+ *
+ * Re-run 2026-07-31 against a copy of `.mizan/mizan.db` at migration 054, the same query returns
+ * 32 rows: 16 estimated 2024-07-01..2026-06-01, NONE of them with a NULL count because
+ * `backfillSnapshots` now writes one on every row it recomputes, and every estimated value has
+ * moved (2026-06-01 is $5,521.48 there, not the $3,868.92 pinned below). Kept as a fixed capture
+ * rather than refreshed, because a chart geometry test wants a stable series and the shapes it
+ * exercises are the point; the values are this file's own input and are not claimed to be live.
  *
  * Reports asks for the whole series by default and Accounts asks for twelve months, so both draw
  * all twenty of these points. Nothing in this series is withheld: its widest gap is 31 days
@@ -68,8 +76,10 @@ test('zero is inside the domain and printed, whatever the series does', () => {
   assert.ok(zero, 'the zero tick exists');
   assert.equal(zero.label, '$0');
   assert.ok(zero.yPct > 0 && zero.yPct < 100, `${zero.yPct}% is inside the plot`);
-  // The stored domain is −$1,061.49 to $5,569.12, so a $5,000 step would print two marks and
-  // calibrate nothing. The three-tick floor drops it to $2,500.
+  // The captured domain is −$1,061.49 to $5,569.12, so a $5,000 step would print two marks and
+  // calibrate nothing. The three-tick floor drops it to $2,500. The live series has since widened
+  // to −$3,076.47..$6,140.61, where the same rule resolves to four ticks; the rule, not the count,
+  // is what this asserts.
   assert.deepEqual(geometry.valueTicks.map((t) => t.label), ['$0', '$2,500', '$5,000']);
 });
 

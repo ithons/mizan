@@ -120,3 +120,77 @@ test('formatMoney gives the model the exact figure, not an abbreviation', () => 
   assert.equal(formatMoney(0), '$0.00');
   assert.equal(formatMoney(null), 'N/A');
 });
+
+/**
+ * A share of a signed total is not a share of anything.
+ *
+ * `SpendingReport.percentage` divides a category by the SIGNED total, and a category whose refunds
+ * exceeded its purchases subtracts from that denominator. Measured 2026-07-31 against a copy of
+ * `.mizan/mizan.db` at migration 054, for 2026-07-01 onward: the total is 111299 cents while
+ * Shopping alone is -102863, so the eight positive categories published 192.3% between them and the
+ * model was handed a set of shares that could not add to 100.
+ */
+
+function refundedDb(): Database.Database {
+  const db = setupDb();
+  const txn = db.prepare(`
+    INSERT INTO transactions
+      (id, account_id, date, amount, merchant_name, original_name, category_id, pending,
+       transfer_status, duplicate_status, created_at, updated_at)
+    VALUES (?, 'acct', ?, ?, ?, ?, ?, 0, 'none', 'none',
+            '2026-06-30T00:00:00.000Z', '2026-06-30T00:00:00.000Z')
+  `);
+  // The live July shape: one category net negative under a total that is still comfortably
+  // positive, which is the case where a share LOOKS computable and is not.
+  txn.run('t10', '2026-06-20', 20000, 'Target', 'REFUND', 'cat_shop_household');
+  txn.run('t11', '2026-06-21', -30000, 'Cafe', 'CAFE', 'cat_food_restaurants');
+  return db;
+}
+
+test('HEALTHY: an all-positive month publishes shares, and they add up', () => {
+  const db = setupDb();
+  const tool = runAdvisorTool(db, 'spending_by_category', RANGE) as {
+    total: number;
+    share_note: string | null;
+    negative_categories: unknown[];
+    categories: Array<{ category: string; spent: number; percent_of_total: number | null }>;
+  };
+
+  assert.equal(tool.share_note, null, 'nothing to qualify on an ordinary month');
+  assert.deepEqual(tool.negative_categories, []);
+  const shares = tool.categories.map((c) => c.percent_of_total ?? 0);
+  assert.ok(shares.every((share) => share !== null));
+  assert.equal(Math.round(shares.reduce((sum, share) => sum + share, 0)), 100);
+  db.close();
+});
+
+test('a month with a net-refund category publishes no shares, and says which category', () => {
+  const db = refundedDb();
+  const tool = runAdvisorTool(db, 'spending_by_category', RANGE) as {
+    total: number;
+    total_is_signed_sum: boolean;
+    share_note: string | null;
+    negative_categories: Array<{ category: string; net: number }>;
+    categories: Array<{ category: string; spent: number; percent_of_total: number | null }>;
+  };
+
+  // Food $350.00, Shopping $25.00 of purchases against a $200.00 return: total stays positive.
+  assert.equal(tool.total, 175);
+  assert.equal(tool.total_is_signed_sum, true);
+  assert.deepEqual(tool.negative_categories, [{ category: 'Shopping', net: -175 }]);
+  for (const category of tool.categories) {
+    assert.equal(category.percent_of_total, null, `${category.category} must not carry a share`);
+  }
+  assert.match(tool.share_note ?? '', /Shopping/);
+  assert.match(tool.share_note ?? '', /refunds and credits exceeded purchases/);
+  db.close();
+});
+
+test('the negative category is still returned, at its signed figure', () => {
+  const db = refundedDb();
+  const tool = runAdvisorTool(db, 'spending_by_category', RANGE) as {
+    categories: Array<{ category: string; spent: number }>;
+  };
+  assert.equal(tool.categories.find((c) => c.category === 'Shopping')?.spent, -175);
+  db.close();
+});

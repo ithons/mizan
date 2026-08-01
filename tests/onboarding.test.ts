@@ -22,6 +22,8 @@ function syncHealth(overrides: Partial<SyncHealth> = {}): SyncHealth {
     attention_count: 0,
     fresh_count: 0,
     never_synced_count: 0,
+    // Nothing is connected in this fixture, so no run has ever finished.
+    last_run: null,
     connections: [],
     ...overrides,
   };
