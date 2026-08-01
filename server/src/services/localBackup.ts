@@ -43,6 +43,12 @@ export const LOCAL_BACKUP_TABLES = [
   // No longer holds access_url (moved to the credentials store in migration 021), so it's
   // safe to back up: it carries only status/last_synced metadata for the SimpleFIN connection.
   'simplefin_connections',
+  // Declares no foreign key to `accounts` on purpose (migration 055): a proposal is evidence about
+  // which existing account took which new provider id, and it has to outlive a row later merged or
+  // deleted. Also the only record that an adoption happened at all, since adoption's whole point is
+  // that the account row looks exactly as it did before. Listed here so a restore keeps the audit
+  // trail, and because the closure test only guards tables it can see.
+  'simplefin_relink_proposals',
   'net_worth_snapshots',
   'sync_runs',
   'sync_run_items',

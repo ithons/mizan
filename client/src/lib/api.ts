@@ -45,6 +45,11 @@ import type {
   ReportSummary,
   SafeToSpend,
   Security,
+  SimplefinRelinkAdoptRequest,
+  SimplefinRelinkAdoptResponse,
+  SimplefinRelinkDismissRequest,
+  SimplefinRelinkDismissResponse,
+  SimplefinRelinkPendingResponse,
   SpendingReport,
   SubscriptionInsights,
   SyncHealth,
@@ -627,6 +632,20 @@ export const simplefinApi = {
     apiFetch<{ success: boolean; transactionsAdded: number; transactionsModified: number }>(
       '/api/simplefin/resync',
       { method: 'POST' }
+    ),
+  // The re-link surface. `pendingRelink` answers `{ proposal: null, carries: [] }` on every install
+  // that has no pending proposal, which is nearly all of them and nearly all the time; that is the
+  // healthy answer, and SimplefinSection renders nothing for it.
+  pendingRelink: () => apiFetch<SimplefinRelinkPendingResponse>('/api/simplefin/relink'),
+  adoptRelink: (proposalId: string, body: SimplefinRelinkAdoptRequest) =>
+    apiFetch<SimplefinRelinkAdoptResponse>(
+      `/api/simplefin/relink/${encodeURIComponent(proposalId)}/adopt`,
+      { method: 'POST', body: JSON.stringify(body) }
+    ),
+  dismissRelink: (proposalId: string, body: SimplefinRelinkDismissRequest) =>
+    apiFetch<SimplefinRelinkDismissResponse>(
+      `/api/simplefin/relink/${encodeURIComponent(proposalId)}/dismiss`,
+      { method: 'POST', body: JSON.stringify(body) }
     ),
 };
 

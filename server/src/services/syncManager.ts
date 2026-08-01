@@ -1,8 +1,14 @@
 import type { Response } from 'express';
 import type Database from 'better-sqlite3';
-import type { SyncEvent } from '../../../shared/types';
+import type { SyncEvent, SyncRunItem, SyncRunItemStatus } from '../../../shared/types';
 import { syncCoinbase } from './coinbase';
-import { classifySimplefinFailure, syncSimplefin, triageSimplefinErrors } from './simplefin';
+import {
+  classifySimplefinFailure,
+  syncSimplefin,
+  triageSimplefinErrors,
+  type SimplefinSyncResult,
+} from './simplefin';
+import type { RelinkSyncBlock } from './simplefinRelink';
 import { detectRecurring } from './recurring';
 import { autoCategorizeTransactions } from './rules';
 import { reconcileReconstructedHistory, takeSnapshot, type ReconstructionRun } from './snapshot';
@@ -160,6 +166,111 @@ export function describeReconstruction(run: ReconstructionRun): string {
   };
   const because = run.trigger ? cause[run.trigger] : 'rebuilt on request';
   return `${run.reconstructed} reconstructed month(s) ${reach}: ${because}.`;
+}
+
+/** The one sentence a reauth-shaped provider message earns, in one place because two paths use it. */
+const SIMPLEFIN_REAUTH_RECOVERY =
+  'Reconnect SimpleFIN in Settings to restore access for the affected institution.';
+
+/**
+ * What a SimpleFIN stage that refused to write puts on its run item.
+ *
+ * Derived from the block the way `classifySimplefinFailure` derives its advice from the HTTP
+ * status, rather than being a sentence written here: the headline and the recovery action come from
+ * `RELINK_OUTCOMES`, and every count is one the guard produced. The "wrote nothing" clause is a
+ * property of the code path rather than a reassurance: `applySimplefinResponse` returns above its
+ * first write, so the account loop, the transaction upserts and `zeroAccountsMissingFromResponse`
+ * are all unreached. `tests/simplefinRelinkGate.test.ts` holds that shape to the schema.
+ */
+export function describeRelinkBlock(block: RelinkSyncBlock): string {
+  return [
+    block.headline,
+    `${block.pairCount} pairing(s) proposed, ${block.unpairedStoredCount} stored account(s) and ` +
+      `${block.unpairedProviderCount} provider account(s) left unpaired.`,
+    'Nothing was written this pass: no account was added, updated or zeroed, and no transaction was recorded.',
+  ].join(' ');
+}
+
+export interface SimplefinStageRecord {
+  runItem: SyncRunItem;
+  /** What the connection row was left at. Never 'sync_error' here: this path is the non-throwing one. */
+  connectionStatus: 'active' | 'reauth_required';
+  /** True exactly when the pass wrote nothing because a re-link is pending. */
+  blocked: boolean;
+}
+
+/**
+ * Record what a completed SimpleFIN call did, including the case where it deliberately did nothing.
+ *
+ * Extracted from `_runFullSyncInternal` so this can be driven against a migrated database: the
+ * property worth a regression test is that a blocked pass is recorded as a skip naming where to
+ * resolve it, and that an ordinary pass is recorded exactly as it was before.
+ *
+ * SimpleFIN reports per-institution problems (e.g. reauth needed) inside a successful HTTP
+ * response's `errors` array rather than as an HTTP failure, so a sync can return fewer/no accounts
+ * for an affected institution while still "succeeding" unless this is surfaced explicitly. Only the
+ * auth-shaped messages may claim reauth: the same array also carries advisories, and telling the
+ * owner their institution login had expired over "Requested date range exceeds limit of 90 days and
+ * was capped." pointed them at re-linking the bank, the riskiest action available.
+ */
+export function recordSimplefinStage(
+  db: Database.Database,
+  runId: string,
+  result: SimplefinSyncResult
+): SimplefinStageRecord {
+  const triage = triageSimplefinErrors(result.errors);
+  const needsReauth = triage.reauth.length > 0;
+  const providerMessages = [...triage.reauth, ...triage.advisories];
+  const relink: RelinkSyncBlock | null = result.relinkBlock;
+
+  // Persist reauth state onto the connection so sync-health (and the per-account badges) reflect
+  // it; a clean sync clears it back to active.
+  //
+  // A pending re-link takes this same derivation and deliberately not a status of its own.
+  // Everything the connection is answerable for worked: the stored access URL authenticated, the
+  // bridge answered, and a full account list parsed. Leaving a previous `sync_error` standing
+  // instead would keep telling the owner to act on a failure this very response disproved, which is
+  // the 402-then-renew sequence that produced the incident. What is NOT claimed is freshness:
+  // `applySimplefinResponse` returns without advancing `last_synced_at`, so sync-health keeps
+  // ageing this connection off its last real pull for as long as the block stands.
+  const connectionStatus = needsReauth ? 'reauth_required' : 'active';
+  db.prepare(`UPDATE simplefin_connections SET status = ? WHERE id = 'simplefin_primary' AND status != 'removed'`)
+    .run(connectionStatus);
+
+  // 'skipped' rather than 'failed' or 'reauth_required'. Nothing failed: the provider answered and
+  // the response parsed, so 'failed' would be a claim about SimpleFIN that nothing here checked. No
+  // login expired either, and 'reauth_required' points the owner at re-linking the bank, which is
+  // the action that mints new ids and caused this in the first place. The stage declined to run and
+  // says where to settle it, which is what 'skipped' means.
+  const status: SyncRunItemStatus = relink
+    ? relink.syncRunItemStatus
+    : needsReauth ? 'reauth_required' : 'succeeded';
+  const messages = relink ? [describeRelinkBlock(relink), ...providerMessages] : providerMessages;
+  // Both sentences, when both apply: a re-link blocks every institution and an expired login blocks
+  // one, and dropping either would leave the owner acting on half of what is standing.
+  const recovery = [
+    relink ? relink.recoveryAction : null,
+    needsReauth ? SIMPLEFIN_REAUTH_RECOVERY : null,
+  ].filter((sentence): sentence is string => sentence !== null);
+
+  const runItem = recordSyncRunItem(db, runId, {
+    provider: 'simplefin',
+    connection_id: 'simplefin_primary',
+    institution_name: 'SimpleFIN',
+    status,
+    accounts_seen: result.accountCount,
+    transactions_added: result.added,
+    transactions_modified: result.modified,
+    transactions_removed: result.removed,
+    transactions_skipped: result.skipped,
+    error_code: relink ? relink.errorCode : undefined,
+    // Advisories still get reported on the item, which the sync panel renders whatever the item's
+    // status is; what they no longer do is set that status.
+    error_message: messages.length > 0 ? messages.join('; ') : undefined,
+    recovery_action: recovery.length > 0 ? recovery.join(' ') : undefined,
+  });
+
+  return { runItem, connectionStatus, blocked: relink !== null };
 }
 
 export interface PostSyncStagesResult {
@@ -489,37 +600,9 @@ async function _runFullSyncInternal(): Promise<void> {
       emitSyncEvent({ type: 'sync_progress', message: 'Syncing SimpleFIN...', progress: 30 });
       try {
         const simplefinResult = await withRetry(() => syncSimplefin());
-        // SimpleFIN reports per-institution problems (e.g. reauth needed) inside a
-        // successful HTTP response's `errors` array rather than as an HTTP failure, so a
-        // sync can return fewer/no accounts for an affected institution while still
-        // "succeeding" unless this is surfaced explicitly. Only the auth-shaped messages may
-        // claim reauth: the same array also carries advisories, and telling the owner their
-        // institution login had expired over "Requested date range exceeds limit of 90 days and
-        // was capped." pointed them at re-linking the bank, the riskiest action available.
-        const triage = triageSimplefinErrors(simplefinResult.errors);
-        const needsReauth = triage.reauth.length > 0;
-        const providerMessages = [...triage.reauth, ...triage.advisories];
-        // Persist reauth state onto the connection so sync-health (and the per-account
-        // badges) reflect it; a clean sync clears it back to active.
-        db.prepare(`UPDATE simplefin_connections SET status = ? WHERE id = 'simplefin_primary' AND status != 'removed'`)
-          .run(needsReauth ? 'reauth_required' : 'active');
-        const runItem = recordSyncRunItem(db, run.id, {
-          provider: 'simplefin',
-          connection_id: 'simplefin_primary',
-          institution_name: 'SimpleFIN',
-          status: needsReauth ? 'reauth_required' : 'succeeded',
-          accounts_seen: simplefinResult.accountCount,
-          transactions_added: simplefinResult.added,
-          transactions_modified: simplefinResult.modified,
-          transactions_removed: simplefinResult.removed,
-          transactions_skipped: simplefinResult.skipped,
-          // Advisories still get reported on the item, which the sync panel renders whatever the
-          // item's status is; what they no longer do is set that status.
-          error_message: providerMessages.length > 0 ? providerMessages.join('; ') : undefined,
-          recovery_action: needsReauth ? 'Reconnect SimpleFIN in Settings to restore access for the affected institution.' : undefined,
-        });
+        const stage = recordSimplefinStage(db, run.id, simplefinResult);
 
-        pendingBalanceChanges.push({ runItemId: runItem.id, changes: simplefinResult.balanceChanges });
+        pendingBalanceChanges.push({ runItemId: stage.runItem.id, changes: simplefinResult.balanceChanges });
       } catch (err) {
         const message = (err as Error).message || 'SimpleFIN sync failed';
         // The recovery advice is derived from the HTTP status, not asserted. One sentence for every

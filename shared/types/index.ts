@@ -1534,3 +1534,174 @@ export interface AiDigestRevertResult {
   /** Populated when an action restored a different number of rows than the plan expected. */
   discrepancies: string[];
 }
+
+// ---------------------------------------------------------------------------
+// SimpleFIN re-link (services/simplefinRelink.ts, migration 055)
+// ---------------------------------------------------------------------------
+//
+// When a provider re-mints its account ids, the sync stops before writing and asks. These are the
+// API-edge shapes: money is DOLLARS here, converted exactly once by `toRelinkProposalView`, while
+// the service and the stored snapshots stay in integer cents like the rest of the schema.
+
+/** How much the evidence behind a proposed pair carries. Three words, never a score. */
+export type SimplefinRelinkPairStrength = 'exact' | 'strong' | 'inferred';
+
+/** The specific comparisons that produced (or failed to produce) a pairing. */
+export type SimplefinRelinkPairEvidence =
+  | 'institution_name_match'
+  | 'institution_name_differs'
+  | 'account_name_match'
+  | 'account_number_mask_match'
+  | 'account_name_similar'
+  | 'currency_match'
+  | 'currency_differs'
+  | 'balance_match'
+  | 'sole_unmatched_at_institution';
+
+export type SimplefinRelinkUnpairedReason = 'no_candidate' | 'ambiguous';
+
+export type SimplefinRelinkProposalStatus = 'pending' | 'applied' | 'dismissed';
+
+/** Only the two reportable outcomes are ever persisted; `none` is the silent healthy case. */
+export type SimplefinRelinkOutcome = 'relink' | 'partial';
+
+export interface SimplefinRelinkProviderAccountView {
+  provider_account_id: string;
+  name: string;
+  institution_name: string;
+  currency: string;
+  /** Dollars, as the provider reported them, with no liability negation applied. Null if unparseable. */
+  balance: number | null;
+}
+
+export interface SimplefinRelinkStoredAccountView {
+  account_id: string;
+  /** The provider id the row was carrying when the proposal was raised. */
+  simplefin_account_id: string;
+  account_name: string;
+  institution_name: string;
+  currency: string;
+  type: string;
+  /** Dollars. Positive-as-owed for a liability, and legitimately negative when the card is in credit. */
+  balance: number;
+  is_liability: boolean;
+}
+
+export interface SimplefinRelinkPairView {
+  stored_account_id: string;
+  stored_account_name: string;
+  stored_institution_name: string;
+  stored_simplefin_account_id: string;
+  provider_account_id: string;
+  provider_account_name: string;
+  provider_institution_name: string;
+  strength: SimplefinRelinkPairStrength;
+  evidence: SimplefinRelinkPairEvidence[];
+  /** The sentence the owner confirms against. It restates what was compared, never a likelihood. */
+  reason: string;
+}
+
+export interface SimplefinRelinkUnpairedStoredView {
+  account_id: string;
+  account_name: string;
+  institution_name: string;
+  simplefin_account_id: string;
+  /** Dollars. */
+  balance: number;
+  is_liability: boolean;
+  reason_code: SimplefinRelinkUnpairedReason;
+  reason: string;
+}
+
+export interface SimplefinRelinkUnpairedProviderView {
+  provider_account_id: string;
+  name: string;
+  institution_name: string;
+  currency: string;
+  /** Dollars. Null if the provider sent a balance that did not parse. */
+  balance: number | null;
+  reason_code: SimplefinRelinkUnpairedReason;
+  reason: string;
+}
+
+export interface SimplefinRelinkAppliedPairView {
+  stored_account_id: string;
+  provider_account_id: string;
+  previous_simplefin_account_id: string | null;
+  outcome: 'adopted' | 'already_adopted';
+}
+
+export interface SimplefinRelinkProposalView {
+  id: string;
+  detected_at: string;
+  outcome: SimplefinRelinkOutcome;
+  status: SimplefinRelinkProposalStatus;
+  headline: string;
+  recovery_action: string;
+  /** The screen the owner resolves this on, and its path. One copy, generated from the service. */
+  resolve_on: string;
+  resolve_on_path: string;
+  provider_accounts: SimplefinRelinkProviderAccountView[];
+  stored_accounts: SimplefinRelinkStoredAccountView[];
+  pairs: SimplefinRelinkPairView[];
+  /**
+   * Reported on both sides on purpose. An account genuinely closed at the bank has no partner and
+   * never will, so leaving it unpaired has to be a sayable outcome rather than a blocked one.
+   */
+  unpaired_stored: SimplefinRelinkUnpairedStoredView[];
+  unpaired_provider: SimplefinRelinkUnpairedProviderView[];
+  resolved_at: string | null;
+  applied_pairs: SimplefinRelinkAppliedPairView[] | null;
+  dismissed_reason: string | null;
+}
+
+/** Request body for confirming a pairing. Pairs are confirmed explicitly; none is applied silently. */
+export interface SimplefinRelinkAdoptRequest {
+  pairs: Array<{ stored_account_id: string; provider_account_id: string }>;
+}
+
+/**
+ * What a stored account is carrying right now, read live off the row rather than out of the
+ * proposal's snapshot.
+ *
+ * The snapshot records what the row looked like when the response arrived; these four fields are
+ * what adoption is protecting, and the owner is confirming against the row as it stands. An account
+ * the proposal names but that is no longer in the ledger has no entry here at all, which is how the
+ * screen says so rather than rendering zeros.
+ */
+export interface SimplefinRelinkStoredCarryView {
+  account_id: string;
+  transaction_count: number;
+  /** Earliest transaction date on the row. Null when the row carries no transactions. */
+  first_transaction_date: string | null;
+  /** The line below which manual history owns this account. Null when none is set. */
+  backfill_floor_date: string | null;
+  /** 'manual' when the owner set it, 'auto' when it was guessed. */
+  type_source: string;
+  name_source: string;
+}
+
+/** `proposal` is null exactly when nothing is pending, and the screen renders nothing at all. */
+export interface SimplefinRelinkPendingResponse {
+  proposal: SimplefinRelinkProposalView | null;
+  carries: SimplefinRelinkStoredCarryView[];
+}
+
+export interface SimplefinRelinkAdoptResponse {
+  proposal: SimplefinRelinkProposalView;
+  adopted: SimplefinRelinkAppliedPairView[];
+  /** Stored accounts the proposal named that this confirmation deliberately did not pair. */
+  left_unpaired_stored_account_ids: string[];
+  /** Provider ids from the snapshot no account adopted. */
+  left_unpaired_provider_account_ids: string[];
+}
+
+/** Dismissal states a reason, because "these are new accounts" is a claim the owner is making. */
+export interface SimplefinRelinkDismissRequest {
+  reason: string;
+}
+
+export interface SimplefinRelinkDismissResponse {
+  proposal: SimplefinRelinkProposalView;
+  acknowledged_provider_ids: string[];
+}

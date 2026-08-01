@@ -136,6 +136,31 @@ export const ApplyMerchantRulesSchema = z.object({
 export const SimplefinCredentialsSchema = z.object({
   setupToken: z.string().min(1),
 });
+/**
+ * Confirming a re-link pairing. `min(1)` is load-bearing: an empty `pairs` array would resolve the
+ * proposal having adopted nothing, which is a dismissal without the stated reason a dismissal
+ * requires. Confirming nothing has to go through the dismiss route and say why.
+ */
+export const SimplefinRelinkAdoptSchema = z.object({
+  pairs: z
+    .array(
+      z.object({
+        stored_account_id: z.string().min(1),
+        provider_account_id: z.string().min(1),
+      })
+    )
+    .min(1),
+});
+
+/**
+ * Dismissing a re-link proposal. The reason is required rather than optional: dismissal records the
+ * owner's claim that these really are new accounts, and it is the only record of why the ledger's
+ * existing accounts were left to be zeroed by the next sync.
+ */
+export const SimplefinRelinkDismissSchema = z.object({
+  reason: z.string().trim().min(1).max(240),
+});
+
 export const CoinbaseCredentialsSchema = z.object({
   keyName: z.string().regex(/^organizations\/.+\/apiKeys\/.+$/, 'Key name must match organizations/xxx/apiKeys/yyy'),
   privateKey: z.string().min(1),

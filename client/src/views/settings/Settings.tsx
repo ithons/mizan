@@ -868,6 +868,24 @@ export function Settings() {
   const statusText = (connected: boolean) =>
     connected ? <span className="text-sage-deep">Connected</span> : <span className="text-muted">Connect</span>;
 
+  /**
+   * A pending re-link blocks EVERY sync, and the panel that resolves it lives inside a collapsed
+   * row. A condition that stops the ledger updating cannot be reachable only by guessing which row
+   * to expand, so the row states it and opens itself.
+   *
+   * The query is the same one the panel uses, so it is served from cache rather than fetched twice.
+   */
+  const { data: pendingRelink } = useQuery({
+    queryKey: ['simplefin', 'relink'],
+    queryFn: () => simplefinApi.pendingRelink(),
+    enabled: Boolean(simplefinConnection),
+  });
+  const relinkPending = Boolean(pendingRelink?.proposal);
+
+  useEffect(() => {
+    if (relinkPending) setOpenPanel('simplefin');
+  }, [relinkPending]);
+
   return (
     <Screen size="editorial">
       <div className="mb-8 flex-shrink-0">
@@ -911,7 +929,11 @@ export function Settings() {
                   }`
                 : 'Bank & brokerage balances and transactions, read-only'
             }
-            trailing={statusText(Boolean(simplefinConnection))}
+            trailing={
+              relinkPending
+                ? <span className="text-review-text">Needs your confirmation</span>
+                : statusText(Boolean(simplefinConnection))
+            }
             onClick={() => toggle('simplefin')}
           />
           {openPanel === 'simplefin' && (

@@ -9,6 +9,11 @@ import { guessAccountTypeAndLiability } from './accountClassification';
 import { isBelowBackfillFloor } from './backfillFloor';
 import { toCents, toCentsOrNull, toDollars } from './money';
 import { recordFieldRevision } from './categoryWrites';
+import {
+  guardSimplefinRelink,
+  toProviderSnapshot,
+  type RelinkSyncBlock,
+} from './simplefinRelink';
 
 // We store liability balances as positive "amount owed" and negate what SimpleFIN reports (which
 // normally sends credit balances as negatives).
@@ -163,6 +168,15 @@ export interface SimplefinSyncResult {
   skipped: number;
   balanceChanges: AccountBalanceChange[];
   errors: string[];
+  /**
+   * Non-null exactly when this pass wrote nothing because the provider re-minted its account ids
+   * and the owner has not settled the mapping yet.
+   *
+   * It is a field rather than a thrown error because nothing failed: the request succeeded, the
+   * response parsed, and the accounts are all there. What is missing is a decision only the owner
+   * can make, so the stage reports itself and the run carries on to the other providers.
+   */
+  relinkBlock: RelinkSyncBlock | null;
 }
 
 // A malformed balance/amount must never be persisted: parseFloat would yield NaN
@@ -617,38 +631,56 @@ export function upsertSimplefinTransaction(
   return 'modified';
 }
 
-export async function syncSimplefin(): Promise<SimplefinSyncResult> {
-  const creds = getCredentials();
-  if (!creds.simplefin?.accessUrl) {
-    throw new Error('Missing SimpleFIN access URL');
-  }
-
-  const accessUrl = creds.simplefin.accessUrl;
-
-  const client = axios.create({
-    baseURL: accessUrl,
-  });
-
-  const db = getDb();
+/**
+ * Everything this sync writes, given a response body that has already been fetched.
+ *
+ * Split out of `syncSimplefin` so the whole write path can be driven against a migrated database
+ * with no network in it. The relink gate below is the reason that matters: its guarantee is that
+ * NOTHING is written, and a guarantee about writes has to be testable against the real schema.
+ */
+export function applySimplefinResponse(
+  db: Database.Database,
+  data: unknown,
+  now: string
+): SimplefinSyncResult {
   let added = 0, modified = 0, removed = 0, skipped = 0;
   const balanceChanges: AccountBalanceChange[] = [];
-  const now = new Date().toISOString();
 
-  const connection = db.prepare(
-    "SELECT last_synced_at FROM simplefin_connections WHERE id = 'simplefin_primary'"
-  ).get() as { last_synced_at: string | null } | undefined;
-  // last_synced_at IS NULL means either a brand-new connection or an explicit
-  // user-requested "force full resync" (routes/simplefin.ts POST /resync nulls it).
-  const isFirstSync = !connection?.last_synced_at;
-  const lookbackDays = isFirstSync ? INITIAL_LOOKBACK_DAYS : INCREMENTAL_LOOKBACK_DAYS;
-
-  const startDate = Math.floor(Date.now() / 1000) - (lookbackDays * 86400);
-  const res = await client.get(`/accounts?start-date=${startDate}`);
-  const accounts = simplefinAccountsOrThrow(res.data);
+  const accounts = simplefinAccountsOrThrow(data);
 
   const accountCount = accounts.length;
-  const errors: string[] = providerErrorStrings(res.data);
+  const errors: string[] = providerErrorStrings(data);
   const seenAccountIds = new Set<string>();
+
+  // THE GATE. After the response is parsed, before the first write.
+  //
+  // The account lookup in the loop below matches on `simplefin_account_id` and on nothing else, so
+  // a provider that re-mints its ids reads as a set of accounts that have never been seen (one
+  // INSERT each) sitting beside a set of stored accounts the response no longer mentions (zeroed by
+  // `zeroAccountsMissingFromResponse` at the bottom of this function). That is what happened on
+  // 2026-08-01, when a renewed SimpleFIN Bridge subscription re-minted all nine: the ledger went to
+  // eighteen accounts and net worth read $2,470.92 against a true $11,979.41. Both halves are
+  // downstream of the loop, so the only place to stop is above it.
+  //
+  // Returning here is what short-circuits the zeroing pass: it lives after the loop and is never
+  // reached. The guard itself writes only its own proposal row, which is the audit trail of what
+  // the owner is being asked, and no account, transaction, holding or balance moves.
+  const guard = guardSimplefinRelink(db, accounts.map(toProviderSnapshot), now);
+  if (!guard.proceed) {
+    return {
+      status: 'relink_pending',
+      accountCount,
+      added: 0,
+      modified: 0,
+      removed: 0,
+      skipped: 0,
+      balanceChanges: [],
+      // The provider's own messages still travel: they are about the response, not about this
+      // decision, and syncManager triages them exactly as it does on a pass that wrote.
+      errors,
+      relinkBlock: guard.block,
+    };
+  }
 
   for (const acct of accounts) {
     seenAccountIds.add(acct.id);
@@ -804,5 +836,34 @@ export async function syncSimplefin(): Promise<SimplefinSyncResult> {
     WHERE id = 'simplefin_primary'
   `).run(now);
 
-  return { status: 'synced', accountCount, added, modified, removed, skipped, balanceChanges, errors };
+  return { status: 'synced', accountCount, added, modified, removed, skipped, balanceChanges, errors, relinkBlock: null };
+}
+
+export async function syncSimplefin(): Promise<SimplefinSyncResult> {
+  const creds = getCredentials();
+  if (!creds.simplefin?.accessUrl) {
+    throw new Error('Missing SimpleFIN access URL');
+  }
+
+  const accessUrl = creds.simplefin.accessUrl;
+
+  const client = axios.create({
+    baseURL: accessUrl,
+  });
+
+  const db = getDb();
+  const now = new Date().toISOString();
+
+  const connection = db.prepare(
+    "SELECT last_synced_at FROM simplefin_connections WHERE id = 'simplefin_primary'"
+  ).get() as { last_synced_at: string | null } | undefined;
+  // last_synced_at IS NULL means either a brand-new connection or an explicit
+  // user-requested "force full resync" (routes/simplefin.ts POST /resync nulls it).
+  const isFirstSync = !connection?.last_synced_at;
+  const lookbackDays = isFirstSync ? INITIAL_LOOKBACK_DAYS : INCREMENTAL_LOOKBACK_DAYS;
+
+  const startDate = Math.floor(Date.now() / 1000) - (lookbackDays * 86400);
+  const res = await client.get(`/accounts?start-date=${startDate}`);
+
+  return applySimplefinResponse(db, res.data, now);
 }

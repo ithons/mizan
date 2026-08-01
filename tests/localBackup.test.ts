@@ -172,6 +172,16 @@ function seedEveryTable(db: Database.Database, tag: string): SeededIds {
   db.prepare('INSERT INTO simplefin_connections (id, created_at) VALUES (?, ?)')
     .run(`sf_${tag}`, TEST_NOW);
 
+  // Seeded resolved rather than pending: `idx_simplefin_relink_pending` allows exactly one
+  // unresolved proposal, and a restore that carried a second one would fail on the index rather
+  // than on anything this test is about. An applied row also exercises the status CHECKs.
+  db.prepare(`
+    INSERT INTO simplefin_relink_proposals
+      (id, detected_at, outcome, status, provider_snapshot, stored_snapshot, pairs,
+       unpaired_stored, unpaired_provider, resolved_at, applied_pairs, acknowledged_provider_ids)
+    VALUES (?, ?, 'relink', 'applied', '[]', '[]', '[]', '[]', '[]', ?, '[]', '[]')
+  `).run(`relink_${tag}`, TEST_NOW, TEST_NOW);
+
   db.prepare(`
     INSERT INTO net_worth_snapshots (id, date, total_assets, total_liabilities, net_worth,
                                      breakdown, created_at)
