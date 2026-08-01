@@ -126,6 +126,20 @@ export interface Transaction {
   category_source?: 'human' | 'rule' | 'heuristic' | 'ai' | null;
   /** The other half of the same question. Read with `category_source`, never instead of it. */
   manually_categorized?: boolean;
+  /**
+   * Who authored the amount this row holds (migration 048). 'human' means the owner corrected it
+   * and `upsertSimplefinTransaction` will keep it rather than overwrite it on the next sync. NULL
+   * means the author was never recorded, which is most of the ledger and is not the same as
+   * "nobody".
+   */
+  amount_source?: 'provider' | 'human' | 'ai' | null;
+  /**
+   * What the institution still reports for this row, in dollars, when the owner corrected the
+   * amount and the provider has since re-offered a different one. Null whenever there is no
+   * standing disagreement, which includes "no sync has happened since the correction": absence
+   * here means no later sync reported a different amount, never that the provider agrees.
+   */
+  provider_amount?: number | null;
   created_at: string;
   updated_at: string;
   // joined

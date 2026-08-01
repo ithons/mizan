@@ -1707,6 +1707,19 @@ export function confirmAdvisorDraft(
   // mind, which is theirs to do, so 'user_confirm' never reaches this. Without it, `ai_feedback`
   // recorded every dismissal and no write path read one: the next pass proposed it again, and for
   // an autonomous kind applied it.
+  //
+  // THOSE ROWS DO NOT PILE UP, and the thing stopping them is not here. `supersedeRegeneratedDrafts`
+  // runs at the top of `persistProposals` and deletes every `status = 'open'` draft whose
+  // `draftTargetKey` the fresh pass regenerates, and a refused draft is left open, so the next pass
+  // re-proposing the same target replaces it rather than stacking beside it. The target key for a
+  // categorization is the ROW, so a model working through candidate categories for one transaction
+  // is bounded too. Measured on a `.backup` copy of `.mizan/mizan.db` taken 2026-08-01:
+  // `SELECT COALESCE(SUM(refused_by_guards),0), COUNT(*) FROM ai_runs` returns 0 over 12 runs, and
+  // `SELECT json_extract(payload,'$.transaction_id'), COUNT(*) FROM advisor_drafts
+  //  WHERE kind='categorize_transaction' GROUP BY 1 HAVING COUNT(*)>1` returns exactly one target,
+  // at 2 rows sharing one `created_at`, out of 278 drafts: one pass proposing a row twice, not two
+  // passes stacking. tests/refusedDraftBound.test.ts holds the bound and, just as importantly,
+  // holds that supersession leaves an unrelated open draft and an applied one alone.
   if (source === 'worker_auto') {
     const declined = ownerDeclinedProposal(db, parsedPayload.data);
     if (declined !== null) {

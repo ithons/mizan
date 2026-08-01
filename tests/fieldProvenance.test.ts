@@ -111,30 +111,32 @@ test('an owner edit claims the field and logs what it displaced', (t) => {
   assert.equal(amount?.to_value, '-5000');
 });
 
-test('the provider still wins a revised amount, and the owner value survives as evidence', (t) => {
+test('a corrected amount is kept and the provider restatement is recorded, not written', (t) => {
   const db = migratedTestDb();
   t.after(() => db.close());
 
   const { accountId, transactionId } = posted(db);
   updateTransaction(db, transactionId, { amount: -50 });
 
-  // A tip adjustment: the institution restates the row it already posted.
+  // The institution restates the row it already posted. Under migration 048 as shipped this won:
+  // the amount became -5325 and the owner's correction reverted inside the hour, which is why the
+  // mis-signed Fidelity transfers were never fixable. It is now recorded instead.
   const write = upsertSimplefinTransaction(db, accountId, providerPayload({ amount: -5325 }), TEST_NOW);
-  assert.equal(write, 'modified');
+  assert.equal(write, 'unchanged', 'nothing on the row moved, so the sync panel must not claim it did');
 
   const stored = row(db);
-  assert.equal(stored.amount, -5325, 'the ledger still agrees with the balance it reconciles against');
-  assert.equal(stored.amount_source, 'provider');
+  assert.equal(stored.amount, -5000, 'the correction survives the sync that used to revert it');
+  assert.equal(stored.amount_source, 'human');
 
-  const providerRevisions = revisions(db).filter((r) => r.origin === 'provider_revision');
-  assert.equal(providerRevisions.length, 1);
-  assert.deepEqual(providerRevisions[0], {
+  const rejected = revisions(db).filter((r) => r.origin === 'provider_rejected');
+  assert.equal(rejected.length, 1);
+  assert.deepEqual(rejected[0], {
     field: 'amount',
     from_value: '-5000',
     to_value: '-5325',
     from_source: 'human',
     to_source: 'provider',
-    origin: 'provider_revision',
+    origin: 'provider_rejected',
   });
 });
 

@@ -17,6 +17,7 @@ import {
   deleteTransaction,
   getTransactionById,
   listTransactions,
+  releaseAmountToProvider,
   setTransactionReviewStatus,
   updateTransaction,
   type TransactionListFilters,
@@ -35,8 +36,15 @@ const router = Router();
 
 // transactions.amount is stored as integer cents; the API contract is dollars, so
 // transaction rows are dollarized on the way out. No other numeric column here is money.
+//
+// `provider_amount` is the second one and travels with the first by necessity: it is what the
+// institution still reports for an amount the owner corrected, decoded from the same integer cents
+// in `transaction_field_revisions.to_value`. A screen that showed the corrected figure in dollars
+// beside the provider's in cents would be off by a hundred on exactly the comparison the field
+// exists to make. It is absent (NULL) on every row with no standing disagreement, and
+// `dollarizeFields` leaves a non-number alone, so it survives the boundary as null.
 function transactionToDollars<T extends Record<string, unknown>>(row: T): T {
-  return dollarizeFields(row, ['amount']);
+  return dollarizeFields(row, ['amount', 'provider_amount']);
 }
 
 // ─── query-string parsing (HTTP concern: returns null -> 400) ────────────────
@@ -360,6 +368,42 @@ router.patch(
     }
   }
 );
+
+// POST /:id/amount/release - hand a corrected amount back to the institution
+//
+// A POST rather than a PATCH with a magic body, because the value it writes is not in the request:
+// the server reads what the provider last offered and adopts that. Letting the client name the
+// number would let a stale screen re-assert a figure the institution has since moved off.
+router.post('/:id/amount/release', (req: Request, res: Response, next: NextFunction): void => {
+  try {
+    const db = getDb();
+    const result = releaseAmountToProvider(db, routeId(req.params.id));
+
+    if (!result.ok) {
+      if (result.reason === 'not_found') {
+        res.status(404).json({ error: 'Transaction not found' });
+      } else if (result.reason === 'not_corrected') {
+        res.status(409).json({ error: 'This amount is already the one the institution reported' });
+      } else {
+        res.status(409).json({ error: 'This entry has no SimpleFIN amount to hand back to' });
+      }
+      return;
+    }
+
+    // Only when a figure actually moved. Releasing a field whose value the provider already agrees
+    // with changes authorship and nothing else, and re-snapshotting on it would write a net-worth
+    // row for an event with no money in it. Kept in step with the PATCH handler above, which takes
+    // the same two follow-ups for the same reason.
+    if (result.providerAmountAdopted !== null) {
+      detectRecurring();
+      refreshTransactionIntegrity(db);
+    }
+
+    res.json({ data: transactionToDollars(result.row) });
+  } catch (err) {
+    next(err);
+  }
+});
 
 // DELETE /:id - delete only if manual
 router.delete('/:id', (req: Request, res: Response, next: NextFunction): void => {

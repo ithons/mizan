@@ -434,11 +434,10 @@ describe('bar fills are visible against their own track', () => {
   });
 
   test('the track itself is measured against the grounds the bar renders on', () => {
-    // OPEN FINDING, recorded rather than asserted. The fill-to-track edge clears 3:1 in every tone
-    // above, so the VALUE the bar reports is readable. The track-to-page edge, which is what says
-    // how far the bar could go, does not clear anything: `track` measures under 1.6:1 against every
-    // ground in the app, in both themes. That is a token question and this test does not gate it,
-    // it pins the reading so the number cannot drift without somebody noticing.
+    // This used to be recorded as an OPEN FINDING and not gated: the fill-to-track edge clears 3:1
+    // in every tone above, so the VALUE the bar reports is readable, while the track-to-page edge,
+    // which is what says how far the bar could GO, cleared nothing. The reading below is unchanged
+    // and is still pinned, because it is a fact about the palette rather than about the component.
     const measured = Object.fromEntries(
       (['paper', 'card', 'card-alt', 'well', 'rail'] as const).map((ground) => [
         ground,
@@ -454,6 +453,13 @@ describe('bar fills are visible against their own track', () => {
       well: [1.19, 1.28],
       rail: [1.22, 1.46],
     });
-    assert.match(BAR, /OPEN FINDING, do not read this as settled/);
+
+    // What changed on 2026-08-01 is that the finding is closed, and NOT by moving a token: no solid
+    // track can clear the page and leave the fills 3:1 (tests/barBoundary.test.ts scans all 256
+    // achromatic values and proves it), so the extent is carried by a ring instead. The marker is
+    // gone from the source and this asserts it stays gone, so the finding cannot quietly reopen as
+    // prose while the ring is still there.
+    assert.doesNotMatch(BAR, /OPEN FINDING/);
+    assert.match(BAR, /ring-1 ring-line-3/, 'the bar declares no boundary; the finding is open again');
   });
 });

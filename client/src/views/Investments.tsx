@@ -252,6 +252,11 @@ export function Investments() {
 
   const history = report?.history ?? [];
   const delta = getPortfolioDelta(marketValue, history, report?.portfolio_account_ids.length ?? null);
+  // Looked up by date rather than read off `delta.baseline`, because `PortfolioSeriesPoint` is the
+  // shape `getPortfolioDelta` reasons about (value, estimated, coverage) and provenance is not part
+  // of that arithmetic. `date` is UNIQUE on net_worth_snapshots and that function already refuses a
+  // series that is not strictly ascending, so this finds the same point it returned.
+  const baselineMembership = delta ? history.find((p) => p.date === delta.baseline.date)?.membership : undefined;
 
   const [lens, setLens] = useState<AllocationLens>('asset_type');
   const [selectedHolding, setSelectedHolding] = useState<Holding | null>(null);
@@ -308,6 +313,26 @@ export function Investments() {
               {delta.change >= 0 ? '↑' : '↓'} {formatWholeCurrency(Math.abs(delta.change))} since{' '}
               {delta.baseline.estimated ? 'the estimated ' : ''}
               {formatDateShort(delta.baseline.date)}
+            </div>
+          )}
+          {/*
+            Which accounts the baseline point was a sum over is a fact about the day it was written,
+            and every snapshot taken before migration 056 was written without recording it. For those
+            the set was worked out afterwards from an accounts table that postdates them, so the
+            delta is measured from a point whose membership is a reconstruction, and saying so is the
+            same courtesy `estimated` gets one line up.
+
+            It says nothing on a healthy ledger and it clears itself: `takeSnapshot` records the set
+            from now on, so once the baseline is a snapshot taken after 056 this is silent forever.
+            The chart is deliberately left unmarked. Seventeen measured rows on the live ledger will
+            carry a reconstructed membership for as long as they exist and nothing can ever observe
+            what the portfolio was on a day that has passed, so painting them would be a permanent
+            mark on the one thing the owner cannot act on.
+          */}
+          {baselineMembership === 'reconstructed' && (
+            <div className="mt-1 text-note leading-relaxed text-muted-2">
+              Which accounts that point covered was reconstructed from your accounts as they are now,
+              not recorded when it was taken.
             </div>
           )}
           {notes.crypto && <div className="mt-1 text-note tabular-nums text-muted-2">{notes.crypto}</div>}

@@ -3,6 +3,7 @@ import { format, subMonths, startOfMonth, differenceInCalendarMonths } from 'dat
 import type Database from 'better-sqlite3';
 import { getDb } from '../db/index';
 import { getPreference, setPreference } from './preferences';
+import { readPortfolioAccounts } from './netWorthHistory';
 
 // Upper bound on reverse-replay estimation: a 50-year backstop so a stray ancient
 // transaction can't spin the loop for an absurd number of months. There is deliberately no
@@ -140,6 +141,24 @@ function purgeUnjustifiedEstimates(db: Database.Database, earliestMonth: string 
     .run(earliestMonth).changes;
 }
 
+/**
+ * The portfolio's membership, frozen as JSON, for a row about to be written.
+ *
+ * `readPortfolioAccounts` filters on `is_liability = 0 AND is_hidden = 0`, which is a subset of the
+ * `is_hidden = 0` a breakdown is written under, so every id here has a value on the row beside it.
+ * `coveredIds` narrows that to the accounts a reconstructed month could actually account for.
+ *
+ * Sorted so two rows written from the same set are byte-identical, which is what makes "did the set
+ * change between these two points" a comparison rather than a parse.
+ */
+function frozenPortfolio(portfolioIds: string[], coveredIds?: Set<string>): string {
+  const ids = portfolioIds
+    .filter((id) => coveredIds === undefined || coveredIds.has(id))
+    .slice()
+    .sort();
+  return JSON.stringify(ids);
+}
+
 export function takeSnapshot(): void {
   const db = getDb();
 
@@ -190,25 +209,35 @@ export function takeSnapshot(): void {
   // has to read NULL as "probably complete".
   const coveredAccounts = accounts.length;
 
+  // Which of those accounts were the portfolio, decided here rather than by whoever reads the row
+  // later. `/api/reports/investments` used to intersect every historical breakdown with today's
+  // accounts table, so retyping an account into a portfolio type moved every past point: on a copy
+  // of the live ledger taken 2026-08-01, retyping Wealthfront Cash to `brokerage` moved 2026-07-30
+  // from $2,445.89 to $3,447.59 without touching a snapshot. This is 'recorded' in the strict sense
+  // that the code writing the balances wrote the set alongside them, in the same statement.
+  const portfolioAccounts = frozenPortfolio(readPortfolioAccounts(db).map((a) => a.id));
+
   if (existing) {
     db.prepare(`
       UPDATE net_worth_snapshots
       SET total_assets = ?, total_liabilities = ?, net_worth = ?, breakdown = ?,
           liquid_assets = ?, investment_assets = ?, crypto_assets = ?,
-          covered_accounts = ?, total_accounts = ?
+          covered_accounts = ?, total_accounts = ?,
+          portfolio_accounts = ?, portfolio_accounts_source = 'recorded'
       WHERE id = ?
     `).run(total_assets, total_liabilities, net_worth, JSON.stringify(breakdown),
            liquid_assets, investment_assets, crypto_assets,
-           coveredAccounts, coveredAccounts, existing.id);
+           coveredAccounts, coveredAccounts, portfolioAccounts, existing.id);
   } else {
     db.prepare(`
       INSERT INTO net_worth_snapshots
         (id, date, total_assets, total_liabilities, net_worth, breakdown, is_estimated,
          liquid_assets, investment_assets, crypto_assets, covered_accounts, total_accounts,
-         created_at)
-      VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?)
+         created_at, portfolio_accounts, portfolio_accounts_source)
+      VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, 'recorded')
     `).run(uuidv4(), today, total_assets, total_liabilities, net_worth, JSON.stringify(breakdown),
-           liquid_assets, investment_assets, crypto_assets, coveredAccounts, coveredAccounts, now);
+           liquid_assets, investment_assets, crypto_assets, coveredAccounts, coveredAccounts, now,
+           portfolioAccounts);
   }
 
   takeHoldingsSnapshot(db, today, now);
@@ -544,6 +573,10 @@ export function backfillSnapshots(): void {
   const floors = accountFloorMonths(accounts, firstTransactionByAccount);
   const earliestMonth = earliestCoveredMonth(floors);
 
+  // Read once: the set is the same for every month this run writes, and only the covered subset
+  // differs. Inside the loop this was one query per month, up to 600 of them.
+  const portfolioIds = readPortfolioAccounts(db).map((account) => account.id);
+
   // Runs before the early return and before any writing, because a raised floor is exactly when
   // stale rows go stale: the months this run will no longer produce are the ones nothing would
   // ever have deleted.
@@ -716,12 +749,21 @@ export function backfillSnapshots(): void {
     // this derived", and the value it replaced described balances that no longer exist.
     const derivedAt = new Date().toISOString();
 
+    // The portfolio's membership for this month, narrowed to the accounts the month could account
+    // for at all. 'recorded' here means recorded at DERIVATION time, which is `created_at` and not
+    // `date`: the balances of a reconstructed row come from today's accounts table too, so the two
+    // halves describe the same instant and are rewritten together on every run. Reading it as an
+    // observation of what the portfolio was on `date` would be the reverse-replay-as-fact mistake
+    // `is_estimated` exists to stop, which is why that flag stays on the same row.
+    const portfolioAccounts = frozenPortfolio(portfolioIds, new Set(Object.keys(approxBalances)));
+
     if (existing) {
       db.prepare(`
         UPDATE net_worth_snapshots
         SET total_assets = ?, total_liabilities = ?, net_worth = ?, breakdown = ?,
             liquid_assets = ?, investment_assets = ?, crypto_assets = ?,
-            covered_accounts = ?, total_accounts = ?, created_at = ?
+            covered_accounts = ?, total_accounts = ?, created_at = ?,
+            portfolio_accounts = ?, portfolio_accounts_source = 'recorded'
         WHERE id = ?
       `).run(
         total_assets,
@@ -734,6 +776,7 @@ export function backfillSnapshots(): void {
         coveredAccounts,
         accounts.length,
         derivedAt,
+        portfolioAccounts,
         existing.id
       );
       continue;
@@ -743,8 +786,8 @@ export function backfillSnapshots(): void {
       INSERT INTO net_worth_snapshots
         (id, date, total_assets, total_liabilities, net_worth, breakdown, is_estimated,
          liquid_assets, investment_assets, crypto_assets, covered_accounts, total_accounts,
-         created_at)
-      VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?)
+         created_at, portfolio_accounts, portfolio_accounts_source)
+      VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, 'recorded')
     `).run(
       uuidv4(),
       targetStr,
@@ -757,7 +800,8 @@ export function backfillSnapshots(): void {
       crypto_assets,
       coveredAccounts,
       accounts.length,
-      derivedAt
+      derivedAt,
+      portfolioAccounts
     );
   }
 }

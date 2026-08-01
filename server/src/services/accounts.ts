@@ -320,17 +320,28 @@ export function mergeAccounts(
  * Values are summed where both ids appear on the same date: after a merge they are two parts of one
  * account, so the month's net worth must not change. That is the property migration 039 was
  * restoring, and it is the property this keeps.
+ *
+ * `portfolio_accounts` (migration 056) is remapped in the same pass, and has to be: it is a list of
+ * ids naming which accounts a point's portfolio value was a sum over, so leaving the source id in it
+ * after the breakdown entry moved would drop that account's balance out of every historical point
+ * while the row still looked complete. The set is a set, so a merge of two portfolio accounts
+ * shortens it by one, which is what actually happened to the ledger and is the honest count.
  */
 export function remapAccountIdInSnapshots(
   db: Database.Database,
   fromAccountId: string,
   toAccountId: string
 ): number {
-  const rows = db.prepare('SELECT id, breakdown FROM net_worth_snapshots').all() as Array<{
+  const rows = db.prepare(
+    'SELECT id, breakdown, portfolio_accounts FROM net_worth_snapshots'
+  ).all() as Array<{
     id: string;
     breakdown: string;
+    portfolio_accounts: string | null;
   }>;
-  const update = db.prepare('UPDATE net_worth_snapshots SET breakdown = ? WHERE id = ?');
+  const update = db.prepare(
+    'UPDATE net_worth_snapshots SET breakdown = ?, portfolio_accounts = ? WHERE id = ?'
+  );
   let changed = 0;
 
   for (const row of rows) {
@@ -349,11 +360,40 @@ export function remapAccountIdInSnapshots(
       breakdown[toAccountId] =
         typeof existing === 'number' && Number.isFinite(existing) ? existing + moved : moved;
     }
-    update.run(JSON.stringify(breakdown), row.id);
+    update.run(JSON.stringify(breakdown), remapPortfolioAccounts(row.portfolio_accounts, fromAccountId, toAccountId), row.id);
     changed += 1;
   }
 
   return changed;
+}
+
+/**
+ * The frozen portfolio membership of one snapshot, with the merged-away id replaced.
+ *
+ * Returns the column unchanged when it holds nothing this can act on, which keeps "no set was ever
+ * recorded" (NULL) distinct from "the set is empty": the first is read as a reconstruction at the
+ * read edge, and writing `[]` here would turn it into a claim that the point held no portfolio.
+ */
+function remapPortfolioAccounts(
+  stored: string | null,
+  fromAccountId: string,
+  toAccountId: string
+): string | null {
+  if (stored === null) return null;
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(stored);
+  } catch {
+    return stored;
+  }
+  if (!Array.isArray(parsed)) return stored;
+
+  const ids = parsed.filter((id): id is string => typeof id === 'string');
+  if (!ids.includes(fromAccountId)) return stored;
+
+  const remapped = new Set(ids.map((id) => (id === fromAccountId ? toAccountId : id)));
+  return JSON.stringify([...remapped].sort());
 }
 
 export type DeleteAccountResult = { ok: true } | { ok: false; reason: 'not_found' };
@@ -372,9 +412,13 @@ export function deleteAccount(db: Database.Database, id: string): DeleteAccountR
     //
     // The account's past balances DID happen, so rewriting them would silently change what net
     // worth was in every earlier month. What the app must not do is guess about an id it can no
-    // longer resolve: `deriveAssetBuckets` therefore counts an unresolvable account under `other`
-    // rather than assuming it was a non-liability asset, which is what made a removed credit card
-    // read as money the owner had.
+    // longer resolve. Treating an unknown breakdown id as a non-liability asset is what made a
+    // removed credit card read as money the owner had, so a reader that walks breakdown entries
+    // must drop the ones it cannot resolve rather than default them. The rule used to name
+    // `deriveAssetBuckets` as the place it was enforced; that function is deleted (see the note in
+    // netWorthHistory.ts) and the rule now binds `portfolioInSnapshot` in routes/reports.ts, which
+    // is the one remaining reader that resolves breakdown ids and which skips what is not in the
+    // set it was given.
     //
     // holdings and holdings_history cascade away with the account. That is correct HERE and wrong in
     // mergeAccounts, where the positions survive under the target: see the note there.

@@ -120,92 +120,134 @@ export function readSnapshotBefore(
   return row ? hydrate(row) : null;
 }
 
-export interface AssetBuckets {
-  liquid: number;
-  investment: number;
-  crypto: number;
-  other: number;
-  /** Net owed. Negative when the liabilities in the breakdown are collectively in credit. */
-  liabilities: number;
-}
+/*
+ * `deriveAssetBuckets` stood here and was deleted 2026-08-01, with its `AssetBuckets` type,
+ * LIQUID_TYPES and INVESTMENT_TYPES.
+ *
+ * It bucketed a snapshot's per-account breakdown into liquid / investment / crypto / other /
+ * liabilities at READ time, and its argument was sound: `liquid_assets` and `investment_assets` are
+ * frozen at write time from `accounts.type` as it stood then, so retyping an account silently
+ * changes what the stored series means. That argument is not lost. It is what the block below,
+ * migration 056 and `parseSnapshotPortfolio` are for, and they answer it by recording the set at
+ * write time and labelling a reconstruction as reconstructed, rather than by re-deriving at read
+ * time from an accounts table that postdates the row.
+ *
+ * It had no production caller. `/api/reports/investments` was the last one and left, because this
+ * function's INVESTMENT_TYPES bucketed `crypto_wallet` separately while the Investments screen
+ * totals it with the rest of the portfolio, so the two definitions of "investment assets" disagreed
+ * by exactly the Coinbase wallet. Re-confirmed before deleting, on 2026-08-01:
+ *   grep -rn deriveAssetBuckets server client shared scripts tests
+ * returned this file, `tests/creditPosition.test.ts`, and two comments in `routes/reports.ts` and
+ * `tests/investmentsPortfolio.test.ts` that record the defect in the past tense. No surface read it.
+ *
+ * A shared definition backing no surface is worse than no definition: nothing fails when it drifts,
+ * and a later change cites it as authoritative because it is the only one written down. The single
+ * assertion resting on it, that a card in credit carries as a NEGATIVE liability and not as debt of
+ * the same size, moved onto `takeSnapshot` in tests/creditPosition.test.ts, which is the live path
+ * that writes `total_liabilities` and the breakdown those buckets were derived from.
+ */
 
-const LIQUID_TYPES = new Set(['checking', 'savings', 'cash', 'closed']);
-const INVESTMENT_TYPES = new Set(['brokerage', 'ira_traditional', 'ira_roth']);
+/* ── What the portfolio was, and when that was decided ─────────────────────── */
 
 /**
- * Asset-class buckets derived from a snapshot's per-account breakdown at READ time.
+ * Accounts the Investments screen is about: anything holding a position now, or typed as one.
  *
- * `net_worth_snapshots.liquid_assets` / `investment_assets` / `crypto_assets` are computed when the
- * row is written, from `accounts.type` as it stood at that moment, and nothing ever recomputes them.
- * Account types are editable and are also auto-guessed on first sync, so correcting a type silently
- * rewrites what the historical series MEANS without changing a single stored number.
- *
- * On the live database both Fidelity accounts were first auto-typed `checking` and later retyped to
- * `brokerage` and `ira_roth`. The snapshots written on 2026-06-30 and 07-01 therefore still record
- * `investment_assets = 0` and `liquid_assets = 801953` for a portfolio that held $1,661.66, and the
- * Investments chart plots $2,441.93 -> $0.00 -> $0.00 -> $1,665.86: a portfolio that appears to
- * vanish for two days and come back.
- *
- * Deriving from the breakdown fixes the whole series at once and keeps fixing it, because the
- * breakdown records WHICH ACCOUNT held WHAT, which is a fact, while the bucket columns record an
- * interpretation of that fact which was frozen at write time.
- *
- * Accounts deleted since the snapshot was taken are counted in `other` rather than guessed at. The
- * previous behaviour of treating an unknown account as a non-liability asset is what made a removed
- * credit card read as money you had.
- *
- * IT HAS NO PRODUCTION CALLER RIGHT NOW. `/api/reports/investments` was the last one and resolves
- * its own portfolio set, because this INVESTMENT_TYPES bucketing puts `crypto_wallet` in a
- * separate bucket from the accounts that screen totals. Verified by
- * `grep -rn deriveAssetBuckets server client shared scripts tests` on 2026-07-31: the only hits
- * outside this file are two comments and `tests/creditPosition.test.ts`. So this is a definition
- * of "investment assets" that no surface reads, and nothing will fail if it drifts from the one
- * that is on screen. Re-home it or delete it; do not cite it as authoritative.
+ * One definition, imported by the writer (`services/snapshot.ts`, which freezes it onto each row)
+ * and by the reader (`routes/reports.ts`, which resolves today's set for the headline). Migration
+ * 056 pins the same list in SQL, deliberately, because a migration must reproduce on a clone in a
+ * year regardless of where this constant has moved to by then.
  */
-export function deriveAssetBuckets(
-  db: Database.Database,
-  breakdownJson: string
-): AssetBuckets {
-  const buckets: AssetBuckets = { liquid: 0, investment: 0, crypto: 0, other: 0, liabilities: 0 };
+export const PORTFOLIO_ACCOUNT_TYPES = ['brokerage', 'ira_traditional', 'ira_roth', 'crypto_wallet'];
 
-  let breakdown: Record<string, unknown>;
+export interface PortfolioAccountRow {
+  id: string;
+  type: string;
+  current_balance: number;
+  /** 1 when the account carries at least one position right now. */
+  holds_position: number;
+}
+
+/**
+ * The portfolio as it stands right now, in id order.
+ *
+ * `is_hidden = 0` is not decoration: it is the predicate `takeSnapshot` writes a breakdown entry
+ * under, so an account outside it can never appear in a future point of the series. Without it,
+ * disconnecting Coinbase (routes/coinbase.ts sets `is_hidden = 1` and leaves `current_balance`)
+ * left $391.17 in the headline, out of the series, and standing in the delta as movement every day.
+ *
+ * The `EXISTS holdings` arm is why a type edit alone is not the reproduction of the freezing bug it
+ * looks like: on the live ledger all three portfolio accounts hold positions, so retyping Fidelity
+ * Individual to `savings` leaves it in the set and moves nothing. What moves history is an edit that
+ * changes the set: retyping an account INTO a portfolio type, hiding one, or deleting one.
+ */
+export function readPortfolioAccounts(db: Database.Database): PortfolioAccountRow[] {
+  return db.prepare(`
+    SELECT
+      a.id,
+      a.type,
+      a.current_balance,
+      EXISTS (SELECT 1 FROM holdings h WHERE h.account_id = a.id) AS holds_position
+    FROM accounts a
+    WHERE a.is_liability = 0
+      AND a.is_hidden = 0
+      AND (a.type IN (${PORTFOLIO_ACCOUNT_TYPES.map(() => '?').join(', ')})
+           OR EXISTS (SELECT 1 FROM holdings h2 WHERE h2.account_id = a.id))
+    ORDER BY a.id
+  `).all(...PORTFOLIO_ACCOUNT_TYPES) as PortfolioAccountRow[];
+}
+
+/**
+ * Whether a point's account set was written with it, or worked out afterwards.
+ *
+ * `recorded` means the code that wrote the row's balances wrote the set in the same statement.
+ * `reconstructed` means it was derived later from an accounts table that postdates the row, which
+ * is what migration 056 did to every row that already existed, and what this module does at read
+ * time for a row carrying no set at all. A reconstruction is not a measurement, and this is the
+ * only thing that can tell the two apart afterwards.
+ */
+export type PortfolioMembershipSource = 'recorded' | 'reconstructed';
+
+export interface SnapshotPortfolioMembership {
+  accountIds: Set<string>;
+  source: PortfolioMembershipSource;
+}
+
+export interface SnapshotPortfolioColumns {
+  portfolio_accounts: string | null;
+  portfolio_accounts_source: string | null;
+}
+
+/**
+ * The account set a stored snapshot was made of, falling back to today's portfolio when it has none.
+ *
+ * The fallback is the pre-056 behaviour and is labelled as what it is rather than hidden: a row with
+ * no stored set is one nothing recorded a set for, and today's accounts table is the only evidence
+ * left. It is reachable for a row written before 056 whose breakdown was unreadable, and for a row a
+ * future writer inserts without filling the column in. `tests/investmentHistoryMembership.test.ts`
+ * asserts neither writer in this repo does the latter, so the fallback is a floor, not a path.
+ *
+ * An unrecognised `portfolio_accounts_source` reads as `reconstructed`, never as `recorded`: an
+ * unknown provenance must not be upgraded into a claim that the row was written with its own set.
+ */
+export function parseSnapshotPortfolio(
+  row: SnapshotPortfolioColumns,
+  fallback: Set<string>
+): SnapshotPortfolioMembership {
+  if (row.portfolio_accounts === null) return { accountIds: fallback, source: 'reconstructed' };
+
+  let parsed: unknown;
   try {
-    breakdown = JSON.parse(breakdownJson) as Record<string, unknown>;
+    parsed = JSON.parse(row.portfolio_accounts);
   } catch {
-    return buckets;
+    return { accountIds: fallback, source: 'reconstructed' };
   }
+  if (!Array.isArray(parsed)) return { accountIds: fallback, source: 'reconstructed' };
 
-  const accountRows = db.prepare('SELECT id, type, is_liability FROM accounts').all() as Array<{
-    id: string;
-    type: string;
-    is_liability: number;
-  }>;
-  const accounts = new Map(accountRows.map((row) => [row.id, row]));
-
-  for (const [accountId, rawValue] of Object.entries(breakdown)) {
-    if (typeof rawValue !== 'number' || !Number.isFinite(rawValue)) continue;
-    const account = accounts.get(accountId);
-    if (!account) {
-      buckets.other += rawValue;
-      continue;
-    }
-    if (account.is_liability === 1) {
-      // Signed. A card in credit is stored as a negative amount owed, and Math.abs() turned that
-      // credit into debt of the same size, so the bucket overstated liabilities by twice the
-      // credit and understated net worth by the same amount.
-      buckets.liabilities += rawValue;
-    } else if (LIQUID_TYPES.has(account.type)) {
-      buckets.liquid += rawValue;
-    } else if (INVESTMENT_TYPES.has(account.type)) {
-      buckets.investment += rawValue;
-    } else if (account.type === 'crypto_wallet') {
-      buckets.crypto += rawValue;
-    } else {
-      buckets.other += rawValue;
-    }
-  }
-
-  return buckets;
+  const accountIds = new Set(parsed.filter((id): id is string => typeof id === 'string'));
+  return {
+    accountIds,
+    source: row.portfolio_accounts_source === 'recorded' ? 'recorded' : 'reconstructed',
+  };
 }
 
 /** Render an estimate as an estimate wherever a snapshot is turned into text for the model. */

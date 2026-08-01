@@ -176,6 +176,20 @@ export const transactionsApi = {
       body: JSON.stringify(body),
     }),
   /**
+   * Give a corrected amount back to the institution.
+   *
+   * No body: what the row reverts to is what the provider last offered, and the server reads that
+   * from `transaction_field_revisions` rather than trusting a figure a stale screen is still
+   * showing. The response is the row as it now stands, so the caller does not have to guess
+   * whether the amount moved.
+   *
+   * This is the exit from the amount pin, and it is why the pin is allowed to exist:
+   * `upsertSimplefinTransaction` keeps an owner-corrected amount forever, and a claim over a money
+   * field with no way to withdraw it is what migration 048 refused to build.
+   */
+  releaseAmount: (id: string) =>
+    apiFetch<Transaction>(`/api/transactions/${id}/amount/release`, { method: 'POST' }),
+  /**
    * Set a row aside, or bring it back. The Ledger's row action column is the only caller.
    *
    * The server's `TransactionReviewStatusSchema` also accepts `'reviewed'`, and nothing here sends
@@ -540,7 +554,13 @@ export const reportsApi = {
     // not always all of them: `takeSnapshot` writes a breakdown entry only for visible accounts,
     // so a point taken before an account existed covers fewer, and a sum over a different set is
     // a different quantity rather than a smaller portfolio.
-    return apiFetch<{ portfolio_value: number; holdings_value: number; invested_balance: number; crypto_value: number; portfolio_account_ids: string[]; history: Array<{ date: string; value: number; estimated: boolean; covered_accounts: number }>; allocation: Array<{ security_type: string; total_value: number }>; holdings: unknown[] }>(`/api/reports/investments?${q.toString()}`);
+    //
+    // `membership` says whether the point's account set was written with it (`recorded`) or worked
+    // out afterwards from an accounts table that postdates it (`reconstructed`). Every row written
+    // before migration 056 is the latter, because the set it was summed over was never stored and
+    // the only evidence left is today's accounts. It is the same distinction `estimated` draws one
+    // level up: `estimated` is about the balances, this is about which accounts they belong to.
+    return apiFetch<{ portfolio_value: number; holdings_value: number; invested_balance: number; crypto_value: number; portfolio_account_ids: string[]; history: Array<{ date: string; value: number; estimated: boolean; covered_accounts: number; membership: 'recorded' | 'reconstructed' }>; allocation: Array<{ security_type: string; total_value: number }>; holdings: unknown[] }>(`/api/reports/investments?${q.toString()}`);
   },
 };
 

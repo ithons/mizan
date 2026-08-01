@@ -181,7 +181,17 @@ not overwrite a number the owner set.
 - [ ] **Transaction field provenance.** The sync workstream protected a hand-edited `merchant_name` from provider overwrite using the row's own pending state, and deliberately did NOT extend that to `date`/`amount`: pinning a money field the institution later revised (a tip adjustment, a partial reversal, a corrected post date) would leave the ledger permanently disagreeing with the balance it reconciles against, with nothing on screen saying so. Doing it properly needs a `field_source` or edit-revision log in the shape of migration 042. That belongs here, with the rest of the provenance work.
 - [ ] **Migration: `ai_feedback`.** There is currently no record anywhere of the AI being wrong. `undoAdvisorAction` writes nothing; `updateTransaction` clears `category_action_id` on a hand edit, which protects undo and simultaneously erases the evidence. Written from three call sites: undo, manual override (before clearing), draft dismissal. Highest-value single addition in the design.
 - [ ] **Migration: `ai_memory`** (scope/subject/statement/kind/evidence_count/superseded_by), visible, editable and deletable in Settings, carrying the evidence that produced each entry
-- [ ] **Migration: `ai_runs`, `ai_incidents`, `ai_observations`, `ai_briefs`**
+- [x] **Migration: `ai_runs`, `ai_incidents`.** Shipped as migrations 051 and 050. `ai_observations`
+      and `ai_briefs` were named on this line and nowhere else, were never given a stated purpose in
+      any plan file, and are **dropped, decided 2026-08-01**. The argument and its measurements are
+      in `relink-and-close.md` Phase 4; the short form is that the "have I already said this" job an
+      observations log would have done is already done by the write record itself
+      (`transaction_category_revisions.to_source = 'ai'` and `ai_feedback` joined to
+      `advisor_drafts`), that a stored brief can disagree with a ledger the on-demand digest
+      recomputes against, and that the part of an observation log that is genuinely missing is
+      missing upstream of any table: the worker's output contract accepts drafts only, so an
+      observation carrying no action has no channel to be written from. This line is closed. Do not
+      re-open it without reading that phase first.
 - [ ] **`aiGuards.ts`**: snapshot the headline set (net worth, month spend, month income, savings rate, 60-day scheduled net, per-category totals) before an autonomous batch, re-run the invariants after, diff, and auto-revert the whole batch by action id on breach
 - [ ] **`aiJobs.ts` + `aiScheduler.ts`**: named jobs with declared `{trigger, model, effort, writes, invariants, digestSection}`. Move the worker kickoff into a `finally` so a partial sync still triggers a pass (today it sits after `if (deferredError) throw`).
 - [ ] Emit an SSE event when the background pass applies anything, so the client stops rendering pre-AI category totals for up to 5 minutes

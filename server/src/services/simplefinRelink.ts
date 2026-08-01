@@ -306,9 +306,24 @@ export type PairEvidence =
   | 'sole_unmatched_at_institution';
 
 /**
- * How much the evidence carries, and nothing more. Three words, not a number: a confidence score
- * would be a figure nothing measured, and the owner would be confirming the score instead of the
- * comparison.
+ * WHICH EVIDENCE DECIDED THE PAIR. Three words, not a number: a confidence score would be a figure
+ * nothing measured, and the owner would be confirming the score instead of the comparison.
+ *
+ *   exact     institution, account name and currency all matched, and no other incoming account
+ *             matched that well. Nothing had to be inferred and nothing had to be broken.
+ *   strong    the same, except the names matched through the account-number mask or through one
+ *             containing the other rather than character for character.
+ *   inferred  anything the names did not settle on their own. That includes a pairing resting on
+ *             the institution alone, a currency that changed, an institution string that changed,
+ *             AND a tie that only the balance tiebreak could break.
+ *
+ * The balance case is why this is not a function of rank. `strength` used to be computed inside
+ * `edgeFor`, which sees one candidate at a time and therefore cannot know whether that candidate
+ * was alone at its rank. Two provider accounts matching one stored account on institution, name and
+ * currency is not an exact match to either of them: what actually chose between them was the
+ * balance, which this module documents as its weakest signal precisely because the response that
+ * raises a re-link is the first one in a while and balances have moved since. The `reason` sentence
+ * said so all along; the one-word label said `exact`, and the label is what a hurried owner reads.
  */
 export type PairStrength = 'exact' | 'strong' | 'inferred';
 
@@ -388,7 +403,6 @@ interface CandidateEdge {
   stored: StoredAccountSnapshot;
   provider: ProviderAccountSnapshot;
   rank: number;
-  strength: PairStrength;
   evidence: PairEvidence[];
   balanceMatches: boolean;
 }
@@ -442,8 +456,21 @@ function edgeFor(
   }
   if (rank === null) return null;
 
-  const strength: PairStrength = rank === RANK_NAME ? 'exact' : rank <= RANK_SIMILAR ? 'strong' : 'inferred';
-  return { stored, provider, rank, strength, evidence, balanceMatches };
+  return { stored, provider, rank, evidence, balanceMatches };
+}
+
+/**
+ * The label, derived from what settled the pair rather than from the rank it settled at.
+ *
+ * `resolvedByBalance` is known only to `proposeSimplefinPairing`, which is the only place that can
+ * see all of a stored account's candidates at once, so this cannot live in `edgeFor`. When the
+ * balance is what broke the tie, the names were by definition ambiguous and no amount of rank
+ * entitles the pair to `exact` or `strong`.
+ */
+function pairStrength(edge: CandidateEdge, resolvedByBalance: boolean): PairStrength {
+  if (resolvedByBalance) return 'inferred';
+  if (edge.rank === RANK_NAME) return 'exact';
+  return edge.rank <= RANK_SIMILAR ? 'strong' : 'inferred';
 }
 
 function quoted(value: string): string {
@@ -599,7 +626,7 @@ export function proposeSimplefinPairing(
       providerAccountId: hit.edge.provider.id,
       providerAccountName: hit.edge.provider.name,
       providerInstitutionName: hit.edge.provider.institutionName,
-      strength: hit.edge.strength,
+      strength: pairStrength(hit.edge, hit.resolvedByBalance),
       evidence: hit.edge.evidence,
       reason: describeEdge(hit.edge, hit.resolvedByBalance),
     });

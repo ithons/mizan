@@ -179,6 +179,13 @@ export function LedgerRowInner({
             <span className="truncate text-note text-muted-2">{transaction.account_name}</span>
             {mark && <Mark>{PROVENANCE_LABEL[mark]}</Mark>}
             {direction === 'credit' && <Mark>credit</Mark>}
+            {/* Said on the row because the figure beside it is not the one the institution sent,
+                and a corrected number that looks exactly like a reported one is the thing this
+                mark exists to prevent. It is a statement of authorship, not a finding: it carries
+                the same neutral mono ink as `you`/`rule`/`match` and no tint, because nothing here
+                is open. The provider's competing figure is one click away in the entry's own
+                sheet, which is where the choice between them lives. */}
+            {transaction.amount_source === 'human' && <Mark>amount: you</Mark>}
             {flags.map((flag) => (
               <span
                 key={flag}

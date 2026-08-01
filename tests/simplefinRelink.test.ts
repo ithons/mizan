@@ -350,6 +350,80 @@ test('the balance separates two otherwise identical candidates, and says so', ()
   db.close();
 });
 
+/**
+ * The label has to agree with the sentence beside it.
+ *
+ * These two accounts match their candidates on institution, name and currency, which is the top
+ * rank, and `strength` was read straight off that rank. So a pair that only the balance tiebreak
+ * could decide was labelled `exact` while its own `reason` said "More than one provider account
+ * matched that well". An owner reading the evidence was not misled; an owner reading the one word
+ * was. Both fixtures below are the same shape as the test above and assert what it does not.
+ */
+test('a pair the balance tiebreak decided is not labelled exact', () => {
+  const db = migratedTestDb();
+  linkedAccount(db, { id: 'a_one', providerId: 'ACT-1', accountName: 'Savings', institutionName: 'Ally', balanceCents: 500000 });
+  linkedAccount(db, { id: 'a_two', providerId: 'ACT-2', accountName: 'Savings', institutionName: 'Ally', balanceCents: 900000 });
+  const stored = readStoredSimplefinAccounts(db);
+
+  const { pairs } = proposeSimplefinPairing(
+    [provider('ACT-77', 'Savings', 'Ally', 500000), provider('ACT-78', 'Savings', 'Ally', 900000)],
+    stored
+  );
+
+  assert.equal(pairs.length, 2);
+  for (const pair of pairs) {
+    assert.equal(
+      pair.strength,
+      'inferred',
+      `${pair.storedAccountId} was decided by the balance and must not read as an exact name match`
+    );
+    // The evidence list is unchanged: the names really did match. What moved is the claim about
+    // what settled it, so the two must not be allowed to drift apart in the other direction.
+    assert.ok(pair.evidence.includes('account_name_match'));
+    assert.ok(pair.evidence.includes('balance_match'));
+    assert.match(pair.reason, /only one whose balance matches/);
+  }
+  db.close();
+});
+
+test('a pair the names decided on their own is still labelled exact', () => {
+  const db = migratedTestDb();
+  // One candidate, so nothing is being broken by anything. This is the healthy case the fix must
+  // leave alone: downgrading every pair would have passed the test above and been useless.
+  linkedAccount(db, { id: 'a_one', providerId: 'ACT-1', accountName: 'Savings', institutionName: 'Ally', balanceCents: 500000 });
+  const stored = readStoredSimplefinAccounts(db);
+
+  const { pairs } = proposeSimplefinPairing([provider('ACT-77', 'Savings', 'Ally', 900000)], stored);
+
+  assert.equal(pairs.length, 1);
+  assert.equal(pairs[0].strength, 'exact');
+  // Deliberately a balance that does NOT match: an exact name pairing does not depend on the
+  // balance agreeing, and the reason says the ordinary thing rather than claiming a tiebreak ran.
+  assert.equal(pairs[0].evidence.includes('balance_match'), false);
+  assert.match(pairs[0].reason, /The balances differ/);
+  db.close();
+});
+
+test('a mask pair the balance tiebreak decided is not labelled strong either', () => {
+  const db = migratedTestDb();
+  // Same mask on both sides at one institution, so rank is the mask rung and two candidates tie.
+  linkedAccount(db, { id: 'a_one', providerId: 'ACT-1', accountName: 'Checking ...4021', institutionName: 'Chase', balanceCents: 111111 });
+  linkedAccount(db, { id: 'a_two', providerId: 'ACT-2', accountName: 'Savings ...4021', institutionName: 'Chase', balanceCents: 222222 });
+  const stored = readStoredSimplefinAccounts(db);
+
+  const { pairs } = proposeSimplefinPairing(
+    [provider('ACT-77', 'TOTAL CHECKING 4021', 'Chase', 111111), provider('ACT-78', 'PREMIER 4021', 'Chase', 222222)],
+    stored
+  );
+
+  assert.equal(pairs.length, 2);
+  for (const pair of pairs) {
+    assert.ok(pair.evidence.includes('account_number_mask_match'));
+    assert.equal(pair.strength, 'inferred', 'the mask tied; the balance is what chose');
+  }
+  db.close();
+});
+
 test('an account closed at the bank is left unpaired and does not block the real pairs', () => {
   const db = migratedTestDb();
   linkedAccount(db, { id: 'a_live', providerId: 'ACT-1', accountName: 'Chase Checking', institutionName: 'Chase' });

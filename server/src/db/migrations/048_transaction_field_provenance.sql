@@ -1,5 +1,14 @@
 -- Field-level provenance for date, amount and merchant_name, shaped like migration 042.
 --
+-- AMENDED 2026-08-01, and the amendment is here rather than in a later migration because no schema
+-- changed: the paragraph below was the design of the CODE that reads these columns, and half of it
+-- is no longer true. `amount` IS now a pin. An owner-authored amount survives the sync that used to
+-- overwrite it, the provider's competing figure is filed as `provider_rejected` instead of being
+-- written, and `releaseAmountToProvider` (services/transactions.ts) is the exit that keeps the
+-- objection below answered. `date` is unchanged and still cannot be pinned. The argument, the
+-- measured Fidelity rows that forced it and the three properties that make it safe are at
+-- `upsertSimplefinTransaction` in services/simplefin.ts; nothing below this line was edited.
+--
 -- WHAT THIS IS NOT. It is not a pin. Nothing here lets an owner-authored `amount` or `date` win
 -- against the institution, and that refusal is the design. An institution revises a posted row for
 -- ordinary reasons (a tip adjustment, a partial reversal, a corrected post date), and a pinned

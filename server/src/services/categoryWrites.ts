@@ -290,13 +290,33 @@ export function recordFieldRevision(
   now = new Date().toISOString()
 ): boolean {
   if (revision.origin === 'provider_rejected') {
+    // A standing disagreement is ONE row, not one per hourly sync. But "already filed" and "still
+    // being offered" are different facts, and collapsing them put a wrong number into the ledger.
+    //
+    // Both readers of these rows order by `created_at DESC` and mean by it "what the provider says
+    // NOW". A bare existence check never refreshed the timestamp, so a feed that oscillated
+    // A, B, back to A left B newest: the row read "still reports B", and
+    // `releaseAmountToProvider` adopted B and stamped `amount_source = 'provider'`, recording an
+    // authorship that did not happen and writing a figure the institution had stopped reporting.
+    // The next sync self-healed the number but reported it as `modified`, so the panel claimed the
+    // institution moved something it had not.
+    //
+    // Touching `created_at` on a repeat keeps the row count at one AND makes newest mean current,
+    // which is what both readers already assume. The return value still says false, because no new
+    // disagreement was filed and callers count filings.
     const seen = db.prepare(`
-      SELECT 1 FROM transaction_field_revisions
+      SELECT id FROM transaction_field_revisions
       WHERE transaction_id = ? AND field = ? AND origin = 'provider_rejected'
         AND from_value IS ? AND to_value IS ?
       LIMIT 1
-    `).get(revision.transactionId, revision.field, revision.fromValue, revision.toValue);
-    if (seen) return false;
+    `).get(revision.transactionId, revision.field, revision.fromValue, revision.toValue) as
+      | { id: string }
+      | undefined;
+    if (seen) {
+      db.prepare('UPDATE transaction_field_revisions SET created_at = ? WHERE id = ?')
+        .run(now, seen.id);
+      return false;
+    }
   }
 
   db.prepare(`

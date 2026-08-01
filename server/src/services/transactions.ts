@@ -93,6 +93,42 @@ export function expandCategoryIds(db: Database.Database, categoryIds: string[]):
   return Array.from(expanded);
 }
 
+/**
+ * What the provider still reports for an amount the owner corrected, in cents, or NULL.
+ *
+ * Declared once and used by both readers below, because it is the only place the provider's side
+ * of a standing disagreement lives. `upsertSimplefinTransaction` keeps an owner-authored amount
+ * (`amount_source = 'human'`) and files the provider's offer as a `provider_rejected` revision
+ * instead of writing it, so without this the screen would show one number and have no way to say
+ * that the institution says another.
+ *
+ * Two gates, and both are about not asserting a disagreement that is not standing. The revision
+ * has to be filed against the value the row CURRENTLY holds (`from_value = t.amount`), so
+ * re-correcting to a third number does not leave the previous argument on screen: the next sync
+ * files a fresh rejection against the new value, or, if the provider now agrees, files nothing and
+ * this reads NULL. And `amount_source` has to still be 'human', so a released field shows nothing
+ * even though its rejection rows stay in the append-only log.
+ *
+ * Integer cents, like the column it comes from. `routes/transactions.ts` dollarizes it beside
+ * `amount`, and migration 048 is explicit that `to_value` is TEXT holding whatever the field held,
+ * which for `amount` is the same integer cents, so the CAST is a decode and not a conversion.
+ *
+ * Both sides of the `from_value` comparison are cast to INTEGER rather than the column being cast
+ * to TEXT. The text form is not stable across the boundary: better-sqlite3 binds a JS number as a
+ * float, so `CAST(? AS TEXT)` on 10000 is '10000.0' and would silently match nothing.
+ */
+const PROVIDER_AMOUNT_SQL = `
+      CASE WHEN t.amount_source = 'human' THEN (
+        SELECT CAST(r.to_value AS INTEGER)
+        FROM transaction_field_revisions r
+        WHERE r.transaction_id = t.id
+          AND r.field = 'amount'
+          AND r.origin = 'provider_rejected'
+          AND CAST(r.from_value AS INTEGER) = t.amount
+        ORDER BY r.created_at DESC, r.rowid DESC
+        LIMIT 1
+      ) END AS provider_amount`;
+
 function transactionOrderBy(sortBy: TransactionSortBy, sortDir: TransactionSortDir): string {
   const direction = sortDir.toUpperCase();
 
@@ -218,7 +254,8 @@ export function listTransactions(db: Database.Database, filters: TransactionList
       -- screen has no way to tell a $955.19 Amazon credit from a paycheck and paints both green.
       c.is_income AS category_is_income,
       a.account_name,
-      a.institution_name
+      a.institution_name,
+      ${PROVIDER_AMOUNT_SQL}
     FROM transactions t
     LEFT JOIN categories c ON c.id = t.category_id
     LEFT JOIN accounts a ON a.id = t.account_id
@@ -241,7 +278,8 @@ export function getTransactionById(db: Database.Database, id: string): Record<st
       -- screen has no way to tell a $955.19 Amazon credit from a paycheck and paints both green.
       c.is_income AS category_is_income,
       a.account_name,
-      a.institution_name
+      a.institution_name,
+      ${PROVIDER_AMOUNT_SQL}
     FROM transactions t
     LEFT JOIN categories c ON c.id = t.category_id
     LEFT JOIN accounts a ON a.id = t.account_id
@@ -538,6 +576,93 @@ export function updateTransaction(
 
   const row = db.prepare('SELECT * FROM transactions WHERE id = ?').get(id) as Record<string, unknown>;
   return { ok: true, row, balanceChanged, categorization };
+}
+
+export type ReleaseAmountResult =
+  | { ok: true; row: Record<string, unknown>; providerAmountAdopted: number | null }
+  | { ok: false; reason: 'not_found' | 'not_corrected' | 'not_provider_backed' };
+
+/**
+ * Hand a corrected amount back to the institution.
+ *
+ * This is the half that keeps `upsertSimplefinTransaction`'s amount pin from being a trap.
+ * Migration 048 refused an owner-authored amount outright, and its reason was sound: a pin that
+ * cannot be released leaves the ledger permanently disagreeing with the balance it reconciles
+ * against, with nothing able to end it. So the pin ships with its own exit, and the exit is not
+ * "type the provider's number back in": doing that would leave `amount_source = 'human'` and pin
+ * the row to a value that merely happens to agree today, silently rejecting the next genuine
+ * revision.
+ *
+ * What it adopts is whatever the provider last offered against the value the row currently holds,
+ * which is the same rejection row the screen was showing. When the provider has offered nothing
+ * (no sync since the correction, or it now agrees), the amount does not move and only the
+ * authorship does; that is not a value change, so nothing is logged for it.
+ *
+ * Anything but a SimpleFIN row is refused rather than quietly succeeding, and that is narrower
+ * than "has a provider" on purpose. A manual row has no institution behind it at all, and the
+ * manual-account balance a release would have to keep in step is the owner's own arithmetic. A
+ * Coinbase row has an institution but no re-offer: `upsertCoinbaseTransaction` never rewrites the
+ * `amount` of a row it has already written, so a corrected one is never reverted, no rejection is
+ * ever filed, and stamping `amount_source = 'provider'` onto a number the owner typed would record
+ * an authorship that did not happen.
+ */
+export function releaseAmountToProvider(
+  db: Database.Database,
+  id: string,
+  now = new Date().toISOString()
+): ReleaseAmountResult {
+  const existing = db.prepare(`
+    SELECT id, amount, amount_source, simplefin_transaction_id, is_manual
+    FROM transactions WHERE id = ?
+  `).get(id) as
+    | {
+        id: string;
+        amount: number;
+        amount_source: string | null;
+        simplefin_transaction_id: string | null;
+        is_manual: number;
+      }
+    | undefined;
+
+  if (!existing) return { ok: false, reason: 'not_found' };
+  if (existing.amount_source !== 'human') return { ok: false, reason: 'not_corrected' };
+  if (existing.is_manual || !existing.simplefin_transaction_id) {
+    return { ok: false, reason: 'not_provider_backed' };
+  }
+
+  const offered = db.prepare(`
+    SELECT to_value FROM transaction_field_revisions
+    WHERE transaction_id = ? AND field = 'amount' AND origin = 'provider_rejected'
+      AND CAST(from_value AS INTEGER) = ?
+    ORDER BY created_at DESC, rowid DESC
+    LIMIT 1
+  `).get(existing.id, existing.amount) as { to_value: string | null } | undefined;
+
+  const providerAmount =
+    offered?.to_value != null && Number.isInteger(Number(offered.to_value)) ? Number(offered.to_value) : null;
+  const adopted = providerAmount !== null && providerAmount !== existing.amount ? providerAmount : null;
+
+  db.transaction(() => {
+    if (adopted !== null) {
+      // The row now holds the provider's value and this log row is the only remaining record of
+      // the owner's, which is exactly what migration 048 defines 'provider_revision' to mean.
+      recordFieldRevision(db, {
+        transactionId: existing.id,
+        field: 'amount',
+        fromValue: String(existing.amount),
+        toValue: String(adopted),
+        fromSource: 'human',
+        toSource: 'provider',
+        origin: 'provider_revision',
+      }, now);
+    }
+    db.prepare(`
+      UPDATE transactions SET amount = ?, amount_source = 'provider', updated_at = ? WHERE id = ?
+    `).run(adopted ?? existing.amount, now, existing.id);
+  })();
+
+  const row = getTransactionById(db, existing.id) as Record<string, unknown>;
+  return { ok: true, row, providerAmountAdopted: adopted };
 }
 
 export type DeleteTransactionResult =

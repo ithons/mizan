@@ -45,16 +45,45 @@ export function ProgressBar({ fraction, tone = 'sage', height = 6, className = '
   const pct = Math.min(100, Math.max(0, fraction * 100));
   return (
     /* Track is `bg-track`, not `bg-line`, because the unfilled portion has to be visible or the bar
-       reads as a floating dash of unknown extent rather than a measurement.
-       OPEN FINDING, do not read this as settled: on the current palette `track` no longer buys that.
-       Re-derived from index.css, `track` against the grounds this bar renders on measures
-       paper 1.32 light / 1.55 dark, card 1.32 / 1.40, card-alt 1.26 / 1.31, well 1.19 / 1.28 and
-       rail 1.22 / 1.46, against `line`'s 1.30 / 1.39 on paper. The fill-to-track edge still clears
-       3:1 in every tone (see the map above), so the VALUE is readable; the bar's own outer extent
-       is not. That is a token question, not a component one, and it is deliberately not being
-       patched here by swapping the class. */
+       reads as a floating dash of unknown extent rather than a measurement. It is `bg-track` INSIDE
+       A RING for the same reason, and the ring is what actually carries the extent.
+       Re-derived from index.css on 2026-08-01, `track` against the grounds this note tracks
+       (light / dark), with `line` for comparison because it is what this class was chosen over:
+           track on paper       1.32 / 1.55
+           track on card        1.32 / 1.40
+           track on card-alt    1.26 / 1.31
+           track on well        1.19 / 1.28
+           track on rail        1.22 / 1.46
+           line on paper        1.30 / 1.39
+       The fill-to-track edge clears 3:1 in every tone (see the map above), so the VALUE was
+       readable; the bar's own outer extent was not, on any ground, in either theme, and the class
+       it was chosen over would not have helped.
+       NO TRACK COLOUR CAN FIX THAT, which is why nothing in the palette moved. A bar has to clear
+       3:1 twice at once, page-to-track and track-to-fill, and those two pull in opposite directions.
+       Scanning all 256 achromatic values against the five fills this file can draw, the best a solid
+       track can manage is, per theme, the value and what it separates from that theme's page by:
+           BEST-SOLID-TRACK light rgb(208 208 208) 1.54 to 1
+           BEST-SOLID-TRACK dark rgb(65 65 65) 2.06 to 1
+       Both are under three, so a solid track is the wrong instrument and a hairline boundary is the
+       right one. That scan is re-run in tests/barBoundary.test.ts, which reads these two lines and
+       fails if either the value or the ratio stops reproducing, or if one of them ever clears.
+       `line-3` is that boundary because it is the token that clears everywhere a bar can land
+       (light / dark):
+           line-3 on paper      4.95 / 5.77
+           line-3 on card       4.95 / 5.23
+           line-3 on card-alt   4.74 / 4.88
+           line-3 on well       4.46 / 4.78
+           line-3 on rail       4.58 / 5.44
+           line-3 on track      3.75 / 3.73
+       The last row is why it reads as an edge and not as a wider track. `line-2` is the cheaper
+       candidate and is the one that does not clear: line-2 on well 2.84 / 3.12. `ring`, not
+       `border`, because a border eats into a 6px bar's own height and the fill is what is measured.
+       tests/barBoundary.test.ts reads the ring class out of this file and re-derives all of that, so
+       swapping the token fails there rather than passing silently. This is a legibility fix and
+       deliberately not a palette one: no token moved, so whatever palette direction lands next
+       carries it unchanged. */
     <div
-      className={`overflow-hidden rounded-full bg-track ${className}`}
+      className={`overflow-hidden rounded-full bg-track ring-1 ring-line-3 ${className}`}
       style={{ height }}
       role="progressbar"
       aria-valuenow={Math.round(pct)}
@@ -140,8 +169,12 @@ export function SignedBar({ value, extent, diverging, height = 6, className = ''
        and ink-soft is the widest margin of the three, which is why the zero rule is set in it. The
        rule is deliberately the most visible thing in the component: it is what makes this a
        measurement rather than a blob. `sage-soft` is the member of the family a lighter fill would
-       reach for and it is the one that cannot be used, at 1.63/2.05. */
-    <div className={`relative rounded-full bg-track ${className}`} style={{ height }}>
+       reach for and it is the one that cannot be used, at 1.63/2.05.
+       The `ring-line-3` boundary is the same fix and the same argument as ProgressBar's above: the
+       fill reads against the track, the track does not read against the page, and no track colour
+       can do both at once. It matters more here, because a value at or near zero draws almost no
+       fill at all and the bar would otherwise be nothing on the screen. */
+    <div className={`relative rounded-full bg-track ring-1 ring-line-3 ${className}`} style={{ height }}>
       <div
         className={`absolute top-0 h-full transition-all duration-300 ease-out ${
           negative ? 'rounded-l-full bg-sage-deep' : 'rounded-r-full bg-muted'

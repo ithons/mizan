@@ -475,12 +475,37 @@ interface ExistingTransactionRow {
  * not moved. That panel is also where reauth prompts and partial failures appear, and noise there
  * is what teaches the owner to stop reading it.
  *
- * What migration 048 adds is a record, not a veto. `date` and `amount` are still overwritten from
- * the provider unconditionally, because an institution revises a posted row for ordinary reasons
- * and a pinned money field would leave the ledger permanently disagreeing with the balance it
- * reconciles against. What changes is that overwriting a field the owner authored now appends a
- * `transaction_field_revisions` row, so the owner's value survives as evidence and the
- * disagreement is knowable instead of silent.
+ * `date` is still overwritten from the provider unconditionally, and overwriting a date the owner
+ * authored appends a `provider_revision` row so the displaced value survives as evidence.
+ *
+ * `amount` is the one field where that changed, and migration 048's own header says the opposite,
+ * so the reversal is argued here rather than assumed. 048 refused to let an owner amount win,
+ * because an institution revises a posted row for ordinary reasons and a pinned money field would
+ * leave the ledger permanently disagreeing with the balance it reconciles against. What that
+ * refusal could not express is a provider that is not revising anything but is simply wrong the
+ * same way every hour: Fidelity reports "Electronic Funds Transfer Received" with the sign
+ * inverted, so money coming IN is stored as money going out, and every repair reverted inside the
+ * hour. Measured on a `.backup` copy of `.mizan/mizan.db` taken 2026-08-01 at migration 055:
+ *
+ *   SELECT COUNT(*), SUM(t.amount), SUM(t.amount < 0)
+ *     FROM transactions t JOIN accounts a ON a.id = t.account_id
+ *    WHERE a.institution_name LIKE '%Fidelity%'
+ *      AND (t.original_name LIKE '%Electronic Funds Transfer%'
+ *           OR t.merchant_name LIKE '%Electronic Funds%');
+ *   -> 14 rows, -110000 cents, 14 of them negative.
+ *
+ * So an owner amount is kept, and the provider's standing offer is recorded as `provider_rejected`
+ * rather than written. The three things that keep 048's objection answered:
+ *
+ *   1. The disagreement is on the row, not buried. `provider_amount` (services/transactions.ts)
+ *      reads the newest rejection whose `from_value` is what the row currently holds, so the
+ *      ledger can show both numbers wherever it shows the corrected one.
+ *   2. It is releasable. `releaseAmountToProvider` hands the field back, takes whatever the
+ *      provider currently offers, and logs a `provider_revision`. A pin the owner cannot undo is
+ *      the failure 048 was really guarding against.
+ *   3. It cannot drip. `recordFieldRevision` dedupes `provider_rejected` on
+ *      (transaction_id, field, from_value, to_value), so a standing disagreement is one row and
+ *      not one row per hourly sync.
  */
 export function upsertSimplefinTransaction(
   db: Database.Database,
@@ -531,6 +556,14 @@ export function upsertSimplefinTransaction(
   // a name means "I have no label for this", not "leave this blank forever": the provider may fill
   // it, and doing so appends a `provider_revision` row, so the owner's clearing survives as
   // evidence exactly the way a displaced amount does.
+  // The amount half of the same question, and deliberately provenance-only. There is no heuristic
+  // to union with here: a row's own pending state says nothing about who authored its amount, and
+  // a NULL source (every row written before migration 048) means the author was never recorded,
+  // never that the owner claimed it. So the provider keeps the field until somebody says otherwise
+  // in the write path, which is what `amount_source = 'human'` records.
+  const ownerOwnsAmount = existing.amount_source === 'human';
+  const amount = ownerOwnsAmount ? existing.amount : values.amount;
+
   const ownerNamedMerchant =
     existing.merchant_name_source === 'human' && (existing.merchant_name ?? '') !== '';
   const ownerClearedMerchant =
@@ -561,9 +594,27 @@ export function upsertSimplefinTransaction(
     }, now);
   }
 
+  // Recorded before the early return for the same reason the payee rejection above is: a kept
+  // amount changes nothing on the row, so the comparison below reports 'unchanged' and the
+  // disagreement would never surface. Deduped by `recordFieldRevision` on the exact pair, so the
+  // hourly resync of a standing disagreement writes one row in total, and a provider that changes
+  // its number files a second one against the same kept value.
+  if (ownerOwnsAmount && values.amount !== existing.amount) {
+    recordFieldRevision(db, {
+      transactionId: existing.id,
+      field: 'amount',
+      // Integer cents on both sides, stringified only because one log column holds three types.
+      fromValue: String(existing.amount),
+      toValue: String(values.amount),
+      fromSource: 'human',
+      toSource: 'provider',
+      origin: 'provider_rejected',
+    }, now);
+  }
+
   if (
     existing.date === values.date &&
-    existing.amount === values.amount &&
+    existing.amount === amount &&
     existing.merchant_name === merchantName &&
     existing.original_name === values.originalName &&
     existing.pending === values.pending
@@ -582,20 +633,9 @@ export function upsertSimplefinTransaction(
       origin: 'provider_revision',
     }, now);
   }
-  if (existing.amount_source === 'human' && existing.amount !== values.amount) {
-    recordFieldRevision(db, {
-      transactionId: existing.id,
-      field: 'amount',
-      fromValue: String(existing.amount),
-      toValue: String(values.amount),
-      fromSource: 'human',
-      toSource: 'provider',
-      origin: 'provider_revision',
-    }, now);
-  }
   // The other side of the clearing decision above: the owner removed a label, the provider supplies
   // one, and the provider's value wins. Logged so the removal is knowable rather than silently
-  // undone. Self-limiting like the two revisions above: this write leaves the source 'provider', so
+  // undone. Self-limiting like the date revision above: this write leaves the source 'provider', so
   // the next pass no longer sees a cleared owner field and there is nothing to drip.
   if (ownerClearedMerchant && values.merchantName !== null && values.merchantName !== '') {
     recordFieldRevision(db, {
@@ -609,21 +649,22 @@ export function upsertSimplefinTransaction(
     }, now);
   }
 
-  // date and amount are written from the provider on every update, so 'provider' is what authored
-  // the stored value once this statement runs. merchant_name_source only moves when the provider's
-  // payee is the one actually being written.
+  // date is written from the provider on every update, so 'provider' is what authored the stored
+  // value once this statement runs. amount and merchant_name_source only move when the provider's
+  // value is the one actually being written.
   db.prepare(`
     UPDATE transactions
     SET date = ?, amount = ?, merchant_name = ?, original_name = ?, pending = ?,
-        date_source = 'provider', amount_source = 'provider',
+        date_source = 'provider', amount_source = ?,
         merchant_name_source = ?, updated_at = ?
     WHERE simplefin_transaction_id = ?
   `).run(
     values.date,
-    values.amount,
+    amount,
     merchantName,
     values.originalName,
     values.pending,
+    ownerOwnsAmount ? 'human' : 'provider',
     ownerOwnsMerchant ? existing.merchant_name_source : 'provider',
     now,
     values.providerId

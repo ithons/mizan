@@ -335,7 +335,11 @@ Three SDK call sites exist. `routes/ai.ts` is already modern (streaming, adaptiv
 - [x] **Migration `ai_memory`** (scope / subject / statement / kind / evidence_count /
       superseded_by), visible, editable and deletable in Settings, carrying the evidence that
       produced each entry.
-- [ ] **Migrations `ai_runs`, `ai_incidents`, `ai_observations`, `ai_briefs`.** Moved to 6.3: they only earn their place alongside the job framework and the guard harness that write them.
+- [x] **Migrations `ai_runs`, `ai_incidents`.** Shipped as 051 and 050. `ai_observations` and
+      `ai_briefs` were formally DROPPED on 2026-08-01, not deferred: neither was ever given a stated
+      purpose beyond its name, `ai_memory` covers standing notes and the digest is computed on
+      demand, and a second store would be another hand-maintained copy of state the run rows already
+      carry. Decision recorded in `rebuild-part-3.md`; zero code references either table.
 - [x] **Transaction field provenance.** The sync work protected a hand-edited `merchant_name` from
       provider overwrite using the row's own pending state and deliberately did not extend that to
       `date` / `amount`: pinning a money field the institution later revises would leave the ledger

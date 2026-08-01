@@ -146,20 +146,43 @@ export function EditEntryModal({ transaction, onClose }: { transaction: Transact
   const { data: categories } = useQuery({ queryKey: ['categories'], queryFn: () => categoriesApi.list() });
   const [categoryId, setCategoryId] = useState('');
   const [notes, setNotes] = useState('');
+  const [amount, setAmount] = useState('');
 
   useEffect(() => {
     if (transaction) {
       setCategoryId(transaction.category_id ?? '');
       setNotes(transaction.notes ?? '');
+      setAmount(transaction.amount.toFixed(2));
     }
   }, [transaction]);
 
   const save = useMutation({
-    mutationFn: () =>
-      transactionsApi.update(transaction!.id, { category_id: categoryId || null, notes: notes || null }),
+    mutationFn: () => {
+      const parsed = parseDecimalInput(amount);
+      if (parsed === null) throw new Error('Enter a valid amount');
+      return transactionsApi.update(transaction!.id, {
+        category_id: categoryId || null,
+        notes: notes || null,
+        // Sent only when it moved. `updateTransaction` already treats retyping the stored value as
+        // a non-event, but sending it anyway would run the manual-account rebalance on every save
+        // of a hand-entered row for a delta of zero.
+        ...(parsed !== transaction!.amount ? { amount: parsed } : {}),
+      });
+    },
     onSuccess: () => {
       invalidateFinancialData(qc);
       addToast({ type: 'success', message: 'Entry updated' });
+      onClose();
+    },
+    onError: (err: Error) => addToast({ type: 'error', message: err.message }),
+  });
+
+  const release = useMutation({
+    mutationFn: () => transactionsApi.releaseAmount(transaction!.id),
+    onSuccess: (row) => {
+      invalidateFinancialData(qc);
+      setAmount(row.amount.toFixed(2));
+      addToast({ type: 'success', message: 'The institution owns this amount again' });
       onClose();
     },
     onError: (err: Error) => addToast({ type: 'error', message: err.message }),
@@ -182,6 +205,17 @@ export function EditEntryModal({ transaction, onClose }: { transaction: Transact
   // stopped doing.
   const direction = readDirection(transaction);
 
+  const ownsAmount = transaction.amount_source === 'human';
+  // Non-null only when the provider re-offered a different figure AFTER the correction, so its
+  // absence is "no later sync said otherwise" and never "the provider agrees". Both sentences
+  // below say exactly that much and no more.
+  const providerAmount = transaction.provider_amount ?? null;
+  // Everything about provider disagreement is gated on this. A hand-entered row can carry
+  // `amount_source = 'human'` too, and telling its owner that no sync has reported a different
+  // figure would describe a thing that cannot happen to it.
+  const providerBacked = Boolean(transaction.simplefin_transaction_id);
+  const institution = transaction.institution_name?.trim() || 'SimpleFIN';
+
   return (
     <Modal open onClose={onClose} title={(transaction.merchant_name || transaction.original_name).trim()}>
       <div className="space-y-4">
@@ -203,6 +237,58 @@ export function EditEntryModal({ transaction, onClose }: { transaction: Transact
             adding to income.
           </p>
         )}
+        {/* The amount, and who owns it.
+            An institution can be wrong about a sign and stay wrong: Fidelity reports "Electronic
+            Funds Transfer Received" negative, so money arriving reads as money leaving. Correcting
+            it here sets the row's author to the owner, and the next sync keeps the corrected figure
+            instead of overwriting it. Everything that sums money reads the same column, so the
+            correction lands on the ledger, the reports and the reconciliation at once. */}
+        <div>
+          <label className="mz-label">Amount</label>
+          <div className="flex items-center gap-3">
+            <input
+              type="text"
+              inputMode="decimal"
+              aria-label="Amount"
+              className="mz-field tabular-nums"
+              value={amount}
+              onChange={(e) => setAmount(e.target.value)}
+            />
+            <TextButton
+              onClick={() => {
+                const parsed = parseDecimalInput(amount);
+                if (parsed === null) {
+                  addToast({ type: 'error', message: 'Enter a valid amount' });
+                  return;
+                }
+                setAmount((-parsed).toFixed(2));
+              }}
+              className="whitespace-nowrap"
+            >
+              Flip the sign
+            </TextButton>
+          </div>
+          {providerAmount !== null && (
+            <p className="mt-2 text-note text-review-text">
+              {institution} still reports {formatCurrency(providerAmount, { showSign: providerAmount > 0 })} here. Your
+              figure is the one every total uses.
+            </p>
+          )}
+          {ownsAmount && providerBacked && providerAmount === null && (
+            <p className="mt-2 text-note text-muted">
+              You set this amount. No later sync has reported a different one.
+            </p>
+          )}
+          {ownsAmount && providerBacked && (
+            <TextButton
+              onClick={() => release.mutate()}
+              disabled={release.isPending}
+              className="mt-1.5 !text-note"
+            >
+              {release.isPending ? 'Handing it back…' : `Let ${institution} own this amount again`}
+            </TextButton>
+          )}
+        </div>
         <div>
           <label className="mz-label">Category</label>
           <CategoryPicker
