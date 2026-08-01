@@ -19,6 +19,17 @@ export interface SyncHealthConnectionRow {
   status: string;
   last_synced_at: string | null;
   account_count: number;
+  /**
+   * The recovery advice the most recent failed sync recorded for this connection, or null when the
+   * connection has never failed.
+   *
+   * Read rather than invented. `classifyStatus` used to answer `sync_error` with one sentence,
+   * "Retry this sync. If it fails again, reconnect the institution.", for every possible cause. The
+   * sync had already classified the real one and written it to `sync_run_items.recovery_action`, so
+   * the panel and the account badge were stating a generic guess beside a specific fact the same
+   * database already held. On a 402 the guess was advice that cannot work.
+   */
+  last_failure_action?: string | null;
 }
 
 function ageInDays(iso: string | null, now: Date): number | null {
@@ -60,10 +71,15 @@ function classifyStatus(row: SyncHealthConnectionRow, syncAgeDays: number | null
   }
 
   if (row.status === 'sync_error') {
+    const recorded = row.last_failure_action?.trim();
     return {
       freshness: 'attention',
       statusLabel: 'Last sync failed',
-      statusDetail: 'Retry this sync. If it fails again, reconnect the institution.',
+      // The recorded reason wins when there is one. The fallback is only for a connection marked
+      // sync_error with no failed run item behind it, which the migration window can produce.
+      statusDetail: recorded && recorded.length > 0
+        ? recorded
+        : 'Retry this sync. If it fails again, reconnect the institution.',
       failureReason: 'Last sync attempt failed',
       recommendedAction: 'retry',
       isStale: false,
@@ -233,7 +249,14 @@ export function getSyncHealth(db: Database.Database): SyncHealth {
       'SimpleFIN' AS institution_name,
       sc.status,
       sc.last_synced_at,
-      COUNT(a.id) AS account_count
+      COUNT(a.id) AS account_count,
+      (SELECT i.recovery_action
+         FROM sync_run_items i
+        WHERE i.connection_id = sc.id
+          AND i.status IN ('failed', 'reauth_required')
+          AND i.recovery_action IS NOT NULL
+        ORDER BY i.completed_at DESC, i.rowid DESC
+        LIMIT 1) AS last_failure_action
     FROM simplefin_connections sc
     LEFT JOIN accounts a
       ON a.connection_id = sc.id
@@ -249,7 +272,14 @@ export function getSyncHealth(db: Database.Database): SyncHealth {
       cc.display_name AS institution_name,
       cc.status,
       cc.last_synced_at,
-      COUNT(a.id) AS account_count
+      COUNT(a.id) AS account_count,
+      (SELECT i.recovery_action
+         FROM sync_run_items i
+        WHERE i.connection_id = cc.id
+          AND i.status IN ('failed', 'reauth_required')
+          AND i.recovery_action IS NOT NULL
+        ORDER BY i.completed_at DESC, i.rowid DESC
+        LIMIT 1) AS last_failure_action
     FROM coinbase_connections cc
     LEFT JOIN accounts a
       ON a.connection_id = cc.id

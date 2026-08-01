@@ -2,7 +2,7 @@ import type { Response } from 'express';
 import type Database from 'better-sqlite3';
 import type { SyncEvent } from '../../../shared/types';
 import { syncCoinbase } from './coinbase';
-import { syncSimplefin, triageSimplefinErrors } from './simplefin';
+import { classifySimplefinFailure, syncSimplefin, triageSimplefinErrors } from './simplefin';
 import { detectRecurring } from './recurring';
 import { autoCategorizeTransactions } from './rules';
 import { reconcileReconstructedHistory, takeSnapshot, type ReconstructionRun } from './snapshot';
@@ -522,15 +522,22 @@ async function _runFullSyncInternal(): Promise<void> {
         pendingBalanceChanges.push({ runItemId: runItem.id, changes: simplefinResult.balanceChanges });
       } catch (err) {
         const message = (err as Error).message || 'SimpleFIN sync failed';
-        db.prepare(`UPDATE simplefin_connections SET status = 'sync_error' WHERE id = 'simplefin_primary' AND status != 'removed'`)
-          .run();
+        // The recovery advice is derived from the HTTP status, not asserted. One sentence for every
+        // transport failure told the owner to retry and re-check the setup token on a 402, which is
+        // a lapsed SimpleFIN Bridge subscription and moves for neither.
+        const failure = classifySimplefinFailure(err);
+        // A rejected access URL is a reauth in every sense the rest of the app means it by, so it
+        // takes that status rather than the generic one; the badge and the panel then agree.
+        const connectionStatus = failure.kind === 'unauthorized' ? 'reauth_required' : 'sync_error';
+        db.prepare(`UPDATE simplefin_connections SET status = ? WHERE id = 'simplefin_primary' AND status != 'removed'`)
+          .run(connectionStatus);
         recordSyncRunItem(db, run.id, {
           provider: 'simplefin',
           connection_id: 'simplefin_primary',
           institution_name: 'SimpleFIN',
-          status: 'failed',
-          error_message: message,
-          recovery_action: 'Retry sync. If it continues failing, check SimpleFIN setup token.',
+          status: failure.kind === 'unauthorized' ? 'reauth_required' : 'failed',
+          error_message: failure.statusCode === undefined ? message : `${message} (HTTP ${failure.statusCode})`,
+          recovery_action: failure.recoveryAction,
         });
         deferredError = deferredError ?? new Error(message);
       }

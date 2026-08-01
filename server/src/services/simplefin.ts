@@ -228,6 +228,116 @@ export interface SimplefinErrorTriage {
   advisories: string[];
 }
 
+/**
+ * What a SimpleFIN request that never returned a body means, and what the owner can do about it.
+ *
+ * `triageSimplefinErrors` reads the `errors` array of an otherwise-200 response. This is the other
+ * half: the request itself failed, so there is no array to read and the only evidence is the HTTP
+ * status. Both halves have to exist, because the two say different things and the recovery differs.
+ *
+ * The catch block used to record one sentence for every transport failure, "Retry sync. If it
+ * continues failing, check SimpleFIN setup token." On a 402 that is advice the owner cannot act on
+ * and that cannot work: SimpleFIN Bridge is a paid service, 402 is its way of saying the
+ * subscription lapsed, and neither retrying nor re-pasting the setup token moves it. The owner
+ * followed it against a wall for as long as the failure stood.
+ *
+ * `kind` is a closed union and `SIMPLEFIN_FAILURES` is a total Readonly<Record> over it, so a kind
+ * that declares nothing is a compile error rather than something that quietly inherits "retry".
+ */
+export type SimplefinFailureKind =
+  | 'payment_required'
+  | 'unauthorized'
+  | 'not_found'
+  | 'rate_limited'
+  | 'provider_down'
+  | 'unreachable'
+  | 'unknown';
+
+export interface SimplefinFailure {
+  kind: SimplefinFailureKind;
+  /** Undefined when the request never reached a server that answered. */
+  statusCode: number | undefined;
+  /** Goes onto `sync_run_items.recovery_action`, and is what every surface shows the owner. */
+  recoveryAction: string;
+  /**
+   * True when nothing inside this app can clear it. The owner has to do something at the provider,
+   * so a surface that offers only "Retry" is offering the wrong control.
+   */
+  ownerActsOutsideApp: boolean;
+  /** Whether re-running the sync could plausibly succeed without anything else changing. */
+  retryable: boolean;
+}
+
+const SIMPLEFIN_FAILURES: Readonly<Record<SimplefinFailureKind, Omit<SimplefinFailure, 'statusCode'>>> = {
+  payment_required: {
+    kind: 'payment_required',
+    recoveryAction:
+      'SimpleFIN returned 402 Payment Required, which is how SimpleFIN Bridge reports a lapsed subscription. Renew it at bridge.simplefin.org; retrying and re-pasting the setup token cannot clear this.',
+    ownerActsOutsideApp: true,
+    retryable: false,
+  },
+  unauthorized: {
+    kind: 'unauthorized',
+    recoveryAction:
+      'SimpleFIN rejected the stored access URL. Create a new setup token at bridge.simplefin.org and reconnect SimpleFIN in Settings.',
+    ownerActsOutsideApp: true,
+    retryable: false,
+  },
+  not_found: {
+    kind: 'not_found',
+    recoveryAction:
+      'The stored SimpleFIN access URL no longer resolves, which usually means it was revoked. Reconnect SimpleFIN in Settings with a fresh setup token.',
+    ownerActsOutsideApp: true,
+    retryable: false,
+  },
+  rate_limited: {
+    kind: 'rate_limited',
+    recoveryAction: 'SimpleFIN is rate limiting this connection. The next scheduled sync will try again; nothing needs doing.',
+    ownerActsOutsideApp: false,
+    retryable: true,
+  },
+  provider_down: {
+    kind: 'provider_down',
+    recoveryAction: 'SimpleFIN returned a server error after the retries were exhausted. This is on their side; the next scheduled sync will try again.',
+    ownerActsOutsideApp: false,
+    retryable: true,
+  },
+  unreachable: {
+    kind: 'unreachable',
+    recoveryAction: 'SimpleFIN could not be reached at all, so this says nothing about the connection itself. Check network access and retry.',
+    ownerActsOutsideApp: false,
+    retryable: true,
+  },
+  unknown: {
+    kind: 'unknown',
+    recoveryAction: 'SimpleFIN failed for a reason this app does not recognise. The status is recorded above; retry, and if it repeats the message is the thing to search for.',
+    ownerActsOutsideApp: false,
+    retryable: true,
+  },
+};
+
+/** The status is read off the error rather than the message, because the message is a provider string. */
+function statusCodeOf(err: unknown): number | undefined {
+  if (typeof err !== 'object' || err === null) return undefined;
+  const withResponse = err as { response?: { status?: unknown }; status?: unknown };
+  if (typeof withResponse.response?.status === 'number') return withResponse.response.status;
+  if (typeof withResponse.status === 'number') return withResponse.status;
+  return undefined;
+}
+
+export function classifySimplefinFailure(err: unknown): SimplefinFailure {
+  const statusCode = statusCodeOf(err);
+  const kind: SimplefinFailureKind =
+    statusCode === undefined ? 'unreachable'
+    : statusCode === 402 ? 'payment_required'
+    : statusCode === 401 || statusCode === 403 ? 'unauthorized'
+    : statusCode === 404 ? 'not_found'
+    : statusCode === 429 ? 'rate_limited'
+    : statusCode >= 500 ? 'provider_down'
+    : 'unknown';
+  return { ...SIMPLEFIN_FAILURES[kind], statusCode };
+}
+
 export function triageSimplefinErrors(errors: string[]): SimplefinErrorTriage {
   const triage: SimplefinErrorTriage = { reauth: [], advisories: [] };
   for (const message of errors) {
