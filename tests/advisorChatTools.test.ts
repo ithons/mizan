@@ -32,10 +32,20 @@ function setup(): Database.Database {
     VALUES ('h1','chk','s1',10,200,200000,150000,NULL,'2026-06-01')`).run();
   // Confirmed so the forecast surfaces it: buildRecurringForecast only projects patterns that are
   // confirmed or backed by at least 3 observed transactions.
+  //
+  // Both dates here are bound from the LOCAL calendar rather than written as `date('now', ...)`.
+  // The services these fixtures feed take their window from `new Date()`, and SQLite's clock is
+  // UTC, so a `date('now')` fixture asserts across two clocks that disagree for part of every day.
+  //
+  // Neither of these two is the site that bit. Measured 2026-08-01 by editing each date a day
+  // either way and re-running this file: `next_expected` at +4 or +6 still yields the two bills the
+  // 45-day window asserts, and the snapshot at -1 or +1 still yields the same history row. The site
+  // that bit is `get_budgets` below, where one day back moves the row into the previous month. They
+  // are bound locally all the same, so this file reads one clock rather than two.
   db.prepare(`INSERT INTO recurring_patterns (id,merchant_name,category_id,average_amount,frequency,last_seen,next_expected,is_active,is_confirmed,created_at,updated_at)
-    VALUES ('r1','Netflix','cat_ent',1599,'monthly','2026-06-01',date('now','+5 days'),1,1,'2026-06-01','2026-06-01')`).run();
+    VALUES ('r1','Netflix','cat_ent',1599,'monthly','2026-06-01',?,1,1,'2026-06-01','2026-06-01')`).run(localDaysFromToday(5));
   db.prepare(`INSERT INTO net_worth_snapshots (id,date,net_worth,total_assets,total_liabilities,breakdown,created_at)
-    VALUES ('n1',date('now'),300000,500000,200000,'{}','2026-07-01')`).run();
+    VALUES ('n1',?,300000,500000,200000,'{}','2026-07-01')`).run(localToday());
   return db;
 }
 
@@ -103,9 +113,12 @@ test('get_budgets returns budget vs this-month actual, dollarized', (t) => {
   // `date('now')` is UTC and `getMonthlyBudgetsWithProjection` takes its month from `new Date()`,
   // which is local, so on the last evening of a month west of UTC the row landed in the NEXT month
   // and `spent` came back 0. Observed 2026-07-31 20:20 local: the row was written 2026-08-01 while
-  // the budget window was July. 'localtime' puts the row in the month the assertion is about.
+  // the budget window was July. The date is now bound from the same clock the window is read from,
+  // rather than from a second one corrected to agree with it. Still a one-day-tight assertion by
+  // construction: editing this to `localDaysFromToday(-1)` and re-running on 2026-08-01 puts the
+  // row in July and `spent` comes back 0, which is the failure, reproduced on purpose.
   db.prepare(`INSERT INTO transactions (id,account_id,date,amount,category_id,created_at,updated_at)
-    VALUES ('tb','chk',date('now','localtime'),-4000,'cat_food_restaurants','2026-06-01','2026-06-01')`).run();
+    VALUES ('tb','chk',?,-4000,'cat_food_restaurants','2026-06-01','2026-06-01')`).run(localToday());
   const r = runAdvisorTool(db, 'get_budgets', {}) as {
     month: string;
     budgets: Array<{ category: string; budget: number; spent: number; remaining: number }>;
@@ -185,6 +198,8 @@ import {
   insertAdvisorAction,
   insertCategory,
   insertTransaction,
+  localDaysFromToday,
+  localToday,
   migratedTestDb,
 } from './helpers/schema';
 import {
@@ -543,10 +558,15 @@ test('get_holding_history dollarizes values and leaves the per-unit price alone'
     INSERT INTO holdings (id, account_id, security_id, quantity, institution_price, institution_value, cost_basis, updated_at)
     VALUES ('hold_1', ?, 'sec_btc', 0.0031964, 61234.56, 19575, NULL, '2026-07-30T00:00:00.000Z')
   `).run(account);
+  // Local, because `snapshot.ts` writes `holdings_history.date` from `format(new Date(),
+  // 'yyyy-MM-dd')`. `getHoldingHistory` is the one live service that still filters on SQLite's own
+  // UTC clock (`date >= date('now', '-90 days')`, investmentMetadata.ts), so the two ends of that
+  // comparison come from different clocks in production too; two days back sits far enough inside a
+  // 90-day window that this fixture cannot be what discovers it.
   db.prepare(`
     INSERT INTO holdings_history (id, account_id, security_id, date, quantity, institution_price, institution_value, cost_basis, created_at)
-    VALUES ('hh_1', ?, 'sec_btc', date('now','-2 days'), 0.0031964, 61234.56, 19575, NULL, '2026-07-30T00:00:00.000Z')
-  `).run(account);
+    VALUES ('hh_1', ?, 'sec_btc', ?, 0.0031964, 61234.56, 19575, NULL, '2026-07-30T00:00:00.000Z')
+  `).run(account, localDaysFromToday(-2));
 
   const result = runAdvisorTool(db, 'get_holding_history', { holding_id: 'hold_1' }) as {
     points: Array<{ price_per_unit: number; value: number; cost_basis: number | null; quantity: number }>;

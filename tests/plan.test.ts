@@ -227,8 +227,32 @@ function componentSource(name: string): string {
   return end < 0 ? rest : rest.slice(0, end);
 }
 
+function paletteTokensIn(source: string): string[] {
+  const found = new Set<string>();
+  for (const [, name] of source.matchAll(/(?:^|[\s"'`:!])text-([a-z0-9-]+)/g)) {
+    if (isColorToken(name)) found.add(name);
+  }
+  return [...found].sort();
+}
+
 /**
- * Every `text-*` class in a slice that names a palette token rather than a size step.
+ * The `<input type="checkbox">` and `<input type="radio">` tags in a slice.
+ *
+ * `@tailwindcss/forms` renders a checked box as `background-color: currentColor` with a white
+ * checkmark drawn on top of it, so a `text-*` on one of these tags is the control's FILL and never
+ * a glyph. Measuring it at 4.5:1 measures a colour no character is ever set in, and would report a
+ * pass or a failure about text that does not exist. They are pulled out here and gated at 3:1
+ * under WCAG 1.4.11 instead, below, which is the rule that does apply to them.
+ */
+function formControls(source: string): string[] {
+  return [...source.matchAll(/<input\b[\s\S]*?\/>/g)]
+    .map(([tag]) => tag)
+    .filter((tag) => /type="(?:checkbox|radio)"/.test(tag));
+}
+
+/**
+ * Every `text-*` class in a slice that names a palette token rather than a size step, minus the
+ * form-control fills above.
  *
  * Enumerated from the source instead of listed by hand, because the finding this replaces was a
  * hand-written list: the contrast pass measured paper, card and card-alt and never noticed that
@@ -236,11 +260,8 @@ function componentSource(name: string): string {
  * (`text-note`), an alignment (`text-right`) or an arbitrary value, and is not a colour.
  */
 function inkTokens(source: string): string[] {
-  const found = new Set<string>();
-  for (const [, name] of source.matchAll(/(?:^|[\s"'`:!])text-([a-z0-9-]+)/g)) {
-    if (isColorToken(name)) found.add(name);
-  }
-  return [...found].sort();
+  const glyphs = formControls(source).reduce((text, tag) => text.replace(tag, ''), source);
+  return paletteTokensIn(glyphs);
 }
 
 describe('every ground /plan puts money on, in both themes', () => {
@@ -304,11 +325,61 @@ describe('every ground /plan puts money on, in both themes', () => {
     }
   }
 
-  test('the ground that was missed is the one that failed, and the failure was real', () => {
-    // Kept as the regression record: `muted-2` at 12.5px on `well` is what the strip shipped with.
-    assert.ok(contrast(triplet('muted-2', 'light'), triplet('well', 'light')) < AA);
-    assert.ok(contrast(triplet('muted-2', 'dark'), triplet('well', 'dark')) < AA);
-    assert.doesNotMatch(componentSource('CarryoverStrip'), /text-muted-2/);
+  test('the ground that was missed is still the tightest one this screen uses', () => {
+    // The record being kept is the GROUND, not the pair. `muted-2` at 12.5px on `well` is what the
+    // strip shipped with and what failed; on the current tokens it is 5.41:1 light and 6.42:1 dark,
+    // so it is delisted rather than left standing as a failure that no longer reproduces.
+    assert.ok(contrast(triplet('muted-2', 'light'), triplet('well', 'light')) >= AA);
+    assert.ok(contrast(triplet('muted-2', 'dark'), triplet('well', 'dark')) >= AA);
+
+    // What did survive the palette: `well` returns the lowest ratio of the four grounds in GROUNDS,
+    // in both themes, so it is still the one a tone gets away with everywhere else and fails here.
+    for (const theme of ['light', 'dark'] as const) {
+      const ratios = [...new Set(GROUNDS.map(([, ground]) => ground))].map(
+        (ground) => [ground, contrast(triplet('ink', theme), triplet(ground, theme))] as const
+      );
+      const worst = ratios.reduce((a, b) => (a[1] <= b[1] ? a : b));
+      assert.equal(worst[0], 'well', `${worst[0]} is tighter than well on ${theme}`);
+    }
+
+    // And the tones that still cannot be set on it stay off the strip. This fails both ways: on a
+    // tone that has been fixed and not delisted, and on the strip picking one of them up.
+    const strip = componentSource('CarryoverStrip');
+    const stillFailing: Array<[string, Array<'light' | 'dark'>]> = [
+      ['faint', ['light', 'dark']],
+      ['sage', ['light', 'dark']],
+      ['gold', ['light']],
+    ];
+    for (const [tone, themes] of stillFailing) {
+      for (const theme of themes) {
+        const ratio = contrast(triplet(tone, theme), triplet('well', theme));
+        assert.ok(ratio < AA, `${tone} on well ${theme} is ${ratio.toFixed(2)}:1 and clears AA; delist it`);
+      }
+      assert.ok(!inkTokens(strip).includes(tone), `CarryoverStrip sets text-${tone} on well`);
+    }
+  });
+
+  test('a form control fill is measured at 3:1, which is the rule that applies to it', () => {
+    // `BudgetModal` sets `text-sage` on its rollover checkbox. `@tailwindcss/forms` turns that into
+    // the checked fill, so the pair under test is sage against the modal ground, and the mark on
+    // top of it is the plugin's white checkmark. Neither is text, and neither was measured before.
+    const UI = 3;
+    const controls = GROUNDS.flatMap(([component, ground]) =>
+      formControls(componentSource(component)).map((tag) => [component, ground, tag] as const)
+    );
+    assert.ok(controls.length > 0, 'the form-control scan is matching nothing');
+
+    for (const [component, ground, tag] of controls) {
+      for (const tone of paletteTokensIn(tag)) {
+        for (const theme of ['light', 'dark'] as const) {
+          const fill = contrast(triplet(tone, theme), triplet(ground, theme));
+          assert.ok(fill >= UI, `${component}: ${tone} fill on ${ground} ${theme} is ${fill.toFixed(2)}:1`);
+          // The plugin draws the checkmark in white, unconditionally, in both themes.
+          const mark = contrast([255, 255, 255], triplet(tone, theme));
+          assert.ok(mark >= UI, `${component}: the checkmark on ${tone} ${theme} is ${mark.toFixed(2)}:1`);
+        }
+      }
+    }
   });
 });
 
@@ -340,12 +411,49 @@ describe('bar fills are visible against their own track', () => {
     }
   }
 
-  test('the tones this shipped with are still the ones that failed', () => {
-    // Why the map moved rather than the tokens: `sage` and `clay-scale` are correct everywhere else
-    // they are used, they were simply never measured against `track`.
-    assert.ok(contrast(triplet('sage', 'light'), triplet('track', 'light')) < UI);
-    assert.ok(contrast(triplet('clay-scale', 'light'), triplet('track', 'light')) < UI);
-    assert.doesNotMatch(BAR, /sage: 'bg-sage'/);
-    assert.doesNotMatch(BAR, /clay: 'bg-clay-scale'/);
+  test('the map is the darkest member of each family, and the one that cannot be a fill is unreachable', () => {
+    // Delisted: `sage` and `clay-scale` are the tones this shipped with and the ones that failed
+    // against `track`. On the current tokens they clear, `sage` at 3.18:1 light / 3.14:1 dark and
+    // `clay-scale` at 5.73:1 / 5.98:1, so neither is recorded as a failure any more.
+    assert.ok(contrast(triplet('sage', 'light'), triplet('track', 'light')) >= UI);
+    assert.ok(contrast(triplet('clay-scale', 'light'), triplet('track', 'light')) >= UI);
+
+    // The map is pinned rather than merely not-the-old-one, because the argument for it no longer
+    // rests on contrast: it is the tone the money numerals beside the bar are already set in.
+    assert.match(BAR, /sage: 'bg-sage-deep'/);
+    assert.match(BAR, /clay: 'bg-clay'/);
+    assert.match(BAR, /gold: 'bg-gold'/);
+
+    // `sage-soft` is the member of the family a "plenty of budget left" fill would reach for, and
+    // it is the one that still cannot carry a bar in either theme.
+    for (const theme of ['light', 'dark'] as const) {
+      const ratio = contrast(triplet('sage-soft', theme), triplet('track', theme));
+      assert.ok(ratio < UI, `sage-soft on track ${theme} is ${ratio.toFixed(2)}:1 and clears; delist it`);
+    }
+    assert.ok(!fills.includes('sage-soft'), 'a bar is filled with the one tone that cannot carry it');
+  });
+
+  test('the track itself is measured against the grounds the bar renders on', () => {
+    // OPEN FINDING, recorded rather than asserted. The fill-to-track edge clears 3:1 in every tone
+    // above, so the VALUE the bar reports is readable. The track-to-page edge, which is what says
+    // how far the bar could go, does not clear anything: `track` measures under 1.6:1 against every
+    // ground in the app, in both themes. That is a token question and this test does not gate it,
+    // it pins the reading so the number cannot drift without somebody noticing.
+    const measured = Object.fromEntries(
+      (['paper', 'card', 'card-alt', 'well', 'rail'] as const).map((ground) => [
+        ground,
+        (['light', 'dark'] as const).map((theme) =>
+          Number(contrast(triplet('track', theme), triplet(ground, theme)).toFixed(2))
+        ),
+      ])
+    );
+    assert.deepEqual(measured, {
+      paper: [1.32, 1.55],
+      card: [1.32, 1.4],
+      'card-alt': [1.26, 1.31],
+      well: [1.19, 1.28],
+      rail: [1.22, 1.46],
+    });
+    assert.match(BAR, /OPEN FINDING, do not read this as settled/);
   });
 });

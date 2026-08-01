@@ -17,7 +17,12 @@ import { join } from 'node:path';
  * So this file walks instead of trusting. Every `bg-rail` under `client/src`, the element it grounds
  * and the tones inside it, with descendants that declare a ground of their own left out. The
  * allowance is derived from the palette, not typed in; the exceptions are named individually, so a
- * tenth fails here and a fix that clears one has to delete its line.
+ * sixth fails here and a fix that clears one has to delete its line.
+ *
+ * The 2026-08-01 palette put the light ground at pure white and re-solved the inks against it, and
+ * four of those nine entries cleared as a result. They are deleted, not kept: a recorded exception
+ * that no longer fails is a standing finding the owner cannot act on. What is left is `gold`, at
+ * four call sites, plus the one site whose colour arrives through a `style` prop.
  */
 
 const ROOT = join(import.meta.dirname, '..');
@@ -229,18 +234,18 @@ function allowedOnRail(): string[] {
  * tone off the allowance. Clearing one means deleting its line here, which this file requires.
  */
 const RECORDED_SUB_AA: Record<string, string[]> = {
-  // The selected run row sets its status label with `style={{ color: tone.color }}`, and
-  // `statusTone` resolves to sage-deep, gold or clay for three of its four states; the `Issue`
-  // panel inside a run's detail sets `text-clay` on a rail card.
-  'components/SyncActivityPanel.tsx': ['clay'],
-  // The memory editor and the composer, both `text-muted-2` for the hint line and `text-warning`
-  // (gold) for the error line.
-  'views/settings/AdvisorMemorySection.tsx': ['muted-2', 'warning'],
-  // The CSV preview grid and the backup preview grid: sage-deep for valid, clay for invalid, gold
-  // for duplicates. Four rail cards, three sub-AA tones between them.
-  'views/settings/DataSection.tsx': ['clay', 'gold', 'sage-deep'],
-  // The selected model's caching note.
-  'views/settings/Settings.tsx': ['muted-2'],
+  // The memory editor and the composer, both `text-warning` (the legacy alias for gold) on the
+  // error line. Their `text-muted-2` hint line was recorded here too and now measures 5.56 light,
+  // so it is gone from this list.
+  'views/settings/AdvisorMemorySection.tsx': ['warning'],
+  // The CSV preview grid and the backup preview grid, where gold marks a duplicate. `clay` and
+  // `sage-deep` were recorded here as well, for invalid and valid; both clear now and both are
+  // gone from this list.
+  'views/settings/DataSection.tsx': ['gold'],
+  // Deleted 2026-08-01, because the palette fixed them rather than the code:
+  //   components/SyncActivityPanel.tsx  clay      4.43 -> 12.05 light
+  //   views/settings/Settings.tsx       muted-2   3.67 ->  5.56 light
+  // Both are still set on a rail ground; neither is a failure any more.
 };
 
 /** Sites whose colour is set through a `style` prop, where the class string cannot show it. */
@@ -265,9 +270,11 @@ test('HEALTHY: a rail element carrying only allowed tones reports nothing', () =
 });
 
 test('a sub-AA tone inside a rail element is reported', () => {
-  const src = `<div className="bg-rail p-3"><p className="text-note text-clay">Issue</p></div>`;
-  assert.deepEqual(scanRailGrounds(src)[0].tones, ['clay']);
-  assert.ok(!allowedOnRail().includes('clay'));
+  // `gold`, because it is the only tone still under AA on a light rail that shipping code sets.
+  const src = `<div className="bg-rail p-3"><p className="text-note text-gold">3 duplicates</p></div>`;
+  assert.deepEqual(scanRailGrounds(src)[0].tones, ['gold']);
+  assert.ok(!allowedOnRail().includes('gold'));
+  assert.ok(ratio('gold', 'rail', 'light') < 4.5);
 });
 
 test('HEALTHY: a descendant with its own ground is not standing on rail', () => {
@@ -299,16 +306,22 @@ test('a colour set through a style prop is flagged rather than read as absent', 
 /* ── The allowance, and the ledger of what breaks it ──────────────────────── */
 
 test('the allowance is what the palette says it is, in both themes', () => {
-  assert.deepEqual(allowedOnRail(), ['estimate', 'ink', 'ink-soft', 'muted']);
+  // Twelve names, not four. Nine distinct tokens: three of the names are the legacy `--color-*`
+  // aliases (`negative` -> clay, `positive` -> sage-deep, `sage-text` -> pill-text) and resolve
+  // onto a token already in the list.
+  assert.deepEqual(allowedOnRail(), [
+    'clay', 'clay-scale', 'estimate', 'ink', 'ink-soft', 'muted',
+    'muted-2', 'negative', 'positive', 'review-text', 'sage-deep', 'sage-text',
+  ]);
   const printed: Array<[string, number, number]> = [
-    ['ink', 9.45, 14.6],
-    ['ink-soft', 6.13, 10.2],
-    ['muted', 4.6, 7.6],
-    ['estimate', 5.32, 8.9],
-    ['muted-2', 3.67, 6.46],
-    ['sage-deep', 3.99, 9.18],
-    ['clay', 4.43, 6.68],
-    ['gold', 3.71, 8.1],
+    ['ink', 19.43, 19.8],
+    ['ink-soft', 14.0, 14.3],
+    ['muted', 7.01, 9.03],
+    ['estimate', 4.78, 5.88],
+    ['muted-2', 5.56, 7.3],
+    ['sage-deep', 4.77, 5.85],
+    ['clay', 12.05, 14.18],
+    ['gold', 4.3, 5.87],
   ];
   for (const [tone, light, dark] of printed) {
     assert.equal(ratio(TEXT_TOKEN[tone], 'rail', 'light'), light, `${tone} on rail, light`);
@@ -316,6 +329,12 @@ test('the allowance is what the palette says it is, in both themes', () => {
     const shown = `${tone} ${light.toFixed(2)} / ${dark.toFixed(2)}`.replace(/[./]/g, (c) => `\\${c}`);
     assert.match(CSS, new RegExp(shown.replace(/ /g, '\\s*')), `${tone} on rail is not stated in index.css`);
   }
+  // The split index.css claims about those eight, held as a partition rather than as prose: seven
+  // clear AA in both themes, and `gold` is the one that clears only on dark.
+  const clean = printed.filter(([t]) => ratio(TEXT_TOKEN[t], 'rail', 'light') >= 4.5).map(([t]) => t);
+  assert.deepEqual(clean, ['ink', 'ink-soft', 'muted', 'estimate', 'muted-2', 'sage-deep', 'clay']);
+  assert.ok(printed.every(([t]) => ratio(TEXT_TOKEN[t], 'rail', 'dark') >= 4.5), 'a tracked tone stopped clearing on dark');
+  assert.ok(ratio('gold', 'rail', 'dark') >= 4.5 && ratio('gold', 'rail', 'light') < 4.5);
 });
 
 test('every tone on every rail ground is allowed or is one of the recorded exceptions', () => {
@@ -364,10 +383,14 @@ test('the indirect site resolves to the tones it is recorded with, not to a gues
   const tokens = [...new Set([...block.matchAll(/var\(--mz-([a-z0-9-]+)\)/g)].map((m) => m[1]))];
   assert.deepEqual(tokens.sort(), ['clay', 'gold', 'muted', 'sage-deep']);
   assert.deepEqual([...RECORDED_INDIRECT['components/SyncActivityPanel.tsx']].sort(), tokens.sort());
-  // Three of the four are under AA on a light rail, which is the whole reason the old universal
-  // claim was false at the call site its own sentence named.
+  // Three of the four were under AA on a light rail before 2026-08-01, which is why the old
+  // universal claim was false at the call site its own sentence named. One still is, and the site
+  // stays recorded regardless: a colour that arrives through a `style` prop is invisible to a walk
+  // over class strings whether it passes or fails.
   const under = tokens.filter((t) => ratio(t, 'rail', 'light') < 4.5);
-  assert.deepEqual(under.sort(), ['clay', 'gold', 'sage-deep']);
+  assert.deepEqual(under.sort(), ['gold']);
+  // `partial` is the run status that resolves to it, so this is reachable and not theoretical.
+  assert.match(src, /partial: \{ color: 'var\(--mz-gold\)'/);
 });
 
 test('index.css states the inventory it now claims, and no longer states the universal it broke', () => {
@@ -377,11 +400,13 @@ test('index.css states the inventory it now claims, and no longer states the uni
     if (site.tones.some((t) => !allowedOnRail().includes(t)) || site.indirect) offenders.add(`${site.file}:${site.line}`);
   }
   // The total is a dated reading and a new `bg-rail text-ink` is not a defect, so only a floor is
-  // held on it. The nine is the number the paragraph rests on, and it is exact: a tenth means the
-  // sentence is wrong, and that is the failure this file exists to produce.
+  // held on it. The five is the number the paragraph rests on, and it is exact: a sixth means the
+  // sentence is wrong, and that is the failure this file exists to produce. It was nine until the
+  // 2026-08-01 palette; the four that cleared were deleted from RECORDED_SUB_AA, which is what
+  // stops a fixed entry from sitting here forever as an unactionable finding.
   assert.ok(sites.length >= 20, `only ${sites.length} bg-rail call sites; re-derive the dated figure in index.css`);
-  assert.equal(offenders.size, 9, 'the number of sub-AA rail sites moved; re-derive the figure in index.css');
-  assert.match(CSS, /22 call\s*\n?\s*\*?\s*sites that day, and 9 OF THEM set one of those four on a light rail/);
+  assert.equal(offenders.size, 5, 'the number of uncertified rail sites moved; re-derive the figure in index.css');
+  assert.match(CSS, /22 call\s*\n?\s*\*?\s*sites on 2026-08-01, and 5 OF THEM are not certified clean/);
   assert.doesNotMatch(CSS, /only those\s*\n?\s*\*?\s*two may be set on it/);
   // `rail` was called a bar track; the bar track is its own token and always was.
   assert.doesNotMatch(CSS, /an input well and a bar track/);
@@ -390,15 +415,24 @@ test('index.css states the inventory it now claims, and no longer states the uni
   assert.ok(!bar.includes('bg-rail'), 'ProgressBar now grounds a bar on rail');
 });
 
-test('pill-bg is stated as what it measures, not implied to be clean', () => {
-  assert.equal(ratio('muted-2', 'pill-muted-bg', 'light'), 3.92);
-  assert.equal(ratio('muted-2', 'pill-muted-bg', 'dark'), 4.77);
-  assert.equal(ratio('sage-deep', 'pill-muted-bg', 'light'), 4.27);
-  assert.equal(ratio('sage-deep', 'pill-muted-bg', 'dark'), 6.78);
-  assert.equal(ratio('clay', 'pill-muted-bg', 'light'), 4.74);
-  assert.equal(ratio('muted', 'pill-muted-bg', 'light'), 4.92);
-  assert.match(CSS, /`muted-2` is 3\.92 \/ 4\.77/);
-  assert.match(CSS, /`sage-deep` 4\.27 \/ 6\.78/);
+test('pill-bg is stated as what it measures, and what it measures is no longer a failure', () => {
+  assert.equal(ratio('muted-2', 'pill-muted-bg', 'light'), 5.27);
+  assert.equal(ratio('muted-2', 'pill-muted-bg', 'dark'), 6.28);
+  assert.equal(ratio('sage-deep', 'pill-muted-bg', 'light'), 4.53);
+  assert.equal(ratio('sage-deep', 'pill-muted-bg', 'dark'), 5.03);
+  assert.equal(ratio('clay', 'pill-muted-bg', 'light'), 11.43);
+  assert.equal(ratio('muted', 'pill-muted-bg', 'light'), 6.65);
+  // The two that used to fail here now clear in both themes, which is the claim index.css makes.
+  for (const tone of ['muted-2', 'sage-deep', 'clay', 'muted']) {
+    assert.ok(ratio(tone, 'pill-muted-bg', 'light') >= 4.5, `${tone} on pill-bg fell under AA on light`);
+    assert.ok(ratio(tone, 'pill-muted-bg', 'dark') >= 4.5, `${tone} on pill-bg fell under AA on dark`);
+  }
+  // And `gold` is the one that still does not, so the ground is not written up as clean.
+  assert.equal(ratio('gold', 'pill-muted-bg', 'light'), 4.08);
+  assert.ok(ratio('gold', 'pill-muted-bg', 'light') < 4.5);
+  assert.match(CSS, /`muted-2` is 5\.27 \/ 6\.28/);
+  assert.match(CSS, /`sage-deep` 4\.53 \/ 5\.03/);
+  assert.match(CSS, /`gold` on it is\s*\n?\s*\*?\s*4\.08 \/ 5\.05 and is still the one that does not/);
   // The two call sites the figures are about, so the sentence cannot outlive them.
   const pill = readFileSync(join(SRC, 'components/balance/CategoryPill.tsx'), 'utf8');
   assert.match(pill, /bg-pill-bg text-muted-2/);

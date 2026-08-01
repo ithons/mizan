@@ -26,9 +26,27 @@ import type { Category } from '@shared/types';
  * Verified with the validator against all four grounds (light/dark x paper/card): lightness band
  * PASS, chroma floor PASS, CVD separation PASS (worst adjacent pair #c68627 vs #207029, 13.0 ΔE
  * protan, target 8.0), normal-vision floor PASS (worst adjacent #ad4d3c vs #c68627, 15.7 ΔE,
- * floor 15.0). Contrast against the surfaces lands in the 2.1-3.0 band, which the checks flag as
- * WARN and which obligates relief rather than forbidding the colour; the relief is structural,
- * since a swatch never appears without its category name beside it. Do not use these as text.
+ * floor 15.0). Those three are properties of the eight colours themselves and do not move when
+ * the grounds move.
+ *
+ * Contrast does move, and the 2026-08-01 palette took both grounds to the ends of the scale, so
+ * the figure this paragraph used to carry (a 2.1-3.0 band, flagged WARN) is dead. Re-derived from
+ * the triplets in client/src/index.css with the WCAG 2.1 arithmetic in tests/helpers/palette.ts,
+ * all 32 pairs:
+ *   columns are light paper, light card, dark paper, dark card
+ *   #207029  6.16  6.16  3.41  3.09      #c68627  3.07  3.07  6.84  6.20
+ *   #ad4d3c  5.38  5.38  3.90  3.54      #02a6ad  2.97  2.97  7.06  6.40
+ *   #92417a  6.44  6.44  3.26  2.95      #4c88d3  3.64  3.64  5.77  5.23
+ *   #979828  3.07  3.07  6.84  6.20      #6a51a4  6.31  6.31  3.33  3.01
+ * The two light columns are equal because light paper and light card are the same pure white
+ * triplet. The band is 2.95 to 7.06, and six of the eight now clear 3:1 on all four grounds
+ * rather than none of them; the WARN is local to two pairs, #02a6ad against light paper at 2.97
+ * and #92417a against a dark card at 2.95. The relief is structural either way, since a swatch
+ * never appears without its category name beside it.
+ *
+ * Do not use these as text, and that conclusion did not weaken: a stored hex cannot follow the
+ * theme, so a colour has to clear AA on all four grounds to be text, and none does. The best any
+ * of them manages at its own worst ground is #4c88d3 at 3.64, well under 4.5.
  *
  * Twelve became eight. The twelve were arbitrary: two of them (`#cbb08a`, `#a7bb92` in the sibling
  * chart palette) were 5.4 ΔE apart, which is indistinguishable to a reader with full colour vision,

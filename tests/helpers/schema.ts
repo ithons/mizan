@@ -29,6 +29,56 @@ function nextId(prefix: string): string {
 
 export const TEST_NOW = '2026-07-30T12:00:00.000Z';
 
+/**
+ * A day inside the CURRENT LOCAL month that is never in the future.
+ *
+ * A fixture aimed at a month-scoped surface has to be built from the local calendar, because every
+ * month window in this codebase is local: `aiContext.ts` takes `startOfMonth(new Date())`,
+ * `advisorTools.ts` takes `format(now, 'yyyy')`/`'M'`, and `getMonthlyBudgetsWithProjection` is
+ * handed a local year and month. Two fixture shapes disagree with that, and both pass on most days
+ * of most months, which is how each of them reached main:
+ *
+ *   1. SQLite `date('now')` is UTC. West of UTC the last evening of a month writes tomorrow's date,
+ *      so the row lands in the NEXT month while the window under test is still the old one. Seen in
+ *      `tests/advisorChatTools.test.ts` on 2026-07-31 at 20:20 local: the row was written
+ *      2026-08-01, the budget window was July, and `spent` came back 0. Every such site now binds
+ *      its date from here, and `tests/dates.test.ts` fails if one comes back.
+ *   2. A `daysAgo(n)` offset crosses the month boundary on the first n days of a month. Seen in
+ *      `tests/aiContextSections.test.ts` on 2026-08-01: five tests over `### Category Movement`
+ *      (which is month-to-date) built their rows at `daysAgo(1)`/`daysAgo(2)`, so every row landed
+ *      in July, the section was never emitted, and the assertions matched against ''.
+ *
+ * Use this for anything month-scoped. Keep a days-ago offset only where the surface under test is
+ * itself a rolling window, such as a reconciliation horizon or a 90-day holdings history.
+ */
+export function dayInThisMonth(day: number): string {
+  const now = new Date();
+  return localDate(new Date(now.getFullYear(), now.getMonth(), Math.min(day, now.getDate())));
+}
+
+/**
+ * Today, and a signed offset from today, on the LOCAL calendar.
+ *
+ * Use these instead of SQLite's `date('now')` and `date('now', '+/-n days')` in a fixture. SQLite's
+ * clock is UTC, so a fixture that calls it is asserting across two clocks that disagree for part of
+ * every day, and the production writers these rows stand in for are local:
+ * `snapshot.ts` writes both `net_worth_snapshots.date` and `holdings_history.date` from
+ * `format(new Date(), 'yyyy-MM-dd')`.
+ */
+export function localToday(): string {
+  return localDate(new Date());
+}
+
+export function localDaysFromToday(days: number): string {
+  const d = new Date();
+  d.setDate(d.getDate() + days);
+  return localDate(d);
+}
+
+function localDate(d: Date): string {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
 /** Insert a category, returning its id. Defaults satisfy every NOT NULL the real schema declares. */
 export function insertCategory(
   db: Database.Database,

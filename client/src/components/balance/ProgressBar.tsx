@@ -3,16 +3,18 @@
  *
  * A bar fill is a UI component under WCAG 1.4.11 and needs 3:1 against its adjacent colour, which
  * here is the track it sits in and not the page. The three tones this shipped with did not have it
- * on the light theme: `sage` measured 2.64:1 and `clay-scale` 2.20:1 against `track`, so a
- * low-vision reader could not see where the fill ended and the bar stopped being a measurement.
- * `SignedBar` below already ran into this and fixed it with `muted`/`sage-deep`; these three never
- * got the same pass.
+ * on the palette it shipped on, and `SignedBar` below had already hit the same wall and fixed it
+ * with `muted`/`sage-deep`. Those two figures are not restated here: the triplets that produced
+ * them are gone from index.css, so nothing in the repo can reproduce them.
  *
- * Each tone is now the darkest member of its own family, which is also the one the money numerals
- * already use, so the bar and the figure beside it agree: sage-deep is what a positive figure is
- * set in and clay is what a negative one is set in. `gold` stays, it is the only caution token and
- * it already clears. Ratios are re-derived from the shipped tokens by tests/plan.test.ts, which
- * reads this map rather than a list of names typed next to it.
+ * On the tokens as they now stand the original tones would clear, narrowly: `sage` is 3.18:1 light
+ * and 3.14:1 dark against `track`, `clay-scale` 5.73:1 and 5.98:1. The map is still the darkest
+ * member of each family, and the reason is now the one that does not depend on the palette: it is
+ * the tone the money numerals already use, so the bar and the figure beside it agree. sage-deep is
+ * what a positive figure is set in (3.91:1 / 4.01:1 on track) and clay is what a negative one is
+ * set in (9.86:1 / 9.73:1). `gold` stays, it is the only caution token, and it clears at 3.52:1
+ * light and 4.02:1 dark. Every ratio here is re-derived from the shipped tokens by
+ * tests/plan.test.ts, which reads this map rather than a list of names typed next to it.
  */
 const tones = {
   sage: 'bg-sage-deep',
@@ -42,8 +44,15 @@ interface ProgressBarProps {
 export function ProgressBar({ fraction, tone = 'sage', height = 6, className = '' }: ProgressBarProps) {
   const pct = Math.min(100, Math.max(0, fraction * 100));
   return (
-    /* Track is `bg-track`, not `bg-line`: line measured 1.04:1 against paper, so the unfilled
-       portion was invisible and the bar read as a floating dash of unknown extent. */
+    /* Track is `bg-track`, not `bg-line`, because the unfilled portion has to be visible or the bar
+       reads as a floating dash of unknown extent rather than a measurement.
+       OPEN FINDING, do not read this as settled: on the current palette `track` no longer buys that.
+       Re-derived from index.css, `track` against the grounds this bar renders on measures
+       paper 1.32 light / 1.55 dark, card 1.32 / 1.40, card-alt 1.26 / 1.31, well 1.19 / 1.28 and
+       rail 1.22 / 1.46, against `line`'s 1.30 / 1.39 on paper. The fill-to-track edge still clears
+       3:1 in every tone (see the map above), so the VALUE is readable; the bar's own outer extent
+       is not. That is a token question, not a component one, and it is deliberately not being
+       patched here by swapping the class. */
     <div
       className={`overflow-hidden rounded-full bg-track ${className}`}
       style={{ height }}
@@ -126,11 +135,12 @@ export function SignedBar({ value, extent, diverging, height = 6, className = ''
     /* Colour encodes the exception, not the rule. Every bar in a spending list pointing the same
        accent colour spends colour on nothing; the ordinary direction is structural `muted` and the
        accent is kept for the direction that is unusual, which is money coming back.
-       Measured against `track` in both themes, because a mark needs 3:1 and the obvious choices do
-       not have it here: `sage` is 2.64:1 light, `clay-scale` 2.20:1 light, and `line-3`
-       is 1.04:1, which is a zero rule nobody can see. muted 3.84/4.25, sage-deep 3.33/5.13 and
-       ink-soft 5.12/5.70 all clear it. The rule is deliberately the most visible thing in the
-       component: it is what makes this a measurement rather than a blob. */
+       Measured against `track` in both themes, because a mark needs 3:1. Re-derived from the
+       shipped tokens: muted 5.74/6.19, sage-deep 3.91/4.01 and ink-soft 11.46/9.81 all clear it,
+       and ink-soft is the widest margin of the three, which is why the zero rule is set in it. The
+       rule is deliberately the most visible thing in the component: it is what makes this a
+       measurement rather than a blob. `sage-soft` is the member of the family a lighter fill would
+       reach for and it is the one that cannot be used, at 1.63/2.05. */
     <div className={`relative rounded-full bg-track ${className}`} style={{ height }}>
       <div
         className={`absolute top-0 h-full transition-all duration-300 ease-out ${

@@ -133,13 +133,28 @@ export function LedgerRowInner({
         isCursor ? 'before:absolute before:inset-y-0 before:left-0 before:w-[2px] before:bg-sage' : ''
       }`}
     >
-      {/* Hover raises the row to `card` rather than washing it with `well`, which is what every
-          other list in this app does. This list carries money, and hover is a real ground:
-          computed from the exact triplets in client/src/index.css (WCAG 2.1, sRGB), `sage-deep`,
-          the positive-money token, reads 4.38:1 on light `well`, which is below AA. On `card` it
-          reads 6.11:1 light and 7.05:1 dark, and every other token this row uses clears AA there
-          too (ink 14.46/11.21, estimate 8.14/6.83, muted 7.04/5.84, muted-2 5.61/4.96). */}
-      <div className={`group transition-colors hover:bg-card ${ROW_FRAME}`}>
+      {/* Hover washes the row with `well`, the same ground every other list in this app uses.
+          It used to raise the row to `card` instead, and the reason given was that `well` could
+          not carry the money tones. That reason died with the 2026-08-01 palette and the choice
+          it defended became a no-op in the same stroke, so it is reversed here rather than
+          re-argued. Both halves, from the exact triplets in client/src/index.css (WCAG 2.1,
+          sRGB):
+
+          The no-op. This screen sits directly on `paper` (Layout is `bg-paper`, and `Screen`
+          declares no ground), and on light `card` and `paper` are the same pure-white triplet:
+          `card` on `paper` is 1.00:1. A `hover:bg-card` row therefore changed nothing at all on
+          light, which is the whole affordance gone, not a weak one. `well` on `paper` is 1.11:1
+          light and 1.21:1 dark, a step in both.
+
+          The dead reason. `sage-deep` on `well` is 4.65:1 light and 5.14:1 dark, so the
+          positive-money token the old note said this wash could not carry clears AA on it. So
+          does every other tone this row sets there:
+          `ink` is 18.93:1 light and 17.40:1 dark, `muted` 6.82:1 and 7.93:1, `muted-2` 5.41:1
+          and 6.42:1. The worst pair in either theme is 4.65. `gold` is the one tone `well` cannot
+          carry (index.css records 4.19 / 5.16) and this row sets it nowhere. `CategoryPill` and
+          the tinted flag declare grounds of their own; the neutral `set_aside` outline does not,
+          and it is `muted`. */}
+      <div className={`group transition-colors hover:bg-well ${ROW_FRAME}`}>
         <button
           type="button"
           data-col="select"
@@ -170,8 +185,10 @@ export function LedgerRowInner({
                 /* An open question is tinted; a decision the owner already made is not. `set_aside`
                    is the second kind, so it carries the neutral outline rather than the review
                    tint, which otherwise puts settled work back in the colour of open work.
-                   `text-muted` measures 5.67:1 on light paper, 7.04:1 on light card, 6.95:1 on
-                   dark paper and 5.84:1 on dark card, from the triplets in client/src/index.css. */
+                   This one carries no fill, so its ground is the row's: `text-muted` measures
+                   7.57:1 on light paper and 6.82:1 on light well,
+                   9.57:1 on dark paper and 7.93:1 on dark well,
+                   from the triplets in client/src/index.css. */
                 className={`rounded-md px-1.5 py-px text-rule uppercase tracking-[0.1em] ${
                   flag === 'set_aside'
                     ? 'border border-line-3 text-muted'
@@ -349,14 +366,23 @@ export function ScheduledRow({
 }: ScheduledRowProps) {
   const skipped = occurrence.adjustment_action === 'skip';
   const amount = occurrenceAmount(occurrence);
-  // A skipped row used to be the whole row at `opacity-50`, which took the amount to 2.26:1 on
-  // light paper and 2.86:1 on dark card: a money figure under AA on every ground it lands on.
-  // Line-through plus `muted` says the same thing and stays legible (5.67:1 light paper, 7.04:1
-  // light card, 6.95:1 dark paper, 5.84:1 dark card).
+  // A skipped row used to be the whole row at `opacity-50`, which took the amount under AA on
+  // every ground it lands on. Re-derived on the 2026-08-01 palette rather than left at what it
+  // measured before, because this figure is the only thing stopping `opacity-50` coming back and
+  // a dead one stops nothing: source-over composite of the veiled token at 0.5 onto the ground,
+  // then WCAG 2.1 against that same ground, gives 2.04:1 over light `paper` and 2.26:1 over dark
+  // `well`, the two grounds this row has. Composites carry no subject, so the walker in
+  // tests/contrastClaims.test.ts deliberately does not read them; these two are computed by hand
+  // from the triplets in client/src/index.css.
+  // Line-through plus `muted` says the same thing and stays legible: `muted` is 7.57:1 on light
+  // paper, 6.82:1 on light well, 9.57:1 on dark paper and 7.93:1 on dark well.
   const settledInk = skipped ? 'text-muted line-through' : 'text-estimate';
 
+  // Same hover ground as the posted row above, for the same two reasons: `hover:bg-card` was a
+  // no-op on light, and every tone this row sets clears AA on `well`. The estimate ink is the
+  // one this row adds, and `estimate` on `well` is 4.65:1 light and 5.17:1 dark.
   return (
-    <div className={`group border-b border-line transition-colors hover:bg-card ${ROW_FRAME}`}>
+    <div className={`group border-b border-line transition-colors hover:bg-well ${ROW_FRAME}`}>
       <span data-col="select" className={LEDGER_COLUMNS.select} aria-hidden />
       <div data-col="entry" className={LEDGER_COLUMNS.entry}>
         <div className={`truncate text-body-lg ${settledInk}`}>{occurrence.merchant_name}</div>

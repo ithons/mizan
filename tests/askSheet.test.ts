@@ -131,13 +131,16 @@ describe('the grounds a money numeral lands on in the sheet', () => {
 
   test('the transcript ground measures what AskPanel says it measures', () => {
     // AskPanel's PROSE comment states these two figures; they are re-derived rather than trusted.
-    assert.equal(contrast(triplet('ink', 'light'), triplet('card', 'light')).toFixed(2), '14.46');
-    assert.equal(contrast(triplet('ink', 'dark'), triplet('card', 'dark')).toFixed(2), '11.21');
-    assert.match(SOURCES[1].text, /14\.46:1 light and 11\.21:1 dark/);
+    assert.equal(contrast(triplet('ink', 'light'), triplet('card', 'light')).toFixed(2), '21.00');
+    assert.equal(contrast(triplet('ink', 'dark'), triplet('card', 'dark')).toFixed(2), '19.03');
+    assert.match(SOURCES[1].text, /21\.00:1 light and 19\.03:1 dark/);
   });
 
-  test('the one text colour that is not AA anywhere stays out of the sheet', () => {
-    // `faint` is deliberately below AA (3.26:1 light on paper) and deliberately non-text.
+  test('the one text colour that is under AA on the lightest ground stays out of the sheet', () => {
+    // `faint` is deliberately below AA and deliberately non-text. Re-derived on `paper`, the
+    // lightest ground it could land on: 3.84:1 light, 5.17:1 dark. It clears on dark now, so the
+    // claim is the light one plus the token's own contract, not a blanket "not AA anywhere".
+    assert.ok(contrast(triplet('faint', 'light'), triplet('paper', 'light')) < AA);
     for (const { file, text } of SOURCES) {
       assert.ok(!text.includes('text-faint'), `${file} puts text on the faint token`);
     }

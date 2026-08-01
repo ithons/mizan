@@ -12,8 +12,9 @@ import { Card, type Elevation } from '../client/src/components/balance/Card';
  * The docstring on `Card` described a ladder in which e1 borders `line` on dark and `line-2` on
  * light, and e2 borders `line-2` on dark and `line-3` on light. `className` is one string for both
  * themes, so no arrangement of the three classes below it could produce that, and none ever did:
- * e1 and e2 both border `line-2`. The table said the ladder stepped surface and border together at
- * every rung while the shipped one alternates.
+ * e1 and e2 both border `line-2`. It then said both halves of every rung run away from their own
+ * ground. On a pure white page they cannot: `paper` and `card` are the same triplet, so the
+ * surface half of the ladder is nominal and the border half carries all of it.
  *
  * Every figure in that docstring is re-derived here from `client/src/index.css`, and the token each
  * step actually uses is read out of the rendered class list, so the two cannot drift apart again.
@@ -66,7 +67,7 @@ test('the ladder that ships is surface then border, not both at once', () => {
   assert.deepEqual(step(2), { surface: 'card-alt', border: 'line-2' });
   assert.deepEqual(step(3), { surface: 'card-alt', border: 'line-3' });
 
-  // e1 to e2 holds the border and raises the surface; e2 to e3 holds the surface and steps the
+  // e1 to e2 holds the border and steps the surface; e2 to e3 holds the surface and steps the
   // border. That is the alternation the docstring now describes.
   assert.equal(step(1).border, step(2).border);
   assert.notEqual(step(1).surface, step(2).surface);
@@ -74,66 +75,141 @@ test('the ladder that ships is surface then border, not both at once', () => {
   assert.notEqual(step(2).border, step(3).border);
 });
 
-test('every L* in the docstring reproduces from the palette, for the token the step really uses', () => {
-  const rows: Array<[Elevation, Theme, number, number]> = [
-    // step  theme     surface L*  border L*
-    [1, 'light', 96.0, 76.8],
-    [2, 'light', 98.6, 76.8],
-    [3, 'light', 98.6, 72.8],
-    [1, 'dark', 19.3, 33.9],
-    [2, 'dark', 21.9, 33.9],
-    [3, 'dark', 21.9, 40.2],
+test('every L* and ratio in the docstring reproduces from the palette, for the token the step really uses', () => {
+  const rows: Array<[Elevation, Theme, number, number, number]> = [
+    // step  theme     surface L*  border L*  border on that surface
+    [1, 'light', 100.0, 60.2, 3.15],
+    [2, 'light', 98.3, 60.2, 3.02],
+    [3, 'light', 98.3, 47.2, 4.74],
+    [1, 'dark', 4.7, 44.0, 3.41],
+    [2, 'dark', 8.2, 44.0, 3.19],
+    [3, 'dark', 8.2, 55.9, 4.88],
   ];
-  for (const [elevation, theme, surface, border] of rows) {
+  for (const [elevation, theme, surface, border, edge] of rows) {
     const { surface: s, border: b } = step(elevation);
     assert.equal(lstar(s, theme), surface, `e${elevation} surface, ${theme}`);
     assert.equal(lstar(b, theme), border, `e${elevation} border, ${theme}`);
-    assert.match(SOURCE, new RegExp(`${s} ${surface.toFixed(1)}`), `e${elevation} ${theme} surface is not stated`);
-    assert.match(SOURCE, new RegExp(`${b} ${border.toFixed(1)}`), `e${elevation} ${theme} border is not stated`);
+    assert.equal(ratio(b, s, theme), edge, `e${elevation} border on surface, ${theme}`);
+    // The whole row, in the order the table prints it, so a figure cannot be moved onto the wrong
+    // rung and still match.
+    assert.match(
+      SOURCE,
+      new RegExp(`${s} ${surface.toFixed(1)} · ${b} ${border.toFixed(1)}\\s+${edge.toFixed(2)}:1`),
+      `e${elevation} ${theme} row is not stated as measured`
+    );
   }
-  assert.equal(lstar('paper', 'light'), 87.8);
-  assert.equal(lstar('paper', 'dark'), 13.0);
-  assert.match(SOURCE, /light \(paper L\* 87\.8\)/);
-  assert.match(SOURCE, /dark \(paper L\* 13\.0\)/);
+  assert.equal(lstar('paper', 'light'), 100.0);
+  assert.equal(lstar('paper', 'dark'), 0.0);
+  assert.match(SOURCE, /light \(paper L\* 100\.0\)/);
+  assert.match(SOURCE, /dark \(paper L\* 0\.0\)/);
 });
 
 test('the two step sizes the docstring names are the two the tokens produce', () => {
-  for (const theme of ['light', 'dark'] as const) {
-    assert.equal(
-      Number((lstar(step(2).surface, theme) - lstar(step(1).surface, theme)).toFixed(1)),
-      2.6,
-      `the e1 to e2 surface step is not +2.6 L* on ${theme}`
-    );
-  }
-  assert.equal(Number((lstar(step(3).border, 'light') - lstar(step(2).border, 'light')).toFixed(1)), -4.0);
-  assert.equal(Number((lstar(step(3).border, 'dark') - lstar(step(2).border, 'dark')).toFixed(1)), 6.3);
-  assert.match(SOURCE, /\+2\.6 L\* in\n \* both themes/);
-  assert.match(SOURCE, /-4\.0 L\* light, \+6\.3 dark/);
+  const surfaceStep = (theme: Theme) =>
+    Number((lstar(step(2).surface, theme) - lstar(step(1).surface, theme)).toFixed(1));
+  const borderStep = (theme: Theme) =>
+    Number((lstar(step(3).border, theme) - lstar(step(2).border, theme)).toFixed(1));
+
+  assert.equal(surfaceStep('light'), -1.7);
+  assert.equal(surfaceStep('dark'), 3.5);
+  assert.equal(borderStep('light'), -13.0);
+  assert.equal(borderStep('dark'), 11.9);
+  assert.match(SOURCE, /-1\.7 L\*\n \* light, \+3\.5 L\* dark/);
+  assert.match(SOURCE, /-13\.0 L\* light, \+11\.9 L\* dark/);
 });
 
-test('both halves of every step run away from their own ground, in both themes', () => {
-  // The property the ladder is for: on light a surface rises and a border darkens, on dark both
-  // rise, and in each theme the same word means further from the page.
+test('the border carries every rung and the surface step does not, in both themes', () => {
+  // The property that replaced "both halves run away from the ground", which a pure white page
+  // cannot have. Each rung is legible because its border clears the 3:1 non-text floor against
+  // its OWN surface, and each border runs away from its own surface in whichever direction that
+  // theme leaves open.
   for (const elevation of [1, 2, 3] as const) {
     const { surface, border } = step(elevation);
-    assert.ok(lstar(surface, 'light') > lstar('paper', 'light'), `e${elevation} surface sinks on light`);
-    assert.ok(lstar(border, 'light') < lstar('paper', 'light'), `e${elevation} border rises on light`);
-    assert.ok(lstar(surface, 'dark') > lstar('paper', 'dark'), `e${elevation} surface sinks on dark`);
-    assert.ok(lstar(border, 'dark') > lstar('paper', 'dark'), `e${elevation} border sinks on dark`);
+    assert.ok(ratio(border, surface, 'light') >= 3, `e${elevation} border is under 3:1 on light`);
+    assert.ok(ratio(border, surface, 'dark') >= 3, `e${elevation} border is under 3:1 on dark`);
+    assert.ok(lstar(border, 'light') < lstar(surface, 'light'), `e${elevation} border does not darken on light`);
+    assert.ok(lstar(border, 'dark') > lstar(surface, 'dark'), `e${elevation} border does not lighten on dark`);
   }
+
+  // The surface half is nominal, and the docstring says so rather than claiming a rung it does not
+  // deliver. On light it is backwards as well as small: card-alt sits below card, and card itself
+  // is the page's own triplet.
+  assert.equal(ratio(step(2).surface, step(1).surface, 'light'), 1.04);
+  assert.equal(ratio(step(2).surface, step(1).surface, 'dark'), 1.07);
+  assert.equal(ratio(step(1).surface, 'paper', 'light'), 1);
+  assert.ok(lstar(step(2).surface, 'light') < lstar(step(1).surface, 'light'));
+  assert.match(SOURCE, /1\.04:1 light and 1\.07:1 dark/);
+  assert.match(SOURCE, /`card` on `paper` measures 1\.00:1/);
 });
 
-test('e3 stops raising the surface for the reason it states', () => {
-  // card-white is the next rung and it is where a dialog's own text stops clearing AA on dark.
-  assert.equal(lstar('card-white', 'dark'), 31.3);
-  assert.equal(ratio('clay', 'card-white', 'dark'), 3.41);
-  assert.equal(ratio('muted-2', 'card-white', 'dark'), 3.3);
+test('e3 stops raising the surface, and the AA reason it used to give is gone', () => {
+  // The recorded reason was that card-white on dark broke AA for a dialog's own text. It does not
+  // any more, so the docstring may not keep saying it does.
+  assert.equal(lstar('card-white', 'dark'), 15.2);
+  assert.equal(ratio('clay', 'card-white', 'dark'), 10.84);
+  assert.equal(ratio('muted-2', 'card-white', 'dark'), 5.58);
+  assert.ok(ratio('clay', 'card-white', 'dark') >= 4.5 && ratio('muted-2', 'card-white', 'dark') >= 4.5);
+  assert.match(SOURCE, /`card-white` is L\* 15\.2 on dark now\n \* and those two measure 10\.84:1 and 5\.58:1/);
+
+  // The reason that replaces it: card-white is not a rung. On light it is the page's own triplet.
+  assert.equal(lstar('card-white', 'light'), lstar('paper', 'light'));
+  assert.equal(ratio('card-white', 'paper', 'light'), 1);
+  assert.equal(ratio('card-white', step(3).surface, 'light'), 1.04);
+  assert.equal(ratio('card-white', step(3).surface, 'dark'), 1.17);
   assert.ok(!step(3).surface.includes('white'), 'e3 raised onto card-white');
-  assert.match(SOURCE, /L\* 31\.3, where `clay` measures 3\.41:1 and `muted-2` 3\.30:1/);
+  assert.match(SOURCE, /L\* 100\.0, 1\.00:1 against both/);
+  assert.match(SOURCE, /on dark it would buy 1\.17:1/);
 });
 
-test('the docstring no longer claims the ladder a single class cannot express', () => {
+test('the NEUTRAL LADDER block in index.css is the ladder the triplets under it produce', () => {
+  // index.css states the same L* axis in prose. It is the file the numbers come from, which is
+  // exactly why nothing re-derived them and they went stale with the palette.
+  const heading = 'NEUTRAL LADDER (CIE L*, ascending)';
+  assert.ok(CSS.includes(heading), `index.css no longer carries a section headed "${heading}"`);
+  const block = CSS.slice(CSS.indexOf(heading));
+  const rows: Record<Theme, string> = {
+    light: block.slice(block.indexOf('light'), block.indexOf('dark')),
+    dark: block.slice(block.indexOf('dark'), block.indexOf('\n *\n')),
+  };
+  const NEUTRALS = ['line-3', 'line-2', 'track', 'line', 'well', 'rail', 'card-alt', 'card-white', 'card', 'paper'];
+
+  for (const theme of ['light', 'dark'] as const) {
+    const stated = [...rows[theme].matchAll(/([A-Za-z][A-Za-z0-9-]*) (\d+\.\d)\b/g)].map(
+      ([, name, value]) => [name.toLowerCase(), Number(value)] as const
+    );
+    assert.deepEqual(
+      stated.map(([name]) => name).sort(),
+      [...NEUTRALS].sort(),
+      `the ${theme} row does not list every neutral exactly once`
+    );
+    for (const [name, value] of stated) {
+      assert.equal(lstar(name, theme), value, `${name} on ${theme} is stated as ${value}`);
+    }
+    for (let i = 1; i < stated.length; i += 1) {
+      assert.ok(stated[i][1] >= stated[i - 1][1], `the ${theme} row is not ascending at ${stated[i][0]}`);
+    }
+  }
+
+  // The claim the block makes about those numbers: on light the four surfaces are one value, and
+  // the hover wash inverts by theme.
+  assert.equal(lstar('card-white', 'light'), lstar('paper', 'light'));
+  assert.equal(Number((lstar('card-alt', 'light') - lstar('paper', 'light')).toFixed(1)), -1.7);
+  assert.equal(Number((lstar('card-white', 'dark') - lstar('paper', 'dark')).toFixed(1)), 15.2);
+  assert.equal(Number((lstar('well', 'light') - lstar('card', 'light')).toFixed(1)), -4.2);
+  assert.equal(Number((lstar('well', 'dark') - lstar('card', 'dark')).toFixed(1)), 4.6);
+  assert.match(CSS, /fit inside 1\.7 points and `card` on `paper` is 1\.00:1/);
+  assert.match(CSS, /fit inside 15\.2 points and `card` on `paper` is 1\.10:1/);
+  assert.match(CSS, /card \(-4\.2 L\*\) and rises off a dark one \(\+4\.6 L\*\)/);
+  assert.equal(ratio('card', 'paper', 'light'), 1);
+  assert.equal(ratio('card', 'paper', 'dark'), 1.1);
+});
+
+test('the docstring no longer claims either ladder the tokens cannot express', () => {
   // The exact shape of the old claim: e1 bordering `line`, and e2 bordering `line-3`.
   assert.ok(!/e1\s+card 96\.0\s+· line-2 76\.8\s+card 19\.3\s+· line 27\.9/.test(SOURCE));
   assert.ok(!/e2\s+card-alt 98\.6 · line-3 72\.8/.test(SOURCE));
+  // And the claim the pure white page falsified: that the surface half of every rung runs away
+  // from the ground. It does not, and it may not be asserted in the present tense anywhere.
+  assert.ok(!/run AWAY from their own ground/.test(SOURCE));
+  assert.ok(!/`card-white` is the next rung and on the dark theme it/.test(SOURCE));
 });

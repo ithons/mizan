@@ -264,8 +264,15 @@ export function RulesSection() {
               </TextButton>
               {/* The other half of the door. Accepting was reachable and refusing was not, and a
                   suggestion the owner declines is regenerated on every visit until they give in. */}
-              {/* No `hover:!text-clay` here, unlike the Delete button on the rules below: clay on
-                  `sage-tint` reads 4.39:1 in dark, under AA. The default hover stays on ink. */}
+              {/* No `hover:!text-clay` here, unlike the Delete button on the rules below. The
+                  reason this line used to give was contrast, and that reason is dead: `clay` on
+                  `sage-tint` measures 11.42:1 light and 10.99:1 dark, so it clears AA in both
+                  themes and would separate these two buttons by nothing at all.
+                  What separates them is what they do. `clay` is this app's destructive tone, and
+                  `deleteMutation` below removes a rule the owner wrote, while this button runs
+                  `dismissMutation` and declines a suggestion the owner never had. That is a role
+                  argument and not a measurement, so it is a design call open to being revisited
+                  on design grounds; contrast no longer decides it either way. */}
               <TextButton
                 onClick={() => dismissMutation.mutate(suggestion)}
                 disabled={dismissMutation.isPending || approveAllMutation.isPending}
@@ -276,8 +283,12 @@ export function RulesSection() {
           ))}
           {skipped.length > 0 && (
             <div className="border-t border-sage-tint-border px-4 py-3">
-              {/* Not `text-clay`: on `sage-tint` it reads 4.39:1 in dark, below AA. `text-ink` is
-                  12.73:1 light and 9.58:1 dark, and the weight carries the emphasis instead. */}
+              {/* Not `text-clay`, and again not for contrast: `clay` on `sage-tint` measures
+                  11.42:1 light and 10.99:1 dark and clears AA in both themes, so the figure this
+                  line used to carry is dead. The reason that holds is what the sentence says.
+                  Nothing failed here: a suggestion mizān declined to make is not an error, and
+                  clay would report one. `text-ink` is 18.41:1 light and 15.34:1 dark on the same
+                  ground, and the weight carries the emphasis instead. */}
               <p className="text-note font-medium text-ink">
                 {skipped.length} suggestion{skipped.length === 1 ? ' was' : 's were'} left alone:
               </p>

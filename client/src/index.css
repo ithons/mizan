@@ -105,147 +105,237 @@
  * ============================================================================================
  * WHY THE RAMPS MOVED
  *
- * The old palette held twelve neutrals inside 25 L* points (card-white 100.0 down to dot 75.2),
- * then jumped 19 points to the first text value. The page was therefore a two-value image: a
- * near-white mush plus dark text. `card` on `paper` measured 1.072:1, `rail` on `paper` 1.046:1,
- * `line-2` on `card` 1.283:1, so a surface was defined entirely by a hairline. There is no room
- * to elevate anything when the ground already sits at L* 94.
+ * [historical] The palette this replaced, kept as the record of what it cost. Every figure in this
+ * paragraph re-derives from `git show 9e1c99b^:client/src/index.css` through the same WCAG 2.1 and
+ * CIE L* arithmetic tests/helpers/palette.ts runs, and none of them re-derives from the triplets
+ * below. It held twelve neutrals inside 26.7 L* points (card-white 100.0 down to tan 73.3, eleven
+ * of them inside the 24.8 between card-white and dot 75.2), then jumped 19.2 points to the first
+ * ink (faint 56.0). The page was therefore a two-value image: a near-white mush plus dark text.
+ * `card` on `paper` measured 1.072:1, `rail` on `paper` 1.046:1, `line-2` on `card` 1.283:1, so a
+ * surface was defined entirely by a hairline. There is no room to elevate anything when the ground
+ * already sits at L* 93.9.
  *
  * Three structural facts drive the new values:
- *   1. Ground moves down (light L* 87.8, dark L* 13.0) so surfaces have runway to rise into.
- *      card-on-paper goes 1.072:1 -> 1.240:1 light, 1.190:1 dark. A card is now a value, not a
- *      hairline.
- *   2. Chroma was inverted. sage C=0.045 and sage-deep C=0.054 lost to tan C=0.060 and gold
- *      C=0.123, so the color carrying income and assets was less saturated than a decorative
- *      fill. Now every semantic accent (sage 0.096, sage-deep 0.109, clay 0.120, gold 0.120)
- *      out-saturates every piece of furniture (tan 0.041 is the loudest).
- *   3. gold sat at OKLCh h 78.8 against paper's h 84.6, so the caution color was a saturated
- *      version of the background's own hue and read as ambient. It now sits at h 57.7, roughly
- *      23 degrees clear of the neutral family, and is dark enough in light mode to be read as
- *      text. It is used as text at TWELVE call sites, not the five this line used to claim:
+ *   1. Ground moved to the ENDS of the scale rather than down: light paper is 255 255 255
+ *      (L* 100.0) and dark paper is 0 0 0 (L* 0.0). So there is no runway above a light ground at
+ *      all, and a card cannot become a value: `card` is the paper's own triplet, and
+ *      `card` on `paper` measures 1.00:1 light and 1.10:1 dark. The elevation ladder is carried by
+ *      `line-2` and `line-3` instead. See NEUTRAL LADDER below, and the table in Card.tsx, which
+ *      states the ratio each of the three rungs measures against its own surface.
+ *   2. Chroma is no longer merely ordered, it is separated. [historical] The old palette put sage
+ *      at C=0.045 and sage-deep at C=0.054 behind tan C=0.060 and gold C=0.123, so the colour
+ *      carrying income and assets was less saturated than a decorative fill. There is no ordering
+ *      left to invert: every neutral in this file is chroma 0.000 exactly in both themes, which is
+ *      paper, card, card-alt, card-white, rail, well, line, line-2, line-3, track, dot, tan, beam
+ *      and the whole ink ramp. The tokens carrying any chroma at all are the semantic ones
+ *      (light: sage 0.160, sage-deep 0.160, clay 0.135, gold 0.125, info 0.200, review-text 0.210)
+ *      plus `estimate` at 0.055, which is the deliberate exception argued at its declaration.
+ *   3. gold is held off the page by chroma, not by hue angle, and the line that used to sit here
+ *      had that backwards. [historical] It said gold sat at OKLCh h 78.8 against paper's h 84.6, so
+ *      the caution colour was a saturated version of the background's own hue and read as ambient,
+ *      and that moving it to h 57.7 put it 23 degrees clear of the neutral family. That argument
+ *      cannot be restated against this palette and is not worth rescuing: the neutral family is
+ *      chroma 0.000, and a hue angle at zero chroma is not a direction, it is the arctangent of
+ *      two zeros. `gold` is OKLCh L 0.568 C 0.125 h 67.8 on light and L 0.644 C 0.107 h 69.7 on
+ *      dark, and what separates it from the page is the chroma, with nothing at the other end of a
+ *      hue comparison to be near or far from. It is also dark enough on light to be read as text:
+ *      L* 49.0, and `gold` on `paper` is 4.64:1, which clears AA.
+ *      It is used as text at THIRTEEN call sites, not the five this line used to claim:
  *        grep -rnE 'text-(gold|warning)' client/src | grep -vE ':[0-9]+: \*'
- *        -> 12 on 2026-07-31, being 7 `text-gold` and 5 `text-warning` (the legacy alias, same
+ *        -> 13 on 2026-08-01, being 7 `text-gold` and 6 `text-warning` (the legacy alias, same
  *           triplet). The trailing grep drops prose in block comments, including this line.
+ *           This line said 12 (7 and 5) and had never been run: re-running that command against
+ *           the tree at the commit that introduced it returns 13 (7 and 6) as well.
  *      What it measured before the rebuild is not re-derivable from this file, because the old
  *      triplets are gone from it, so no figure for that is stated here.
+ *
  * ============================================================================================
  * MEASURED CONTRAST (WCAG 2.1, computed from these exact triplets, not estimated)
+ * Not maintained by hand any more. tests/contrastClaims.test.ts parses every cell below, and
+ * every contrast figure written into a comment anywhere under client/src, and recomputes it from
+ * the declarations further down this file. A stale cell fails there rather than sitting here.
  *
  *                        LIGHT              DARK
  *                     paper   card       paper   card
- *   ink              11.66   14.46      13.34   11.21
- *   ink-soft          7.56    9.38       9.32    7.83
- *   muted             5.67    7.04       6.95    5.84
- *   muted-2           4.52    5.61       5.90    4.96
- *   estimate          6.56    8.14       8.13    6.83
- *   sage-deep         4.93    6.11       8.38    7.05    (positive money)
- *   clay              5.47    6.78       6.10    5.13    (negative money)
- *   gold              4.57    5.67       7.40    6.22
- *   sage                -     4.85         -     5.85    (also `bg-sage` + `text-card`)
- *   pill-text on sage-tint  5.14                 5.68
- *   review-text on review-bg 4.93                5.53
+ *   ink              21.00   21.00      21.00   19.03
+ *   ink-soft         15.13   15.13      15.17   13.74
+ *   muted             7.57    7.57       9.57    8.67
+ *   muted-2           6.01    6.01       7.74    7.02
+ *   estimate          5.16    5.16       6.23    5.65
+ *   sage-deep         5.16    5.16       6.20    5.62    (positive money)
+ *   clay             13.02   13.02      15.04   13.63    (negative money)
+ *   gold              4.64    4.64       6.22    5.64
+ *   faint             3.84    3.84       5.17    4.69    (non-text, see below)
+ *   sage                -     4.20         -     4.39    (also `bg-sage` + `text-card`)
+ *   pill-text on sage-tint  4.52                 4.53
+ *   review-text on review-bg  4.62               4.56
  *
- * Every money numeral clears AA on both grounds in both themes. The old secondary ramp measured
- * 3.24:1 / 2.36:1 / 2.01:1 and failed outright; the ramp that replaced it cleared AA on a paper
- * of L* 93.9, and these values re-clear it on a paper of L* 87.8.
+ * The two LIGHT columns are the same number on every row, and that is the palette's central fact
+ * rather than a copy-paste slip: `card` and `paper` are one triplet on light, 255 255 255. A
+ * surface cannot elevate on a pure white page, and this one does not try: `card` on `paper` is
+ * 1.00:1, the identical colour twice, so the border carries the whole elevation ladder instead.
+ * See NEUTRAL LADDER below and Card.tsx.
  *
- * `faint` is the one token that does not reach AA (light 3.26 on paper, dark 4.10) and is
- * deliberately non-text, same as before. Today.tsx uses `text-faint` on two small strings; that
- * is the view violating the token contract, not the token.
+ * Every money numeral clears AA on both grounds in both themes, and no longer barely: the tones
+ * `Figure` can render money in are `ink`, `sage-deep`, `clay` and `estimate`, and the worst of
+ * those sixteen readings in the table above is 5.16. tests/edgeToken.test.ts holds that as a
+ * threshold and not as a printed figure, so a palette that drags one of them under fails there.
  *
- * `rail` is chrome, not a text ground. It is the navigation's own fill, the selected row in the
- * sync panel, a code chip and a chat bubble, two text inputs, the active row of both pickers, and
- * the ground under several settings panels. It is NOT a bar track: `ProgressBar` uses `track`.
+ * [historical] Two ramps ago a secondary ramp measured 3.24:1 / 2.36:1 / 2.01:1 and failed
+ * outright; the ramp that replaced it cleared AA on a paper of L* 93.9 and re-cleared it on a
+ * paper of L* 87.8. Light paper is L* 100.0 now. Neither of those grounds exists in this file any
+ * more and neither figure re-derives from it, so they are kept as the record of what the ramp cost
+ * and are not a measurement of anything shipping.
  *
- * Of the tones set on it in shipping code, four clear AA on both themes and four clear it only on
- * dark (light / dark, from these triplets):
- *     ink 9.45 / 14.60   ·   ink-soft 6.13 / 10.20   ·   muted 4.60 / 7.60   ·   estimate 5.32 / 8.90
- *     muted-2 3.67 / 6.46   ·   sage-deep 3.99 / 9.18   ·   clay 4.43 / 6.68   ·   gold 3.71 / 8.10
+ * `faint` is the one INK in the table that goes under AA, and only on the two light grounds. It
+ * stays declared non-text in both themes anyway: a token whose contract flips by theme is one
+ * nobody can hold in their head at the call site. `sage` also sits under AA there, in both themes,
+ * and is not a counter-example, because its row measures a `bg-sage` swatch against the page and
+ * the text that goes ON that swatch is `card`.
  *
- * The second line is not a prohibition this app observes, and saying it was is the sentence that
- * used to sit here. Counted 2026-07-31 by walking every `bg-rail` element under client/src and
- * reading the tones inside it, skipping descendants that declare a ground of their own: 22 call
- * sites that day, and 9 OF THEM set one of those four on a light rail. SyncActivityPanel twice
- * (once through `statusTone`'s inline `color`, which resolves to sage-deep, gold or clay),
- * AdvisorMemorySection twice, DataSection four times, Settings once. tests/railGround.test.ts runs
- * that same walk, names every one of the nine with the tone it sets, and fails both on a tenth and
- * on an entry that has been fixed and not deleted. The total is a dated reading and moves as views
- * are added; the nine is the number that is held. Do not add one; the four safe tones are there.
+ * The sentence that used to sit here named Today.tsx setting `text-faint` on two small strings and
+ * called that the view violating the token contract. There is no Today.tsx and there is no
+ * `text-faint`:
+ *     grep -rn 'text-faint' client/src   ->  3 on 2026-08-01, all three of them in this paragraph.
+ * `--mz-faint` renders at exactly two places, both non-text: TrendChart's zero rule, as
+ * `stroke="var(--mz-faint)"`, and SERIES_OVERFLOW_COLOR in lib/chartColors.ts. The contract is
+ * kept, so there is no finding here to leave standing.
+ *
+ * `rail` is chrome by ROLE, and on this palette it is barely a surface at all: `rail` on `paper`
+ * is 1.08:1 light and 1.06:1 dark, so what marks it is what it is used for, not a value step. It is
+ * the navigation's own fill, the selected row in the sync panel, a code chip and a chat bubble, two
+ * text inputs, the active row of both pickers, and the ground under several settings panels. It is
+ * NOT a bar track: `ProgressBar` uses `track`.
+ *
+ * The light ground is pure white now and the inks were solved against it, so rail carries almost
+ * everything. Of the eight tones this note tracks, seven clear AA in both themes and one clears it
+ * only on dark (light / dark, computed from these triplets):
+ *     ink 19.43 / 19.80   ·   ink-soft 14.00 / 14.30   ·   muted 7.01 / 9.03   ·   estimate 4.78 / 5.88
+ *     muted-2 5.56 / 7.30   ·   sage-deep 4.77 / 5.85   ·   clay 12.05 / 14.18
+ *     gold 4.30 / 5.87   ·   the one that does not
+ *
+ * That is a reading, not a permission, and it is not a prohibition either: saying rail could carry
+ * only two tones is the sentence that used to sit here and it was false at nine call sites.
+ * Re-counted by walking every `bg-rail` element under client/src and reading the tones inside it,
+ * skipping descendants that declare a ground of their own:
+ * 22 call sites on 2026-08-01, and 5 OF THEM are not certified clean by that walk.
+ * Four set `gold` on a light rail (AdvisorMemorySection twice, through the legacy `text-warning`
+ * alias, and DataSection twice); the fifth sets its colour through an inline `style` prop, where no
+ * class string can show it (SyncActivityPanel's selected run row, whose `statusTone` resolves to
+ * muted, sage-deep, gold or clay, so it lands on the failing tone whenever a run ends partial).
+ * tests/railGround.test.ts runs that same walk, names every one of the five with the tone it sets,
+ * and fails both on a sixth and on an entry that has been fixed and not deleted. The total is a
+ * dated reading and moves as views are added; the five is the number that is held.
+ *
+ * That list was nine before the 2026-08-01 palette. `muted-2`, `sage-deep` and `clay` were all
+ * sub-AA on a light rail then and none of them is now, so the four entries recording them were
+ * deleted from the test rather than left standing as findings nobody can act on. Every "before"
+ * figure below is re-derivable, not remembered:
+ *     git show HEAD:client/src/index.css   ->  muted-2 3.67, sage-deep 3.99, clay 4.43 on a light
+ *     rail; the same WCAG 2.1 arithmetic this file's tests run, against the previous triplets.
  *
  * The accounts list is the site that was fixed rather than recorded, because what it put on `rail`
  * was a money numeral: it filled its SELECTED row with `rail` and set a balance, a merchant line
- * and a caption on it, and it uses `card` now (worst pair in either theme 4.96).
- * tests/navigation.test.ts and tests/accountsRowContrast.test.ts recompute the figures above.
+ * and a caption on it, and three of those five tones were sub-AA on light at the time. All five
+ * clear on rail now (worst 4.77), so that reading is historical; the row still uses `card`, where
+ * the worst pair in either theme is 5.16. What marks selection there is the ring, not the fill:
+ * `card` on `paper` is 1.00:1 on light, because both are pure white.
+ * tests/accountsRowContrast.test.ts recomputes every one of those figures.
  *
- * `pill-bg` is the same kind of ground and is likewise not clean. `clay` on it is 4.74 / 4.93 and
- * `muted` 4.92 / 5.61, but `muted-2` is 3.92 / 4.77 (CategoryPill's uncategorized state) and
- * `sage-deep` 4.27 / 6.78 (CategoriesSection's Badge), both at 11.5px where no exemption applies.
- * `gold` on it is 3.97 / 5.98, which is why the two Accounts caution pills left it.
+ * `pill-bg` is the same kind of ground and the same thing happened to it. Two call sites sat under
+ * AA on it before 2026-08-01 and neither does now (light / dark):
+ *     `clay` 11.43 / 12.21   ·   `muted` 6.65 / 7.77
+ *     `muted-2` is 5.27 / 6.28, CategoryPill's uncategorized state, 3.92 / 4.77 before
+ *     `sage-deep` 4.53 / 5.03, CategoriesSection's Badge, 4.27 / 6.78 before
+ * Both are 11.5px, where no large-text exemption applies, and both clear. `gold` on it is
+ * 4.08 / 5.05 and is still the one that does not, which is why the two Accounts caution pills left
+ * it and have not come back.
  *
- * `well` is the hover wash and is likewise not a secondary-text ground: `muted-2` on `well` is
- * 4.02 light / 4.14 dark. `Row` applies it on hover and focus to every list row in the app, so a
- * row whose resting ground is safe still crosses below AA for as long as the pointer is on it.
- * That is the primitive's to settle, and it is recorded here rather than left unstated.
+ * `well` is the hover wash, and `Row` applies it on hover and focus to every list row in the app,
+ * so whatever it cannot carry, every list row in the app loses for as long as the pointer is on it.
+ * It used to lose its secondary text there. It no longer does: `muted-2` on `well` is
+ * 5.41 light / 6.42 dark, against 4.02 / 4.14 before. `gold` on `well` is 4.19 / 5.16 and is the
+ * one ink that still goes under on light, the same tone that goes under on `rail` and on `pill-bg`.
  * ============================================================================================
- * NEUTRAL LADDER (CIE L*)
- *   light  rail 80.2 | line-3 72.8 | track 74.1 | line-2 76.8 | line 81.7 | well 83.5 |
- *          PAPER 87.8 | card 96.0 | card-alt 98.6 | card-white 100.0
- *   dark   rail 9.0 | PAPER 13.0 | card 19.3 | card-alt 21.9 | well 24.8 | line 27.9 |
- *          track 28.8 | card-white 31.3 | line-2 33.9 | line-3 40.2
+ * NEUTRAL LADDER (CIE L*, ascending)
+ *   light  line-3 47.2 | line-2 60.2 | track 89.2 | line 89.9 | well 95.8 | rail 96.9 |
+ *          card-alt 98.3 | card-white 100.0 | card 100.0 | PAPER 100.0
+ *   dark   PAPER 0.0 | rail 2.7 | card 4.7 | card-alt 8.2 | well 9.3 | line 15.2 |
+ *          card-white 15.2 | track 18.9 | line-2 44.0 | line-3 55.9
+ *
+ * The surfaces are not a ladder any more and are not asked to be one. On light `paper`, `card` and
+ * `card-white` are the SAME pure white triplet and `card-alt` sits 1.7 L* under them, so all four
+ * fit inside 1.7 points and `card` on `paper` is 1.00:1, the identical colour twice. On dark they
+ * fit inside 15.2 points and `card` on `paper` is 1.10:1. What separates a surface from the page,
+ * and one elevation rung from the next, is `line-2` and `line-3`, which is why they sit so far
+ * down the light ramp and so far up the dark one. Card.tsx names the three rungs and the ratio
+ * each measures; tests/cardElevation.test.ts re-derives every figure in it, and every figure in
+ * these two lines, from the triplets below.
+ *
  * `well` is the hover wash and inverts direction by theme on purpose: it recedes from a light
- * card (-12.5 L*) and rises off a dark one (+5.5 L*), so hover always means "this row moved".
+ * card (-4.2 L*) and rises off a dark one (+4.6 L*), so hover always means "this row moved".
  */
 :root,
 :root[data-theme='light'] {
   color-scheme: light;
 
-  --mz-paper-c: 229 219 202;
-  --mz-rail-c: 209 198 176;
-  --mz-card-c: 248 243 234;
-  --mz-card-alt-c: 253 251 245;
+  --mz-paper-c: 255 255 255;
+  --mz-rail-c: 246 246 246;
+  --mz-card-c: 255 255 255;
+  --mz-card-alt-c: 250 250 250;
   --mz-card-white-c: 255 255 255;
 
-  --mz-ink-c: 38 33 25;
-  --mz-ink-soft-c: 71 63 50;
-  --mz-muted-c: 91 81 66;
-  --mz-muted-2-c: 105 96 79;
-  --mz-faint-c: 128 118 101;
-  /* Achromatic and cool against the warm measured ink, because this app distinguishes a balance
-     it read from the bank from one it reverse-replayed, and that distinction previously survived
-     only as a dashed stroke inside TrendChart. */
-  --mz-estimate-c: 67 74 80;
+  --mz-ink-c: 0 0 0;
+  --mz-ink-soft-c: 38 38 38;
+  --mz-muted-c: 84 84 84;
+  --mz-muted-2-c: 99 99 99;
+  --mz-faint-c: 130 130 130;
+  /* The one ink that carries chroma, which is what marks it as a different KIND of ink rather than
+     a quieter one. Every neutral in this file is chroma 0.000 exactly, `ink` through `faint`
+     included; `estimate` is OKLCh C 0.055 at h 205.5 on light and C 0.045 at h 203.6 on dark.
+     This line used to say "achromatic and cool against the warm measured ink", and all three of
+     those words are now wrong: 67 117 123 is a teal and not achromatic, light `ink` is 0 0 0 and
+     not warm, and cool was never the property doing the work anyway, since `info` (h 262.1) and
+     `review-text` (h 309.9) are both cooler than it.
+     It is also not a de-emphasis. `estimate` and `sage-deep` sit at the same L* 46.1 on light and
+     the table above gives them the same figure in both LIGHT columns, so an estimated balance
+     renders at exactly the weight the positive-money ink does and is told apart from it by hue
+     rather than by being quieter. That is the point, and it is the reason for the token: this
+     app distinguishes a balance it read from the bank from one it reverse-replayed, and that
+     distinction previously survived only as a dashed stroke inside TrendChart. */
+  --mz-estimate-c: 67 117 123;
 
-  --mz-line-c: 214 202 180;
-  --mz-line-2-c: 202 188 165;
-  --mz-line-3-c: 191 177 152;
-  --mz-track-c: 192 181 160;
-  --mz-well-c: 218 207 187;
-  --mz-dot-c: 163 151 130;
+  --mz-line-c: 226 226 226;
+  --mz-line-2-c: 145 145 145;
+  --mz-line-3-c: 112 112 112;
+  --mz-track-c: 224 224 224;
+  --mz-well-c: 243 243 243;
+  --mz-dot-c: 150 150 150;
 
-  --mz-sage-c: 83 116 55;
-  --mz-sage-deep-c: 59 102 34;
-  --mz-sage-soft-c: 126 153 98;
-  --mz-sage-tint-c: 222 233 213;
-  --mz-sage-tint-border-c: 192 209 179;
-  --mz-sage-panel-c: 225 235 218;
-  --mz-sage-panel-border-c: 190 207 179;
-  --mz-pill-text-c: 67 104 41;
+  --mz-sage-c: 37 142 51;
+  --mz-sage-deep-c: 9 127 35;
+  --mz-sage-soft-c: 114 195 117;
+  --mz-sage-tint-c: 221 247 220;
+  --mz-sage-tint-border-c: 179 223 179;
+  --mz-sage-panel-c: 227 249 227;
+  --mz-sage-panel-border-c: 184 225 184;
+  --mz-pill-text-c: 9 127 35;
 
-  --mz-clay-c: 143 58 39;
-  --mz-clay-scale-c: 192 88 60;
-  --mz-gold-c: 148 78 0;
-  --mz-tan-c: 187 168 143;
-  --mz-beam-c: 175 165 145;
+  --mz-clay-c: 106 0 0;
+  --mz-clay-scale-c: 172 3 17;
+  --mz-gold-c: 166 102 0;
+  --mz-tan-c: 176 176 176;
+  --mz-beam-c: 0 0 0;
 
-  --mz-pill-muted-bg-c: 214 205 185;
-  --mz-pill-muted-border-c: 193 182 161;
+  --mz-pill-muted-bg-c: 240 240 240;
+  --mz-pill-muted-border-c: 196 196 196;
 
-  --mz-review-bg-c: 250 225 198;
-  --mz-review-border-c: 232 191 152;
-  --mz-review-text-c: 143 82 12;
-  --mz-review-active-c: 244 213 180;
+  --mz-review-bg-c: 248 233 255;
+  --mz-review-border-c: 224 190 250;
+  --mz-review-text-c: 151 64 203;
+  --mz-review-active-c: 242 220 255;
 
-  --mz-info-c: 77 117 152;
+  --mz-info-c: 47 110 235;
 
   /* The CATEGORY identity ramp is NOT here. A category colour is persisted user data
      (`categories.color`, a hex string in SQLite), so the value that renders is always the stored
@@ -261,47 +351,72 @@
      them where they were.
 
      Slot order is the colour-vision-deficiency mechanism and is not decoration. These eight were
-     searched under the dataviz six checks against BOTH grounds -- paper #e5dbca light, #262119
-     dark -- holding OKLCH chroma to 0.105-0.145 so they still read as this palette rather than as
-     a default chart pack. Measured on the adjacent pairlist, which is the one stacked bars and
-     legends take: worst CVD dE 12.8 light / 13.1 dark (target 8), worst normal-vision dE 20.8 /
-     20.9 (floor 15), and all sixteen values clear 3:1 on their own ground. Eight cannot clear the
-     all-pairs floors -- no eight can -- so every legend row carries its label and its percentage
-     beside the swatch, and identity is never colour alone.
+     searched under the dataviz six checks against BOTH grounds, which are the two `paper`
+     triplets: #ffffff on light and #000000 on dark. Measured on the adjacent pairlist, which is
+     the one stacked bars and legends take: worst CVD dE 19.8 light / 18.9 dark (target 8), worst
+     normal-vision dE 24.1 / 22.8 (floor 15), OKLCH lightness 0.462-0.660 light and 0.495-0.666
+     dark inside the bands 0.43-0.77 and 0.48-0.67, OKLCH chroma 0.103-0.201 light and 0.107-0.199
+     dark over a floor of 0.100, and all sixteen values clear 3:1 on their own ground, the worst
+     being 3.22 light and 3.10 dark. Eight cannot clear the all-pairs floors -- no eight can -- so
+     every legend row carries its label and its percentage beside the swatch, and identity is never
+     colour alone.
 
      tests/seriesPalette.test.ts recomputes all of that from these declarations. Re-order or
-     re-step them and it fails; that is the point. */
-  --mz-series-1-c: 59 96 14;
-  --mz-series-2-c: 111 83 156;
-  --mz-series-3-c: 29 125 87;
-  --mz-series-4-c: 41 77 163;
-  --mz-series-5-c: 145 69 58;
-  --mz-series-6-c: 40 130 173;
-  --mz-series-7-c: 155 108 10;
-  --mz-series-8-c: 131 49 96;
+     re-step them and it fails; that is the point.
 
-  /* Keyed to ink-soft rather than black: a neutral black shadow over warm paper composites to a
-     desaturated grey-beige that reads as smudge, while the paper's own chroma reads as shade. */
+     The provenance sentence above used to name the grounds as paper #e5dbca light and #262119
+     dark, which were the previous palette's, and to say the search held chroma to 0.105-0.145 "so
+     they still read as this palette rather than as a default chart pack". Both halves were dead
+     and neither failed anything: the ramp reaches 0.201, and on a palette whose own accents run to
+     review-text's 0.210 there is nothing left for a 0.20 slot to be louder than, so the ceiling is
+     gone and only the floor is enforced. seriesPalette.test.ts derives both grounds live rather
+     than reading them from this comment, which is exactly why it kept passing while the comment
+     rotted. */
+  --mz-series-1-c: 0 128 103;
+  --mz-series-2-c: 78 140 255;
+  --mz-series-3-c: 0 109 9;
+  --mz-series-4-c: 162 81 213;
+  --mz-series-5-c: 153 90 0;
+  --mz-series-6-c: 218 90 182;
+  --mz-series-7-c: 169 0 13;
+  --mz-series-8-c: 0 147 163;
+
+  /* The shadow colour is rgb(71 63 50), a warm dark neutral. The argument recorded here for it was
+     that a neutral black over WARM paper composites to a grey-beige that reads as smudge, while
+     the paper's own chroma reads as shade. That paper is gone: light `paper` is 255 255 255, chroma
+     0, so there is no hue left for the shadow to agree with, and the colour is kept because the
+     palette is the decision, not because that argument still holds.
+     What can be said about it is a measurement. At e1's own 0.07 the colour composites over white
+     paper to rgb(242 242 241), 1.12:1, and that is the densest pixel of the shadow before any blur
+     is applied. It is under the 1.15:1 step floor tests/edgeToken.test.ts holds the dark edge to,
+     so on light the shadow is a soft cue and the border is the elevation ladder (see Card.tsx).
+     On dark it is not even a cue: `--mz-e1` there is rgb(0 0 0 / 0.40) and the page a card is
+     dropped onto is 0 0 0, so the shadow composites to the page exactly, 1.00:1.
+     Both composites are re-derived from these declarations by tests/edgeToken.test.ts. */
   --mz-e1: 0 1px 2px rgb(71 63 50 / 0.07);
   --mz-e2: 0 4px 12px -2px rgb(71 63 50 / 0.12), 0 2px 4px -2px rgb(71 63 50 / 0.07);
   --mz-e3: 0 16px 40px -8px rgb(71 63 50 / 0.20), 0 4px 10px -4px rgb(71 63 50 / 0.11);
 
   /* The edge that carries elevation when the shadow cannot, which on this theme is nowhere.
      Deliberately empty on light; the dark blocks below turn it on.
-     A lit top edge only reads where the ground is darker than the edge. Compositing white at the
-     alpha this used to carry (0.35) against each light surface, and measuring the value jump the
-     edge makes against its own surface (WCAG 2.1 contrast, sRGB, both terms from the triplets in
-     this file):
-         over card       (248 243 234) -> rgb(250 247 241)   1.04:1
-         over card-alt   (253 251 245) -> rgb(254 252 249)   1.01:1
-         over paper      (229 219 202) -> rgb(238 232 221)   1.12:1
-         over ink        ( 38  33  25) -> rgb(114 111 106)   3.18:1
-     So on the surfaces it was designed for it is invisible, and the only place it did anything was
-     the one place it damaged: `InkButton` is `bg-ink shadow-e1`, and a 3.18:1 band across the top
-     of a near-black control is a defect, not elevation. On light, `--mz-e*` plus the card/paper
-     value step is the whole mechanism.
-     These four ratios are re-derived from this file at test time by tests/edgeToken.test.ts, which
-     also fails if a light-theme edge is reintroduced above the no-op threshold. */
+     A lit top edge only reads where the ground is darker than the edge. The grounds it lands on
+     are whatever an element declares under a `shadow-e*`, which is `card`, `card-alt` and `ink`
+     (InkButton). That list is derived from client/src by tests/edgeToken.test.ts rather than typed
+     here; `paper` is not in it, and this note used to measure the edge against `paper` as though a
+     `bg-paper shadow-e*` element existed. None does.
+     Compositing white at the alpha this used to carry (0.35) against each light ground, and
+     measuring the value jump the edge makes against its own ground (WCAG 2.1 contrast, sRGB, both
+     terms from the triplets in this file):
+         over card       (255 255 255) -> rgb(255 255 255)   1.00:1
+         over card-alt   (250 250 250) -> rgb(252 252 252)   1.02:1
+         over ink        (  0   0   0) -> rgb( 89  89  89)   3.01:1
+     On light `card` IS the page, so white over it is not a faint step, it is no step: the composite
+     is the surface, channel for channel. The only place the edge did anything was the one place it
+     damaged: `InkButton` is `bg-ink shadow-e1`, and a 3.01:1 band across the top of a pure black
+     control is a defect, not elevation. There is no card/paper value step to fall back on either
+     (1.00:1), so on light the border is the whole mechanism; see Card.tsx.
+     These ratios are re-derived from this file at test time by tests/edgeToken.test.ts, which also
+     fails if a light-theme edge is reintroduced above the no-op threshold. */
   --mz-edge: 0 0 0 0 rgb(0 0 0 / 0);
 
   /* Composed aliases. Declared once for both themes; see the note above. */
@@ -395,9 +510,16 @@
   --color-info-10: rgb(var(--color-info-c) / 0.1);
 }
 
-/* Dark: ground at L* 13.0 held in the paper hue family (OKLCh h ~80), so it reads as ink and
- * oiled brass rather than as a trading terminal. 83 L* points of runway above the ground is what
- * lets panel, card, hover, selected and both inks each take a distinct value.
+/* Dark: ground at L* 0.0, pure black, chroma 0.000. There is no hue for it to be held in and the
+ * runway above it is the whole 100 points of the axis. What that buys is in the NEUTRAL LADDER
+ * above: paper 0.0, rail 2.7, card 4.7, card-alt 8.2 and well 9.3 are five distinct surfaces
+ * inside the bottom ten points, and the ink ramp above them runs faint 52.8, estimate 58.2,
+ * muted-2 64.7, muted 71.5, ink-soft 87.4, ink 100.0.
+ *
+ * [historical] This note used to read "ground at L* 13.0 held in the paper hue family (OKLCh
+ * h ~80), so it reads as ink and oiled brass rather than as a trading terminal", and claimed 83
+ * L* points of runway. That ground was rgb(38 33 25). It is gone, nothing in this file is warm any
+ * more, and the runway is 100.
  *
  * The dark triplets are written twice, once here and once under [data-theme='dark'], because a
  * media query and an attribute selector cannot share a rule. The attribute wins by specificity
@@ -407,69 +529,75 @@
   :root {
     color-scheme: dark;
 
-    --mz-paper-c: 38 33 25;
-    --mz-rail-c: 29 25 19;
-    --mz-card-c: 52 46 37;
-    --mz-card-alt-c: 57 52 43;
-    --mz-card-white-c: 79 73 61;
+    --mz-paper-c: 0 0 0;
+    --mz-rail-c: 10 10 10;
+    --mz-card-c: 16 16 16;
+    --mz-card-alt-c: 24 24 24;
+    --mz-card-white-c: 38 38 38;
 
-    --mz-ink-c: 239 234 225;
-    --mz-ink-soft-c: 204 197 184;
-    --mz-muted-c: 179 170 153;
-    --mz-muted-2-c: 166 156 140;
-    --mz-faint-c: 137 128 112;
-    --mz-estimate-c: 178 186 193;
+    --mz-ink-c: 255 255 255;
+    --mz-ink-soft-c: 219 219 219;
+    --mz-muted-c: 175 175 175;
+    --mz-muted-2-c: 157 157 157;
+    --mz-faint-c: 126 126 126;
+    --mz-estimate-c: 106 147 151;
 
-    --mz-line-c: 72 65 54;
-    --mz-line-2-c: 86 79 66;
-    --mz-line-3-c: 102 94 79;
-    --mz-track-c: 74 67 55;
-    --mz-well-c: 65 58 48;
-    --mz-dot-c: 123 113 93;
+    --mz-line-c: 38 38 38;
+    --mz-line-2-c: 104 104 104;
+    --mz-line-3-c: 134 134 134;
+    --mz-track-c: 46 46 46;
+    --mz-well-c: 26 26 26;
+    --mz-dot-c: 110 110 110;
 
-    --mz-sage-c: 145 182 116;
-    --mz-sage-deep-c: 157 200 130;
-    --mz-sage-soft-c: 133 164 101;
-    --mz-sage-tint-c: 49 61 40;
-    --mz-sage-tint-border-c: 65 82 51;
-    --mz-sage-panel-c: 46 56 38;
-    --mz-sage-panel-border-c: 65 80 52;
-    --mz-pill-text-c: 153 194 128;
+    --mz-sage-c: 60 137 66;
+    --mz-sage-deep-c: 78 156 83;
+    --mz-sage-soft-c: 25 107 36;
+    --mz-sage-tint-c: 19 42 20;
+    --mz-sage-tint-border-c: 41 83 43;
+    --mz-sage-panel-c: 16 37 17;
+    --mz-sage-panel-border-c: 38 77 40;
+    --mz-pill-text-c: 78 156 83;
 
-    --mz-clay-c: 234 132 109;
-    --mz-clay-scale-c: 251 142 112;
-    --mz-gold-c: 246 155 81;
-    --mz-tan-c: 160 142 117;
-    --mz-beam-c: 113 103 85;
+    --mz-clay-c: 255 208 193;
+    --mz-clay-scale-c: 255 139 126;
+    --mz-gold-c: 183 129 62;
+    --mz-tan-c: 150 150 150;
+    --mz-beam-c: 255 255 255;
 
-    --mz-pill-muted-bg-c: 54 49 39;
-    --mz-pill-muted-border-c: 82 74 61;
+    --mz-pill-muted-bg-c: 28 28 28;
+    --mz-pill-muted-border-c: 76 76 76;
 
-    --mz-review-bg-c: 75 53 27;
-    --mz-review-border-c: 107 72 36;
-    --mz-review-text-c: 232 166 106;
-    --mz-review-active-c: 88 63 34;
+    --mz-review-bg-c: 47 30 58;
+    --mz-review-border-c: 92 62 113;
+    --mz-review-text-c: 178 111 223;
+    --mz-review-active-c: 64 42 80;
 
-    --mz-info-c: 123 164 201;
+    --mz-info-c: 84 137 240;
 
-    /* Same eight hues, re-stepped for the dark band (OKLCH L 0.49-0.66), not an automatic flip. */
-    --mz-series-1-c: 81 120 43;
-    --mz-series-2-c: 122 97 164;
-    --mz-series-3-c: 43 148 105;
-    --mz-series-4-c: 70 110 199;
-    --mz-series-5-c: 188 78 63;
-    --mz-series-6-c: 41 143 191;
-    --mz-series-7-c: 183 131 31;
-    --mz-series-8-c: 167 75 126;
+    /* Same eight hues, re-stepped for the dark band (OKLCH L 0.495-0.666), not an automatic flip.
+       Slot by slot the two themes agree on hue to within 2.34 degrees, the widest being slot 5
+       (light h 64.8, dark h 67.2), re-derived 2026-08-01 from these triplets. A slot is a POSITION,
+       so its hue may not move when the theme flips; only its lightness may. seriesPalette.test.ts
+       recomputes the band and tests/contrastClaims.test.ts re-derives the figure above. */
+    --mz-series-1-c: 0 136 110;
+    --mz-series-2-c: 79 142 255;
+    --mz-series-3-c: 0 120 25;
+    --mz-series-4-c: 167 87 218;
+    --mz-series-5-c: 161 98 0;
+    --mz-series-6-c: 220 92 184;
+    --mz-series-7-c: 181 23 27;
+    --mz-series-8-c: 0 152 168;
 
     /* Near-black at high alpha: an ink-soft shadow is lighter than a dark ground, so the light
        theme's warm shadow would have glowed instead of shading.
 
        But a dark shadow on a dark ground is also nearly invisible, so on this theme the shadow is
        no longer the mechanism: it only softens the seat. The elevation that actually reads is the
-       pair below it in `Card` -- a rising surface (card L* 19.3 -> card-alt 21.9) and a
-       brightening border (line 27.9 -> line-2 33.9 -> line-3 40.2) -- plus this lit top edge,
-       which is the one thing a raised object gets on a dark ground that a flat one does not. */
+       pair below it in `Card` -- a rising surface (card L* 4.7 -> card-alt 8.2) and a brightening
+       border (line 15.2 -> line-2 44.0 -> line-3 55.9) -- plus this lit top edge, which is the one
+       thing a raised object gets on a dark ground that a flat one does not. Note the asymmetry the
+       2026-08-01 palette introduced: the surface step is 3.5 L* and the border step is 28.8, so
+       even on dark, where a surface CAN elevate, the border is doing most of the work. */
     --mz-e1: 0 1px 2px rgb(0 0 0 / 0.40);
     --mz-e2: 0 4px 12px -2px rgb(0 0 0 / 0.52), 0 2px 4px -2px rgb(0 0 0 / 0.40);
     --mz-e3: 0 16px 40px -8px rgb(0 0 0 / 0.66), 0 4px 10px -4px rgb(0 0 0 / 0.48);
@@ -480,59 +608,59 @@
 :root[data-theme='dark'] {
   color-scheme: dark;
 
-  --mz-paper-c: 38 33 25;
-  --mz-rail-c: 29 25 19;
-  --mz-card-c: 52 46 37;
-  --mz-card-alt-c: 57 52 43;
-  --mz-card-white-c: 79 73 61;
+  --mz-paper-c: 0 0 0;
+  --mz-rail-c: 10 10 10;
+  --mz-card-c: 16 16 16;
+  --mz-card-alt-c: 24 24 24;
+  --mz-card-white-c: 38 38 38;
 
-  --mz-ink-c: 239 234 225;
-  --mz-ink-soft-c: 204 197 184;
-  --mz-muted-c: 179 170 153;
-  --mz-muted-2-c: 166 156 140;
-  --mz-faint-c: 137 128 112;
-  --mz-estimate-c: 178 186 193;
+  --mz-ink-c: 255 255 255;
+  --mz-ink-soft-c: 219 219 219;
+  --mz-muted-c: 175 175 175;
+  --mz-muted-2-c: 157 157 157;
+  --mz-faint-c: 126 126 126;
+  --mz-estimate-c: 106 147 151;
 
-  --mz-line-c: 72 65 54;
-  --mz-line-2-c: 86 79 66;
-  --mz-line-3-c: 102 94 79;
-  --mz-track-c: 74 67 55;
-  --mz-well-c: 65 58 48;
-  --mz-dot-c: 123 113 93;
+  --mz-line-c: 38 38 38;
+  --mz-line-2-c: 104 104 104;
+  --mz-line-3-c: 134 134 134;
+  --mz-track-c: 46 46 46;
+  --mz-well-c: 26 26 26;
+  --mz-dot-c: 110 110 110;
 
-  --mz-sage-c: 145 182 116;
-  --mz-sage-deep-c: 157 200 130;
-  --mz-sage-soft-c: 133 164 101;
-  --mz-sage-tint-c: 49 61 40;
-  --mz-sage-tint-border-c: 65 82 51;
-  --mz-sage-panel-c: 46 56 38;
-  --mz-sage-panel-border-c: 65 80 52;
-  --mz-pill-text-c: 153 194 128;
+  --mz-sage-c: 60 137 66;
+  --mz-sage-deep-c: 78 156 83;
+  --mz-sage-soft-c: 25 107 36;
+  --mz-sage-tint-c: 19 42 20;
+  --mz-sage-tint-border-c: 41 83 43;
+  --mz-sage-panel-c: 16 37 17;
+  --mz-sage-panel-border-c: 38 77 40;
+  --mz-pill-text-c: 78 156 83;
 
-  --mz-clay-c: 234 132 109;
-  --mz-clay-scale-c: 251 142 112;
-  --mz-gold-c: 246 155 81;
-  --mz-tan-c: 160 142 117;
-  --mz-beam-c: 113 103 85;
+  --mz-clay-c: 255 208 193;
+  --mz-clay-scale-c: 255 139 126;
+  --mz-gold-c: 183 129 62;
+  --mz-tan-c: 150 150 150;
+  --mz-beam-c: 255 255 255;
 
-  --mz-pill-muted-bg-c: 54 49 39;
-  --mz-pill-muted-border-c: 82 74 61;
+  --mz-pill-muted-bg-c: 28 28 28;
+  --mz-pill-muted-border-c: 76 76 76;
 
-  --mz-review-bg-c: 75 53 27;
-  --mz-review-border-c: 107 72 36;
-  --mz-review-text-c: 232 166 106;
-  --mz-review-active-c: 88 63 34;
+  --mz-review-bg-c: 47 30 58;
+  --mz-review-border-c: 92 62 113;
+  --mz-review-text-c: 178 111 223;
+  --mz-review-active-c: 64 42 80;
 
-  --mz-info-c: 123 164 201;
+  --mz-info-c: 84 137 240;
 
-  --mz-series-1-c: 81 120 43;
-  --mz-series-2-c: 122 97 164;
-  --mz-series-3-c: 43 148 105;
-  --mz-series-4-c: 70 110 199;
-  --mz-series-5-c: 188 78 63;
-  --mz-series-6-c: 41 143 191;
-  --mz-series-7-c: 183 131 31;
-  --mz-series-8-c: 167 75 126;
+  --mz-series-1-c: 0 136 110;
+  --mz-series-2-c: 79 142 255;
+  --mz-series-3-c: 0 120 25;
+  --mz-series-4-c: 167 87 218;
+  --mz-series-5-c: 161 98 0;
+  --mz-series-6-c: 220 92 184;
+  --mz-series-7-c: 181 23 27;
+  --mz-series-8-c: 0 152 168;
 
   --mz-e1: 0 1px 2px rgb(0 0 0 / 0.40);
   --mz-e2: 0 4px 12px -2px rgb(0 0 0 / 0.52), 0 2px 4px -2px rgb(0 0 0 / 0.40);
@@ -553,8 +681,15 @@
 }
 
 @layer components {
-  /* No `focus:outline-none` here. It used to override the global :focus-visible rule above and
-     leave a 1.07:1 border change as the only focus affordance on all 31 inputs in the app. */
+  /* No `focus:outline-none` here. It used to override the global :focus-visible rule above, which
+     left the `border-line-2` to `focus:border-line-3` swap below as the field's whole focus
+     affordance. That swap is `line-3` on `line-2`, 1.57:1 light and 1.53:1 dark, across a 1px
+     edge, on every field that carries this class:
+       grep -rno 'mz-field' client/src | grep -v index.css | wc -l   ->  42 on 2026-08-01.
+     The outline is the affordance. The border swap is not, at either figure.
+
+     [historical] This note previously stated that swap as 1.07:1, from the pre-2026-08-01
+     triplets, and the field count as 31. */
   .mz-field {
     @apply w-full rounded-lg border border-line-2 bg-card-alt px-3 py-2 text-body text-ink placeholder:text-muted-2 focus:border-line-3 focus:ring-0;
   }

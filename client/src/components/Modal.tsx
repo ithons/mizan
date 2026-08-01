@@ -40,9 +40,26 @@ export function Modal({ open, onClose, title, children, maxWidth = '480px' }: Mo
       />
       {/* Modal */}
       <div
-        /* e3, matching `Card`: card-alt over the scrim with a line-3 edge. On the dark ground the
-           e3 shadow is nearly invisible against paper at L* 13.0, so the surface and the border
-           are what say this sits above everything else. */
+        /* e3, matching `Card`. A dialog is the surface that carries money, so what actually
+           separates it from the page is worth stating rather than assuming.
+
+           Not the surface step. `card-alt` on `paper` is 1.04:1 light and 1.18:1 dark, and on
+           light that is under the 1.15:1 floor `tests/edgeToken.test.ts` holds a value edge to.
+           The note here used to name the surface as half the mechanism, alongside a dark ground
+           of L* 13.0; dark `paper` is L* 0.0 now and light `paper` is pure white, so neither half
+           of that sentence survived the 2026-08-01 palette.
+
+           Not the shadow either, on dark: `--mz-e3` there is black over a pure black page, so it
+           composites to the page exactly and measures 1.00:1. On light its densest term
+           composites to rgb(218 217 214) over white, 1.41:1 before any blur, which is a soft seat
+           and not an edge.
+
+           What is left is the border and the scrim, and between them they are enough. `line-3`
+           on `card-alt` is 4.74:1 light and 4.88:1 dark, the same edge `Card` names for its own
+           e3 rung. The scrim is this component's alone, which no elevation rung has: `bg-ink/25`
+           composites to rgb(191 191 191) on light and rgb(64 64 64) on dark, and the dialog
+           surface stands off it at 1.76:1 and 1.71:1 respectively. Every figure here was
+           re-derived from client/src/index.css on 2026-08-01. */
         className="relative flex max-h-[calc(100vh-2rem)] w-full flex-col rounded-xl border border-line-3 bg-card-alt shadow-e3"
         style={{ maxWidth }}
       >

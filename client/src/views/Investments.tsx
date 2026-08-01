@@ -289,9 +289,17 @@ export function Investments() {
             <div className="font-serif text-hero-lg font-light leading-none tabular-nums text-ink">{formatWholeCurrency(marketValue)}</div>
           )}
           {delta != null && (
-            // `sage-deep`, not `sage`: this is a money numeral on the paper ground, where sage
-            // measures 3.91:1 and fails AA for text. sage-deep is 4.93 light and 8.38 dark, which
-            // is what every other positive numeral in this view already uses.
+            // `sage-deep`, not `sage`: this is a money numeral and the ground is `paper`, where
+            // `sage` measures 4.20:1 light and 4.85:1 dark. That is under AA on light and over it
+            // on dark, so `sage` is a tone this numeral would carry in one theme and lose in the
+            // other. `sage-deep` is 5.16:1 light and 6.20:1 dark, which is what every other
+            // positive numeral in this view already uses.
+            //
+            // [historical] The 2026-08-01 palette moved both figures and left the argument where
+            // it was: `sage` on `paper` read 3.91 light / 6.96 dark before it and was under AA on
+            // light then too. Re-derivable, not remembered:
+            //   git show HEAD:client/src/index.css   ->  the previous triplets, through the same
+            //   WCAG 2.1 arithmetic tests/helpers/palette.ts runs.
             //
             // The baseline is named rather than called "last snapshot": which snapshot it is
             // depends on whether the newest one already carries today's balances, and a label

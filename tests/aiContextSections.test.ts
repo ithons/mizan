@@ -5,6 +5,7 @@ import { _setDbForTesting } from '../server/src/db/index';
 import { buildFinancialContext } from '../server/src/services/aiContext';
 import {
   TEST_NOW,
+  dayInThisMonth,
   insertAccount,
   insertAdvisorAction,
   insertCategory,
@@ -22,6 +23,16 @@ import {
  * of the failures were caught, because each round's tests only proved that the defect was found.
  */
 
+/**
+ * An offset from today, for the sections that are NOT scoped to a calendar month: the
+ * reconciliation horizon between two snapshots, the recent-transaction list, the provenance and
+ * merchant-rule sections.
+ *
+ * Never for a month-scoped section. On the first n days of a month this returns a date in the
+ * PREVIOUS month, which is how five tests over `### Category Movement` came to assert against an
+ * empty string on 2026-08-01. Use `dayInThisMonth` there; the whole argument is at its definition
+ * in `tests/helpers/schema.ts`.
+ */
 function daysAgo(n: number): string {
   const d = new Date();
   d.setDate(d.getDate() - n);
@@ -576,12 +587,14 @@ test('a ledger whose accounts all start together carries no coverage notation at
 
 // ── Signed category totals ─────────────────────────────────────────────────
 
+// `### Category Movement` is month-to-date, so every row here is dated with `dayInThisMonth`. Built
+// with a days-ago offset these read '' on the first two days of any month, which they did.
 test('a category driven negative by refunds is explained, and an ordinary month is not', () => {
   const ordinary = migratedTestDb();
   _setDbForTesting(ordinary);
   const plainAccount = insertAccount(ordinary, { type: 'checking', current_balance: 100000 });
   const plainCategory = insertCategory(ordinary, { name: 'Shopping Test' });
-  insertTransaction(ordinary, { account_id: plainAccount, date: daysAgo(2), amount: -5000, category_id: plainCategory });
+  insertTransaction(ordinary, { account_id: plainAccount, date: dayInThisMonth(2), amount: -5000, category_id: plainCategory });
   const ordinaryContext = buildFinancialContext();
   assert.match(ordinaryContext, /### Category Movement/);
   assert.doesNotMatch(ordinaryContext, /refunds and credits exceeded purchases/);
@@ -591,8 +604,8 @@ test('a category driven negative by refunds is explained, and an ordinary month 
   _setDbForTesting(refunded);
   const account = insertAccount(refunded, { type: 'checking', current_balance: 100000 });
   const shopping = insertCategory(refunded, { name: 'Shopping Test' });
-  insertTransaction(refunded, { account_id: account, date: daysAgo(2), amount: -5000, category_id: shopping });
-  insertTransaction(refunded, { account_id: account, date: daysAgo(1), amount: 20000, category_id: shopping });
+  insertTransaction(refunded, { account_id: account, date: dayInThisMonth(2), amount: -5000, category_id: shopping });
+  insertTransaction(refunded, { account_id: account, date: dayInThisMonth(1), amount: 20000, category_id: shopping });
   const refundedContext = buildFinancialContext();
   assert.match(refundedContext, /refunds and credits exceeded purchases/);
   refunded.close();
@@ -684,13 +697,6 @@ test('recent transactions carry the provenance of their category', () => {
  * "Spending: $1,112.99", and the largest single category movement of the month was not on the page.
  */
 
-/** A day inside the current month that is never in the future, so the window always holds it. */
-function thisMonth(day: number): string {
-  const now = new Date();
-  const clamped = Math.min(day, now.getDate());
-  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(clamped).padStart(2, '0')}`;
-}
-
 function movementSection(context: string): string {
   return context.split('### Category Movement')[1]?.split('\n###')[0] ?? '';
 }
@@ -704,10 +710,10 @@ test('a net-refund category is not ranked off the list, however far negative it 
   // old ordering the ninth could not survive a LIMIT 8 no matter how large its movement.
   const ordinary = ['cat_food', 'cat_travel', 'cat_transport', 'cat_subscriptions', 'cat_pets', 'cat_ent', 'cat_health', 'cat_home'];
   ordinary.forEach((category, index) => {
-    insertTransaction(db, { account_id: account, date: thisMonth(2), amount: -(index + 1) * 1000, category_id: category });
+    insertTransaction(db, { account_id: account, date: dayInThisMonth(2), amount: -(index + 1) * 1000, category_id: category });
   });
-  insertTransaction(db, { account_id: account, date: thisMonth(3), amount: -102_459, category_id: 'cat_shop' });
-  insertTransaction(db, { account_id: account, date: thisMonth(4), amount: 205_322, category_id: 'cat_shop' });
+  insertTransaction(db, { account_id: account, date: dayInThisMonth(3), amount: -102_459, category_id: 'cat_shop' });
+  insertTransaction(db, { account_id: account, date: dayInThisMonth(4), amount: 205_322, category_id: 'cat_shop' });
 
   const section = movementSection(buildFinancialContext());
   assert.match(section, /Shopping: -\$1,028\.63/, 'the largest movement of the month must be on the page');
@@ -719,8 +725,8 @@ test('HEALTHY: an ordinary month carries no refund note and leaves nothing off',
   const db = migratedTestDb();
   _setDbForTesting(db);
   const account = insertAccount(db, { type: 'checking', current_balance: 500000 });
-  insertTransaction(db, { account_id: account, date: thisMonth(2), amount: -5_000, category_id: 'cat_food' });
-  insertTransaction(db, { account_id: account, date: thisMonth(3), amount: -2_500, category_id: 'cat_shop' });
+  insertTransaction(db, { account_id: account, date: dayInThisMonth(2), amount: -5_000, category_id: 'cat_food' });
+  insertTransaction(db, { account_id: account, date: dayInThisMonth(3), amount: -2_500, category_id: 'cat_shop' });
 
   const section = movementSection(buildFinancialContext());
   assert.match(section, /Food & Drink: \$50\.00/);
@@ -735,7 +741,7 @@ test('what is left off is counted and totalled rather than cut', () => {
   const account = insertAccount(db, { type: 'checking', current_balance: 500000 });
   const categories = ['cat_food', 'cat_travel', 'cat_transport', 'cat_subscriptions', 'cat_pets', 'cat_ent', 'cat_health', 'cat_home', 'cat_shop', 'cat_personal_care'];
   categories.forEach((category, index) => {
-    insertTransaction(db, { account_id: account, date: thisMonth(2), amount: -(index + 1) * 1000, category_id: category });
+    insertTransaction(db, { account_id: account, date: dayInThisMonth(2), amount: -(index + 1) * 1000, category_id: category });
   });
 
   const section = movementSection(buildFinancialContext());
@@ -748,12 +754,12 @@ test('the list covers the same rows as the Spending figure printed above it', ()
   const db = migratedTestDb();
   _setDbForTesting(db);
   const account = insertAccount(db, { type: 'checking', current_balance: 500000 });
-  insertTransaction(db, { account_id: account, date: thisMonth(2), amount: -73_160, category_id: 'cat_food' });
-  insertTransaction(db, { account_id: account, date: thisMonth(3), amount: -102_459, category_id: 'cat_shop' });
-  insertTransaction(db, { account_id: account, date: thisMonth(4), amount: 205_322, category_id: 'cat_shop' });
+  insertTransaction(db, { account_id: account, date: dayInThisMonth(2), amount: -73_160, category_id: 'cat_food' });
+  insertTransaction(db, { account_id: account, date: dayInThisMonth(3), amount: -102_459, category_id: 'cat_shop' });
+  insertTransaction(db, { account_id: account, date: dayInThisMonth(4), amount: 205_322, category_id: 'cat_shop' });
   // A transfer, which Report Summary excludes. The old SQL did not, so the two lists differed by
   // exactly this row on top of everything the ordering dropped.
-  insertTransaction(db, { account_id: account, date: thisMonth(5), amount: -97_500, category_id: 'cat_xfer_out' });
+  insertTransaction(db, { account_id: account, date: dayInThisMonth(5), amount: -97_500, category_id: 'cat_xfer_out' });
 
   const context = buildFinancialContext();
   const spending = /Spending: (-?\$[\d,]+\.\d\d)/.exec(context)?.[1];
@@ -774,12 +780,24 @@ test('the list covers the same rows as the Spending figure printed above it', ()
  * parent collapsed to whichever the Map saw last, and `rollover_balance` was ignored, while
  * `getMonthlyBudgetsWithProjection` rolls a budget's own descendants up and adds rollover. The
  * model read a percentage /plan does not render. It reads /plan's now.
+ *
+ * The four tests below are month-scoped twice over: the movement line is month-to-date, and
+ * `getMonthlyBudgetsWithProjection` is handed the LOCAL year and month. So their rows are dated
+ * with `dayInThisMonth`, never with a days-ago offset.
  */
 function budgetOn(db: Database.Database, categoryId: string, amountCents: number, rolloverCents = 0): void {
+  // The budget opens in the month under test, and that is load-bearing for the rollover case.
+  // `walkRolloverLedger` starts at `created_at.slice(0, 7)` and re-derives every month from there,
+  // so a budget created in an EARLIER month has its carried balance recomputed rather than read
+  // from `rollover_balance`. Observed by running this file on 2026-08-01 with the old fixed
+  // 2026-07-30 created_at: August's walk added July's own unspent $200 and the row printed
+  // "$150.00 spent of $500.00 (30%)" where the fixture had set up $300.00 available and 50%.
+  // Opening the budget on the 1st of the current month leaves exactly one month to walk.
+  const createdAt = `${dayInThisMonth(1)}T00:00:00.000Z`;
   db.prepare(`
     INSERT INTO budgets (id, category_id, amount, period, rollover, rollover_balance, created_at, updated_at)
     VALUES (?, ?, ?, 'monthly', ?, ?, ?, ?)
-  `).run(`bud_${categoryId}`, categoryId, amountCents, rolloverCents === 0 ? 0 : 1, rolloverCents, TEST_NOW, TEST_NOW);
+  `).run(`bud_${categoryId}`, categoryId, amountCents, rolloverCents === 0 ? 0 : 1, rolloverCents, createdAt, createdAt);
 }
 
 test('a budget set on a child category is not compared against its whole parent', () => {
@@ -791,9 +809,9 @@ test('a budget set on a child category is not compared against its whole parent'
   const sibling = insertCategory(db, { name: 'Cinema Test', parent_id: parent });
 
   budgetOn(db, child, 10000);
-  insertTransaction(db, { account_id: account, date: daysAgo(2), amount: -5000, category_id: child });
+  insertTransaction(db, { account_id: account, date: dayInThisMonth(2), amount: -5000, category_id: child });
   // The sibling's spend belongs to the parent's movement total and to no budget at all.
-  insertTransaction(db, { account_id: account, date: daysAgo(1), amount: -40000, category_id: sibling });
+  insertTransaction(db, { account_id: account, date: dayInThisMonth(1), amount: -40000, category_id: sibling });
 
   const context = buildFinancialContext();
   const section = context.split('### Category Movement')[1] ?? '';
@@ -812,7 +830,7 @@ test('a budget with rollover is stated against the amount available, the way /pl
   const account = insertAccount(db, { type: 'checking', current_balance: 500000 });
   const category = insertCategory(db, { name: 'Groceries Test' });
   budgetOn(db, category, 20000, 10000);
-  insertTransaction(db, { account_id: account, date: daysAgo(2), amount: -15000, category_id: category });
+  insertTransaction(db, { account_id: account, date: dayInThisMonth(2), amount: -15000, category_id: category });
 
   const context = buildFinancialContext();
   const section = context.split('### Category Movement')[1] ?? '';
@@ -830,7 +848,7 @@ test('HEALTHY: an ordinary budget on a root category reads exactly as it always 
   const account = insertAccount(db, { type: 'checking', current_balance: 500000 });
   const category = insertCategory(db, { name: 'Transport Test' });
   budgetOn(db, category, 20000);
-  insertTransaction(db, { account_id: account, date: daysAgo(2), amount: -5000, category_id: category });
+  insertTransaction(db, { account_id: account, date: dayInThisMonth(2), amount: -5000, category_id: category });
 
   const context = buildFinancialContext();
   const section = context.split('### Category Movement')[1] ?? '';
@@ -844,7 +862,7 @@ test('HEALTHY: a category with no budget carries no budget clause at all', () =>
   _setDbForTesting(db);
   const account = insertAccount(db, { type: 'checking', current_balance: 500000 });
   const category = insertCategory(db, { name: 'Hobbies Test' });
-  insertTransaction(db, { account_id: account, date: daysAgo(2), amount: -5000, category_id: category });
+  insertTransaction(db, { account_id: account, date: dayInThisMonth(2), amount: -5000, category_id: category });
 
   const context = buildFinancialContext();
   const section = context.split('### Category Movement')[1] ?? '';

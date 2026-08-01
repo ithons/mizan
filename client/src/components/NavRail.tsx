@@ -10,10 +10,11 @@ import { useAppStore } from '../store';
  * What this replaces: eleven destinations plus Settings, each rendered as a 7px dot with its label
  * behind `xl:block`. Under 1280px, which includes any laptop window that is not maximised, the
  * whole navigation was twelve identical dots. Measured from the shipped tokens, `dot` on `rail` is
- * **1.70:1 light and 3.63:1 dark** (`node` over `--mz-dot-c` / `--mz-rail-c` in index.css,
- * WCAG 2.1 sRGB; the same computation `tests/edgeToken.test.ts` runs). Twelve marks nobody can
- * tell apart, in a value nobody can see, standing in for the only thing on screen that says where
- * you are.
+ * **2.74:1 light and 3.88:1 dark** (`--mz-dot-c` over `--mz-rail-c` in index.css, WCAG 2.1 sRGB;
+ * `tests/navigation.test.ts` recomputes both from this file's own triplets and fails if either
+ * moves). Under AA in both themes, and on light under the 3:1 floor a non-text mark would need.
+ * Twelve marks nobody can tell apart, in a value nobody can see, standing in for the only thing on
+ * screen that says where you are.
  *
  * Six is few enough to spend real type on, so the labels are the navigation and there is no icon
  * or dot at all. Two decisions carry it:
@@ -140,9 +141,9 @@ export function NavRail() {
         </span>
         <span className="flex items-baseline gap-2">
           <span className="font-serif text-sub text-ink">mizān</span>
-          {/* Outlined rather than filled: `line` on `rail` is 1.04:1 light, so a chip fill here
+          {/* Outlined rather than filled: `line` on `rail` is 1.20:1 light, so a chip fill here
               would be an invisible rectangle. The border carries the chip and the text carries
-              the contrast (`muted` on `rail`, 4.60:1 light / 7.60:1 dark). */}
+              the contrast (`muted` on `rail`, 7.01:1 light / 9.03:1 dark). */}
           <kbd className="rounded border border-line-3 px-1 py-px font-mono text-micro text-muted">⌘K</kbd>
         </span>
       </button>
@@ -163,10 +164,12 @@ export function NavRail() {
           type="button"
           onClick={runSync}
           disabled={syncStatus === 'syncing'}
-          /* A failure steps up in value rather than changing hue: `clay` on `rail` measures
-             4.43:1 light, under AA at this size, and a colour that cannot be read is not a
-             warning. `ink` on `rail` is 9.45:1 against `muted`'s 4.60:1, so the failed state is
-             the one that gets darker, and the word says which state it is either way. */
+          /* A failure steps up in value rather than changing hue. `clay` on `rail` measures
+             12.05:1 light / 14.18:1 dark, so it would be legible here and this is a stated choice
+             rather than a contrast finding: a hue is a legend the owner has to learn, and one that
+             says "error" only if they already know it does. `ink` on `rail` is 19.43:1 against
+             `muted`'s 7.01:1, so the failed state is the one that gets darker, and the word says
+             which state it is either way. */
           className={`mt-3 block w-full pl-3 pr-[22px] text-right text-note transition-colors ${
             syncStatus === 'error' ? 'font-medium text-ink' : 'text-muted hover:text-ink'
           }`}

@@ -79,36 +79,65 @@ function ratio(fg: string, bg: string, theme: 'light' | 'dark'): string {
 }
 
 test('the dot that was the navigation measures what the rail says it measures', () => {
-  assert.equal(ratio('dot', 'rail', 'light'), '1.70');
-  assert.equal(ratio('dot', 'rail', 'dark'), '3.63');
-  assert.match(RAIL_SOURCE, /\*\*1\.70:1 light and 3\.63:1 dark\*\*/);
-  // Below AA in both themes, and below any threshold at all on light, which is why the marks are
-  // gone rather than recoloured: twelve of them said the same thing in a value nobody can see.
-  assert.ok(Number(ratio('dot', 'rail', 'light')) < 3);
+  assert.equal(ratio('dot', 'rail', 'light'), '2.74');
+  assert.equal(ratio('dot', 'rail', 'dark'), '3.88');
+  assert.match(RAIL_SOURCE, /\*\*2\.74:1 light and 3\.88:1 dark\*\*/);
+  // Below AA in both themes, and below the 3:1 floor a non-text mark would need on light, which is
+  // why the marks are gone rather than recoloured: twelve of them said the same thing in a value
+  // nobody can see. Both halves of that sentence are asserted, not just the light one.
+  assert.ok(Number(ratio('dot', 'rail', 'light')) < 3, 'the light dot now clears the 3:1 floor');
+  assert.ok(Number(ratio('dot', 'rail', 'dark')) < 4.5, 'the dark dot now clears AA');
 });
 
 test('the other three figures in the rail reproduce too', () => {
-  assert.equal(ratio('line', 'rail', 'light'), '1.04');
-  assert.match(RAIL_SOURCE, /`line` on `rail` is 1\.04:1 light/);
+  assert.equal(ratio('line', 'rail', 'light'), '1.20');
+  assert.match(RAIL_SOURCE, /`line` on `rail` is 1\.20:1 light/);
 
-  assert.equal(ratio('muted', 'rail', 'light'), '4.60');
-  assert.equal(ratio('muted', 'rail', 'dark'), '7.60');
-  assert.match(RAIL_SOURCE, /`muted` on `rail`, 4\.60:1 light \/ 7\.60:1 dark/);
+  assert.equal(ratio('muted', 'rail', 'light'), '7.01');
+  assert.equal(ratio('muted', 'rail', 'dark'), '9.03');
+  assert.match(RAIL_SOURCE, /`muted` on `rail`, 7\.01:1 light \/ 9\.03:1 dark/);
 
-  assert.equal(ratio('clay', 'rail', 'light'), '4.43');
-  assert.equal(ratio('ink', 'rail', 'light'), '9.45');
-  assert.match(RAIL_SOURCE, /`clay` on `rail` measures\n\s+4\.43:1 light/);
-  assert.match(RAIL_SOURCE, /`ink` on `rail` is 9\.45:1 against `muted`'s 4\.60:1/);
+  assert.equal(ratio('clay', 'rail', 'light'), '12.05');
+  assert.equal(ratio('clay', 'rail', 'dark'), '14.18');
+  assert.equal(ratio('ink', 'rail', 'light'), '19.43');
+  assert.match(RAIL_SOURCE, /`clay` on `rail` measures\n\s+12\.05:1 light \/ 14\.18:1 dark/);
+  assert.match(RAIL_SOURCE, /`ink` on `rail` is 19\.43:1 against\n\s+`muted`'s 7\.01:1/);
 });
 
-test('every label the rail renders clears AA on the rail', () => {
-  // 17px is below the large-text threshold, so 4.5:1 applies to inactive labels as well as active.
+test('the sync failure is a step in value, and the rail no longer claims clay could not be read', () => {
+  // Delisted: `clay` on `rail` was 4.43:1 and the rail justified `ink` by saying a colour that
+  // cannot be read is not a warning. It measures 12.05:1 light / 14.18:1 dark now, so that
+  // justification is not available and the file must not still be making it.
+  assert.ok(Number(ratio('clay', 'rail', 'light')) >= 4.5);
+  assert.ok(Number(ratio('clay', 'rail', 'dark')) >= 4.5);
+  assert.doesNotMatch(RAIL_SOURCE, /under AA at this size/);
+  // The choice itself still has to be stated as a choice.
+  assert.match(RAIL_SOURCE, /steps up in value rather than changing hue/);
+});
+
+test('every tone the rail sets as text clears AA on the ground it is set on', () => {
+  // Enumerated from the rail's own class lists rather than named here, because the failure this
+  // guards against is a tone added to the rail and never measured. 17px is below the large-text
+  // threshold, so 4.5:1 applies to inactive labels as well as active.
+  const tones = [...new Set([...RAIL_SOURCE.matchAll(/(?:^|[\s"'`:!])text-([a-z0-9-]+)/g)].map((m) => m[1]))]
+    .filter((name) => CSS.includes(`--mz-${name}-c:`))
+    .sort();
+  assert.deepEqual(tones, ['ink', 'muted', 'paper'], 'the rail sets a tone this test has not measured');
+
   for (const theme of ['light', 'dark'] as const) {
     for (const tone of ['ink', 'muted']) {
       assert.ok(Number(ratio(tone, 'rail', theme)) >= 4.5, `${tone} on rail, ${theme}`);
     }
+    // `paper` is the wordmark chip only, which is `bg-ink`, so it is measured on ink and not rail.
+    assert.ok(Number(ratio('paper', 'ink', theme)) >= 4.5, `paper on ink, ${theme}`);
   }
-  assert.ok(!RAIL_SOURCE.includes('text-muted-2'), 'the rail puts secondary text on a 3.67:1 pair');
+
+  // `faint` is the one text token still under AA on this ground on light, at 3.56:1; it clears on
+  // dark at 4.88:1, and is non-text by contract either way. `muted-2` used to be listed beside it as a
+  // 3.67:1 pair; it is 5.56:1 light / 7.30:1 dark now, so it is delisted rather than left recorded
+  // as a failure, and the enumeration above is what keeps the rail honest instead.
+  assert.ok(Number(ratio('faint', 'rail', 'light')) < 4.5, 'faint clears AA on rail now; delist it');
+  assert.ok(Number(ratio('muted-2', 'rail', 'light')) >= 4.5);
   assert.ok(!RAIL_SOURCE.includes('text-faint'), 'the rail uses the non-text token as text');
 });
 

@@ -530,8 +530,18 @@ export function Ledger() {
             type="button"
             onClick={() => selectChip(chip.id)}
             aria-pressed={filter === chip.id}
-            /* `review-bg`, not `review-active`: review-text on review-active measures 4.44:1 in
-               light, which is below AA. On review-bg it is 4.93:1 light and 5.53:1 dark. */
+            /* `review-bg`, not `review-active`: `review-text` on `review-active` measures 4.21:1
+               light and 3.74:1 dark, so it is under AA in BOTH themes now, where the figure this
+               note used to carry recorded only a light failure. On `review-bg` it is 4.62:1 light
+               and 4.56:1 dark and clears in both. The failing pair renders nowhere and is not a
+               standing exception, but establishing that takes two commands rather than one, because
+               `tailwind.config.js:73` exposes `review-active` as a utility and a grep of
+               `client/src` structurally cannot see whether it is used. On 2026-08-01:
+                 `grep -rn review-active client/src`  -> 7 lines in 2 files, being the four token
+                    declarations in `index.css` and this comment's own three lines
+                 `grep -rn 'bg-review-active\|text-review-active' client/src`  -> nothing
+               So it is a declared ground with no call site, which is why the sub-AA pair is not
+               listed as an exception: nothing renders it. */
             className={`rounded-md px-2.5 py-1 text-body transition-colors ${
               filter === chip.id ? 'bg-review-bg text-review-text' : 'text-muted hover:text-ink'
             }`}
@@ -616,9 +626,14 @@ export function Ledger() {
           >
             {confirmBatch.isPending ? 'Applying…' : `Accept all ${batch.ids.length} as proposed`}
           </button>
-          {/* `text-muted`, not `text-muted-2`: on `rail` the second reads 3.67:1 in light, below
-              AA. `text-muted` on `rail` is 4.60:1 light and 7.60:1 dark, computed from the
-              triplets in client/src/index.css. */}
+          {/* `text-muted`, not `text-muted-2`, and no longer for contrast. `muted-2` on `rail`
+              measures 5.56:1 light and 7.30:1 dark, so it clears AA in both themes and the
+              reason this line used to give is dead. It held before the 2026-08-01 palette;
+              index.css records that there, alongside the tones tests/railGround.test.ts delisted
+              at the same time, and it is not restated here as though it were current. What picks
+              the tone now is emphasis and not measurement: this sentence qualifies the button
+              beside it and is meant to be read before it is pressed, so it takes the same weight
+              as the count on its left. `muted` on `rail` is 7.01:1 light and 9.03:1 dark. */}
           <span className="max-w-[54ch] text-note text-muted">
             Each is applied on its own. Any the write guards refuse are left exactly as they are, with
             the reason printed on the entry it is about.

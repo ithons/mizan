@@ -138,12 +138,16 @@ export function ClaimSheet({
 /**
  * One month of a rollover budget, as the ledger recorded it. Reading this writes nothing.
  *
- * The strip is `bg-well`, and `well` is the one ground on this screen that the money numerals were
- * never measured against: `muted-2` on `well` is 4.02:1 light and 4.14:1 dark, both under AA for
- * 12.5px text, and the recorded budget amount was set in it. Every ink in here now clears 4.5:1 on
- * `well` in both themes, checked from the shipped tokens by tests/plan.test.ts rather than asserted
- * here. Hierarchy is carried by the ladder ink-soft -> muted with the carried-on figure in ink,
- * which is what the strip is actually for.
+ * The strip is `bg-well`, and `well` is the one ground on this screen the money numerals were never
+ * measured against: the recorded budget amount was set in `muted-2` on it, and nothing had checked
+ * the pair. On the current tokens `muted-2` on `well` is 5.41:1 light and 6.42:1 dark, so that
+ * particular pair is no longer a failure and is not recorded as one. What survives the palette is
+ * the ground: `well` still returns the lowest ratio of the four this screen uses, in both themes,
+ * and three tones are still under AA on it, being `faint` (3.46 light / 4.29 dark), `sage`
+ * (3.79 / 4.02) and `gold` on light only (4.19). Every ink in here clears 4.5:1 on `well`
+ * in both themes, checked from the shipped tokens by tests/plan.test.ts rather than asserted here.
+ * Hierarchy is carried by the ladder ink-soft -> muted with the carried-on figure in ink, which is
+ * what the strip is actually for.
  */
 function CarryoverStrip({ rows }: { rows: BudgetRolloverLedgerEntry[] }) {
   const openMonth = currentMonthKey();

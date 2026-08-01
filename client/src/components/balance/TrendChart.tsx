@@ -529,10 +529,18 @@ const NO_MARKS: TrendMark[] = [];
  * a different claim, so it now differs in hue, weight and rhythm at once.
  *
  * `gold` rather than `clay`, because clay is the negative-money colour on every other surface in
- * this app and a coverage break is not a judgement about the money. Both strokes are graphics,
- * which WCAG 1.4.11 puts at 3:1. Measured from the palette triplets, on paper / on card:
- *   gold      light 4.57 / 5.67   dark 7.40 / 6.22
- *   estimate  light 6.56 / 8.14   dark 8.13 / 6.83
+ * this app and a coverage break is not a judgement about the money. All three strokes are
+ * graphics, which WCAG 1.4.11 puts at 3:1. Re-derived from the palette triplets on 2026-08-01,
+ * on paper / on card:
+ *   sage      light 4.20 / 4.20   dark 4.85 / 4.39
+ *   gold      light 4.64 / 4.64   dark 6.22 / 5.64
+ *   estimate  light 5.16 / 5.16   dark 6.23 / 5.65
+ * The two light columns are equal on every row, and that is not a transcription slip: light
+ * `card` and light `paper` are the same pure white triplet, so `card` on `paper` measures 1.00:1
+ * and splitting the light figures by ground says nothing at all on that theme. The split still
+ * says something on dark, where each stroke gives up roughly half a point moving off the page
+ * onto a raised surface. `sage` is the one closest to the floor and clears it in both themes on
+ * both grounds.
  */
 const STROKE: Record<TrendSegmentKind, { color: string; width: number; dash?: string; cap: 'butt' | 'round'; key: string }> = {
   measured: { color: 'var(--mz-sage)', width: 2.6, cap: 'butt', key: 'recorded' },
@@ -707,8 +715,11 @@ export function TrendChart({ history, marks = NO_MARKS, height = 120, className 
           {valueTicks.map((tick) => (
             <div
               key={tick.value}
-              // Money numerals, so `muted` rather than `muted-2`: 5.67:1 on paper against 4.52:1,
-              // and the datum wears full ink because every other reading is a distance from it.
+              // Money numerals, so `muted` rather than `muted-2`: `muted` on `paper` measures
+              // 7.57:1 light and 9.57:1 dark, against `muted-2` on `paper` at 6.01:1 light and
+              // 7.74:1 dark. Both clear AA comfortably on this palette, so what the stronger tone
+              // buys here is hierarchy and not compliance. The zero datum wears full ink because
+              // every other reading is a distance from it.
               className={`absolute right-2 -translate-y-1/2 whitespace-nowrap text-rule tabular-nums ${
                 tick.isZero ? 'text-ink' : 'text-muted'
               }`}
@@ -782,9 +793,19 @@ export function TrendChart({ history, marks = NO_MARKS, height = 120, className 
               y1={(zeroYPct / 100) * VIEW_H}
               y2={(zeroYPct / 100) * VIEW_H}
               // `faint` and not `line-3`: the zero rule is the datum the whole scale rests on, so
-              // it has to clear 3:1 as a meaningful graphic. line-3 is 1.54:1 on light paper and
-              // dot is 2.10:1; faint is 3.26:1 light and 4.10:1 dark, and is already the token
-              // documented as deliberately non-text.
+              // it has to clear 3:1 as a meaningful graphic under WCAG 1.4.11, and it must not
+              // out-weigh the series it is a datum for. The reason recorded here before the
+              // 2026-08-01 palette was that `line-3` was too pale to see; re-derived, it argues
+              // the opposite. `line-3` on `paper` is 4.95:1 light and 5.77:1 dark, the strongest
+              // of the three candidates, stronger than the trace itself, and already the tone the
+              // other value ticks are drawn in, so the datum would read as one more tick.
+              // `dot` on `paper` is 2.96:1 light and 4.12:1 dark and misses the floor on light.
+              // `faint` on `paper` is 3.84:1 light and 5.17:1 dark: it clears the floor in both
+              // themes, it is nobody else's tone in this chart, and on light it sits under the
+              // measured trace, which is `sage` on `paper` at 4.20:1 light and 4.85:1 dark. On
+              // dark it does not sit under it, so what keeps the rule subordinate there is hue
+              // and weight rather than value: the trace is green at 2.6 units, the rule neutral
+              // at 2.2.
               stroke="var(--mz-faint)"
               strokeWidth="2.2"
             />
