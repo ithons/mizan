@@ -235,6 +235,26 @@ export function mergeAccounts(
       WHERE account_id = ?
     `).run(targetAccountId, now, sourceAccountId);
 
+    // `holdings` carries UNIQUE(account_id, security_id), so moving the source's positions onto the
+    // target throws the moment both accounts hold the same security. A plain UPDATE here made
+    // merging two accounts at one broker fail with a raw constraint error, which is exactly what a
+    // SimpleFIN re-link produces: the same brokerage arrives under a new provider id holding the
+    // same three funds, and the merge that would repair it could not run.
+    //
+    // On a collision the SOURCE row wins and the target's is dropped. It is NOT summed, which is
+    // what `holdings_history` does below and for a different reason: history is a permanent record
+    // where two accounts genuinely held two parts of one day's position, while `holdings` is
+    // CURRENT state, and the overwhelmingly common collision is one position seen twice under two
+    // ids. Summing there would double the portfolio. The source is the newer of the two readings,
+    // and the next sync rewrites this table from the provider for whatever accounts then exist, so
+    // this choice settles within the hour either way. `holdings_history` is where the durable answer
+    // lives, and it is handled separately.
+    db.prepare(`
+      DELETE FROM holdings
+      WHERE account_id = ?
+        AND security_id IN (SELECT security_id FROM holdings WHERE account_id = ?)
+    `).run(targetAccountId, sourceAccountId);
+
     db.prepare(`
       UPDATE holdings
       SET account_id = ?, updated_at = ?

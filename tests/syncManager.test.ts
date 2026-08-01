@@ -166,7 +166,7 @@ test('runPostSyncStages: a liability sign correction is recorded, naming both va
   assert.equal(change?.entity_id, 'acct_1');
   assert.equal(change?.change_type, 'updated');
   assert.match(change?.description ?? '', /563\.26 owed/);
-  assert.match(change?.description ?? '', /credit balance of \$563\.26/);
+  assert.match(change?.description ?? '', /gives a \$563\.26 credit/);
 });
 
 test('runPostSyncStages: an unverifiable liability is reported rather than passed over', (t) => {

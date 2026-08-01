@@ -77,6 +77,18 @@ export function correctLiabilitySigns(db: Database.Database, now: string): Liabi
     FROM transactions
     WHERE account_id = ? AND pending = 0 AND date > ?
   `);
+  // A snapshot is taken at an INSTANT and dated a DAY, so a row dated the same day may have posted
+  // either side of it and the chain has two legitimate readings. Requiring the strict one alone made
+  // the guard blind at a boundary it meets constantly: on 2026-08-01 three Chase charges dated
+  // 2026-07-30 posted after that day's 21:50 snapshot, summing to exactly the $62.36 between the
+  // chain's answer and the provider's magnitude, so a correction that was right to the cent could
+  // not fire. Exactness is preserved because a match is still an exact match; what widens is only
+  // which of two defensible chains it may match against.
+  const sumOnAndAfter = db.prepare(`
+    SELECT COALESCE(SUM(amount), 0) AS total
+    FROM transactions
+    WHERE account_id = ? AND pending = 0 AND date >= ?
+  `);
   const pendingAfter = db.prepare(`
     SELECT COUNT(*) AS count
     FROM transactions
@@ -101,16 +113,40 @@ export function correctLiabilitySigns(db: Database.Database, now: string): Liabi
       // Walking newest to oldest already keeps an anchor from before the correction out of reach.
       if (typeof anchorValue !== 'number' || !Number.isFinite(anchorValue)) continue;
 
-      const { total } = sumAfter.get(account.id, snapshot.date) as { total: number };
-      const expectedOwed = anchorValue - total;
+      const strict = (sumAfter.get(account.id, snapshot.date) as { total: number }).total;
+      const inclusive = (sumOnAndAfter.get(account.id, snapshot.date) as { total: number }).total;
+      const candidates = strict === inclusive
+        ? [anchorValue - strict]
+        : [anchorValue - strict, anchorValue - inclusive];
+      // Take the reading that settles the direction, if either does. Both are the same chain over a
+      // one-day difference in where its horizon is cut.
+      const expectedOwed =
+        candidates.find((c) => c !== 0 && Math.sign(c) !== Math.sign(account.current_balance)
+          && Math.abs(c) === Math.abs(account.current_balance))
+        ?? candidates[0];
 
       // Exactness is the safety property, and it is why this is a correction rather than a guess.
       // The rule can only fire when the provider's own transactions agree with the provider's own
       // magnitude to the cent and disagree only about direction. An incomplete feed cannot trigger
       // it (Discover's backfill_floor_date is 2026-06-16, Coinbase's is 2025-09-04): a chain
       // missing even one row lands on a different magnitude and no correction is made.
-      if (expectedOwed >= 0) continue;
-      if (account.current_balance <= 0) continue;
+      // The disagreement is about DIRECTION, and it runs both ways.
+      //
+      // This used to fire only when the ledger implied a credit and the provider had been negated
+      // into debt. That is one half of the same defect. `liabilityAdjustedCents` negates whatever
+      // the provider sends, so an institution that reports a positive balance for money OWED comes
+      // out stored as a credit, and nothing corrected it because the guard required
+      // `current_balance > 0`. On 2026-08-01 that left Chase Sapphire recorded as $5,433.49 in
+      // credit when the ledger said $5,433.49 owed, to the cent, and net worth was overstated by
+      // twice that. Chase and Capital One disagree about the sign convention on the same feed, so
+      // this is not a one-institution quirk to special-case.
+      //
+      // What makes the correction safe is unchanged and is the exactness below, not the direction:
+      // the provider's own transactions must agree with the provider's own magnitude to the cent and
+      // disagree only about which way it points.
+      if (expectedOwed === 0) continue;
+      if (account.current_balance === 0) continue;
+      if (Math.sign(expectedOwed) === Math.sign(account.current_balance)) continue;
       if (Math.abs(expectedOwed) !== Math.abs(account.current_balance)) {
         // The two sides disagree about direction and about magnitude, so the magnitude cannot be
         // adopted. Moving on in silence would report the direction as settled, and this is the case
@@ -143,10 +179,9 @@ export function correctLiabilitySigns(db: Database.Database, now: string): Liabi
       account_id: account.id,
       account_name: account.account_name,
       reason:
-        `Provider reports $${dollars(account.current_balance)} owed; the ledger since ${doubt.date} ` +
-        `(anchored at ${describePosition(doubt.anchorValue)}) gives a credit balance of ` +
-        `$${dollars(Math.abs(doubt.expectedOwed))}. The magnitudes disagree, so nothing was adopted ` +
-        'and the direction of this balance is in doubt.',
+        `Provider reports ${describePosition(account.current_balance)}; the ledger since ${doubt.date} ` +
+        `(anchored at ${describePosition(doubt.anchorValue)}) gives ${describePosition(doubt.expectedOwed)}. ` +
+        'The magnitudes disagree, so nothing was adopted and the direction of this balance is in doubt.',
     });
   }
 
@@ -163,8 +198,12 @@ function describePosition(cents: number): string {
 }
 
 /** The sync_changes description for an adoption, naming both values so neither is lost. */
+/**
+ * Names both values and both directions. It used to hardcode "reported owed ... stored as a credit",
+ * which was only ever true of one of the two corrections this makes.
+ */
 export function describeLiabilitySignCorrection(correction: LiabilitySignCorrection): string {
-  const stored = dollars(correction.stored_balance);
-  const adopted = dollars(Math.abs(correction.corrected_balance));
-  return `Provider reported $${stored} owed; the ledger since ${correction.anchor_date} gives a credit balance of $${adopted}. Stored as a credit.`;
+  const stored = describePosition(correction.stored_balance);
+  const adopted = describePosition(correction.corrected_balance);
+  return `Provider reported ${stored}; the ledger since ${correction.anchor_date} gives ${adopted}. Stored as ${correction.corrected_balance < 0 ? 'a credit' : 'owed'}.`;
 }

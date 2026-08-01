@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import type Database from 'better-sqlite3';
-import { correctLiabilitySigns } from '../server/src/services/liabilitySign';
+import { correctLiabilitySigns, describeLiabilitySignCorrection } from '../server/src/services/liabilitySign';
 import { liabilityAdjustedCents } from '../server/src/services/simplefin';
 import { insertAccount, insertTransaction, migratedTestDb } from './helpers/schema';
 
@@ -91,7 +91,7 @@ test('a magnitude that does not match to the cent is not adopted, and is not pas
   assert.equal(report.unverifiable.length, 1);
   assert.equal(report.unverifiable[0].account_id, card);
   assert.match(report.unverifiable[0].reason, /\$5\.82 owed/);
-  assert.match(report.unverifiable[0].reason, /credit balance of \$5\.83/);
+  assert.match(report.unverifiable[0].reason, /gives a \$5\.83 credit/);
   assert.match(report.unverifiable[0].reason, /2026-07-23/);
   db.close();
 });
@@ -265,4 +265,54 @@ test('the ingest guard stays on the one shape a single number can diagnose', () 
   const ordinary: string[] = [];
   assert.equal(liabilityAdjustedCents(-563.26, true, 'Discover', ordinary), 56326);
   assert.deepEqual(ordinary, []);
+});
+
+/**
+ * The 2026-08-01 case, and the half of the defect the original fix did not cover.
+ *
+ * `liabilityAdjustedCents` negates whatever the provider sends. Chase reports a POSITIVE balance for
+ * money owed, so a Chase card came out of the transform stored as a credit, and the correction could
+ * not touch it because it required `current_balance > 0`. Chase Sapphire read $5,433.49 in credit
+ * against a ledger that said $5,433.49 owed, to the cent, and net worth was overstated by twice it.
+ */
+test('a provider that reports owed as positive is corrected too, not only the other way', () => {
+  const db = migratedTestDb();
+  const card = insertAccount(db, { account_name: 'Chase Sapphire', type: 'credit', is_liability: 1, current_balance: -543349 });
+  // The ledger: settled at $5,115.02 owed, then $318.47 of new charges against it.
+  db.prepare(`
+    INSERT INTO net_worth_snapshots (id, date, total_assets, total_liabilities, net_worth, breakdown, is_estimated, created_at)
+    VALUES ('snap_1', '2026-07-30', 0, 511502, -511502, ?, 0, '2026-07-30T21:50:00.000Z')
+  `).run(JSON.stringify({ [card]: 511502 }));
+  insertTransaction(db, { account_id: card, date: '2026-07-31', amount: -31847, merchant_name: 'Uniqlo' });
+
+  const report = correctLiabilitySigns(db, '2026-08-01T18:00:00.000Z');
+
+  assert.equal(report.corrections.length, 1);
+  assert.equal(report.corrections[0].stored_balance, -543349);
+  assert.equal(report.corrections[0].corrected_balance, 543349, 'the card owes; it is not in credit');
+  assert.equal(
+    (db.prepare('SELECT current_balance AS b FROM accounts WHERE id = ?').get(card) as { b: number }).b,
+    543349
+  );
+  assert.match(describeLiabilitySignCorrection(report.corrections[0]), /Stored as owed/);
+  db.close();
+});
+
+test('HEALTHY: a liability whose stored sign already agrees with the ledger is left alone', () => {
+  const db = migratedTestDb();
+  const card = insertAccount(db, { account_name: 'Capital One Savor', type: 'credit', is_liability: 1, current_balance: 2397 });
+  db.prepare(`
+    INSERT INTO net_worth_snapshots (id, date, total_assets, total_liabilities, net_worth, breakdown, is_estimated, created_at)
+    VALUES ('snap_ok', '2026-07-30', 0, 2397, -2397, ?, 0, '2026-07-30T21:50:00.000Z')
+  `).run(JSON.stringify({ [card]: 2397 }));
+
+  const report = correctLiabilitySigns(db, '2026-08-01T18:00:00.000Z');
+
+  assert.deepEqual(report.corrections, [], 'an agreeing balance must not be corrected');
+  assert.deepEqual(report.unverifiable, [], 'an agreeing balance must not be reported as doubtful');
+  assert.equal(
+    (db.prepare('SELECT current_balance AS b FROM accounts WHERE id = ?').get(card) as { b: number }).b,
+    2397
+  );
+  db.close();
 });
