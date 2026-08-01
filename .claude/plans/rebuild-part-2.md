@@ -1378,3 +1378,140 @@ the financial context off their servers, which their default would not.
   two non-chat ones the summary was billed and never read.
 - Gemini's caching copy told the owner the cache is "created per conversation and deleted when it
   ends", which is the wrong cost model for a cache created lazily inside one request.
+
+## Phase 9, landed 2026-07-31
+
+The plan defined Phase 9 as sweeping the 91 capped findings from the original audit for anything the
+phases had not incidentally fixed. **That list was not recoverable** (it lived in a context window that
+was compacted several sessions ago), and the code it described has since been almost entirely
+rewritten, so restating it would have been a claim about work nobody could check. It was replaced by a
+fresh six-lens audit of the codebase as it now stands: **26 findings raised, 3 refuted, 23 survived**
+independent adversarial verification (9 high, 10 medium, 4 low).
+
+Those 23 were fixed across four disjoint tracks, and then **every fix was refuted by an independent
+agent that had not written it**. That second pass is the one worth recording:
+
+| | claims upheld | overstated | refuted | regressions introduced |
+|---|---|---|---|---|
+| investments | 2 | 2 | 4 | 4 |
+| ai writes and data | 4 | 4 | 1 | 4 |
+| detectors and copy | 5 | 2 | 2 | 7 |
+| client chrome | 6 | 1 | 1 | 3 |
+| **total** | **17** | **9** | **8** | **18** |
+
+**Eight of 23 fixes did not do what their own report said, and the fixes introduced 18 regressions
+between them.** A round of fix-then-report, with tests passing and both typechecks clean, was wrong
+about a third of what it claimed. This is the fifth round in a row where that held.
+
+### The tests were the one thing nothing typechecked
+
+`tests/` was in neither tsconfig project for the whole life of the repo. `tsconfig.json` covers
+`client/src` and `shared`; `tsconfig.server.json` covers `server/src` and `shared`. The 1,545 tests
+whose job is to assert the code is correct were the only files no compiler read.
+
+Adding `tsconfig.tests.json` reported **27 errors**, and the ones that mattered were fixtures asserting
+against fiction: `plaid_transaction_id`, `plaid_account_id`, `connection_type: 'plaid'` and
+`scope: 'plaid_all'` on types migration 014 made unreachable in 2026, and a `route` field on
+`TransactionReviewQueueSummary` that no server query has ever produced. CLAUDE.md had called the plaid
+fixtures cosmetic. They were not cosmetic once a compiler looked at them: a test that builds a row the
+database cannot hold is asserting against a shape that does not exist.
+
+The `route` disagreement was resolved **against the test**. `getTransactionReviewSummary` constructs
+all seven queues literally and emits no route on any of them, and `QUEUE_DESTINATIONS` in
+`Instrument.tsx` is a total `Record<TransactionReviewQueueId, string | null>`, so a new queue that
+declares no destination is a compile error there, where an optional server field would let one default
+into nothing silently. Same structural argument as `DRAFT_KIND_AUTONOMY`. The gate is now four:
+`npm test` plus `npm run typecheck` (three projects).
+
+### What the second pass caught that the first pass had reported as fixed
+
+- **The Investments hero and its own chart still disagreed, for a second reason.** The fix resolved one
+  portfolio account set, but read it from `accounts` with no `is_hidden` filter while the series comes
+  from breakdown JSON that `takeSnapshot` writes only for `is_hidden = 0`. Disconnecting Coinbase
+  (`DELETE /api/coinbase/disconnect` sets `is_hidden = 1` and leaves `current_balance` alone) put the
+  wallet in the headline and not in the series: hero $2,436.21 against a tail of $2,045.04, and a
+  standing `+$391.17 since Jul 31` on a portfolio that had not moved. Two more cases reached the same
+  split: `?endDate=` before the newest snapshot, and balances moving after the newest snapshot.
+- **"Each surface says why" was a claim about comments.** The screen printed $2,436.21 and Cmd+K
+  printed $2,045.04 for the same words, and the only text explaining the gap was a source comment
+  neither the owner nor the model reads. The reconciling sentence is now rendered on both.
+- **The reconciliation note fired on an ordinary healthy account.** Judging `holdings_value` against
+  the headline meant an IRA funded and not yet invested read as a $500 discrepancy. It is judged
+  against `invested_balance` now, and the uninvested balance gets its own line that accuses nothing.
+- **A dismissal silenced the wrong rule.** `ownerDeclinedProposal` keyed a retirement on the rule's
+  *pattern*, so declining to retire rule X for "Spotify" also silenced a proposal about rule Y on the
+  same pattern. Keyed on rule id now, read back out of the dismissed draft's own payload. The fix
+  carried its own hazard: `json_extract` raises on a non-JSON payload, which threw out of both the
+  guard and the worker; both use `json_valid` now.
+- **The declined-proposal suppression had no route back and nothing on screen said it existed.** A
+  suggestion the owner turned down simply stopped appearing, permanently, with the code comment naming
+  an escape hatch the UI could not reach. There is a "Suggestions you turned down" panel in Settings
+  now, with `GET /api/ai/declined` and a restore that reopens the draft.
+- **The write guard and the model's own pool disagreed about what one dismissal meant.** The guard
+  refused per (row, category); the worker dropped the whole row. So declining "Coffee" for a row made
+  that row invisible to every future pass rather than declining one category for it. The row stays in
+  the pool now, annotated with the categories that are refused for it.
+- **`unreconciled_residual` summed signed residuals under a sentence promising it is zero exactly when
+  the list is empty.** Two unreconciled accounts at +$999 and -$999 published a clean bill of health.
+  It sums magnitudes now, which makes the biconditional structurally true, because the filter that
+  decides `unreconciled` requires magnitude past the tolerance.
+- **The duplicate detector fired on an ordinary healthy event.** Newness was decided on the group id,
+  which is a content hash: a pending duplicate pair posting, or a merchant rename, minted a new id and
+  re-alarmed. Newness is decided on member transaction ids now. A third copy joining an established
+  group used to be silent and is now reported once.
+- **Two comments written in the same change set disagreed about one measurement** (the review backlog
+  as 15 in `dataQuality` and 7 in `Instrument`). 15 is the raw `advisor_drafts` count; 7 is what
+  survives `isDraftStillActionable`, and 7 is what the panel prints. Both now say which is which.
+- **`index.css` claimed every `bg-rail` call site pairs it with `text-ink`.** A walker over the tree
+  found **22 rail call sites, 9 of them setting a tone a light rail cannot carry**. The false universal
+  is replaced by the measured allowance, and `tests/railGround.test.ts` fails both on a tenth site and
+  on an entry that gets fixed without being delisted.
+- **The selection ring the accounts fix made load-bearing was nullified by `opacity-55`.** `opacity`
+  applies to `box-shadow`, so on a closed or hidden row (both of which can be the selected one) sage
+  composited to 1.97:1 on light against a surface step of 1.13, and nothing marked which row the
+  detail panel was describing.
+
+### Figures that did not reproduce, restated with the query beside them
+
+- The undo panel cap: reported as 78% of actions unreachable, measured at **65%** (142 actions, 92
+  past the newest-50 window). The panel now serves all of them and states the drawing cap.
+- `TrendChart` carried four stale measurements: the series is **32 rows, 16 estimated**, median gap
+  **28 days** not 2, `joinLimit` 93 against a 274-day gap that **is** withheld so the line does break,
+  the tightest drawn step **0.129%** not 0.55%, and 19 of 32 points inside the last 16.4% not 15 of 20.
+- The estimated June sheet is **5521.48**, not the 3868.92 in the comment; `backfillSnapshots`
+  recomputes estimated rows on every run.
+- The largest step between two **measured** rows is -255052 on 2026-07-13; the larger -445319 crosses
+  an estimated-to-measured boundary and is not the same quantity.
+
+### Driven in a browser
+
+Five screens at 1024, 1200 and 1440, both themes, no console errors and no horizontal overflow at any
+width. The persisted partial-sync fault renders (`UNCALIBRATED  The last sync did not finish every
+stage`), which is correct: the newest sheet was written by a run whose SimpleFIN stage returned
+**402**, so 13 of its 14 balances are whatever the previous run left, and `covered_accounts = 14`
+counts accounts the snapshot included, not accounts a provider refreshed. "What needs you" reads
+**AI Insights 7** in the default tone rather than "Uncategorized 7" in alarm ink linking to a filter
+holding none of them, and the ledger's "Model suggests" chip agrees with the queue at 7.
+
+### Two things that exist only on this machine
+
+`CLAUDE.md` is gitignored, so a fresh clone has no copy, no review ever sees an edit to it, and several
+passages in it are the only surviving record of what a bug cost. That is unchanged and still undecided.
+`.claude/hooks/migration-guard.sh` was in the same position and is now tracked: CLAUDE.md described it
+as one of the two things that catch a migration-prefix collision, and it existed nowhere but here.
+
+### Left open, deliberately
+
+- **The Investments account set is resolved from today's `accounts` table and applied to every past
+  breakdown.** Retyping a brokerage to `savings` moves the same two snapshots from $2,445.89 to
+  $505.92, and the screen stays internally consistent while being historically false. Reproduced, not
+  fixed. The honest fix freezes membership at snapshot-write time, which needs `snapshot.ts`, a
+  migration and a backfill. The route comment states the limitation instead of claiming the set is
+  right for history.
+- **`deriveAssetBuckets` has no production caller.** `reports.ts` was the last one. It survives only
+  because `tests/creditPosition.test.ts` is the sole remaining assertion that a card in credit carries
+  as a negative liability through that path. Re-home it or delete it with its test.
+- **The nine sub-AA `rail` call sites are recorded, not fixed**, in `tests/railGround.test.ts`, plus two
+  on `pill-bg`. Each is a one-class fix in a file outside the track that found them.
+- **A refused draft row is written on every pass** that re-proposes a declined category for a row.
+  Nothing bounds the accumulation. The alternative, dropping the row, is the defect that was fixed.
