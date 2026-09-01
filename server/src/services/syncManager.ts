@@ -362,15 +362,37 @@ export function runPostSyncStages(
         (preSync.get(correction.account_id) ?? correction.stored_balance) !== correction.corrected_balance
     );
 
-    if (news.length > 0 || signs.unverifiable.length > 0) {
+    // The same de-duplication `news` already gets, applied to the other half of this stage.
+    //
+    // `news` filters corrections to the ones that actually changed, on the stated reasoning that
+    // saying an unchanged thing "hourly forever is how a panel stops being read". The unverifiable
+    // list was exempt from that and re-filed an identical row on every sync. Its only silence
+    // condition is a PENDING row in flight, and this feed has never produced one: `SELECT pending,
+    // COUNT(*) FROM transactions GROUP BY 1` returns `0|2734` on the live ledger, so the branch
+    // that suppresses a doubt cannot be reached. Measured before this change: 21 recorded items
+    // between 2026-07-30 and 2026-08-31 carrying 5 distinct messages.
+    //
+    // Compared against the last message this stage filed rather than against a fixed window, so a
+    // finding that goes away and comes back is reported again, and one that merely persists is not.
+    const unverifiableMessage = signs.unverifiable.length > 0
+      ? signs.unverifiable.map((a) => `${a.account_name ?? a.account_id}: ${a.reason}`).join('; ')
+      : undefined;
+    const lastFiled = db.prepare(`
+      SELECT error_message FROM sync_run_items
+      WHERE connection_id = 'liability-sign'
+      ORDER BY completed_at DESC, rowid DESC
+      LIMIT 1
+    `).get() as { error_message: string | null } | undefined;
+    const unverifiableIsNew = unverifiableMessage !== undefined
+      && unverifiableMessage !== (lastFiled?.error_message ?? null);
+
+    if (news.length > 0 || unverifiableIsNew) {
       const signItem = recordSyncRunItem(db, runId, {
         provider: 'system',
         connection_id: 'liability-sign',
         institution_name: 'Liability balance direction',
         status: 'succeeded',
-        error_message: signs.unverifiable.length > 0
-          ? signs.unverifiable.map((a) => `${a.account_name ?? a.account_id}: ${a.reason}`).join('; ')
-          : undefined,
+        error_message: unverifiableMessage,
       });
       // A corrected balance is never silently different from what the provider said.
       for (const correction of news) {

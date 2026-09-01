@@ -449,3 +449,79 @@ test('isSyncStale: any one stale connection makes the whole thing stale, even if
   db.prepare(`INSERT INTO coinbase_connections (id, coinbase_user_id, last_synced_at, created_at) VALUES ('c2', 'cb_user', ?, '2026-06-30T00:00:00.000Z')`).run(new Date(Date.now() - 20 * 60_000).toISOString());
   assert.equal(isSyncStale(db, 10), true);
 });
+
+/**
+ * An unchanged unverifiable liability finding is filed once, not every hour.
+ *
+ * `news` already filters corrections to what changed, on the stated reasoning that repeating an
+ * unchanged thing "hourly forever is how a panel stops being read". The unverifiable list was
+ * exempt. Its only silence condition is a PENDING row in flight and this feed has never produced
+ * one (`SELECT pending, COUNT(*) FROM transactions GROUP BY 1` returns `0|2734` on the live
+ * ledger), so the branch that suppresses a doubt is unreachable and the finding re-filed forever:
+ * 21 recorded items over one month carrying 5 distinct messages.
+ */
+function unverifiableStages(reason: string): Parameters<typeof runPostSyncStages>[3] {
+  return {
+    detectRecurring: () => {},
+    refreshTransactionIntegrity: () => emptyIntegrity,
+    autoCategorizeTransactions: () => ({ updated: 0 }),
+    correctLiabilitySigns: () => ({
+      corrections: [],
+      unverifiable: [{ account_id: 'acc_1', account_name: 'Discover', reason }],
+    }),
+    takeSnapshot: () => {},
+  };
+}
+
+function liabilityItems(db: Database.Database): Array<{ error_message: string | null }> {
+  return db
+    .prepare("SELECT error_message FROM sync_run_items WHERE connection_id = 'liability-sign' ORDER BY rowid")
+    .all() as Array<{ error_message: string | null }>;
+}
+
+function newRun(db: Database.Database, id: string, at: string): void {
+  db.prepare("INSERT INTO sync_runs (id, scope, status, started_at) VALUES (?, 'full', 'running', ?)").run(id, at);
+}
+
+test('runPostSyncStages: an unchanged unverifiable finding is not re-filed every sync', (t) => {
+  const db = setupSyncDb();
+  t.after(() => db.close());
+
+  runPostSyncStages(db, 'run_1', null, unverifiableStages('the magnitudes disagree'));
+  assert.equal(liabilityItems(db).length, 1, 'the first sighting must be reported');
+
+  newRun(db, 'run_2', '2026-06-30T01:00:00.000Z');
+  runPostSyncStages(db, 'run_2', null, unverifiableStages('the magnitudes disagree'));
+  newRun(db, 'run_3', '2026-06-30T02:00:00.000Z');
+  runPostSyncStages(db, 'run_3', null, unverifiableStages('the magnitudes disagree'));
+
+  assert.equal(liabilityItems(db).length, 1, 'the same finding was filed again on a later sync');
+});
+
+test('runPostSyncStages: a CHANGED unverifiable finding is reported again', (t) => {
+  const db = setupSyncDb();
+  t.after(() => db.close());
+
+  runPostSyncStages(db, 'run_1', null, unverifiableStages('the magnitudes disagree by $5.82'));
+  newRun(db, 'run_2', '2026-06-30T01:00:00.000Z');
+  runPostSyncStages(db, 'run_2', null, unverifiableStages('the magnitudes disagree by $26.21'));
+
+  const items = liabilityItems(db);
+  assert.equal(items.length, 2, 'a finding that changed was suppressed as a repeat');
+  assert.match(items[1].error_message ?? '', /\$26\.21/);
+});
+
+test('HEALTHY: nothing to correct and nothing in doubt files nothing at all', (t) => {
+  const db = setupSyncDb();
+  t.after(() => db.close());
+
+  runPostSyncStages(db, 'run_1', null, {
+    detectRecurring: () => {},
+    refreshTransactionIntegrity: () => emptyIntegrity,
+    autoCategorizeTransactions: () => ({ updated: 0 }),
+    correctLiabilitySigns: () => ({ corrections: [], unverifiable: [] }),
+    takeSnapshot: () => {},
+  });
+
+  assert.deepEqual(liabilityItems(db), []);
+});
