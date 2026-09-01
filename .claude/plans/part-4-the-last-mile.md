@@ -544,3 +544,78 @@ formality"). Gate 4 requires running the app, and running the app costs a write 
 PROVES REAL: the constant, the two COUNT gates, and the count of 5.
 PROVES FIXED: `MIZAN_DIR` reads an env override; booting with it set against a copied database
 leaves `.mizan/mizan.db` byte-identical.
+
+---
+
+# Progress log
+
+## 2026-09-01: Phases 0 through 4 landed, plus what looking at the screen found
+
+Fourteen commits. `npm test` 1743 passing, three typechecks clean, `npm run build` clean, and the
+production build verified by running it rather than by reading it.
+
+**Phase 0.** `getSyncHealth` takes an injectable clock. The gate went from 1690/1691 to green.
+
+**Phase 1, the bind.** `listenOnHost` in `server/src/listen.ts`, called once, in both modes.
+`ViteExpress.bind` attaches Vite to the already-bound server, which is what `ViteExpress.listen`
+does internally. Verified in the real app: `lsof` shows `127.0.0.1:3010`, a curl from this
+machine's LAN address with a forged `Host` header now fails to connect where it previously returned
+HTTP 200 on both a GET and a POST. The beyond-loopback warning is no longer behind `IS_PROD`.
+`npm start` now sets `NODE_ENV=production`, which was its own finding: helmet's CSP, the production
+CORS policy and `express.static(dist/client)` were all unreachable from either documented command,
+so `npm run build` wrote a client bundle that `npm start` never served. Verified by running it: CSP
+header present, hashed asset served, still bound to loopback.
+
+**Also landed to make Phase 7 possible, ahead of order.** `MIZAN_DIR_OVERRIDE`. Every figure below
+was then taken from the real app running against a copy, with `.mizan/mizan.db` byte-identical
+before and after (sha256 `a6a5872467e3727d...`).
+
+**Phase 2, the wrong numbers.**
+- `safeToSpend` asks `calculateGoalProgress` instead of reading `goals.current_amount` raw. On the
+  live ledger this moved the Balance screen's subject numeral from **"$1,036.75 short this month"
+  to "$35.05"**, and the screenshot before and after is the proof. `list_goals` had the same defect
+  from the other side and now asks the same function, so the chat tool and the system prompt cannot
+  disagree about one goal inside one conversation.
+- `confirmRecurringAdjustment` converts to cents once. Demonstrated by reintroducing the second
+  conversion and watching both new tests fail.
+- A sold-out position is no longer priced as a 100% unrealized loss. One shared `isLivePosition`
+  predicate, used by the header, the row gain, the holdings list and the Cmd+K answer;
+  `getAllocationSlices` already had this filter privately, which is how one of four consumers was
+  right.
+- `boundaryApplicableTo` clamps the reconciliation boundary adjustment so it can only shrink a
+  residual toward zero. This was the one critical carried at 2/3 with a live dissent, so it was
+  reproduced first: on a ledger that reconciles to the cent, a row dated on the last snapshot date
+  produced `adjusted_residual +5000` and a row dated on the first produced `-7000` with
+  `direction_conflict` TRUE. Both now report 0. The live Chase Checking case is untouched
+  (residual 54418, boundary 54418, adjusted 0), which is what makes the fix conservative.
+
+**Phase 3, the detector.** The spending spike is measured against the maximum of the six preceding
+30-day windows rather than against the single window before it, with a floor under the baseline so
+a ratio against near-zero cannot be printed as a reading. Replayed over the same year of the
+owner's real ledger: **303 firing days became 25**, ten categories became two, and the largest
+reading fell from 25000% to 497%. Those 25 days are four distinct events, each visible for 10 to 13
+days because a 30-day window carries one spike for about that long. On today's data the detector is
+silent, and `/api/insights` returns one positive and one info row.
+
+**Phase 4, the sync path.**
+- An unreadable `credentials.json` is a fault rather than an empty store, it is recorded as a failed
+  sync run item so the run lands `partial` instead of toasting "Sync complete" in green, and every
+  mutator refuses to write over a file it could not read. That last part was the destructive half:
+  a re-link would have replaced the Coinbase key and every AI provider key with just the SimpleFIN
+  URL.
+- An unreadable Coinbase 200 no longer zeroes the whole crypto position. `accountRowsSeen`
+  distinguishes an empty feed from a genuine sell-out, because a sell-out still returns rows.
+- All four outbound provider calls set a timeout. They set none, axios waits forever, and
+  `defaultIsRetryable` treats a statusless network error as retryable across three attempts.
+
+**Found by looking at the screen, which no finder could do.** The Investments holdings list
+rendered a $0.38 position, a $0.21 position and a $0.01 balance all as "$0", and one row read
+"−$0 · 12.5%": a percentage stated against an amount printed as nothing. A per-unit price went
+through the whole-dollar formatter, so POL at $0.090195 rendered as "$0" while CLAUDE.md explains
+at length why the database keeps that precision. Both fixed with named formatters and property
+tests. This is the class of defect Phase 7 was written to reach, and it was reachable within
+minutes of the app being runnable.
+
+**Corrected mid-flight.** V6 in this document claimed "the detectors are silent on the owner's real
+data" on the strength of three detectors. The one I did not run was firing 83% of the year. The
+claim is struck above and the measurement that replaced it is stated with its query.
