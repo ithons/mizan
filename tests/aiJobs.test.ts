@@ -24,6 +24,7 @@ import {
   type DetectedChange,
 } from '../server/src/services/aiWorker';
 import { _setDbForTesting } from '../server/src/db/index';
+import { upsertMerchantRule } from '../server/src/services/rules';
 import { migratedTestDb, insertTransaction } from './helpers/schema';
 
 // The framework's job is to make a job's declarations true rather than descriptive. Two of them
@@ -955,4 +956,77 @@ test('a job declaring no invariants has none evaluated, and says none held', () 
   );
   db.close();
   assert.deepEqual(breaches, [], 'declaring nothing must not silently assert everything');
+});
+
+// ─── A no-op is not an applied change ────────────────────────────────────────
+
+/**
+ * Re-proposing a rule the ledger already holds resolves the draft and applies nothing.
+ *
+ * `confirmAdvisorDraft` already declined to write an `advisor_actions` row for this case, on the
+ * argument that an action with no blast radius and an Undo that reverts nothing is exactly what the
+ * refusal path was fixed to stop producing. But it still returned success, `runAiJob` counted every
+ * success as `applied++`, and the client toasted "AI review applied N changes". The worker
+ * re-proposes such rules on every pass, so every hourly run announced a change it had itself
+ * decided not to record.
+ */
+function ruleProposal(pattern: string, categoryId: string): AiJobProposal {
+  return {
+    kind: 'create_merchant_rule',
+    label: `Rule for ${pattern}`,
+    summary: `${pattern} is always ${categoryId}.`,
+    route: '/settings',
+    payload: { kind: 'create_merchant_rule', pattern, category_id: categoryId, apply_existing: true },
+    changes: [],
+    citations: [],
+  };
+}
+
+test('a rule the ledger already holds is resolved, not counted as applied, and not toasted', async (t) => {
+  const db = migratedTestDb();
+  const env = withCredentials();
+  t.after(() => { db.close(); env.restore(); });
+
+  // The rule exists before the pass, authored by the model on an earlier pass, and every matching
+  // row is already filed under it: the state the draft proposes already holds.
+  const txnId = insertTransaction(db, { merchant_name: 'Trupanion', amount: -3902 });
+  upsertMerchantRule(db, 'Trupanion', 'cat_health', '2026-07-01T00:00:00.000Z', { source: 'ai' });
+  db.prepare("UPDATE transactions SET category_id = 'cat_health', category_source = 'rule' WHERE id = ?").run(txnId);
+
+  const events = collectEvents();
+  await runAiJob(job({ writes: ['categorize_transaction', 'create_merchant_rule'] }), collecting([ruleProposal('Trupanion', 'cat_health')]), {
+    db,
+    trigger: 'after_sync',
+    syncRunId: 'run_1',
+    emit: events.emit,
+  });
+
+  const [row] = runRows(db);
+  assert.equal(row.applied, 0, 'a no-op was counted as an applied change');
+  assert.equal(row.queued, 0, 'a no-op was queued for review');
+  assert.equal(row.refused_by_guards, 0, 'a no-op was reported as a refusal');
+
+  // Resolved, so it stops being re-proposed; but no action row, so nothing pretends to be undoable.
+  const draft = db.prepare("SELECT status FROM advisor_drafts WHERE kind = 'create_merchant_rule'").get() as { status: string };
+  assert.equal(draft.status, 'confirmed');
+  assert.equal((db.prepare('SELECT COUNT(*) AS n FROM advisor_actions').get() as { n: number }).n, 0);
+
+  // And nothing toasts. `ai_pass_applied` is the event the client turns into "applied N changes".
+  assert.deepEqual(events.events.filter((e) => e.type === 'ai_pass_applied'), []);
+});
+
+test('HEALTHY: a rule that is genuinely new is still applied and still announced', async (t) => {
+  const db = migratedTestDb();
+  const env = withCredentials();
+  t.after(() => { db.close(); env.restore(); });
+  insertTransaction(db, { merchant_name: 'Qvist Nordheim', amount: -2500 });
+
+  const events = collectEvents();
+  await runAiJob(job({ writes: ['categorize_transaction', 'create_merchant_rule'] }), collecting([ruleProposal('Qvist Nordheim', 'cat_health')]), {
+    db, trigger: 'after_sync', syncRunId: 'run_1', emit: events.emit,
+  });
+
+  const [row] = runRows(db);
+  assert.equal(row.applied, 1);
+  assert.equal(events.events.filter((e) => e.type === 'ai_pass_applied').length, 1);
 });

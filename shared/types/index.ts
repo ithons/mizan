@@ -913,6 +913,11 @@ export interface AdvisorConfirmResponse {
   changed: number;
   draft: AdvisorDraftAction;
   result?: unknown;
+  /**
+   * True when the handler could prove it touched nothing: the state the draft proposes already
+   * held. Not an applied change, and callers must not count or toast it as one.
+   */
+  wroteNothing?: boolean;
 }
 
 /**

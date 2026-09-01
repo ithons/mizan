@@ -1866,8 +1866,12 @@ export function confirmAdvisorDraft(
 
   return {
     success: true,
-    message: 'Draft action applied.',
+    message: result.wroteNothing ? 'Nothing to apply: the ledger already holds this.' : 'Draft action applied.',
     changed: result.changed,
+    // Surfaced so a caller can tell "applied" from "already true". `aiJobs` counted every success
+    // as an applied change and the client toasted it as one, on the same pass that had
+    // deliberately declined to record it as an action because it changed nothing.
+    wroteNothing: result.wroteNothing === true,
     draft: draftAction,
     result: result.result,
   };

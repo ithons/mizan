@@ -413,6 +413,12 @@ interface PersistResult {
   applied: number;
   queued: number;
   refusedByGuards: number;
+  /**
+   * Drafts resolved because the state they proposed already held. Not applied, not queued, not
+   * refused: the worker re-proposes a rule the ledger already has on every pass, and counting that
+   * as `applied` announced a change every hour that nothing had made.
+   */
+  unchanged: number;
   /** Draft ids this pass applied unattended, in the order it applied them. */
   appliedDraftIds: string[];
 }
@@ -432,6 +438,7 @@ function persistProposals(
   let queued = 0;
   let refusedByGuards = 0;
   const appliedDraftIds: string[] = [];
+  let unchanged = 0;
 
   db.transaction(() => {
     supersedeRegeneratedDrafts(db, new Set(proposals.map((p) => draftTargetKey(p.payload))));
@@ -456,10 +463,20 @@ function persistProposals(
           confirmation_required: true,
         };
         try {
-          confirmAdvisorDraft(db, action, true, 'worker_auto');
+          const outcome = confirmAdvisorDraft(db, action, true, 'worker_auto');
           status = 'confirmed';
-          applied++;
-          appliedDraftIds.push(id);
+          // A handler that proved it touched nothing resolves the draft (so it stops being
+          // re-proposed) but is not an applied change: it wrote no action, it has no undo, and the
+          // client's "AI review applied N changes" toast reads `applied`. The worker re-proposes a
+          // rule the ledger already has on every pass, so without this every hourly run announced
+          // a change it had declined to record.
+          if (outcome.wroteNothing) {
+            unchanged++;
+            console.log(`[ai:${job.name}] Draft ${id} already holds; resolved without applying.`);
+          } else {
+            applied++;
+            appliedDraftIds.push(id);
+          }
         } catch (err) {
           if (err instanceof DraftRefusedError) {
             // Policy, not failure: the guards read the owner's own rules and history and said no.
@@ -492,7 +509,7 @@ function persistProposals(
     }
   })();
 
-  return { applied, queued, refusedByGuards, appliedDraftIds };
+  return { applied, queued, refusedByGuards, unchanged, appliedDraftIds };
 }
 
 /**
@@ -571,6 +588,7 @@ function runGuardedPersist(
       applied: 0,
       queued: report.value.queued + report.value.appliedDraftIds.length,
       refusedByGuards: report.value.refusedByGuards,
+      unchanged: report.value.unchanged,
       appliedDraftIds: [],
     },
     report,
