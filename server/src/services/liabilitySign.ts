@@ -128,8 +128,11 @@ export function correctLiabilitySigns(db: Database.Database, now: string): Liabi
       // Exactness is the safety property, and it is why this is a correction rather than a guess.
       // The rule can only fire when the provider's own transactions agree with the provider's own
       // magnitude to the cent and disagree only about direction. An incomplete feed cannot trigger
-      // it (Discover's backfill_floor_date is 2026-06-16, Coinbase's is 2025-09-04): a chain
-      // missing even one row lands on a different magnitude and no correction is made.
+      // it: a chain missing even one row lands on a different magnitude and no correction is made.
+      // (This used to cite Discover's floor as 2026-06-16. Re-derived 2026-09-01 it reads
+      // 2026-07-31, along with every other SimpleFIN account; see the note in balanceHistory.ts
+      // about floors being rewritten out of band. The argument does not depend on the value, so
+      // the value is no longer stated here.)
       // The disagreement is about DIRECTION, and it runs both ways.
       //
       // This used to fire only when the ledger implied a credit and the provider had been negated

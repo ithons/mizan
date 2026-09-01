@@ -126,13 +126,30 @@ interface SeriesStart {
  *
  * `backfill_floor_date` (migration 030) is the line above which the provider owns the history and
  * below which only a manual import can supply it. Imported history is real history, so the floor
- * does not truncate it: every one of the 2,196 rows below a floor in the live database is
- * `source_type = 'import'`, and BofA Cash Rewards' ledger genuinely reaches 2023-09-16 under a
- * 2026-04-27 floor.
+ * does not truncate it.
  *
  * What the floor does bind is a PROVIDER row below it, which is the state migration 030 exists to
  * prevent: a feed that reaches below its own floor served part of a period it does not cover, and a
  * walk through it would describe a stretch of time the provider never fully reported.
+ *
+ * THE FIGURE THAT USED TO BE HERE WAS WRONG BY THE TIME ANYONE READ IT AGAIN. It said "every one
+ * of the 2,196 rows below a floor in the live database is `source_type = 'import'`", under a
+ * "2026-04-27 floor" on BofA Cash Rewards. Re-derived 2026-09-01 against the live database:
+ *
+ *   SELECT t.source_type, COUNT(*) FROM transactions t JOIN accounts a ON a.id = t.account_id
+ *    WHERE a.backfill_floor_date IS NOT NULL AND t.date < a.backfill_floor_date GROUP BY 1;
+ *     -> import 2195, simplefin 384
+ *   SELECT account_name, backfill_floor_date FROM accounts WHERE backfill_floor_date IS NOT NULL;
+ *     -> all nine SimpleFIN accounts read 2026-07-31; Coinbase reads 2025-09-04
+ *
+ * So 384 provider rows now sit below their own floor, which is exactly the state described above
+ * as the one migration 030 exists to prevent. The floors were rewritten out of band: the only
+ * writer of this column anywhere in the tree is `scripts/backfill/floor-map.ts`, which is not in
+ * any tsconfig and leaves no record of having run. Nothing in the app can distinguish a floor the
+ * owner meant from one a script set, which is the real defect here and is not fixed by editing a
+ * comment. The data is left alone deliberately: rewriting a floor to make the sentence true again
+ * would be repairing the database instead of the write path, and the intended values are the
+ * owner's to state.
  */
 function resolveStart(
   db: Database.Database,
