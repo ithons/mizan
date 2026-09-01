@@ -15,6 +15,8 @@ import {
   recategorizeAll,
   suggestMerchantRules,
   upsertMerchantRule,
+  countTransactionsHeldByRule,
+  countTransactionsHeldByAllRules,
 } from '../services/rules';
 
 const router = Router();
@@ -27,22 +29,25 @@ function getParamId(value: string | string[] | undefined): string | null {
   return typeof value === 'string' && value.trim().length > 0 ? value : null;
 }
 
+/**
+ * `match_count` comes from `countTransactionsHeldByRule`, the one definition, never from SQL here.
+ *
+ * This route used to carry its own `LIKE '%' || pattern || '%'`, which is not the matcher the app
+ * resolves rules by and ignores precedence entirely. See `countTransactionsHeldByAllRules`.
+ */
 function getRule(db: Database.Database, id: string) {
-  return db.prepare(`
+  const rule = db.prepare(`
     SELECT
       mr.*,
       c.name AS category_name,
       c.color AS category_color,
-      c.icon AS category_icon,
-      (
-        SELECT COUNT(*)
-        FROM transactions t
-        WHERE lower(COALESCE(t.merchant_name, t.original_name, '')) LIKE '%' || lower(mr.pattern) || '%'
-      ) AS match_count
+      c.icon AS category_icon
     FROM merchant_rules mr
     JOIN categories c ON c.id = mr.category_id
     WHERE mr.id = ? AND mr.retired_at IS NULL
-  `).get(id);
+  `).get(id) as Record<string, unknown> | undefined;
+  if (!rule) return rule;
+  return { ...rule, match_count: countTransactionsHeldByRule(db, id) ?? 0 };
 }
 
 // GET / - list rules
@@ -54,19 +59,18 @@ router.get('/', (_req: Request, res: Response, next: NextFunction): void => {
         mr.*,
         c.name AS category_name,
         c.color AS category_color,
-        c.icon AS category_icon,
-        (
-          SELECT COUNT(*)
-          FROM transactions t
-          WHERE lower(COALESCE(t.merchant_name, t.original_name, '')) LIKE '%' || lower(mr.pattern) || '%'
-        ) AS match_count
+        c.icon AS category_icon
       FROM merchant_rules mr
       JOIN categories c ON c.id = mr.category_id
       WHERE mr.retired_at IS NULL
       ORDER BY mr.created_at DESC
-    `).all();
+    `).all() as Array<Record<string, unknown> & { id: string }>;
 
-    res.json({ data: rules });
+    // One pass for the whole list rather than one resolution per rule: same answer, and the
+    // per-rule form would re-sort 253 rules 253 times.
+    const held = countTransactionsHeldByAllRules(db);
+
+    res.json({ data: rules.map((rule) => ({ ...rule, match_count: held.get(rule.id) ?? 0 })) });
   } catch (err) {
     next(err);
   }

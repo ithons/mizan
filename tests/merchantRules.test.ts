@@ -9,6 +9,8 @@ import {
   merchantMatchesRulePattern,
   recategorizeAll,
   upsertMerchantRule,
+  countTransactionsHeldByRule,
+  countTransactionsHeldByAllRules,
 } from '../server/src/services/rules';
 import {
   TEST_NOW,
@@ -499,4 +501,79 @@ test('two rules alike in source, length and timestamp are still separated, by id
     category_id: string | null;
   };
   assert.equal(row.category_id, books, 'the lower id wins, and does so every time');
+});
+
+/**
+ * The count on Settings > Rules is the count the app resolves by.
+ *
+ * `routes/rules.ts` carried its own `LIKE '%' || pattern || '%'`. That is not the matcher:
+ * `normalizeMerchantMatchValue` strips punctuation, the stopwords store/pos/purchase/debit/card/
+ * online/payment and 2+ digit runs, and `normalizedMatch` then accepts equality, bidirectional
+ * containment once the shorter side reaches four characters, or a 0.86 bigram score. The LIKE both
+ * missed rows the rule really holds and counted rows another rule outranks it for, and it
+ * contradicted the AI's own retire gate, which asks `countTransactionsHeldByRule`.
+ */
+test('the batched held count agrees with the per-rule definition, rule for rule', (t) => {
+  const db = migratedTestDb();
+  t.after(() => db.close());
+  const account = insertAccount(db);
+
+  // A short pattern inside a noisy provider descriptor: the LIKE finds nothing, the matcher does.
+  insertTransaction(db, { id: 'n1', account_id: account, merchant_name: 'PURCHASE AUTHORIZED ON 07/10 SQ *TARTINE 4471' });
+  insertTransaction(db, { id: 'n2', account_id: account, merchant_name: 'POS DEBIT TARTINE BAKERY' });
+  // A long pattern containing the merchant name, the other direction of containment.
+  insertTransaction(db, { id: 'n3', account_id: account, merchant_name: 'Amazon' });
+  // A name no rule below claims.
+  insertTransaction(db, { id: 'n4', account_id: account, merchant_name: 'Qvist Nordheim' });
+
+  upsertMerchantRule(db, 'Tartine', 'cat_food', '2026-07-01T00:00:00.000Z', { source: 'human' });
+  upsertMerchantRule(db, 'Amazon Marketplace', 'cat_shop', '2026-07-02T00:00:00.000Z', { source: 'human' });
+
+  const batched = countTransactionsHeldByAllRules(db);
+  const rules = db.prepare('SELECT id, pattern FROM merchant_rules WHERE retired_at IS NULL').all() as Array<{
+    id: string;
+    pattern: string;
+  }>;
+  assert.ok(rules.length >= 2);
+  for (const rule of rules) {
+    assert.equal(
+      batched.get(rule.id),
+      countTransactionsHeldByRule(db, rule.id),
+      `the batched count disagrees with the definition for "${rule.pattern}"`
+    );
+  }
+});
+
+test('a rule holding rows through the real matcher does not read as zero matches', (t) => {
+  const db = migratedTestDb();
+  t.after(() => db.close());
+  const account = insertAccount(db);
+  // Containment running the OTHER way: the rule's pattern is longer than the merchant name, so
+  // `LIKE '%amazon marketplace%'` against "Amazon" finds nothing, while `normalizedMatch` accepts
+  // it because the shorter side is four characters or more and is contained in the longer.
+  insertTransaction(db, { id: 'n1', account_id: account, merchant_name: 'Amazon' });
+  upsertMerchantRule(db, 'Amazon Marketplace', 'cat_shop', '2026-07-01T00:00:00.000Z', { source: 'human' });
+
+  const ruleId = (db.prepare('SELECT id FROM merchant_rules LIMIT 1').get() as { id: string }).id;
+
+  // The predicate the route used to run, kept here as the contrast.
+  const likeCount = (db.prepare(`
+    SELECT COUNT(*) AS n FROM transactions t
+    JOIN merchant_rules mr ON mr.id = ?
+    WHERE lower(COALESCE(t.merchant_name, t.original_name, '')) LIKE '%' || lower(mr.pattern) || '%'
+  `).get(ruleId) as { n: number }).n;
+
+  assert.equal(likeCount, 0, 'the LIKE would have found this; pick a harder fixture');
+  assert.equal(countTransactionsHeldByAllRules(db).get(ruleId), 1);
+});
+
+test('HEALTHY: a rule that genuinely holds nothing counts zero', (t) => {
+  const db = migratedTestDb();
+  t.after(() => db.close());
+  const account = insertAccount(db);
+  insertTransaction(db, { id: 'n1', account_id: account, merchant_name: 'Qvist Nordheim' });
+  upsertMerchantRule(db, 'Tartine', 'cat_food', '2026-07-01T00:00:00.000Z', { source: 'human' });
+
+  const ruleId = (db.prepare('SELECT id FROM merchant_rules LIMIT 1').get() as { id: string }).id;
+  assert.equal(countTransactionsHeldByAllRules(db).get(ruleId), 0);
 });
