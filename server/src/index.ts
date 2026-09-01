@@ -15,6 +15,7 @@ import { autoCategorizeTransactions } from './services/rules';
 import { reclassifyAutoAccountTypes } from './services/accountClassification';
 import { errorHandler } from './middleware/errorHandler';
 import { buildLocalGuardConfig, localOriginGuard } from './middleware/localGuard';
+import { listenOnHost } from './listen';
 
 import accountsRouter from './routes/accounts';
 import transactionsRouter from './routes/transactions';
@@ -160,12 +161,40 @@ async function main() {
   app.use(errorHandler);
 
   const announce = () => console.log(`\n  Mizān  →  http://localhost:${PORT}\n`);
-  if (IS_PROD && !HOST_IS_LOOPBACK) {
+  // Not gated on IS_PROD. It used to be, and since neither `npm run dev` nor `npm start` sets
+  // NODE_ENV the condition was never true, so the one line that would have told the owner the
+  // ledger was reachable from the LAN could not print on either documented command.
+  if (!HOST_IS_LOOPBACK) {
     console.log(`[startup] MIZAN_HOST=${HOST}: binding beyond loopback. The app has no auth middleware, so anything that can reach this host/port can read/write your financial data.`);
   }
-  const server = IS_PROD
-    ? app.listen(PORT, HOST, announce)
-    : ViteExpress.listen(app, PORT, announce);
+
+  // We bind the socket ourselves in BOTH modes, then hand the bound server to vite-express.
+  //
+  // `ViteExpress.listen(app, port, cb)` is `app.listen(port, () => bind(app, server, cb))`: it
+  // takes no host, so Node bound `::` (every interface, dual stack). `IS_PROD` is
+  // `NODE_ENV === 'production'` and neither npm script sets NODE_ENV, so this was the branch both
+  // documented commands took, and `MIZAN_HOST` was read into a constant only the other branch
+  // used. The app listened on the LAN for the whole life of the repo while README.md, CLAUDE.md
+  // and the comment above all said it bound to loopback.
+  //
+  // localGuard does not cover for this and was never meant to. It is a browser-only defence:
+  // `evaluateLocalRequest` skips the Origin check when the request carries no Origin at all, and
+  // `tests/localGuard.test.ts` asserts that as correct, because curl and SSE legitimately omit it.
+  // A LAN peer sending `Host: localhost:3001` satisfies the host allowlist and then reads and
+  // writes freely. Loopback is the half that stops a non-browser peer; the guard is the half that
+  // stops a browser. They only work as a pair.
+  //
+  // `ViteExpress.bind` is exported for exactly this and is what `listen` calls internally.
+  const server = listenOnHost(app, PORT, HOST, (bound) => {
+    if (!IS_PROD) {
+      ViteExpress.bind(app, bound, announce).catch((err: unknown) => {
+        console.error('[fatal] Vite middleware failed to attach:', err);
+        process.exit(1);
+      });
+      return;
+    }
+    announce();
+  });
 
   // Sync runs on boot and on a timer, both on by default. They used to be opt-in, gated behind
   // env vars whose comments cited "it calls external providers" as the reason. That rationale
