@@ -600,10 +600,13 @@ one keyboard owner, and a surface with nowhere to live means the integration is 
   sharing one. The file whose history is the record of why the `id ASC` tiebreak exists must not carry
   a figure its own query contradicts. Re-run the query, paste the output, print the query beside it.
 - **The stale hex inventory item is corrected**, per the census in Phase 12.
-- **`CLAUDE.md` and `.claude/plans/ui-overhaul.md` get tracked.** Both are currently outside git.
-  `ui-overhaul.md` shows as `??` in `git status`, and `CLAUDE.md` is gitignored at line 8. Phase 9
-  already resolved the identical situation for `.claude/hooks/migration-guard.sh` by tracking it. Do
-  the same here, or decide explicitly not to and record the reason. What is not acceptable is leaving
+- **`CLAUDE.md` and `.claude/plans/ui-overhaul.md` get tracked.** [SETTLED 2026-09-01, both ways.]
+  `ui-overhaul.md` was tracked at 906c75e and trimmed to a stub on 2026-09-01, which is the other
+  half of Decision 4 below and had not been done: the repo shipped its whole 2026-07-27 Diagnosis
+  for a month, describing a palette and a set of defects that no longer existed. `CLAUDE.md` stays
+  gitignored, which `relink-and-close.md` records as the owner's explicit decision. The sentence
+  below said "Both are currently outside git", and it was already false for `ui-overhaul.md` when it
+  was written. What is not acceptable is leaving
   the only record of what a bug cost in one working copy for a third consecutive plan.
 
 **What proves it worked.** The membership freeze: retype an account in a scratch copy and assert the
