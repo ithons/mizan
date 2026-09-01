@@ -11,18 +11,7 @@
  * that reaches from one to the other, and it is already how `mizan:open-palette` works.
  */
 
-export type AdvisorPromptSource =
-  | 'dashboard'
-  | 'reports'
-  | 'budget'
-  | 'goal'
-  | 'transaction'
-  | 'account'
-  | 'investment'
-  | 'recurring'
-  | 'sync'
-  | 'review'
-  | 'import';
+export type AdvisorPromptSource = 'import' | 'sync';
 
 export interface AdvisorRoutePrompt {
   source: AdvisorPromptSource;
