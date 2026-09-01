@@ -68,8 +68,11 @@ test('AccountDetail does not say "no transactions" before it knows', () => {
   assert.match(src, /txQ\.isError \?/, 'a failed transactions query still renders the empty sentence');
   assert.match(src, /QueryErrorBanner/, 'the screen has no way to say it failed');
 
-  // Order matters: pending and error must both be checked BEFORE length === 0.
-  const pendingAt = src.indexOf('txQ.isPending ?');
-  const emptyAt = src.indexOf('No transactions for this account yet.');
-  assert.ok(pendingAt > 0 && pendingAt < emptyAt, 'the empty branch is reached before the pending check');
+  // Order matters: pending and error must both be checked BEFORE length === 0. Comments are
+  // stripped first, because the comment explaining this defect quotes the sentence it is about.
+  const code = src.replace(/\{\/\*[\s\S]*?\*\/\}/g, '').replace(/\/\*[\s\S]*?\*\//g, '');
+  const pendingAt = code.indexOf('txQ.isPending ?');
+  const emptyAt = code.indexOf('No transactions for this account yet.');
+  assert.ok(pendingAt > 0, 'no pending guard at all');
+  assert.ok(pendingAt < emptyAt, 'the empty branch is reached before the pending check');
 });
