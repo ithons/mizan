@@ -28,6 +28,7 @@ import {
 import { runFullSync, isSyncActive } from '../services/syncManager';
 import { listSyncRuns } from '../services/syncHistory';
 import axios from 'axios';
+import { PROVIDER_HTTP_TIMEOUT_MS } from '../services/httpTimeouts';
 
 const router = Router();
 
@@ -41,7 +42,9 @@ router.post(
 
       // Decode the base64 setup token to get the claim URL
       const decoded = Buffer.from(setupToken, 'base64').toString('utf-8');
-      const accessUrl = await axios.post(decoded).then(r => r.data as string);
+      const accessUrl = await axios
+        .post(decoded, undefined, { timeout: PROVIDER_HTTP_TIMEOUT_MS })
+        .then((r) => r.data as string);
 
       // The access URL (which embeds basic-auth) is persisted only in the encrypted
       // credentials store, never in the DB. The connection row is a non-secret marker.

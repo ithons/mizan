@@ -1,5 +1,6 @@
 import jwt from 'jsonwebtoken';
 import axios from 'axios';
+import { PROVIDER_HTTP_TIMEOUT_MS } from './httpTimeouts';
 import { v4 as uuidv4 } from 'uuid';
 import type Database from 'better-sqlite3';
 import { getCredentials } from './credentials';
@@ -377,7 +378,8 @@ async function getUsdSpotPrice(currency: string): Promise<number> {
 
   try {
     const spotResponse = await axios.get<{ data: { amount: string } }>(
-      `https://api.coinbase.com/v2/prices/${currency}-USD/spot`
+      `https://api.coinbase.com/v2/prices/${currency}-USD/spot`,
+      { timeout: PROVIDER_HTTP_TIMEOUT_MS }
     );
     const spotPrice = parseCoinbaseNumber(spotResponse.data.data.amount, `${currency}-USD spot price`);
     if (spotPrice <= 0) {
@@ -442,6 +444,7 @@ async function signedRequest<T>(
       method,
       url: `https://api.coinbase.com${path}`,
       data: body,
+      timeout: PROVIDER_HTTP_TIMEOUT_MS,
       headers: {
         Authorization: `Bearer ${token}`,
         'Content-Type': 'application/json',

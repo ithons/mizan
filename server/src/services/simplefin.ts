@@ -1,4 +1,5 @@
 import axios from 'axios';
+import { PROVIDER_HTTP_TIMEOUT_MS } from './httpTimeouts';
 import { v4 as uuidv4 } from 'uuid';
 import { epochSecondsToLocalDate } from './dates';
 import type Database from 'better-sqlite3';
@@ -890,6 +891,7 @@ export async function syncSimplefin(): Promise<SimplefinSyncResult> {
 
   const client = axios.create({
     baseURL: accessUrl,
+    timeout: PROVIDER_HTTP_TIMEOUT_MS,
   });
 
   const db = getDb();
