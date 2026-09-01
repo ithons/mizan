@@ -890,7 +890,7 @@ test('HEALTHY: an owner rule untouched by the action is not retired by the undo'
   const fx = setup();
   txn(fx, { id: 'o1', merchant_name: 'Shell Gas' });
   // A rule the owner made, which this action has nothing to do with.
-  upsertMerchantRule(fx.db, 'Shell Gas', 'cat_transport', '2026-07-01T00:00:00.000Z', { source: 'user' });
+  upsertMerchantRule(fx.db, 'Shell Gas', 'cat_transport', '2026-07-01T00:00:00.000Z', { source: 'human' });
   txn(fx, { id: 'r1', merchant_name: 'Qvist Nordheim' });
 
   confirmAdvisorDraft(
