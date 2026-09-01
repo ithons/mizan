@@ -487,3 +487,30 @@ test('the report scope predicate is exposed separately, so it cannot be left off
   assert.ok(doc.predicates.example.includes(doc.predicates.report_scope_condition));
   assert.match(doc.predicates.usage, /report_scope_cte/);
 });
+
+/**
+ * The three frozen split columns carry their caveat to the model.
+ *
+ * `liquid_assets`, `investment_assets` and `crypto_assets` are frozen from the ACCOUNT TYPES in
+ * force when the snapshot was written. An account retyped later does not move in them, so a row
+ * can be a genuine measurement (`is_estimated = 0`) and still split the same money differently
+ * from `breakdown`. `routes/reports.ts` already refuses to read `investment_assets` for exactly
+ * this reason, naming two measured days on this ledger where it says $0.00 against a portfolio
+ * holding $1,661.66. The schema doc published all three as bare `CENTS`, with the caveats sitting
+ * on `is_estimated` and `covered_accounts` instead, so the one warning the model needed to not
+ * quote a wrong split was the one it did not get.
+ */
+test('the frozen asset-split columns are published with their caveat, not as bare cents', (t) => {
+  const db = migratedTestDb();
+  t.after(() => db.close());
+
+  for (const name of ['liquid_assets', 'investment_assets', 'crypto_assets']) {
+    const c = column(db, 'net_worth_snapshots', name);
+    assert.ok(c.note, `${name} is published with no note at all`);
+    assert.match(c.note, /frozen from the ACCOUNT TYPES/i, `${name} is published with no caveat`);
+    assert.match(c.note, /breakdown/i, `${name}'s caveat does not name what to use instead`);
+  }
+
+  // The contrast: a column that IS what it says stays uncluttered.
+  assert.equal(column(db, 'net_worth_snapshots', 'total_assets').note, undefined);
+});

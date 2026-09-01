@@ -208,9 +208,20 @@ function syncIssue(syncHealth: SyncHealth, footprint: LedgerFootprint): Weighted
  * they are the reason this panel never reached a clean state: a routine checking-to-savings
  * transfer, both legs categorized and the pair confirmed, put a permanent row in a list of things
  * to fix. Excluding transfers, investment and crypto flows from income and spending totals is the
- * intended behaviour of `transactionFilters.excludedFromTotalsSql`, not a defect, and the counts
- * still reach the owner where they belong: `ReportSummary.excluded_flows` on the Reports screen and
- * in the advisor's financial context. Nothing that only describes correct behaviour goes in here.
+ * intended behaviour of `transactionFilters.excludedFromTotalsSql`, not a defect. Nothing that only
+ * describes correct behaviour goes in here.
+ *
+ * WHERE THE COUNTS ACTUALLY GO, corrected. This used to say they "still reach the owner where they
+ * belong: `ReportSummary.excluded_flows` on the Reports screen and in the advisor's financial
+ * context". Half of that is true and half names a screen that no longer exists: Phase 8 deleted
+ * Reports and `App.tsx` redirects `/reports` to `/?window=this-month`. `grep -rn excluded_flows
+ * client/src/views client/src/components` returns nothing.
+ *
+ * `getExcludedFlowSummary` still runs (`reporting.ts`), still ships on
+ * `GET /api/reports/summary`, and still reaches the model (`aiContext.ts`). So the owner can ask
+ * for it and cannot look at it. That is a real gap and it is stated here rather than papered over,
+ * but it does not change the argument above: an excluded transfer is correct behaviour, and this
+ * panel is for things the owner can act on.
  *
  * `weight` orders ties inside one severity band. It is never summed, never serialized, and is not a
  * score; the panel reports conditions, and a grade derived from them would be a claim nothing
