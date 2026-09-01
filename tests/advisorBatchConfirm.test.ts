@@ -11,6 +11,7 @@ import { DraftRefusedError } from '../server/src/services/aiWriteGuards';
 import type { GuardRejectionReason } from '../server/src/services/aiWriteGuards';
 import { getTransactionReviewSummary } from '../server/src/services/transactionReview';
 import { upsertMerchantRule } from '../server/src/services/rules';
+import { upsertRecurringAdjustment } from '../server/src/services/recurringAdjustments';
 import { TEST_NOW, insertAccount, insertCategory, insertTransaction, migratedTestDb } from './helpers/schema';
 
 function setupDb(): Database.Database {
@@ -618,4 +619,100 @@ test('a categorization the owner made by hand refuses the same way, without an a
   assert.equal((db.prepare('SELECT COUNT(*) AS n FROM advisor_actions').get() as { n: number }).n, 0);
   const status = db.prepare("SELECT status FROM advisor_drafts WHERE id = 'd_hand'").get() as { status: string };
   assert.equal(status.status, 'open');
+});
+
+/**
+ * A confirmed bill reprice is stored once in cents, not twice.
+ *
+ * `confirmRecurringAdjustment` called `toCentsOrNull` and then handed the result to
+ * `upsertRecurringAdjustment`, which converts again, so "$180" landed as -1,800,000 cents. Every
+ * surface that reads the forecast inherited it: `forecast.bills` and `forecast.net`, the ledger
+ * spine, Instrument's next-bill reading, and `monthlyRecurringSurplus`, which dates every goal.
+ *
+ * The assertion is on the STORED cents, not on a dollarized response, because a second conversion
+ * at the route boundary would hide a wrong stored value behind a right-looking one.
+ */
+function insertRecurringPattern(
+  db: Database.Database,
+  id: string,
+  averageAmountCents: number,
+  merchant = 'Comcast'
+): void {
+  // Column names taken from the migrated schema, not invented: there is no `next_expected_date`
+  // and no `status` on this table.
+  db.prepare(`
+    INSERT INTO recurring_patterns
+      (id, merchant_name, average_amount, frequency, last_seen, next_expected,
+       is_active, is_confirmed, transaction_count, created_at, updated_at)
+    VALUES (?, ?, ?, 'monthly', '2026-07-01', '2026-08-01', 1, 1, 6,
+            '2026-07-01', '2026-07-01')
+  `).run(id, merchant, averageAmountCents);
+}
+
+function insertAdjustmentDraft(db: Database.Database, id: string, payload: AdvisorDraftPayload): void {
+  db.prepare(`
+    INSERT INTO advisor_drafts (id, kind, label, summary, route, payload, changes, citations, status,
+                                created_at, updated_at)
+    VALUES (?, 'create_recurring_adjustment', ?, 'summary', '/ledger', ?, '[]', '[]', 'open',
+            '2026-07-01', '2026-07-01')
+  `).run(id, `Draft ${id}`, JSON.stringify(payload));
+}
+
+test('a confirmed recurring adjustment stores dollars as cents exactly once', (t) => {
+  const db = setupDb();
+  t.after(() => db.close());
+  insertRecurringPattern(db, 'rec_1', -20000);
+
+  insertAdjustmentDraft(db, 'd_adj', {
+    kind: 'create_recurring_adjustment',
+    recurring_id: 'rec_1',
+    original_date: '2026-08-01',
+    action: 'adjust',
+    adjusted_amount: -180,
+  } as AdvisorDraftPayload);
+
+  const result = confirmAdvisorDraftsByIds(db, ['d_adj']);
+  assert.equal(result.applied, 1, JSON.stringify(result.outcomes));
+
+  const row = db
+    .prepare('SELECT adjusted_amount FROM recurring_occurrence_adjustments WHERE recurring_id = ?')
+    .get('rec_1') as { adjusted_amount: number };
+  // -180 dollars is -18000 cents. Converted twice it was -1800000, a $18,000 bill.
+  assert.equal(row.adjusted_amount, -18000);
+});
+
+test('the route and the draft path agree on the unit they hand the service', (t) => {
+  const db = setupDb();
+  t.after(() => db.close());
+  // recurring_patterns carries UNIQUE(merchant_name), so two patterns need two merchants.
+  insertRecurringPattern(db, 'rec_a', -20000, 'Comcast');
+  insertRecurringPattern(db, 'rec_b', -20000, 'Verizon');
+
+  // The draft path, through confirmAdvisorDraft.
+  insertAdjustmentDraft(db, 'd_a', {
+    kind: 'create_recurring_adjustment',
+    recurring_id: 'rec_a',
+    original_date: '2026-08-01',
+    action: 'adjust',
+    adjusted_amount: -42.5,
+  } as AdvisorDraftPayload);
+  confirmAdvisorDraftsByIds(db, ['d_a']);
+
+  // The route path, which passes req.body straight through in dollars.
+  upsertRecurringAdjustment(db, 'rec_b', {
+    original_date: '2026-08-01',
+    action: 'adjust',
+    adjusted_date: null,
+    adjusted_amount: -42.5,
+    note: null,
+  });
+
+  const rows = db
+    .prepare('SELECT recurring_id, adjusted_amount FROM recurring_occurrence_adjustments ORDER BY recurring_id')
+    .all() as Array<{ recurring_id: string; adjusted_amount: number }>;
+  // One function, two callers, one unit contract. They disagreed by 100x.
+  assert.deepEqual(rows, [
+    { recurring_id: 'rec_a', adjusted_amount: -4250 },
+    { recurring_id: 'rec_b', adjusted_amount: -4250 },
+  ]);
 });

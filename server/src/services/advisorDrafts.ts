@@ -40,7 +40,7 @@ import {
 import { refreshTransactionIntegrity } from './transactionIntegrity';
 import { upsertRecurringAdjustment } from './recurringAdjustments';
 import { setManualCostBasis, setSecurityMetadata } from './investmentMetadata';
-import { toCents, toCentsOrNull, toDollars, toDollarsOrNull } from './money';
+import { toCents, toDollars, toDollarsOrNull } from './money';
 import { AdvisorDraftPayloadSchema } from '../../../shared/schemas';
 import { safeJsonParse } from './jsonSafe';
 
@@ -951,14 +951,26 @@ function confirmRecurringAdjustment(
   changed: number;
   result: unknown;
 } {
-  // payload.adjusted_amount is dollars. recurring_occurrence_adjustments.adjusted_amount
-  // substitutes for recurring_patterns.average_amount (integer cents) in the forecast, so it
-  // must be stored in cents to stay consistent with that arithmetic.
+  // `payload.adjusted_amount` is dollars, and it is passed on in dollars, because
+  // `upsertRecurringAdjustment` is the thing that converts. That is the unit contract its other
+  // caller, `routes/recurring.ts`, already holds: it hands `req.body` straight through.
+  //
+  // This used to call `toCentsOrNull` here as well, under a comment that stated the requirement
+  // ("must be stored in cents") correctly and then met it twice. An owner-confirmed "reprice the
+  // Comcast bill to $180" was stored as -1,800,000 cents, so the forecast reported an $18,000
+  // bill and that carried into `forecast.net`, the ledger spine, the next-bill reading, and
+  // `monthlyRecurringSurplus`, which sets every goal's projected completion date.
+  //
+  // The sibling handlers are the reason this one stood out and the reason the fix is to remove
+  // the conversion rather than to change the service: `confirmBudget` and `confirmGoalTarget`
+  // convert once and then write SQL themselves, and `confirmManualCostBasis` passes dollars to
+  // `setManualCostBasis`, which converts. This was the only handler that both converted AND
+  // called a converting service.
   const adjustment = upsertRecurringAdjustment(db, payload.recurring_id, {
     original_date: payload.original_date,
     action: payload.action,
     adjusted_date: payload.adjusted_date ?? null,
-    adjusted_amount: toCentsOrNull(payload.adjusted_amount),
+    adjusted_amount: payload.adjusted_amount ?? null,
     note: payload.note ?? null,
   });
 
