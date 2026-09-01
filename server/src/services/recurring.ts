@@ -131,8 +131,15 @@ export const RECENT_AMOUNT_WINDOW = 6;
  * Bills list (which renders the stored column) and the forecast (which recomputes here) quote one
  * number. They used to disagree by $78 on the live payroll pattern, both on screen at once.
  *
- * Only `pending` is filtered: detection already applied excludedFromTotalsSql before linking these
- * rows, so a transfer or a confirmed duplicate never carries a recurring_id to begin with.
+ * `pending` and the transfer-category predicate are filtered, and the second one is here because
+ * the sentence that used to stand in its place was false. It said detection had already applied
+ * its exclusions before linking these rows, "so a transfer never carries a recurring_id to begin
+ * with". Detection's pool also excludes `category_id LIKE 'cat_xfer%'`, and nothing clears
+ * `recurring_id` when a linked row is LATER recategorized into a transfer: on the live ledger four
+ * rows carried both (`SELECT COUNT(*) FROM transactions WHERE recurring_id IS NOT NULL AND
+ * COALESCE(category_id,'') LIKE 'cat_xfer%'` -> 4 on 2026-09-01). A transfer leg in the amount
+ * window pulls a bill's estimate toward the transfer's size. The predicate is detection's own, so
+ * the two agree about what a pattern is made of.
  */
 export function recentSignedAmounts(
   db: Database.Database,
@@ -146,6 +153,7 @@ export function recentSignedAmounts(
     FROM transactions
     WHERE recurring_id IN (${placeholders})
       AND pending = 0
+      AND COALESCE(category_id, '') NOT LIKE 'cat_xfer%'
     ORDER BY recurring_id ASC, date DESC, id DESC
   `).all(...patternIds) as Array<{ recurring_id: string; amount: number }>;
 

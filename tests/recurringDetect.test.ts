@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import Database from 'better-sqlite3';
 import { addMonths, format, subDays, subMonths } from 'date-fns';
 import { _setDbForTesting } from '../server/src/db/index';
-import { bigramLength, detectRecurring } from '../server/src/services/recurring';
+import { bigramLength, detectRecurring, recentSignedAmounts } from '../server/src/services/recurring';
 import { compareTwoStrings } from 'string-similarity';
 import { insertAccount, insertTransaction, migratedTestDb } from './helpers/schema';
 
@@ -545,6 +545,61 @@ test('HEALTHY: a repeat merchant lands in its own group without a fuzzy scan cha
     const rows = db.prepare('SELECT merchant_name, transaction_count FROM recurring_patterns').all() as Array<{ merchant_name: string; transaction_count: number }>;
     assert.equal(rows.length, 1, 'the near-miss became its own group instead of folding in');
     assert.equal(rows[0].transaction_count, 5, 'the near-miss row was not folded into the pattern');
+  } finally {
+    teardown(db);
+  }
+});
+
+/**
+ * A linked row recategorized into a transfer stops feeding the amount estimate.
+ *
+ * `recentSignedAmounts` filtered only `pending`, under a comment asserting that a transfer "never
+ * carries a recurring_id to begin with" because detection excludes transfers before linking. It
+ * does, but nothing clears `recurring_id` when a linked row is LATER recategorized into `cat_xfer`,
+ * and the live ledger carried four such rows. A transfer leg in the amount window pulls a bill's
+ * estimate toward the transfer's size.
+ */
+test('recentSignedAmounts ignores a linked row that was recategorized into a transfer', () => {
+  const db = setupDb();
+  try {
+    const account = insertAccount(db);
+    db.prepare(`
+      INSERT INTO recurring_patterns
+        (id, merchant_name, average_amount, frequency, last_seen, next_expected,
+         is_active, is_confirmed, transaction_count, created_at, updated_at)
+      VALUES ('p1', 'rent', 150000, 'monthly', '2026-08-01', '2026-09-01', 1, 1, 3, '2026-05-01', '2026-05-01')
+    `).run();
+    // Three linked months at $1,500, then the newest one recategorized as a transfer out.
+    for (const [i, date] of ['2026-06-01', '2026-07-01', '2026-08-01'].entries()) {
+      insertTransaction(db, { id: `r${i}`, account_id: account, date, amount: -150000, merchant_name: 'rent' });
+    }
+    // The helper does not carry recurring_id; link the rows the way detection does.
+    db.prepare("UPDATE transactions SET recurring_id = 'p1' WHERE id IN ('r0','r1','r2')").run();
+    db.prepare("UPDATE transactions SET category_id = 'cat_xfer_out', amount = -900000 WHERE id = 'r2'").run();
+
+    const amounts = recentSignedAmounts(db, ['p1']);
+    // Two honest legs remain; the $9,000 transfer must not be in the window.
+    assert.equal(amounts.get('p1'), -150000, 'a transfer leg reached the amount estimate');
+  } finally {
+    teardown(db);
+  }
+});
+
+test('HEALTHY: ordinary linked rows still feed the estimate unchanged', () => {
+  const db = setupDb();
+  try {
+    const account = insertAccount(db);
+    db.prepare(`
+      INSERT INTO recurring_patterns
+        (id, merchant_name, average_amount, frequency, last_seen, next_expected,
+         is_active, is_confirmed, transaction_count, created_at, updated_at)
+      VALUES ('p2', 'gym', 4000, 'monthly', '2026-08-01', '2026-09-01', 1, 1, 3, '2026-05-01', '2026-05-01')
+    `).run();
+    for (const [i, date] of ['2026-06-01', '2026-07-01', '2026-08-01'].entries()) {
+      insertTransaction(db, { id: `g${i}`, account_id: account, date, amount: -4000, merchant_name: 'gym', category_id: 'cat_health' });
+    }
+    db.prepare("UPDATE transactions SET recurring_id = 'p2' WHERE id IN ('g0','g1','g2')").run();
+    assert.equal(recentSignedAmounts(db, ['p2']).get('p2'), -4000);
   } finally {
     teardown(db);
   }

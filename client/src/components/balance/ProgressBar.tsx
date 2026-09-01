@@ -102,10 +102,17 @@ export function ProgressBar({ fraction, tone = 'sage', height = 6, className = '
  * Order a signed magnitude list so the biggest thing is first and a credit is not mistaken for a
  * small expense.
  *
- * A category total can be negative now: July 2026 Shopping is -$1,203.63 because that month's
+ * A category total can be negative now: a month whose refunds exceed its purchases nets below
+ * zero, and this component has to render that state rather than clamp it away. (Shopping in July
+ * 2026 is the live example. The figure is NOT stated here: it read -$1,203.63 when this was written,
+ * -$1,028.63 in the record on 2026-07-31, and -$892.41 on 2026-09-01, moving as rows are
+ * recategorized, and a number no re-derivation reproduces is the claim rule 2 forbids. The query:
+ *   SELECT -SUM(t.amount) FROM transactions t JOIN categories c ON c.id = t.category_id
+ *    WHERE COALESCE(c.parent_id, c.id) = 'cat_shop' AND t.date BETWEEN '2026-07-01' AND '2026-07-31'
+ *      AND t.pending = 0 AND <excludedFromTotalsSql>;)
  * Amazon and REI credits exceed its purchases. Sorting such a list by amount descending puts the
  * single largest movement of money LAST, under a heading that says "top spending". Sorting by
- * absolute value instead interleaves a $1,203.63 credit into the middle of the spend ranking as
+ * absolute value instead interleaves that credit into the middle of the spend ranking as
  * though it were spend.
  *
  * Neither is right, because they are two lists. Spending ranks by amount; credits are a different
@@ -145,7 +152,7 @@ interface SignedBarProps extends SignedBarScale {
  * Diverging bar with a printed zero.
  *
  * `ProgressBar` clamps to 0..1, which is correct for a fraction of a budget and silently wrong for
- * a signed total: a -$1,203.63 category clamped to zero width renders identically to a category
+ * a signed total: a net-refund category clamped to zero width renders identically to a category
  * that spent nothing, and "spent nothing" is a claim the data does not make. This draws from a
  * zero rule instead, so the direction is visible and the extent is comparable across the set.
  *
