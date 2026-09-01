@@ -12,10 +12,11 @@
     "typecheck:server": "tsc --noEmit -p tsconfig.server.json",
     "typecheck:client": "tsc --noEmit -p tsconfig.json",
     "typecheck:tests": "tsc --noEmit -p tsconfig.tests.json",
-    "typecheck": "npm run typecheck:server && npm run typecheck:client && npm run typecheck:tests",
+    "typecheck": "npm run typecheck:server && npm run typecheck:client && npm run typecheck:tests && npm run typecheck:scripts",
     "build": "tsc -p tsconfig.server.json && cp -r server/src/db/migrations dist/server/src/db/ && vite build",
     "start": "NODE_ENV=production node --env-file-if-exists=.env dist/server/src/index.js",
-    "db:migrate": "tsx server/src/db/migrate.ts"
+    "db:migrate": "tsx server/src/db/migrate.ts",
+    "typecheck:scripts": "tsc --noEmit -p tsconfig.scripts.json"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.100.1",
