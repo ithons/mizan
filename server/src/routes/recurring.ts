@@ -299,9 +299,11 @@ router.post('/:id/dismiss', (req: Request, res: Response, next: NextFunction): v
 
     const now = new Date().toISOString();
     const dismissPattern = db.transaction(() => {
+      // `dismissed_at` is what makes this decision durable. Without it the row was deleted by
+      // the next detection pass (see migration 057) and the bill came back two syncs later.
       db.prepare(
-        'UPDATE recurring_patterns SET is_active = 0, is_confirmed = 0, updated_at = ? WHERE id = ?'
-      ).run(now, id);
+        'UPDATE recurring_patterns SET is_active = 0, is_confirmed = 0, dismissed_at = ?, updated_at = ? WHERE id = ?'
+      ).run(now, now, id);
 
       db.prepare(
         'UPDATE transactions SET recurring_id = NULL, updated_at = ? WHERE recurring_id = ?'

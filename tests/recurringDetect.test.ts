@@ -414,3 +414,75 @@ test('the stored amount is a median of recent occurrences, not of the whole hist
     teardown(db);
   }
 });
+
+/**
+ * A dismissed bill stays dismissed, across as many detection passes as you like.
+ *
+ * `POST /api/recurring/:id/dismiss` sets `is_active = 0, is_confirmed = 0` and NULLs
+ * `recurring_id` on every linked transaction. `detectRecurring` honoured that state and then, at
+ * the end of the same function, deleted rows matching exactly that predicate plus "has no linked
+ * transactions", which the unlinking had just made true. So the record of the decision was gone by
+ * the next sync and the merchant was detected fresh on the one after. Migration 057 adds
+ * `dismissed_at` to tell a dismissal apart from the rename-stranded rows that delete exists for.
+ */
+function dismissPattern(db: Database.Database, id: string): void {
+  const now = '2026-09-01T00:00:00.000Z';
+  db.prepare(
+    'UPDATE recurring_patterns SET is_active = 0, is_confirmed = 0, dismissed_at = ?, updated_at = ? WHERE id = ?'
+  ).run(now, now, id);
+  db.prepare('UPDATE transactions SET recurring_id = NULL, updated_at = ? WHERE recurring_id = ?').run(now, id);
+}
+
+test('a dismissed pattern survives repeated detection and never comes back', () => {
+  const db = setupDb();
+  try {
+    // A clean monthly bill, seeded relative to today the way every other test in this file does,
+    // because detection windows off the wall clock.
+    seedSeries(db, 'Netflix', -1599, 30, 4);
+    detectRecurring();
+
+    const found = patternFor(db, 'netflix');
+    assert.ok(found, 'detection never found the pattern, so this test proves nothing');
+    dismissPattern(db, found.id as string);
+
+    // The pass that used to delete the decision, and the two after it that used to re-detect.
+    detectRecurring();
+    detectRecurring();
+    detectRecurring();
+
+    const rows = db
+      .prepare("SELECT is_active, dismissed_at FROM recurring_patterns WHERE merchant_name = 'netflix'")
+      .all() as Array<{ is_active: number; dismissed_at: string | null }>;
+
+    assert.equal(rows.length, 1, 'the dismissal record was deleted and the pattern re-created');
+    assert.equal(rows[0].is_active, 0, 'a dismissed pattern was reactivated');
+    assert.ok(rows[0].dismissed_at, 'the dismissal marker was lost');
+  } finally {
+    teardown(db);
+  }
+});
+
+test('HEALTHY: a genuinely stranded pattern is still cleaned up', () => {
+  const db = setupDb();
+  try {
+    // The case the delete exists for: `merchant_name` is UNIQUE and detection upserts against it,
+    // so renaming a group in normalizeMerchant() leaves the old row behind with nothing linked.
+    // It was never dismissed, so it must still be removed.
+    db.prepare(`
+      INSERT INTO recurring_patterns
+        (id, merchant_name, average_amount, frequency, last_seen, next_expected,
+         is_active, is_confirmed, transaction_count, created_at, updated_at)
+      VALUES ('stranded', 'old cursor name', 2000, 'monthly', '2026-05-01', '2026-06-01', 0, 0, 0,
+              '2026-05-01', '2026-05-01')
+    `).run();
+
+    detectRecurring();
+
+    const left = db.prepare("SELECT COUNT(*) AS n FROM recurring_patterns WHERE id = 'stranded'").get() as {
+      n: number;
+    };
+    assert.equal(left.n, 0, 'the stranded-row cleanup stopped working');
+  } finally {
+    teardown(db);
+  }
+});

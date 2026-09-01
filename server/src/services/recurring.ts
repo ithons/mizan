@@ -419,9 +419,15 @@ export function detectRecurring(): void {
 
     // Upsert recurring_pattern matching on merchant_name
     const existing = db.prepare(
-      'SELECT id, is_active, is_confirmed, category_id FROM recurring_patterns WHERE merchant_name = ?'
+      'SELECT id, is_active, is_confirmed, dismissed_at, category_id FROM recurring_patterns WHERE merchant_name = ?'
     ).get(normalizedName) as
-      | { id: string; is_active: number; is_confirmed: number; category_id: string | null }
+      | {
+          id: string;
+          is_active: number;
+          is_confirmed: number;
+          dismissed_at: string | null;
+          category_id: string | null;
+        }
       | undefined;
 
     let patternId: string;
@@ -437,6 +443,9 @@ export function detectRecurring(): void {
     );
 
     if (existing) {
+      // A dismissal is honoured on its own terms, not only through the is_active/is_confirmed
+      // pair, so a future change to either flag cannot quietly revive a pattern the owner refused.
+      if (existing.dismissed_at) continue;
       if (!existing.is_active && !existing.is_confirmed) continue;
 
       patternId = existing.id;
@@ -529,13 +538,20 @@ export function detectRecurring(): void {
   // for the next hand-written migration.
   //
   // Deliberately narrow: only rows that are inactive AND unconfirmed AND have no transactions
-  // still linked to them. A confirmed pattern is the user's own decision, and a manually
-  // created one legitimately carries transaction_count = 0 (createRecurringPattern seeds it
-  // confirmed so it shows up immediately), so both are excluded.
+  // still linked to them AND were never dismissed. A confirmed pattern is the user's own
+  // decision, and a manually created one legitimately carries transaction_count = 0
+  // (createRecurringPattern seeds it confirmed so it shows up immediately), so both are excluded.
+  //
+  // `dismissed_at IS NULL` is the fourth condition and it was the missing one. Dismissal sets
+  // exactly `is_active = 0, is_confirmed = 0` and unlinks every transaction, which is this
+  // predicate precisely, so this statement deleted the record of the owner's decision on the next
+  // sync and the guard above (`if (!existing.is_active && !existing.is_confirmed) continue`) had
+  // nothing left to honour. The bill returned on the sync after that.
   const stranded = db.prepare(`
     DELETE FROM recurring_patterns
     WHERE is_active = 0
       AND is_confirmed = 0
+      AND dismissed_at IS NULL
       AND NOT EXISTS (SELECT 1 FROM transactions t WHERE t.recurring_id = recurring_patterns.id)
   `).run();
   if (stranded.changes > 0) {
