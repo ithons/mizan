@@ -13,8 +13,21 @@ import { isBelowBackfillFloor } from './backfillFloor';
 export interface CoinbaseSyncResult {
   accountCount: number;
   transactionCount: number;
+  /** Holdings zeroed because the feed no longer reports them. Not a transaction count. */
   staleAccountCount: number;
   balanceChanges: AccountBalanceChange[];
+  /**
+   * Per-coin and per-stage failures that did NOT abort the run.
+   *
+   * This stage had no error channel at all. The comment on the pricing catch says "a single
+   * unpriceable/delisted coin must not abort the whole run", which is right, and then the failure
+   * went to `console.warn` and nowhere else. `syncManager` hardcoded `status: 'succeeded'`, so a
+   * pass that could not price half the portfolio and skipped the entire trade-history import
+   * recorded itself as a clean success and the balance beam stayed calibrated. SimpleFIN has
+   * carried `errors: string[]` through `recordSimplefinStage` since the same defect was found
+   * there.
+   */
+  errors: string[];
 }
 
 interface CoinbaseConnectionRow {
@@ -502,6 +515,7 @@ export async function syncCoinbase(): Promise<CoinbaseSyncResult> {
   // Account ROWS in the response, whatever their balance. A genuine sell-out returns rows with
   // zero balances; an unreadable body returns none, and only the second may not zero the ledger.
   let accountRowsSeen = 0;
+  const errors: string[] = [];
   const balanceChanges: AccountBalanceChange[] = [];
   const seenCurrencies = new Set<string>();
   const activeConnectionId = ensureCoinbaseConnection(db, now);
@@ -558,6 +572,9 @@ export async function syncCoinbase(): Promise<CoinbaseSyncResult> {
       } catch (err) {
         const message = err instanceof Error ? err.message : 'unknown pricing error';
         console.warn(`[coinbase] Skipping ${currency}: ${message}`);
+        // Reported, not only logged. The holding keeps its last known value, which is the right
+        // call, and the owner is entitled to know that this run did not re-price it.
+        errors.push(`${currency} could not be priced (${message}); its last known value was kept.`);
         seenCurrencies.add(currency);
         continue;
       }
@@ -583,6 +600,14 @@ export async function syncCoinbase(): Promise<CoinbaseSyncResult> {
   // run and wrote that zero into net_worth_snapshots with `is_estimated = 0`: the balances come back
   // on the next good sync, the snapshot does not.
   const feedWasEmpty = accountRowsSeen === 0;
+  if (feedWasEmpty) {
+    // `zeroStaleCoinbaseHoldings` already declined to zero anything and said so on the console.
+    // This is the half that reaches the owner: the run left every holding and the account balance
+    // at their last known values, which is the right call and is not a successful refresh.
+    errors.push(
+      'Coinbase returned no account rows, so holdings and the account balance were left at their last known values rather than zeroed.'
+    );
+  }
   const zeroedCount = zeroStaleCoinbaseHoldings(db, accountId, seenCurrencies, accountRowsSeen, now);
 
   // The account balance is the sum of its holdings (authoritative, already in cents).
@@ -620,7 +645,9 @@ export async function syncCoinbase(): Promise<CoinbaseSyncResult> {
   try {
     transactionCount += await syncCoinbaseLedger();
   } catch (err) {
-    console.warn(`[coinbase] Ledger sync failed (non-fatal): ${err instanceof Error ? err.message : String(err)}`);
+    const message = err instanceof Error ? err.message : String(err);
+    console.warn(`[coinbase] Ledger sync failed (non-fatal): ${message}`);
+    errors.push(`The v2 ledger import failed, so converts, sends and receives may be missing: ${message}`);
   }
 
   db.prepare(
@@ -633,6 +660,7 @@ export async function syncCoinbase(): Promise<CoinbaseSyncResult> {
     transactionCount,
     staleAccountCount: zeroedCount,
     balanceChanges,
+    errors,
   };
 }
 

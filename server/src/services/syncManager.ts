@@ -653,15 +653,31 @@ async function _runFullSyncInternal(): Promise<void> {
       emitSyncEvent({ type: 'sync_progress', message: 'Syncing Coinbase...', progress: 50 });
       try {
         const coinbaseResult = await withRetry(() => syncCoinbase());
+        // `status` is derived from what the stage reported rather than hardcoded 'succeeded'.
+        // A pass that could not price a coin, or that skipped the whole v2 ledger import, or that
+        // declined to zero holdings because the feed was empty, is not a clean success, and saying
+        // it is keeps `last_run.incomplete` false and the balance beam calibrated on a sheet the
+        // provider did not fully refresh. 'skipped' is the same word `recordSimplefinStage` uses
+        // for "the provider answered and something did not run": nothing here failed outright, or
+        // withRetry would have thrown into the catch below.
+        const coinbaseIncomplete = coinbaseResult.errors.length > 0;
         const runItem = recordSyncRunItem(db, run.id, {
           provider: 'coinbase',
           connection_id: 'coinbase',
           institution_name: 'Coinbase',
-          status: 'succeeded',
+          status: coinbaseIncomplete ? 'skipped' : 'succeeded',
+          error_message: coinbaseIncomplete ? coinbaseResult.errors.join(' ') : undefined,
           accounts_seen: coinbaseResult.accountCount,
           transactions_added: coinbaseResult.transactionCount,
-          transactions_modified: coinbaseResult.staleAccountCount,
+          // `staleAccountCount` is holdings ZEROED, not transactions modified. It used to be
+          // written into `transactions_modified`, so the sync panel reported "8 transactions
+          // modified" on a run that modified none and zeroed eight positions, which is the more
+          // alarming event described as the less alarming one.
+          holdings_zeroed: coinbaseResult.staleAccountCount,
         });
+        if (coinbaseIncomplete) {
+          deferredError = deferredError ?? new Error(coinbaseResult.errors[0]);
+        }
 
         pendingBalanceChanges.push({ runItemId: runItem.id, changes: coinbaseResult.balanceChanges });
       } catch (err) {

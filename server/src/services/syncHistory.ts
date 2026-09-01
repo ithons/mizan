@@ -15,6 +15,11 @@ export interface SyncRunCounts {
   accounts_seen?: number;
   transactions_added?: number;
   transactions_modified?: number;
+  /**
+   * Holdings set to quantity 0 because the feed stopped reporting them. NOT transactions.
+   * The Coinbase stage used to report this in `transactions_modified`; see migration 058.
+   */
+  holdings_zeroed?: number;
   transactions_removed?: number;
   transactions_skipped?: number;
   duplicate_candidates?: number;
@@ -84,11 +89,12 @@ export function recordSyncRunItem(
       transactions_modified,
       transactions_removed,
       transactions_skipped,
+      holdings_zeroed,
       error_code,
       error_message,
       recovery_action
     )
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
     id,
     runId,
@@ -103,6 +109,7 @@ export function recordSyncRunItem(
     input.transactions_modified ?? 0,
     input.transactions_removed ?? 0,
     input.transactions_skipped ?? 0,
+    input.holdings_zeroed ?? 0,
     input.error_code ?? null,
     input.error_message ?? null,
     input.recovery_action ?? null
