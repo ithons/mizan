@@ -13,6 +13,7 @@ import {
 import { creditNote, isInCredit, signedAccountBalance } from '../../lib/accountBalance';
 import { Screen, SectionLabel, TextButton, TrendChart } from '../../components/balance';
 import { SkeletonRows } from '../../components/SkeletonLoader';
+import { QueryErrorBanner } from '../../components/QueryErrorBanner';
 
 const INVESTMENT_TYPES = new Set(['brokerage', 'ira_traditional', 'ira_roth', 'crypto_wallet']);
 
@@ -98,11 +99,12 @@ export function AccountDetail() {
     enabled: Boolean(id) && isInvestment,
     retry: false,
   });
-  const { data: txPage } = useQuery({
+  const txQ = useQuery({
     queryKey: ['account', id, 'transactions'],
     queryFn: () => transactionsApi.list({ accountId: [id], limit: 25 }),
     enabled: Boolean(id),
   });
+  const { data: txPage } = txQ;
 
   // One line, one style. A ledger series is a reconstruction end to end and says so in `origin`;
   // only the snapshot basis carries reverse-replayed points, and those stay dashed.
@@ -208,7 +210,16 @@ export function AccountDetail() {
           </SectionLabel>
           <TextButton onClick={() => navigate('/ledger')}>View all</TextButton>
         </div>
-        {transactions.length === 0 ? (
+        {/* "No transactions for this account yet." is a statement about the ACCOUNT, and it was
+            being made before the transactions query had answered and permanently if it failed. The
+            only loading guard on this screen reads `isLoading` from the ACCOUNTS query, which
+            resolves first, so the sentence rendered in the gap. The other four money screens carry
+            a QueryErrorBanner; this one had no error surface at all. */}
+        {txQ.isPending ? (
+          <SkeletonRows rows={4} />
+        ) : txQ.isError ? (
+          <QueryErrorBanner items={[{ query: txQ, label: "this account's transactions" }]} />
+        ) : transactions.length === 0 ? (
           <div className="py-6 text-body text-muted">No transactions for this account yet.</div>
         ) : (
           transactions.map((t) => {

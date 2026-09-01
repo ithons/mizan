@@ -57,3 +57,19 @@ test('summarizeQueryFailures names what is missing when something failed', () =>
   const summary = summarizeQueryFailures([{ query: bad, label: 'your accounts' }]);
   assert.deepEqual(summary, { labels: ['your accounts'], detail: 'Failed to fetch' });
 });
+
+test('AccountDetail does not say "no transactions" before it knows', () => {
+  const src = source('client/src/views/accounts/AccountDetail.tsx');
+
+  // The only loading guard on this screen read `isLoading` from the ACCOUNTS query, which resolves
+  // first, so the sentence rendered while the transactions query was still in flight and
+  // permanently if it failed. The file had no error surface at all.
+  assert.match(src, /txQ\.isPending \?/, 'the empty sentence is not gated on the query resolving');
+  assert.match(src, /txQ\.isError \?/, 'a failed transactions query still renders the empty sentence');
+  assert.match(src, /QueryErrorBanner/, 'the screen has no way to say it failed');
+
+  // Order matters: pending and error must both be checked BEFORE length === 0.
+  const pendingAt = src.indexOf('txQ.isPending ?');
+  const emptyAt = src.indexOf('No transactions for this account yet.');
+  assert.ok(pendingAt > 0 && pendingAt < emptyAt, 'the empty branch is reached before the pending check');
+});
