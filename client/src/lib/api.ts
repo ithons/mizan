@@ -60,6 +60,7 @@ import type {
   TransactionFilters,
   TransactionReviewSummary,
   TransactionUpdateResult,
+  ReconciliationReading,
 } from '@shared/types';
 
 async function apiFetch<T>(url: string, options?: RequestInit): Promise<T> {
@@ -477,6 +478,16 @@ export const insightsApi = {
   list: () => apiFetch<Insight[]>('/api/insights'),
   safeToSpend: () => apiFetch<SafeToSpend>('/api/insights/safe-to-spend'),
   quality: () => apiFetch<DataQualitySummary>('/api/insights/quality'),
+  /**
+   * Does the ledger explain each account's balance, and do two accounts' rows explain each other?
+   *
+   * The route's own comment calls this "the one check that decides whether every other number in
+   * the app is true", and it had no fetcher at all: `GET /api/insights/reconciliation` was the only
+   * data route in the app with zero client callers, so the check ran on every request to it and
+   * reached nothing but the advisor's context. This repo's own rule is that a fetcher with no
+   * caller is a dropped capability; a ROUTE with no fetcher is the same thing one layer down.
+   */
+  reconciliation: () => apiFetch<ReconciliationReading>('/api/insights/reconciliation'),
 };
 
 // ─── Reports ─────────────────────────────────────────────────────────────────

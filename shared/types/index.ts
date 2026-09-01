@@ -1378,6 +1378,51 @@ export interface SafeToSpend {
   forecast_days: number;
 }
 
+/* --- Does the ledger explain the balances? (GET /api/insights/reconciliation) --- */
+
+/** One account's balance against the transactions that should explain it. Money in DOLLARS. */
+export interface ReconciliationAccountReading {
+  account_id: string;
+  account_name: string;
+  is_liability: boolean;
+  is_market_driven: boolean;
+  window_count: number;
+  first_date: string | null;
+  last_date: string | null;
+  observed_delta: number;
+  explained_delta: number;
+  residual: number;
+  boundary_amount: number;
+  adjusted_residual: number;
+  direction_conflict: boolean;
+  largest_window_residual: number;
+  residual_ratio: number | null;
+}
+
+/** Two accounts whose rows do not explain each other. Money in DOLLARS. */
+export interface FlowConservationReading {
+  account_a_id: string;
+  account_a_name: string | null;
+  account_b_id: string;
+  account_b_name: string | null;
+  leg_count: number;
+  first_date: string;
+  last_date: string;
+  movement: number;
+}
+
+export interface ReconciliationReading {
+  accounts: ReconciliationAccountReading[];
+  /** The subset judged unexplained. Empty is the healthy state and must render as silence. */
+  unreconciled: ReconciliationAccountReading[];
+  /** Magnitude summed over `unreconciled` only, so opposite directions cannot cancel. */
+  unreconciled_residual: number;
+  /** Raw residual over EVERY account, including market-driven ones the filter exempts. */
+  residual_all_accounts: number;
+  measured_snapshot_count: number;
+  flow_conservation: FlowConservationReading[];
+}
+
 /* --- What the AI changed (GET /api/ai/digest) --- */
 
 /**

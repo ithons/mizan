@@ -128,6 +128,9 @@ export function Ledger() {
   }, [search]);
 
   // Deep links the retired screens answered: /transactions?uncategorized=1&range=all.
+  // Plus `accountId`, which is how a finding hands over the rows it is made of rather than a
+  // description of them: `LedgerIntegrityPanel` links here so acting on a flow-conservation
+  // finding does not mean going and finding the rows by hand.
   useEffect(() => {
     if (searchParams.get('uncategorized') === '1') {
       setFilter('uncategorized');
@@ -135,6 +138,8 @@ export function Ledger() {
     }
     const requested = searchParams.get('range');
     if (requested && RANGES.some((r) => r.id === requested)) setRange(requested as RangeId);
+    const account = searchParams.get('accountId');
+    if (account) setAccountFilter(account);
   }, [searchParams]);
 
   useEffect(() => {

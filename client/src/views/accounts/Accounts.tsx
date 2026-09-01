@@ -11,6 +11,7 @@ import { useAppStore } from '../../store';
 import { Screen, ScreenHeader, SectionLabel, Card, Figure, Row, TextButton, TrendChart } from '../../components/balance';
 import { ConfirmRemoveModal } from '../../components/ConfirmRemoveModal';
 import { QueryErrorBanner } from '../../components/QueryErrorBanner';
+import { LedgerIntegrityPanel } from '../../components/LedgerIntegrityPanel';
 import { SkeletonRows } from '../../components/SkeletonLoader';
 import { AddManualAccountModal, EditAccountModal, MergeAccountModal } from './Modals';
 
@@ -379,6 +380,12 @@ export function Accounts() {
         </div>
       </div>
       )}
+
+      {/* Whether the ledger explains these balances. Silent unless it does not, so on an ordinary
+          ledger this renders nothing at all. It sits on Accounts because both halves of the check
+          are about accounts: one asks whether an account's own rows explain its balance, the other
+          whether two accounts' rows explain each other. */}
+      <LedgerIntegrityPanel className="mb-8 flex-shrink-0" />
 
       {netWorthHistory.length >= 2 && (
         <div className="mb-8 flex-shrink-0">
