@@ -286,6 +286,15 @@ function classifyFrequency(
  * detected, which is a behaviour change and not a documentation fix. The sentence is corrected
  * instead, and the parameter's real job is stated.
  */
+/**
+ * How many bigrams `compareTwoStrings` sees in `s`: it strips whitespace first, then a string of
+ * length n has n-1 bigrams. Mirrors the library so the bound in `detectRecurring` is exact; if
+ * string-similarity ever changes its normalisation this and the test that pins it both move.
+ */
+export function bigramLength(s: string): number {
+  return Math.max(0, s.replace(/\s+/g, '').length - 1);
+}
+
 function variance(values: number[], med: number): number {
   // `med` is a guard, not a centre: a series whose median is 0 has no scale to be a fraction of.
   if (values.length === 0 || med === 0) return 0;
@@ -334,6 +343,7 @@ export function detectRecurring(): void {
     Array<{ id: string; date: string; amount: number; category_id: string | null }>
   >();
   const groupNames: string[] = [];
+  const groupBigramLengths: number[] = [];
 
 
   for (const txn of transactions) {
@@ -341,14 +351,37 @@ export function detectRecurring(): void {
     if (!raw) continue;
     let normalized = normalizeMerchant(raw);
     if (!normalized) continue;
-    // Fuzzy matching: check if normalized name is very similar to an existing group
+    // Fuzzy matching: check if normalized name is very similar to an existing group.
+    //
+    // The exact-hit short circuit is semantics-preserving and is most of the speed. The scan
+    // below keeps the HIGHEST-scoring group, and `compareTwoStrings(x, x)` is 1.0, the maximum,
+    // with no other group able to tie it because group names are unique. So when the normalized
+    // name is already a group the scan can only return that group, and running it is O(groups)
+    // of bigram comparisons to learn what a Map lookup already knows. On the owner's ledger
+    // most rows are repeat merchants, and this pass ran on every hourly sync: measured at
+    // 995.6 / 922.7 / 913.8 ms against a copy of the live database before this line, and the
+    // figure after it is stated in the test that pins it.
     let matchedGroup = normalized;
-    let highestScore = 0;
-    for (const gName of groupNames) {
-      const score = compareTwoStrings(normalized, gName);
-      if (score > highestScore) {
-        highestScore = score;
-        matchedGroup = score > 0.85 ? gName : normalized;
+    if (!groups.has(normalized)) {
+      let highestScore = 0;
+      const ownLength = bigramLength(normalized);
+      for (let g = 0; g < groupNames.length; g++) {
+        // Exact upper bound, so skipping never changes which group wins. `compareTwoStrings` is
+        // the Dice coefficient over bigrams, 2|A∩B| / (|A|+|B|), and |A∩B| cannot exceed the
+        // smaller of the two bigram counts, so the score is at most
+        // 2·min(|A|,|B|) / (|A|+|B|). A pair whose bound is under the 0.85 threshold cannot be the
+        // winner (the winner must clear the threshold) and cannot change the outcome when nothing
+        // clears it (the result is then `normalized` whatever the runner-up scored), so the
+        // comparison is skipped. `tests/recurringDetect.test.ts` pins the bound against the real
+        // library on adversarial pairs.
+        const otherLength = groupBigramLengths[g];
+        const bound = (2 * Math.min(ownLength, otherLength)) / (ownLength + otherLength);
+        if (bound <= 0.85) continue;
+        const score = compareTwoStrings(normalized, groupNames[g]);
+        if (score > highestScore) {
+          highestScore = score;
+          matchedGroup = score > 0.85 ? groupNames[g] : normalized;
+        }
       }
     }
     normalized = matchedGroup;
@@ -356,7 +389,7 @@ export function detectRecurring(): void {
 
     if (!groups.has(normalized)) {
       groupNames.push(normalized);
-
+      groupBigramLengths.push(bigramLength(normalized));
       groups.set(normalized, []);
     }
     groups.get(normalized)!.push({

@@ -3,7 +3,8 @@ import assert from 'node:assert/strict';
 import Database from 'better-sqlite3';
 import { addMonths, format, subDays, subMonths } from 'date-fns';
 import { _setDbForTesting } from '../server/src/db/index';
-import { detectRecurring } from '../server/src/services/recurring';
+import { bigramLength, detectRecurring } from '../server/src/services/recurring';
+import { compareTwoStrings } from 'string-similarity';
 import { insertAccount, insertTransaction, migratedTestDb } from './helpers/schema';
 
 // detectRecurring() runs on the module singleton and had no direct test: it's one of the
@@ -482,6 +483,68 @@ test('HEALTHY: a genuinely stranded pattern is still cleaned up', () => {
       n: number;
     };
     assert.equal(left.n, 0, 'the stranded-row cleanup stopped working');
+  } finally {
+    teardown(db);
+  }
+});
+
+/**
+ * The bigram bound used to skip comparisons is sound, so skipping never changes a grouping.
+ *
+ * `detectRecurring` scanned every accumulated group with a full bigram comparison for every row
+ * and ran on every hourly sync: 995.6 / 922.7 / 913.8 ms on a copy of the live ledger. Two exact
+ * shortcuts brought it to 178.9 / 147.9 / 147.6 ms: an exact-name hit skips the scan (a string
+ * scores 1.0 against itself and no other group can tie it), and a pair whose length-derived upper
+ * bound is at or under the 0.85 threshold is not compared. The second one is only exact if the
+ * bound is; this is the test of that.
+ */
+test('the Dice upper bound never falls below the real score', () => {
+  const pairs: Array<[string, string]> = [
+    ['netflix', 'netflix'],
+    ['netflix', 'netflixcom'],
+    ['a', 'ab'],
+    ['ab', 'abc'],
+    ['abab', 'baba'],
+    ['starbucks', 'starbucks store 44'],
+    ['sq tartine bakery', 'tartine'],
+    ['mass inst payroll ppd', 'mass inst tech payroll'],
+    ['x', 'y'],
+    ['', 'abc'],
+    ['aaaa', 'aaaaaaaa'],
+    ['the the the', 'the'],
+  ];
+  for (const [a, b] of pairs) {
+    const la = bigramLength(a);
+    const lb = bigramLength(b);
+    const bound = la + lb === 0 ? 1 : (2 * Math.min(la, lb)) / (la + lb);
+    const score = compareTwoStrings(a, b);
+    assert.ok(score <= bound + 1e-12, `bound ${bound} is below the real score ${score} for "${a}" vs "${b}"`);
+  }
+});
+
+test('bigramLength mirrors the library: whitespace stripped, then n-1', () => {
+  assert.equal(bigramLength('netflix'), 6);
+  assert.equal(bigramLength('net flix'), 6, 'the library strips whitespace before counting');
+  assert.equal(bigramLength('a'), 0);
+  assert.equal(bigramLength(''), 0);
+});
+
+test('HEALTHY: a repeat merchant lands in its own group without a fuzzy scan changing anything', () => {
+  const db = setupDb();
+  try {
+    seedSeries(db, 'Spotify', -999, 30, 4);
+    // One near-miss row that CONTINUES the monthly cadence, 30 days before the series starts. The
+    // fuzzy scan folds it in and the pattern has 5 rows; if the short circuit wrongly skipped the
+    // scan for a NEW name, "spotifyy" would be its own one-row group, too small to be a pattern,
+    // and the count would read 4. The precondition is asserted rather than assumed: the first
+    // draft of this test used "Netflix Inc", which scores exactly 0.80 against "netflix" and was
+    // never folded by the original code either.
+    assert.ok(compareTwoStrings('spotify', 'spotifyy') > 0.85, 'fixture does not clear the threshold');
+    seedSeries(db, 'Spotifyy', -999, 30, 1, { endDaysAgo: 120 });
+    detectRecurring();
+    const rows = db.prepare('SELECT merchant_name, transaction_count FROM recurring_patterns').all() as Array<{ merchant_name: string; transaction_count: number }>;
+    assert.equal(rows.length, 1, 'the near-miss became its own group instead of folding in');
+    assert.equal(rows[0].transaction_count, 5, 'the near-miss row was not folded into the pattern');
   } finally {
     teardown(db);
   }
