@@ -120,15 +120,32 @@ export interface Buckets {
   netWorth: number;
 }
 
+/** Dollars to whole cents. Every figure this file settles is settled here first. */
+const cents = (dollars: number): number => Math.round(dollars * 100);
+
 export function bucketsOf(s: NetWorthSnapshot): Buckets {
   const liquid = s.liquid_assets ?? 0;
   const equity = s.investment_assets ?? 0;
   const crypto = s.crypto_assets ?? 0;
+  // `other` is settled in cents, like the payoff below and for the same reason.
+  //
+  // The four figures arrive as four SEPARATELY divided floats: `routes/networth.ts` dollarizes
+  // total_assets, liquid_assets, investment_assets and crypto_assets each through `toDollars`, so
+  // subtracting them in dollars leaves binary dust. On a sheet that accounts for every cent the
+  // residual came out at something like 4.5e-13 rather than 0, `Math.max(0, ...)` kept it, and
+  // Instrument's `row.amount !== 0` filter let it through to a BarRow that printed it as "Other
+  // $0": a bucket the owner does not have, on a sheet with nothing left over. The same
+  // subtraction-in-floats shape is what put "$0 would still be owed, with no cash left to reach
+  // it" on Reports, and it is why `cents()` exists twenty lines below this.
+  //
+  // A genuine "other" bucket is a real account type none of the three named ones covers, and it
+  // survives this unchanged: it is whole cents and rounds to itself.
+  const otherCents = cents(s.total_assets) - (cents(liquid) + cents(equity) + cents(crypto));
   return {
     liquid,
     equity,
     crypto,
-    other: Math.max(0, s.total_assets - (liquid + equity + crypto)),
+    other: Math.max(0, otherCents) / 100,
     liabilities: s.total_liabilities,
     netWorth: s.net_worth,
   };
@@ -143,8 +160,6 @@ export function bucketsOf(s: NetWorthSnapshot): Buckets {
  * `b.liquid - b.liabilities` drew an After-payoff cash figure LARGER than now by the credit, money
  * the owner does not have.
  */
-const cents = (dollars: number): number => Math.round(dollars * 100);
-
 function payableCents(b: Buckets): number {
   return Math.max(0, Math.min(cents(b.liabilities), cents(b.liquid)));
 }

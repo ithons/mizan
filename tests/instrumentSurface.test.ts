@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import type { NetWorthSnapshot } from '../shared/types';
 import { readState } from '../client/src/components/balance/Figure';
 import { signedBarScale } from '../client/src/components/balance/ProgressBar';
 import {
@@ -16,8 +17,7 @@ import {
   windowRange,
   type SheetPoint,
   type SpendingCategory,
-  type WindowId,
-} from '../client/src/views/instrumentReadings';
+  type WindowId, bucketsOf} from '../client/src/views/instrumentReadings';
 import type {
   NullableMetricSummary,
   ReportMetricSummary,
@@ -492,4 +492,54 @@ test('every window id the selector offers resolves to a range', () => {
     assert.match(range.endDate, /^\d{4}-\d{2}-\d{2}$/);
     assert.ok(range.startDate <= range.endDate, `${w.id} resolves to an inverted range`);
   }
+});
+
+/**
+ * A sheet that accounts for every cent has no "other" bucket.
+ *
+ * `bucketsOf` subtracted four SEPARATELY dollarized floats: `routes/networth.ts` divides
+ * total_assets, liquid_assets, investment_assets and crypto_assets each by 100 on the way out, so
+ * the residual on a fully accounted sheet came out as binary dust rather than 0. `Math.max(0, ...)`
+ * kept it, Instrument's `row.amount !== 0` filter passed it, and a BarRow printed "Other $0": a
+ * bucket the owner does not have. Same shape as the Reports payoff defect, which is why `cents()`
+ * exists in this file.
+ */
+function sheet(over: Partial<NetWorthSnapshot>): NetWorthSnapshot {
+  return {
+    id: 's', date: '2026-09-01', total_assets: 0, total_liabilities: 0, net_worth: 0,
+    liquid_assets: 0, investment_assets: 0, crypto_assets: 0, is_estimated: false,
+    ...over,
+  } as NetWorthSnapshot;
+}
+
+test('a fully accounted sheet has no other bucket, whatever the floats do', () => {
+  // The exact shape the live ledger produces: three parts summing to the whole, each of which is
+  // a separately divided float. 6712.02 + 2529.64 + 489.15 is not 9730.81 in binary.
+  const b = bucketsOf(sheet({
+    total_assets: 9730.81, liquid_assets: 6712.02, investment_assets: 2529.64, crypto_assets: 489.15,
+  }));
+  assert.equal(b.other, 0, 'float dust rendered as an "Other" bucket');
+});
+
+test('a real other bucket survives, to the cent', () => {
+  // A real account type none of the three named buckets covers. It is whole cents and must not be
+  // rounded away by the same arithmetic that removes the dust.
+  const b = bucketsOf(sheet({
+    total_assets: 9830.81, liquid_assets: 6712.02, investment_assets: 2529.64, crypto_assets: 489.15,
+  }));
+  assert.equal(b.other, 100);
+});
+
+test('a one-cent other bucket is a bucket, not dust', () => {
+  const b = bucketsOf(sheet({
+    total_assets: 9730.82, liquid_assets: 6712.02, investment_assets: 2529.64, crypto_assets: 489.15,
+  }));
+  assert.equal(b.other, 0.01);
+});
+
+test('the parts exceeding the whole is clamped, not rendered as negative', () => {
+  const b = bucketsOf(sheet({
+    total_assets: 100, liquid_assets: 200, investment_assets: 0, crypto_assets: 0,
+  }));
+  assert.equal(b.other, 0);
 });
