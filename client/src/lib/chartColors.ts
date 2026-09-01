@@ -13,8 +13,13 @@
  * and silently deletes the utility.
  *
  * Order is the colour-vision-deficiency mechanism, not decoration: the slots were searched under the
- * dataviz six checks against both grounds (paper #e5dbca light, #262119 dark), and re-ordering them
- * invalidates that. Assign in sequence and never cycle -- past eight groups, fold the tail into a
+ * dataviz six checks against both grounds, and re-ordering them invalidates that. The grounds are
+ * not named here on purpose. This sentence used to give them as "paper #e5dbca light, #262119
+ * dark", which were the PREVIOUS palette's; the light ground is now white and the dark ground is
+ * black. The identical sentence in `index.css` was corrected when the palette landed and this copy
+ * was not, which is the whole argument for not writing the values down twice.
+ * `tests/seriesPalette.test.ts` derives both grounds live from the tokens, which is why it kept
+ * passing while this comment rotted. Assign in sequence and never cycle -- past eight groups, fold the tail into a
  * single "Other" slice rather than reusing a colour. `tests/seriesPalette.test.ts` re-runs the
  * measurements against the tokens as declared in index.css.
  */

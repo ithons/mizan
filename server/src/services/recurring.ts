@@ -277,9 +277,18 @@ function classifyFrequency(
   return null;
 }
 
+/**
+ * Coefficient of variation: standard deviation over the mean, centred on the MEAN.
+ *
+ * The comment here used to say "using median as center", which the code has never done: `med` is
+ * only a guard against a degenerate series and every term below is centred on `mean`. Changing the
+ * code to match the sentence would move the variance of every pattern and re-decide what gets
+ * detected, which is a behaviour change and not a documentation fix. The sentence is corrected
+ * instead, and the parameter's real job is stated.
+ */
 function variance(values: number[], med: number): number {
+  // `med` is a guard, not a centre: a series whose median is 0 has no scale to be a fraction of.
   if (values.length === 0 || med === 0) return 0;
-  // Coefficient of variation: std_dev / mean, using median as center
   const mean = values.reduce((a, b) => a + b, 0) / values.length;
   if (mean === 0) return 0;
   const variance =

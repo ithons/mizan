@@ -552,9 +552,18 @@ function loadOrderedMerchantRules(db: Database.Database): MerchantRule[] {
  * `upsertMerchantRule` never bumps `created_at`, so a re-applied rule is not the newest, and two
  * owner rules of equal pattern length resolved differently depending on which path asked: the
  * whole-ledger pass took the newer one, the single-rule apply took whichever it was handed, and
- * the next re-check reverted the difference. `merchant_rules` is dense in exactly those ties (236
- * live rules over 41 distinct timestamps, 173 of them sharing one: `SELECT created_at, COUNT(*)
- * FROM merchant_rules WHERE retired_at IS NULL GROUP BY created_at ORDER BY 2 DESC`).
+ * the next re-check reverted the difference. `merchant_rules` is dense in exactly those ties:
+ *
+ *   SELECT COUNT(*), COUNT(DISTINCT created_at) FROM merchant_rules WHERE retired_at IS NULL;
+ *   SELECT created_at, COUNT(*) FROM merchant_rules WHERE retired_at IS NULL
+ *    GROUP BY created_at ORDER BY 2 DESC LIMIT 1;
+ *
+ * Re-derived 2026-09-01 against the live database: **251 live rules over 58 distinct timestamps,
+ * 171 of them sharing one**. It read 236 / 41 / 173 when this was written and 248 / 55 / 171 a day
+ * earlier, so the counts move with every sync and only the shape is stable: a large majority of
+ * live rules share a single instant, and without `id ASC` the winner among them is whatever
+ * SQLite's temp b-tree emits. `tests/merchantRules.test.ts` pins that tiebreak directly and does
+ * not depend on any figure here.
  */
 function rulesOutranking(
   ordered: MerchantRule[],
