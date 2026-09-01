@@ -1,3 +1,4 @@
+import { useQuery } from '@tanstack/react-query';
 import { NavLink, useNavigate } from 'react-router-dom';
 import { syncApi } from '../lib/api';
 import { formatCompactRelative } from '../lib/formatters';
@@ -108,13 +109,32 @@ export function NavRail() {
 
   useNavShortcuts(navigate);
 
+  // `lastSynced` in the store is session state: it is null on mount and only ever written by an
+  // SSE `sync_complete` arriving in THIS tab. So every page load said "Not synced yet" on a ledger
+  // with 186 recorded sync runs whose latest completion is a column in the database, and the rail
+  // held that claim until the next sync happened to land while the tab was open.
+  //
+  // `syncApi.health()` already returned it and had zero callers, which is this repo's documented
+  // shape for a dropped capability rather than dead code. The key is ['sync', 'health'] so the
+  // existing 'sync' entry in FINANCIAL_QUERY_KEYS refreshes it after a run without a second list
+  // to keep in step.
+  const { data: syncHealth } = useQuery({
+    queryKey: ['sync', 'health'],
+    queryFn: syncApi.health,
+    staleTime: 60_000,
+  });
+
+  // The store wins when it has a value, because it can only hold a sync that finished after this
+  // query was fetched. The server answers for every load before that.
+  const lastSyncedAt = lastSynced ?? syncHealth?.last_synced_at ?? null;
+
   const syncLabel =
     syncStatus === 'syncing'
       ? 'Syncing…'
       : syncStatus === 'error'
         ? 'Sync failed'
-        : lastSynced
-          ? `Synced ${formatCompactRelative(lastSynced)}`
+        : lastSyncedAt
+          ? `Synced ${formatCompactRelative(lastSyncedAt)}`
           : 'Not synced yet';
 
   const runSync = () => {

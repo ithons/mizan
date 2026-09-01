@@ -5,9 +5,11 @@ import { join } from 'node:path';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { MemoryRouter } from 'react-router-dom';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { NavRail, NAV_ITEMS, SETTINGS_ITEM, ALL_NAV_ITEMS } from '../client/src/components/NavRail';
 import { SHORTCUTS, chordOf, shortcut } from '../client/src/lib/keyboard';
 import { NotFound } from '../client/src/views/NotFound';
+import type { SyncHealth } from '../shared/types';
 
 /**
  * The navigation, rendered, at the width the labels used to disappear at.
@@ -21,9 +23,24 @@ import { NotFound } from '../client/src/views/NotFound';
 const ROOT = join(import.meta.dirname, '..');
 const RAIL_SOURCE = readFileSync(join(ROOT, 'client/src/components/NavRail.tsx'), 'utf8');
 
+/**
+ * The rail reads the last successful sync from the server, so it needs a query client.
+ *
+ * `retry: false` matters: these assertions are about markup, and a rail rendered with the query
+ * still pending is the exact state a real first paint is in, so the sync line under test here is
+ * the fallback wording. What the rail does once the query resolves is asserted separately, in
+ * `the sync line prefers the server's answer to an empty session store`.
+ */
 function railMarkup(path: string): string {
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: false, gcTime: 0 } },
+  });
   return renderToStaticMarkup(
-    createElement(MemoryRouter, { initialEntries: [path] }, createElement(NavRail))
+    createElement(
+      QueryClientProvider,
+      { client: queryClient },
+      createElement(MemoryRouter, { initialEntries: [path] }, createElement(NavRail))
+    )
   );
 }
 
@@ -234,4 +251,45 @@ test('the catch-all does not apologise', () => {
   for (const word of ['Sorry', 'sorry', 'Oops', 'oops', 'apolog']) {
     assert.ok(!markup.includes(word), `the catch-all says "${word}"`);
   }
+});
+
+/**
+ * The sync line answers from the ledger, not from what this browser tab happened to witness.
+ *
+ * `lastSynced` in the Zustand store is written only by an SSE `sync_complete` arriving in this
+ * tab, and it starts null. So the rail read "Not synced yet" on every page load, on a ledger whose
+ * latest completed run is a column in the database, and held that claim until a sync happened to
+ * finish while the tab was open. `syncApi.health()` already returned the answer and had no caller.
+ */
+function railMarkupWithHealth(lastSyncedAt: string | null): string {
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: false, gcTime: 0 } },
+  });
+  queryClient.setQueryData(['sync', 'health'], { last_synced_at: lastSyncedAt } as SyncHealth);
+  return renderToStaticMarkup(
+    createElement(
+      QueryClientProvider,
+      { client: queryClient },
+      createElement(MemoryRouter, { initialEntries: ['/'] }, createElement(NavRail))
+    )
+  );
+}
+
+test('the sync line prefers the server answer to an empty session store', () => {
+  const justNow = new Date(Date.now() - 5 * 60_000).toISOString();
+  const markup = railMarkupWithHealth(justNow);
+
+  assert.match(markup, /5m ago/, 'the rail ignored the last sync the server reported');
+  assert.doesNotMatch(
+    markup,
+    /Not synced yet/,
+    'a ledger with a recorded sync was described as never synced'
+  );
+});
+
+test('HEALTHY: a genuinely never-synced ledger still says so', () => {
+  // The wording is not wrong, it was only reached wrongly. A fresh install has no run to report
+  // and must keep saying that rather than inventing a time.
+  const markup = railMarkupWithHealth(null);
+  assert.match(markup, /Not synced yet/);
 });
