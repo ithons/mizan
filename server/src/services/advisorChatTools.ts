@@ -1030,7 +1030,7 @@ function guardNote(report: GuardedBatchReport<unknown>): GuardNote | null {
     incident_id: report.incident_id,
     breaches,
     note: report.status === 'reverted'
-      ? `The ledger's headline figures moved by more than these writes account for, so the batch was taken back: ${report.reverted_rows} category write(s) reverted. The revert walks category writes only, so a merchant rule this call created still exists and is listed in Settings. Tell the user what stands and what does not, and do not retry it blind.`
+      ? `The ledger's headline figures moved by more than these writes account for, so the batch was taken back: ${report.reverted_rows} category write(s) reverted and ${report.reverted_rules} merchant rule write(s) reversed. A rule this call created was retired back out; a rule it retired was put back. Nothing from this call stands. Tell the user what happened, and do not retry it blind.`
       : 'The ledger\'s headline figures moved by more than these writes account for AND the revert did not run, so the writes are still applied and an incident is open. Tell the user to check the incident before doing anything else here.',
   };
 }
@@ -1113,10 +1113,18 @@ function createMerchantRuleTool(db: Database.Database, input: ToolInput): unknow
   );
 
   if (guard?.status === 'reverted') {
-    // Reported as two facts rather than one, because the revert takes back category writes and
-    // nothing else: the rows the rule swept in are back where they were and the merchant_rules row
-    // is still there. Collapsing that into `applied: false` would claim a deletion that never ran.
-    return { rule_created: outcome.applied, rows_applied: 0, detail: outcome.detail, guard };
+    // `rule_created: false`, because at HEAD the revert really does take the rule back.
+    //
+    // This used to return `outcome.applied` here, under a comment saying "the revert takes back
+    // category writes and nothing else: the rows the rule swept in are back where they were and
+    // the merchant_rules row is still there". That was true of the old harness. `revertBatch` now
+    // calls `undoRuleWrites`, which retires a rule whose pre-batch target was 'absent', and
+    // `GuardedBatchReport.reverted_rules` documents that as "a creation retired away". So the tool
+    // was telling the model, and through it the owner, to go look in Settings for a rule that is
+    // not live, on every reverted batch.
+    //
+    // `rows_applied: 0` is unchanged and still right: the category writes were reverted too.
+    return { rule_created: false, rows_applied: 0, detail: outcome.detail, guard };
   }
   if (guard) return { ...outcome, guard };
   return outcome;

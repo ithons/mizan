@@ -1,5 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import Database from 'better-sqlite3';
 import {
   ADVISOR_TOOLS,
@@ -1092,4 +1094,43 @@ test('a chat write that names a row the owner categorized by hand changes nothin
   assert.equal(row.category_source, 'human');
   assert.equal(result.requested, 1);
   assert.equal(result.applied + result.failed, 1, 'the call reports one outcome for the one row asked about');
+});
+
+/**
+ * The guard note tells the model what the revert actually did.
+ *
+ * It said "The revert walks category writes only, so a merchant rule this call created still
+ * exists and is listed in Settings", and `createMerchantRuleTool` returned `rule_created: true` on
+ * a reverted batch under a matching comment. Both were true of the old harness. `revertBatch` now
+ * calls `undoRuleWrites`, which retires a rule whose pre-batch state was 'absent', and
+ * `GuardedBatchReport.reverted_rules` documents that in as many words as "a creation retired
+ * away". So on every reverted batch the tool sent the model to look in Settings for a rule that is
+ * not live, and reported a creation that no longer stands as having stood.
+ */
+test('the reverted-batch note does not send the model looking for a rule the revert took back', () => {
+  const src = readFileSync(join(__dirname, '..', 'server/src/services/advisorChatTools.ts'), 'utf8');
+
+  assert.ok(
+    !src.includes('The revert walks category writes only'),
+    'the note still claims the revert leaves merchant rules alone'
+  );
+  assert.ok(
+    !src.includes('still exists and is listed in Settings'),
+    'the note still sends the model to Settings for a retired rule'
+  );
+  // And it says what did happen, from the report rather than from prose.
+  assert.match(src, /\$\{report\.reverted_rules\} merchant rule write\(s\) reversed/);
+});
+
+test('a reverted create_merchant_rule call reports the rule as not created', () => {
+  const src = readFileSync(join(__dirname, '..', 'server/src/services/advisorChatTools.ts'), 'utf8');
+  // Scoped to createMerchantRuleTool: the categorize tool has its own reverted branch above it,
+  // and that one has always returned applied: 0 correctly.
+  const fn = src.slice(src.indexOf('function createMerchantRuleTool'));
+  const branch = fn.slice(fn.indexOf("if (guard?.status === 'reverted')"));
+  assert.match(
+    branch.slice(0, 1600),
+    /return \{ rule_created: false, rows_applied: 0/,
+    'a reverted batch still reports rule_created from the pre-revert outcome'
+  );
 });
