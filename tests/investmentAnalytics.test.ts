@@ -539,7 +539,6 @@ test('the delta carries whether its baseline was measured or reconstructed', () 
  */
 function position(over: Partial<Holding> & { id: string }): Holding {
   return {
-    id: over.id,
     account_id: 'acct',
     security_id: `sec_${over.id}`,
     quantity: 10,
