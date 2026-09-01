@@ -101,22 +101,57 @@ test('SECURITY: nothing calls the host-less ViteExpress.listen', () => {
   assert.match(src, /listenOnHost\s*\(/, 'index.ts no longer binds through listenOnHost');
 });
 
-test('SECURITY: the beyond-loopback warning is not gated on a mode neither npm script sets', () => {
+test('SECURITY: the beyond-loopback warning is not gated on production mode', () => {
   const src = codeWithoutComments(readFileSync(join(ROOT, 'server/src/index.ts'), 'utf8'));
   const pkg = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8')) as {
     scripts: Record<string, string>;
   };
-  // The premise, asserted rather than assumed: if a script ever starts setting NODE_ENV, the
-  // reasoning behind this test changes and this is where a reader should find that out.
-  for (const name of ['dev', 'start']) {
-    assert.ok(
-      !pkg.scripts[name].includes('NODE_ENV'),
-      `npm run ${name} now sets NODE_ENV; revisit why IS_PROD gating was removed here`
-    );
-  }
+  // The premise, asserted rather than assumed. When this warning was first ungated, NEITHER script
+  // set NODE_ENV, so `IS_PROD` was dead and the line could not print at all. `npm start` sets it
+  // now, but `npm run dev` deliberately does not, and dev is where this app actually runs. So the
+  // warning must stay ungated for a different reason than the one it started with, and a reader
+  // who changes `dev` should find that out here.
+  assert.doesNotMatch(
+    pkg.scripts.dev,
+    /NODE_ENV=production/,
+    'npm run dev now runs in production mode; revisit why IS_PROD gating was removed here'
+  );
   assert.ok(
     !/if\s*\(\s*IS_PROD\s*&&\s*!HOST_IS_LOOPBACK\s*\)/.test(src),
-    'the "binding beyond loopback" warning is behind IS_PROD, which neither npm script sets, ' +
-      'so it can never print on either documented command'
+    'the "binding beyond loopback" warning is behind IS_PROD, so it cannot print under ' +
+      'npm run dev, which is the command that actually runs this app'
   );
+});
+
+/**
+ * `npm start` actually enters production mode.
+ *
+ * `IS_PROD` is `NODE_ENV === 'production'` and the start script did not set it, so every branch
+ * behind it was unreachable from either documented command: helmet's full defaults (the non-prod
+ * branch passes `contentSecurityPolicy: false`), the production CORS policy, the CORS_ORIGIN
+ * startup notices, and `express.static(dist/client)` with its SPA fallback. `npm run build` wrote
+ * a client bundle that `npm start` then never served, because vite-express started a dev server
+ * instead. README.md documents build-then-start as the way to run the built app.
+ */
+test('npm start sets NODE_ENV=production, so the production branches are reachable', () => {
+  const pkg = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8')) as {
+    scripts: Record<string, string>;
+  };
+  assert.match(
+    pkg.scripts.start,
+    /NODE_ENV=production/,
+    'npm start does not enter production mode, so helmet CSP, the prod CORS policy and the built ' +
+      'client are all dead code'
+  );
+  // dev must NOT set it: the whole point is that the two modes differ and both are reachable.
+  assert.doesNotMatch(pkg.scripts.dev, /NODE_ENV=production/);
+});
+
+test('the production branch still binds to the same host as the dev branch', () => {
+  const src = codeWithoutComments(readFileSync(join(ROOT, 'server/src/index.ts'), 'utf8'));
+  // Arming IS_PROD must not reintroduce a second listen path with its own host handling. There is
+  // exactly one call, and it takes HOST.
+  const listens = src.match(/listenOnHost\s*\(/g) ?? [];
+  assert.equal(listens.length, 1, 'more than one listen path; the host can diverge again');
+  assert.match(src, /listenOnHost\(app,\s*PORT,\s*HOST/);
 });
