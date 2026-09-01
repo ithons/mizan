@@ -12,7 +12,7 @@ import type { RelinkSyncBlock } from './simplefinRelink';
 import { detectRecurring } from './recurring';
 import { autoCategorizeTransactions } from './rules';
 import { reconcileReconstructedHistory, takeSnapshot, type ReconstructionRun } from './snapshot';
-import { getCredentials } from './credentials';
+import { getCredentials, credentialsUnreadable } from './credentials';
 import { getDb } from '../db/index';
 import {
   finishSyncRun,
@@ -593,7 +593,27 @@ async function _runFullSyncInternal(): Promise<void> {
   try {
     const creds = getCredentials();
 
-
+    // An unreadable credentials file used to be indistinguishable from an empty one, so both
+    // provider gates below simply fell through, the run wrote no provider items at all, and it
+    // finished 'succeeded' with "Sync complete". The client toasted that in green and
+    // `last_run.incomplete` stayed false, which is the flag the balance beam reads to decide it is
+    // calibrated. Recorded as a failed item so the run lands 'partial' and every degradation
+    // surface that already exists picks it up, rather than inventing a new one.
+    const credentialsFault = credentialsUnreadable();
+    if (credentialsFault) {
+      recordSyncRunItem(db, run.id, {
+        provider: 'system',
+        connection_id: null,
+        institution_name: 'Credentials',
+        status: 'failed',
+        error_message: `Stored credentials could not be decrypted: ${credentialsFault}`,
+        recovery_action:
+          'The encryption key lives in the OS keychain. Unlock it and restart, or restore the .mizan ' +
+          'directory these credentials belong to. Until then no provider can sync, and Mizan will ' +
+          'refuse to overwrite the file so the stored keys are not lost.',
+      });
+      deferredError = deferredError ?? new Error('Stored credentials could not be decrypted');
+    }
 
     // Sync SimpleFIN
     if (creds.simplefin?.accessUrl) {

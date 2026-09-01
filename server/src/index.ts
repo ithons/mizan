@@ -8,7 +8,7 @@ import { createWriteStream } from 'fs';
 import ViteExpress from 'vite-express';
 
 import { runMigrations, closeDb, getDb, MIZAN_DIR } from './db/index';
-import { loadCredentials } from './services/credentials';
+import { credentialsUnreadable, loadCredentials } from './services/credentials';
 import { isSyncStale, runFullSync, startSyncScheduler, stopSyncScheduler } from './services/syncManager';
 import { stopAiScheduler } from './services/aiScheduler';
 import { autoCategorizeTransactions } from './services/rules';
@@ -78,12 +78,21 @@ async function main() {
   }
 
   // 2. Load credentials (pre-warm cache). Decryption depends on the OS keychain, which can fail
-  // (locked keychain, moved .mizan dir). Surface that clearly rather than dying anonymously.
-  try {
-    loadCredentials();
-  } catch (err) {
-    console.error('[fatal] Could not load stored credentials (OS keychain unavailable?).');
-    throw err;
+  // (locked keychain, moved .mizan dir).
+  //
+  // This used to be a try/catch whose comment said "surface that clearly rather than dying
+  // anonymously", around a function that cannot throw: `loadCredentials` catches everything and
+  // returns `{}`. So the guard was unreachable and the failure it names was the quietest event in
+  // the app. The state is reported rather than thrown on, because a locked keychain should not
+  // stop the owner reading a ledger that is already on disk. `runFullSync` records it as a failed
+  // run item so the sync says so too, and `saveCredentials` refuses to write over a file it could
+  // not read.
+  loadCredentials();
+  const credentialsFault = credentialsUnreadable();
+  if (credentialsFault) {
+    console.error(`[startup] Stored credentials could not be decrypted: ${credentialsFault}`);
+    console.error('[startup] No provider can sync, and credential writes are refused so the stored');
+    console.error('[startup] keys are not replaced. Unlock the OS keychain, or restore .mizan/.');
   }
 
   const app = express();

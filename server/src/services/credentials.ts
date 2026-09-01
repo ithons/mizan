@@ -40,6 +40,36 @@ export interface CredentialsStore {
 let _key: Buffer | null = null;
 let _cache: CredentialsStore | null = null;
 
+/**
+ * Non-null when `credentials.json` EXISTS but could not be decrypted. Distinct from an empty store.
+ *
+ * "No credentials file" and "credentials file I cannot read" were the same answer, `{}`, and that
+ * one conflation is worth spelling out because it is silent in both directions.
+ *
+ * Reading: `runFullSync` gates each provider on `if (creds.simplefin?.accessUrl)`. An unreadable
+ * file skipped both providers, wrote no `sync_run_items` at all, and finished the run `succeeded`
+ * with "Sync complete", so the client toasted success in green and `last_run.incomplete` stayed
+ * false, which is what keeps the balance beam calibrated. Every hour, on a sheet no provider had
+ * refreshed.
+ *
+ * Writing: this is the destructive half. Every mutator is load, mutate, save. Loading returned
+ * `{}`, so saving wrote a file containing ONLY the field being set. An owner who reacted to
+ * "SimpleFIN not connected" by re-linking would have destroyed their Coinbase key and every stored
+ * AI provider key, encrypted under the new value, with nothing said.
+ */
+let _unreadable: string | null = null;
+
+/** The decrypt error when the credentials file exists but cannot be read, else null. */
+export function credentialsUnreadable(): string | null {
+  return _unreadable;
+}
+
+/** Drop the module cache. Tests only: the cache and the unreadable flag both live for the process. */
+export function _resetCredentialsCacheForTesting(): void {
+  _cache = null;
+  _unreadable = null;
+}
+
 function getDerivedKey(): Buffer {
   if (_key) return _key;
 
@@ -127,24 +157,54 @@ function decrypt(enc: EncryptedFile): string {
   return Buffer.concat([decipher.update(ciphertext), decipher.final()]).toString('utf-8');
 }
 
+/**
+ * Total by design: read paths ask this only to decide whether a provider is configured, and a
+ * throw here would take the whole app down over a locked keychain. The fault is recorded in
+ * `_unreadable` instead, where `credentialsUnreadable()` exposes it to startup, to the sync run,
+ * and to the write guard below.
+ */
 export function loadCredentials(): CredentialsStore {
   if (_cache) return _cache;
   if (!fs.existsSync(CREDENTIALS_PATH)) {
+    _unreadable = null;
     _cache = {};
     return _cache;
   }
   try {
     const enc: EncryptedFile = JSON.parse(fs.readFileSync(CREDENTIALS_PATH, 'utf-8'));
     _cache = JSON.parse(decrypt(enc)) as CredentialsStore;
+    _unreadable = null;
     return _cache;
   } catch (err) {
-    console.error('[credentials] Failed to decrypt credentials:', (err as Error).message);
+    _unreadable = (err as Error).message;
+    console.error(
+      `[credentials] ${CREDENTIALS_PATH} exists but could not be decrypted: ${_unreadable}. ` +
+        'Every provider will be treated as not configured until this is resolved, and credential ' +
+        'writes are refused so the stored keys are not replaced by whichever one you set next.'
+    );
     _cache = {};
     return _cache;
   }
 }
 
+/**
+ * Refuse to write over a file we could not read.
+ *
+ * Every mutator is load, mutate, save, so a save while `_unreadable` is set replaces the whole
+ * store with the single field being written. Failing loudly is the only option that keeps the
+ * other secrets: they are still in the file, and the file is still the only copy.
+ */
+function assertCredentialsWritable(): void {
+  if (_unreadable === null) return;
+  throw new Error(
+    `Refusing to write ${CREDENTIALS_PATH}: it exists but could not be decrypted (${_unreadable}). ` +
+      'Writing now would replace every stored credential with only the one being set. Unlock the OS ' +
+      'keychain, or restore the .mizan directory this key belongs to, or move the file aside to start over.'
+  );
+}
+
 export function saveCredentials(store: CredentialsStore): void {
+  assertCredentialsWritable();
   _cache = store;
   const enc = encrypt(JSON.stringify(store));
   fs.writeFileSync(CREDENTIALS_PATH, JSON.stringify(enc), { mode: 0o600 });
