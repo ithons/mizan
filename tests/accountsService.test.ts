@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { migratedTestDb, insertAccount } from './helpers/schema';
-import { createManualAccount } from '../server/src/services/accounts';
+import { createManualAccount, updateAccount } from '../server/src/services/accounts';
 import { getSnapshotBalanceHistory } from '../server/src/services/balanceHistory';
 
 // institution_name is NOT NULL DEFAULT '' in the real schema, so the test proves
@@ -58,4 +58,43 @@ test('the snapshot series extracts one account\'s points, skipping what it canno
     { date: '2026-01-01', balance: 10000, source: 'measured' },
     { date: '2026-02-01', balance: 12000, source: 'measured' },
   ]);
+});
+
+/**
+ * A balance an institution reported cannot be overwritten through the API.
+ *
+ * `updateAccount`'s policy comment enumerated the provider-sourced fields and left out the money
+ * one; `current_balance` was then written unconditionally. The edit modal hides the field for
+ * synced accounts, which is not a guard: `PATCH /api/accounts/:id` took it from any client. And
+ * `takeSnapshot()` on the next sync recorded the falsified figure into `net_worth_snapshots` as a
+ * measured sheet before the provider put the real balance back, so history carried a number nobody
+ * reported. The standing rule is that a provider number is never rewritten; disagreement is
+ * recorded through migration 048's field provenance instead.
+ */
+test('a synced account refuses a balance edit, a manual one accepts it', (t) => {
+  const db = setupDb();
+  t.after(() => db.close());
+  const synced = insertAccount(db, { type: 'checking', is_manual: 0, current_balance: 123456 });
+  const manual = insertAccount(db, { type: 'cash', is_manual: 1, current_balance: 5000 });
+
+  const refused = updateAccount(db, synced, { current_balance: 9999.99 });
+  assert.deepEqual(refused, { ok: false, reason: 'manual_only' });
+  const untouched = db.prepare('SELECT current_balance FROM accounts WHERE id = ?').get(synced) as { current_balance: number };
+  assert.equal(untouched.current_balance, 123456, 'a provider balance was overwritten');
+
+  const accepted = updateAccount(db, manual, { current_balance: 75.25 });
+  assert.equal(accepted.ok, true);
+  const written = db.prepare('SELECT current_balance FROM accounts WHERE id = ?').get(manual) as { current_balance: number };
+  assert.equal(written.current_balance, 7525);
+});
+
+test('HEALTHY: the fields a synced account MAY edit still work', (t) => {
+  const db = setupDb();
+  t.after(() => db.close());
+  const synced = insertAccount(db, { type: 'checking', is_manual: 0 });
+  // type and is_liability are the documented escape hatch for a misclassified synced account.
+  const result = updateAccount(db, synced, { type: 'savings', account_name: 'Renamed' });
+  assert.equal(result.ok, true);
+  const row = db.prepare('SELECT type, account_name FROM accounts WHERE id = ?').get(synced) as { type: string; account_name: string };
+  assert.deepEqual(row, { type: 'savings', account_name: 'Renamed' });
 });

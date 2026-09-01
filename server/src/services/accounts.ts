@@ -103,11 +103,21 @@ export function updateAccount(db: Database.Database, id: string, input: UpdateAc
     return { ok: false, reason: 'not_found' };
   }
 
-  // institution_name/currency are provider-sourced and only editable on manual accounts.
-  // type/is_liability are editable on any account: a synced account's type is only ever a
-  // sync-time guess (see accountClassification.ts), and correcting it is the intended
+  // institution_name/currency/current_balance are provider-sourced and only editable on manual
+  // accounts. type/is_liability are editable on any account: a synced account's type is only
+  // ever a sync-time guess (see accountClassification.ts), and correcting it is the intended
   // escape hatch for a misclassified account.
-  const manualOnlyFields = [input.institution_name, input.currency];
+  //
+  // `current_balance` was missing from this list. The comment enumerated the fields the policy
+  // covers and left out the money one, and the write below then applied it unconditionally, so
+  // PATCH /api/accounts/:id could overwrite a figure the institution reported. The only guard was
+  // the edit modal not showing the field for synced accounts, which is not a guard. Worse than the
+  // overwrite itself: `takeSnapshot()` on the next sync recorded the falsified figure into
+  // net_worth_snapshots as a MEASURED sheet, and the provider then put the real balance back an
+  // hour later, so the history carried a number nobody reported and nothing could explain. The
+  // standing rule is that a number an institution reported is never rewritten; the app records
+  // disagreement instead, and the mechanism for that is migration 048's field provenance.
+  const manualOnlyFields = [input.institution_name, input.currency, input.current_balance];
   if (!existing.is_manual && manualOnlyFields.some((field) => field !== undefined)) {
     return { ok: false, reason: 'manual_only' };
   }
