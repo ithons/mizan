@@ -652,7 +652,12 @@ function getTransactionFullTool(db: Database.Database, input: ToolInput): unknow
   // `amount` is the only money column on the row. `quantity` is a unit count and stays as stored;
   // dollarizing it would turn 0.0031964 BTC into three ten-thousandths of a coin.
   return {
-    transaction: dollarizeFields(row, ['amount']),
+    // Both money fields, in the same unit, because they are shown side by side and the
+    // `reading.amount` line below tells the model "Dollars." for the object. This dollarized
+    // `amount` alone, so `provider_amount` (integer cents from PROVIDER_AMOUNT_SQL) sat beside it
+    // 100x larger under a label saying dollars. `routes/transactions.ts` dollarizes both and says
+    // why they must travel together.
+    transaction: dollarizeFields(row, ['amount', 'provider_amount']),
     reading: {
       amount: 'Dollars. Negative means money left the account. A positive amount in an expense category is a refund, not income.',
       counts_toward_reports: {

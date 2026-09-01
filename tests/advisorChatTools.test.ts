@@ -1134,3 +1134,43 @@ test('a reverted create_merchant_rule call reports the rule as not created', () 
     'a reverted batch still reports rule_created from the pre-revert outcome'
   );
 });
+
+/**
+ * `get_transaction_full` ships both money fields in the unit it says it does.
+ *
+ * `provider_amount` comes from `PROVIDER_AMOUNT_SQL` in integer cents. The tool dollarized `amount`
+ * alone and then told the model "Dollars." for the object, so an owner-corrected row read, for
+ * example, amount 100.00 beside provider_amount -10000: the disagreement the field exists to show,
+ * mis-stated by a factor of a hundred to the one reader that is meant to reason about it.
+ */
+test('get_transaction_full dollarizes provider_amount beside amount', (t) => {
+  const db = migratedTestDb();
+  t.after(() => db.close());
+  const account = insertAccount(db);
+  const category = insertCategory(db);
+  // The owner corrected a -$100.00 provider figure to +$100.00; migration 048 records both.
+  const id = insertTransaction(db, { account_id: account, category_id: category, amount: 10000 });
+  db.prepare("UPDATE transactions SET amount_source = 'human' WHERE id = ?").run(id);
+  db.prepare(`
+    INSERT INTO transaction_field_revisions
+      (id, transaction_id, field, from_value, to_value, from_source, to_source, origin, created_at)
+    VALUES ('rev_1', ?, 'amount', '10000', '-10000', 'human', 'provider', 'provider_rejected', '2026-08-01T00:00:00.000Z')
+  `).run(id);
+
+  const result = transactionFull(db, id);
+  assert.equal(result.transaction.amount, 100);
+  // It used to be -10000 here, cents, beside a dollar figure.
+  assert.equal(result.transaction.provider_amount, -100, 'provider_amount reached the model in cents');
+});
+
+test('HEALTHY: a row the provider still owns carries no provider_amount, and nothing is invented', (t) => {
+  const db = migratedTestDb();
+  t.after(() => db.close());
+  const account = insertAccount(db);
+  const category = insertCategory(db);
+  const id = insertTransaction(db, { account_id: account, category_id: category, amount: -4200 });
+
+  const result = transactionFull(db, id);
+  assert.equal(result.transaction.amount, -42);
+  assert.equal(result.transaction.provider_amount, null);
+});
