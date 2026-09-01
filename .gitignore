@@ -2,6 +2,7 @@ node_modules/
 dist/
 .env*
 .mizan/
+.mizan-*/
 *.pem
 *.key
 .DS_Store

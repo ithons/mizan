@@ -4,7 +4,17 @@ import path from 'path';
 
 // Store data in the project directory. process.cwd() is always the project
 // root because npm scripts run from there, in both dev and production.
-const MIZAN_DIR = path.join(process.cwd(), '.mizan');
+//
+// MIZAN_DIR_OVERRIDE exists so the app can be booted against a database that is not the owner's.
+// Without it there was no such thing: this was a bare constant, and `server/src/index.ts` runs
+// `reclassifyAutoAccountTypes` on startup whenever any account carries `type_source = 'auto'`.
+// So looking at the app at all, to check a rendering, to reproduce a defect, to drive a screen,
+// cost a write to the real ledger. That is why every "the owner sees it in a browser" claim in
+// the plan files is unverified, and why the two phases gated on seeing the screen never landed.
+// A relative value resolves against cwd so `MIZAN_DIR_OVERRIDE=.mizan-scratch npm run dev` works.
+const MIZAN_DIR = process.env.MIZAN_DIR_OVERRIDE
+  ? path.resolve(process.cwd(), process.env.MIZAN_DIR_OVERRIDE)
+  : path.join(process.cwd(), '.mizan');
 const DB_PATH = path.join(MIZAN_DIR, 'mizan.db');
 const MIGRATIONS_DIR = path.join(__dirname, 'migrations');
 
