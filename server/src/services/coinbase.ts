@@ -72,6 +72,80 @@ export function resolveCryptoSecurityId(db: Database.Database, ticker: string): 
 // one coin, so unlike SimpleFIN there's no array of positions, just one security per account.
 // cost_basis stays NULL: Coinbase's brokerage API reports none, and nothing in this app derives
 // one. See upsertCoinbaseTransaction for why this ledger cannot honestly produce it either.
+/** One row of the v3 brokerage accounts response. */
+export interface CoinbaseAccountPayload {
+  uuid: string;
+  name: string;
+  currency: string;
+  available_balance: {
+    value: string;
+    currency: string;
+  };
+  type: string;
+}
+
+/**
+ * The accounts array from a Coinbase page, or a throw.
+ *
+ * A 200 whose body carries no accounts array is UNREADABLE, not empty, and the difference decides
+ * whether the ledger keeps its holdings. `simplefin.ts` has refused this shape since the same
+ * defect was found there; the note at simplefin.ts:91-93 saying "coinbase.ts already zeroed its
+ * side; this brings the two providers into line" was true of the zeroing and not of the guard in
+ * front of it, so this side had the consequence without the check.
+ */
+export function coinbaseAccountsOrThrow(data: unknown): CoinbaseAccountPayload[] {
+  const accounts = (data as { accounts?: unknown } | null | undefined)?.accounts;
+  if (!Array.isArray(accounts)) {
+    throw new Error(
+      'Coinbase answered 200 with no accounts array; refusing to read an unreadable response as zero holdings.'
+    );
+  }
+  return accounts as CoinbaseAccountPayload[];
+}
+
+/**
+ * Drop coins the feed no longer reports, and refuse to do it when the feed reported nothing at all.
+ *
+ * Total absence is the "unknown" case, never the "sold everything" case, and the two ARE
+ * distinguishable: a genuine sell-out still returns account rows, each carrying a zero balance, so
+ * `accountRowsSeen` is positive while `seenCurrencies` is empty. A maintenance page, a JSON error
+ * envelope or an empty default portfolio returns no rows at all.
+ *
+ * Without the guard one such response zeroed every holding and wrote the account balance to 0, and
+ * because nothing threw the stage recorded 'succeeded'. `takeSnapshot()` runs later in the same run
+ * and wrote that zero into `net_worth_snapshots` with `is_estimated = 0`. The balances return on the
+ * next good sync. The snapshot does not.
+ *
+ * @returns how many holdings were zeroed.
+ */
+export function zeroStaleCoinbaseHoldings(
+  db: Database.Database,
+  accountId: string,
+  seenCurrencies: Set<string>,
+  accountRowsSeen: number,
+  now: string
+): number {
+  if (accountRowsSeen === 0) {
+    console.warn(
+      '[coinbase] Response carried no account rows at all; skipping the zero-out pass rather than reading total absence as total sale.'
+    );
+    return 0;
+  }
+
+  const held = db.prepare(
+    'SELECT h.id AS holding_id, s.ticker FROM holdings h JOIN securities s ON s.id = h.security_id WHERE h.account_id = ?'
+  ).all(accountId) as Array<{ holding_id: string; ticker: string | null }>;
+  let zeroedCount = 0;
+  for (const row of held) {
+    if (row.ticker && seenCurrencies.has(row.ticker)) continue;
+    db.prepare(
+      'UPDATE holdings SET quantity = 0, institution_value = 0, updated_at = ? WHERE id = ?'
+    ).run(now, row.holding_id);
+    zeroedCount++;
+  }
+  return zeroedCount;
+}
+
 export function upsertCoinbaseHolding(
   db: Database.Database,
   accountId: string,
@@ -412,19 +486,8 @@ export async function syncCoinbase(): Promise<CoinbaseSyncResult> {
   const db = getDb();
   const now = new Date().toISOString();
 
-  interface CoinbaseAccount {
-    uuid: string;
-    name: string;
-    currency: string;
-    available_balance: {
-      value: string;
-      currency: string;
-    };
-    type: string;
-  }
-
   interface AccountsPage {
-    accounts: CoinbaseAccount[];
+    accounts: CoinbaseAccountPayload[];
     has_next: boolean;
     cursor: string;
     size: number;
@@ -433,6 +496,9 @@ export async function syncCoinbase(): Promise<CoinbaseSyncResult> {
   let cursor: string | undefined;
   let hasNext = true;
   let coinCount = 0;
+  // Account ROWS in the response, whatever their balance. A genuine sell-out returns rows with
+  // zero balances; an unreadable body returns none, and only the second may not zero the ledger.
+  let accountRowsSeen = 0;
   const balanceChanges: AccountBalanceChange[] = [];
   const seenCurrencies = new Set<string>();
   const activeConnectionId = ensureCoinbaseConnection(db, now);
@@ -468,7 +534,10 @@ export async function syncCoinbase(): Promise<CoinbaseSyncResult> {
       `/api/v3/brokerage/accounts?${params.toString()}`
     );
 
-    for (const account of data.accounts || []) {
+    const pageAccounts = coinbaseAccountsOrThrow(data);
+    accountRowsSeen += pageAccounts.length;
+
+    for (const account of pageAccounts) {
       const currency = account.available_balance?.currency || account.currency;
       const balanceValue = parseCoinbaseNumber(
         account.available_balance?.value,
@@ -501,18 +570,17 @@ export async function syncCoinbase(): Promise<CoinbaseSyncResult> {
     if (!hasNext) break;
   }
 
-  // Zero out coins fully sold since the last sync so they drop out of the account total.
-  const held = db.prepare(
-    'SELECT h.id AS holding_id, s.ticker FROM holdings h JOIN securities s ON s.id = h.security_id WHERE h.account_id = ?'
-  ).all(accountId) as Array<{ holding_id: string; ticker: string | null }>;
-  let zeroedCount = 0;
-  for (const row of held) {
-    if (row.ticker && seenCurrencies.has(row.ticker)) continue;
-    db.prepare(
-      'UPDATE holdings SET quantity = 0, institution_value = 0, updated_at = ? WHERE id = ?'
-    ).run(now, row.holding_id);
-    zeroedCount++;
-  }
+  // Total absence is the "unknown" case, never the "sold everything" case, and the two are
+  // distinguishable: a genuine sell-out still returns account ROWS, each with a zero balance, so
+  // `accountRowsSeen` is positive while `seenCurrencies` is empty. A maintenance page, an error
+  // envelope or a default portfolio returns no rows at all.
+  //
+  // Without this, one such response zeroed every holding, wrote the account balance to 0, and the
+  // stage still recorded 'succeeded' because nothing threw. `takeSnapshot()` runs later in the same
+  // run and wrote that zero into net_worth_snapshots with `is_estimated = 0`: the balances come back
+  // on the next good sync, the snapshot does not.
+  const feedWasEmpty = accountRowsSeen === 0;
+  const zeroedCount = zeroStaleCoinbaseHoldings(db, accountId, seenCurrencies, accountRowsSeen, now);
 
   // The account balance is the sum of its holdings (authoritative, already in cents).
   const totalCents = (db.prepare(
@@ -520,7 +588,7 @@ export async function syncCoinbase(): Promise<CoinbaseSyncResult> {
   ).get(accountId) as { total: number }).total;
 
   const previousCents = existingAcct?.current_balance ?? 0;
-  if (balancesDiffer(previousCents, totalCents)) {
+  if (!feedWasEmpty && balancesDiffer(previousCents, totalCents)) {
     balanceChanges.push({
       accountId,
       accountName: existingAcct?.account_name ?? 'Coinbase',
@@ -531,8 +599,12 @@ export async function syncCoinbase(): Promise<CoinbaseSyncResult> {
       currency: 'USD',
     });
   }
-  db.prepare('UPDATE accounts SET current_balance = ?, updated_at = ? WHERE id = ?').run(totalCents, now, accountId);
-  console.log(`[coinbase] Consolidated account: ${coinCount} coin${coinCount === 1 ? '' : 's'} held, ${zeroedCount} zeroed, ${toDollars(totalCents).toFixed(2)} total`);
+  if (!feedWasEmpty) {
+    db.prepare('UPDATE accounts SET current_balance = ?, updated_at = ? WHERE id = ?').run(totalCents, now, accountId);
+    console.log(`[coinbase] Consolidated account: ${coinCount} coin${coinCount === 1 ? '' : 's'} held, ${zeroedCount} zeroed, ${toDollars(totalCents).toFixed(2)} total`);
+  } else {
+    console.log(`[coinbase] Left the account at ${toDollars(previousCents).toFixed(2)}; the feed said nothing about it.`);
+  }
 
   // Import the full crypto ledger for the active connection: v3 brokerage orders (buy/sell) plus
   // the v2 ledger (converts/sends/receives/fiat). Both dedup on coinbase_transaction_id and honor
