@@ -160,8 +160,8 @@ export function SimplefinSection() {
       ) : (
         <form onSubmit={handleConnect} className="space-y-4">
           <div>
-            <label className="mz-label">Setup token</label>
-            <input
+            <label htmlFor="simplefinsection-setup-token" className="mz-label">Setup token</label>
+            <input id="simplefinsection-setup-token"
               type="text"
               value={setupToken}
               onChange={(e) => setSetupToken(e.target.value)}

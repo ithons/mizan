@@ -57,8 +57,8 @@ export function AddEntryModal({ open, onClose }: { open: boolean; onClose: () =>
       <div className="space-y-4">
         <div className="flex gap-4">
           <div className="flex-1">
-            <label className="mz-label">Date</label>
-            <input
+            <label htmlFor="modals-date" className="mz-label">Date</label>
+            <input id="modals-date"
               type="date"
               className="mz-field"
               value={form.date}
@@ -66,7 +66,7 @@ export function AddEntryModal({ open, onClose }: { open: boolean; onClose: () =>
             />
           </div>
           <div className="flex-1">
-            <label className="mz-label">Amount</label>
+            <label htmlFor="modals-amount" className="mz-label">Amount</label>
             <div className="flex gap-2">
               <select
                 className="mz-field !w-[64px]"
@@ -78,6 +78,7 @@ export function AddEntryModal({ open, onClose }: { open: boolean; onClose: () =>
                 <option value="income">+</option>
               </select>
               <input
+                id="modals-amount"
                 type="number"
                 className="mz-field tabular-nums"
                 placeholder="0.00"
@@ -88,8 +89,8 @@ export function AddEntryModal({ open, onClose }: { open: boolean; onClose: () =>
           </div>
         </div>
         <div>
-          <label className="mz-label">Merchant</label>
-          <input
+          <label htmlFor="modals-merchant" className="mz-label">Merchant</label>
+          <input id="modals-merchant"
             className="mz-field"
             placeholder="Blue Bottle Coffee"
             value={form.merchant}
@@ -98,8 +99,8 @@ export function AddEntryModal({ open, onClose }: { open: boolean; onClose: () =>
         </div>
         <div className="flex gap-4">
           <div className="flex-1">
-            <label className="mz-label">Account</label>
-            <select
+            <label htmlFor="modals-account" className="mz-label">Account</label>
+            <select id="modals-account"
               className="mz-field"
               value={form.account_id}
               onChange={(e) => setForm({ ...form, account_id: e.target.value })}
@@ -115,8 +116,8 @@ export function AddEntryModal({ open, onClose }: { open: boolean; onClose: () =>
             </select>
           </div>
           <div className="flex-1">
-            <label className="mz-label">Category</label>
-            <CategoryPicker
+            <label htmlFor="modals-category-1" className="mz-label">Category</label>
+            <CategoryPicker id="modals-category-1"
               variant="field"
               value={form.category_id}
               categories={categories ?? []}
@@ -126,8 +127,8 @@ export function AddEntryModal({ open, onClose }: { open: boolean; onClose: () =>
           </div>
         </div>
         <div>
-          <label className="mz-label">Notes</label>
-          <input className="mz-field" value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} />
+          <label htmlFor="modals-notes-2" className="mz-label">Notes</label>
+          <input id="modals-notes-2" className="mz-field" value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} />
         </div>
         <div className="flex items-center gap-5 pt-1">
           <InkButton onClick={() => mutation.mutate()} disabled={mutation.isPending}>
@@ -244,9 +245,10 @@ export function EditEntryModal({ transaction, onClose }: { transaction: Transact
             instead of overwriting it. Everything that sums money reads the same column, so the
             correction lands on the ledger, the reports and the reconciliation at once. */}
         <div>
-          <label className="mz-label">Amount</label>
+          <label htmlFor="modals-scheduled-amount" className="mz-label">Amount</label>
           <div className="flex items-center gap-3">
             <input
+              id="modals-scheduled-amount"
               type="text"
               inputMode="decimal"
               aria-label="Amount"
@@ -290,8 +292,8 @@ export function EditEntryModal({ transaction, onClose }: { transaction: Transact
           )}
         </div>
         <div>
-          <label className="mz-label">Category</label>
-          <CategoryPicker
+          <label htmlFor="modals-category-2" className="mz-label">Category</label>
+          <CategoryPicker id="modals-category-2"
             variant="field"
             value={categoryId}
             categories={categories ?? []}
@@ -300,8 +302,8 @@ export function EditEntryModal({ transaction, onClose }: { transaction: Transact
           />
         </div>
         <div>
-          <label className="mz-label">Notes</label>
-          <input className="mz-field" value={notes} onChange={(e) => setNotes(e.target.value)} />
+          <label htmlFor="modals-notes" className="mz-label">Notes</label>
+          <input id="modals-notes" className="mz-field" value={notes} onChange={(e) => setNotes(e.target.value)} />
         </div>
         <div className="flex items-center gap-5 pt-1">
           <InkButton onClick={() => save.mutate()} disabled={save.isPending}>
@@ -383,8 +385,8 @@ export function AddScheduledModal({
     <Modal open={open} onClose={onClose} title="Add a scheduled item">
       <div className="space-y-4">
         <div>
-          <label className="mz-label">Name</label>
-          <input
+          <label htmlFor="modals-name" className="mz-label">Name</label>
+          <input id="modals-name"
             className="mz-field"
             value={name}
             onChange={(e) => setName(e.target.value)}
@@ -394,8 +396,8 @@ export function AddScheduledModal({
         </div>
         <div className="flex gap-4">
           <div className="flex-1">
-            <label className="mz-label">Amount</label>
-            <input
+            <label htmlFor="modals-amount-2" className="mz-label">Amount</label>
+            <input id="modals-amount-2"
               type="number"
               className="mz-field tabular-nums"
               placeholder="0.00"
@@ -404,8 +406,8 @@ export function AddScheduledModal({
             />
           </div>
           <div className="flex-1">
-            <label className="mz-label">Frequency</label>
-            <select
+            <label htmlFor="modals-frequency" className="mz-label">Frequency</label>
+            <select id="modals-frequency"
               className="mz-field"
               value={frequency}
               onChange={(e) => setFrequency(e.target.value as RecurringPattern['frequency'])}
@@ -420,8 +422,8 @@ export function AddScheduledModal({
         </div>
         <div className="flex gap-4">
           <div className="flex-1">
-            <label className="mz-label">Next date</label>
-            <input
+            <label htmlFor="modals-next-date" className="mz-label">Next date</label>
+            <input id="modals-next-date"
               type="date"
               className="mz-field tabular-nums"
               value={nextDate}
@@ -429,8 +431,8 @@ export function AddScheduledModal({
             />
           </div>
           <div className="flex-1">
-            <label className="mz-label">Category</label>
-            <CategoryPicker
+            <label htmlFor="modals-category-3" className="mz-label">Category</label>
+            <CategoryPicker id="modals-category-3"
               variant="field"
               value={categoryId}
               categories={categories}

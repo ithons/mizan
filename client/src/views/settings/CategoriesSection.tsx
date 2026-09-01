@@ -83,10 +83,17 @@ function ColorPicker({
   value,
   onChange,
   size,
+  labelledBy,
 }: {
   value: string;
   onChange: (color: string) => void;
   size: 'sm' | 'md';
+  /**
+   * The id of the text that names this group. A swatch picker is a set of buttons, not one
+   * control, so a `<label htmlFor>` has nothing to point at; the group carries `aria-labelledby`
+   * instead and the "Color" label becomes the text it points back to.
+   */
+  labelledBy?: string;
 }) {
   const dim = size === 'sm' ? 'h-4 w-4' : 'h-5 w-5';
   const swatch = (color: string, offRamp: boolean) => (
@@ -107,7 +114,11 @@ function ColorPicker({
   );
 
   return (
-    <div className={`flex flex-wrap items-center ${size === 'sm' ? 'gap-1' : 'gap-2'}`}>
+    <div
+      role="group"
+      aria-labelledby={labelledBy}
+      className={`flex flex-wrap items-center ${size === 'sm' ? 'gap-1' : 'gap-2'}`}
+    >
       {!isOnRamp(value) && swatch(value, true)}
       {CATEGORY_PRESET_COLORS.map((color) => swatch(color, false))}
     </div>
@@ -343,9 +354,9 @@ export function CategoriesSection() {
       >
         <div className="space-y-4">
           <div>
-            <label className="mz-label">Name</label>
+            <label htmlFor="categoriessection-name" className="mz-label">Name</label>
             <div className="flex gap-2">
-              <input
+              <input id="categoriessection-name"
                 autoFocus
                 className="mz-field flex-1"
                 value={addName}
@@ -364,8 +375,8 @@ export function CategoriesSection() {
             </div>
           </div>
           <div>
-            <label className="mz-label">Color</label>
-            <ColorPicker value={addColor} onChange={setAddColor} size="md" />
+            <span id="categories-add-color" className="mz-label">Color</span>
+            <ColorPicker value={addColor} onChange={setAddColor} size="md" labelledBy="categories-add-color" />
           </div>
           <div className="flex items-center gap-5 pt-1">
             <InkButton onClick={() => addMutation.mutate()} disabled={addMutation.isPending || !addName}>

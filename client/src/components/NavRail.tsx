@@ -193,6 +193,10 @@ export function NavRail() {
           className={`mt-3 block w-full pl-3 pr-[22px] text-right text-note transition-colors ${
             syncStatus === 'error' ? 'font-medium text-ink' : 'text-muted hover:text-ink'
           }`}
+          // The one line on every screen that changes on its own. A screen reader hears the new
+          // state when a sync finishes or fails without the owner having to go looking; 'polite'
+          // because nothing here is urgent enough to interrupt what they were reading.
+          aria-live="polite"
         >
           {syncLabel}
         </button>

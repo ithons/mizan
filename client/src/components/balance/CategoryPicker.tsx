@@ -15,6 +15,12 @@ interface CategoryPickerProps {
   align?: 'left' | 'right';
   /** 'field' = full-width bordered form control (modals); 'quiet' = text trigger (filter rows). */
   variant?: 'field' | 'quiet';
+  /**
+   * Forwarded to the trigger button so a `<label htmlFor>` can name it. The four "Category" labels
+   * in the ledger and plan modals sat above this component with nothing to point at, which made
+   * them the last unassociated labels in the app.
+   */
+  id?: string;
   disabled?: boolean;
   className?: string;
 }
@@ -33,7 +39,7 @@ interface Row {
  * onChange(categoryId). Reuses the combobox/listbox pattern from Select.tsx.
  */
 export function CategoryPicker({
-  value, categories, onChange, placeholder = 'Category', clearable = true, filter, align = 'left', variant = 'quiet', disabled = false, className = '',
+  value, categories, onChange, placeholder = 'Category', clearable = true, filter, align = 'left', variant = 'quiet', disabled = false, className = '', id,
 }: CategoryPickerProps) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
@@ -99,6 +105,7 @@ export function CategoryPicker({
   return (
     <div ref={rootRef} className={`relative ${className}`}>
       <button
+        id={id}
         type="button" role="combobox" aria-expanded={open} aria-haspopup="listbox" disabled={disabled}
         onClick={() => !disabled && setOpen((o) => !o)}
         className={variant === 'field'

@@ -25,8 +25,8 @@ function AccountFields({ form, setForm, showBalance }: {
   return (
     <>
       <div>
-        <label className="mz-label">Account name</label>
-        <input
+        <label htmlFor="modals-account-name" className="mz-label">Account name</label>
+        <input id="modals-account-name"
           className="mz-field"
           value={form.account_name}
           onChange={(e) => setForm({ ...form, account_name: e.target.value })}
@@ -34,8 +34,8 @@ function AccountFields({ form, setForm, showBalance }: {
         />
       </div>
       <div>
-        <label className="mz-label">Institution</label>
-        <input
+        <label htmlFor="modals-institution" className="mz-label">Institution</label>
+        <input id="modals-institution"
           className="mz-field"
           value={form.institution_name}
           onChange={(e) => setForm({ ...form, institution_name: e.target.value })}
@@ -44,8 +44,8 @@ function AccountFields({ form, setForm, showBalance }: {
       </div>
       <div className="flex gap-4">
         <div className="flex-1">
-          <label className="mz-label">Type</label>
-          <select
+          <label htmlFor="modals-type" className="mz-label">Type</label>
+          <select id="modals-type"
             className="mz-field"
             value={form.type}
             onChange={(e) => setForm({ ...form, type: e.target.value })}
@@ -67,8 +67,8 @@ function AccountFields({ form, setForm, showBalance }: {
       </div>
       {showBalance && (
         <div>
-          <label className="mz-label">Current balance</label>
-          <input
+          <label htmlFor="modals-current-balance" className="mz-label">Current balance</label>
+          <input id="modals-current-balance"
             type="number"
             className="mz-field tabular-nums"
             value={form.current_balance}
@@ -168,8 +168,8 @@ export function MergeAccountModal({ open, source, accounts, onClose, onMerged }:
     <Modal open={open} onClose={onClose} title="Merge account">
       <div className="space-y-4">
         <div>
-          <label className="mz-label">Merge into</label>
-          <select className="mz-field" value={targetId} onChange={(e) => setTargetId(e.target.value)}>
+          <label htmlFor="modals-merge-into" className="mz-label">Merge into</label>
+          <select id="modals-merge-into" className="mz-field" value={targetId} onChange={(e) => setTargetId(e.target.value)}>
             <option value="">Pick an account…</option>
             {candidates.map((a) => (
               <option key={a.id} value={a.id}>

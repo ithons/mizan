@@ -755,10 +755,10 @@ export function DataSection() {
             </p>
           </div>
           <div>
-            <label className="mz-label">
+            <label htmlFor="datasection-type-delete-to-confirm" className="mz-label">
               Type <span className="font-mono text-clay">delete</span> to confirm
             </label>
-            <input
+            <input id="datasection-type-delete-to-confirm"
               className="mz-field font-mono !text-body"
               value={deleteConfirm}
               onChange={(e) => setDeleteConfirm(e.target.value)}

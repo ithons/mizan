@@ -403,16 +403,16 @@ function BudgetModal({
     <Modal open={open} onClose={onClose} title={editing ? `Edit ${editing.category_name ?? 'budget'}` : 'Add a monthly budget'}>
       <div className="space-y-4">
         <div>
-          <label className="mz-label">Category</label>
-          <CategoryPicker
+          <label htmlFor="plan-category" className="mz-label">Category</label>
+          <CategoryPicker id="plan-category"
             variant="field" value={categoryId} categories={categories} onChange={setCategoryId}
             placeholder="Pick a category…" disabled={Boolean(editing)}
             filter={(c) => !c.is_income && (editing ? c.id === editing.category_id || !budgetedIds.has(c.id) : !budgetedIds.has(c.id))}
           />
         </div>
         <div>
-          <label className="mz-label">Monthly amount</label>
-          <input type="number" className="mz-field tabular-nums" placeholder="0.00" value={amount} onChange={(e) => setAmount(e.target.value)} />
+          <label htmlFor="plan-monthly-amount" className="mz-label">Monthly amount</label>
+          <input id="plan-monthly-amount" type="number" className="mz-field tabular-nums" placeholder="0.00" value={amount} onChange={(e) => setAmount(e.target.value)} />
         </div>
         <label className="flex cursor-pointer items-center gap-2">
           <input
@@ -497,13 +497,13 @@ function GoalModal({ open, onClose, editing }: { open: boolean; onClose: () => v
     <Modal open={open} onClose={onClose} title={editing ? `Edit ${editing.name}` : 'New goal'}>
       <div className="space-y-4">
         <div>
-          <label className="mz-label">Name</label>
-          <input className="mz-field" placeholder="Emergency fund" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
+          <label htmlFor="plan-name" className="mz-label">Name</label>
+          <input id="plan-name" className="mz-field" placeholder="Emergency fund" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
         </div>
         <div className="flex gap-4">
           <div className="flex-1">
-            <label className="mz-label">Target amount</label>
-            <input
+            <label htmlFor="plan-target-amount" className="mz-label">Target amount</label>
+            <input id="plan-target-amount"
               type="number"
               className="mz-field tabular-nums"
               placeholder="10,000"
@@ -512,8 +512,8 @@ function GoalModal({ open, onClose, editing }: { open: boolean; onClose: () => v
             />
           </div>
           <div className="flex-1">
-            <label className="mz-label">Saved so far</label>
-            <input
+            <label htmlFor="plan-saved-so-far" className="mz-label">Saved so far</label>
+            <input id="plan-saved-so-far"
               type="number"
               className="mz-field tabular-nums"
               placeholder="0.00"
@@ -524,12 +524,12 @@ function GoalModal({ open, onClose, editing }: { open: boolean; onClose: () => v
         </div>
         <div className="flex gap-4">
           <div className="flex-1">
-            <label className="mz-label">Target date</label>
-            <input type="date" className="mz-field" value={form.target_date} onChange={(e) => setForm({ ...form, target_date: e.target.value })} />
+            <label htmlFor="plan-target-date" className="mz-label">Target date</label>
+            <input id="plan-target-date" type="date" className="mz-field" value={form.target_date} onChange={(e) => setForm({ ...form, target_date: e.target.value })} />
           </div>
           <div className="flex-1">
-            <label className="mz-label">Linked account</label>
-            <select className="mz-field" value={form.account_id} onChange={(e) => setForm({ ...form, account_id: e.target.value })}>
+            <label htmlFor="plan-linked-account" className="mz-label">Linked account</label>
+            <select id="plan-linked-account" className="mz-field" value={form.account_id} onChange={(e) => setForm({ ...form, account_id: e.target.value })}>
               <option value="">None</option>
               {(accounts ?? [])
                 .filter((a) => !a.is_hidden)

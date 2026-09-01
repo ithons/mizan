@@ -84,8 +84,8 @@ export function CoinbaseSection() {
             , under Advanced Trade API, with read-only permissions.
           </p>
           <div>
-            <label className="mz-label">Key name</label>
-            <input
+            <label htmlFor="coinbasesection-key-name" className="mz-label">Key name</label>
+            <input id="coinbasesection-key-name"
               className="mz-field font-mono !text-body"
               value={form.keyName}
               onChange={(e) => setForm({ ...form, keyName: e.target.value })}
@@ -93,9 +93,9 @@ export function CoinbaseSection() {
             />
           </div>
           <div>
-            <label className="mz-label">Private key</label>
+            <label htmlFor="coinbasesection-private-key" className="mz-label">Private key</label>
             <div className="relative">
-              <textarea
+              <textarea id="coinbasesection-private-key"
                 className="mz-field resize-none font-mono !text-body"
                 rows={4}
                 value={form.privateKey}

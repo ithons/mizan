@@ -102,8 +102,8 @@ function HoldingModal({ holding, accountName, onClose }: { holding: Holding | nu
         )}
         <div className="flex gap-4">
           <div className="flex-1">
-            <label className="mz-label">Manual cost basis</label>
-            <input
+            <label htmlFor="investments-manual-cost-basis" className="mz-label">Manual cost basis</label>
+            <input id="investments-manual-cost-basis"
               type="number"
               className="mz-field tabular-nums"
               placeholder={holding.provider_cost_basis != null ? `Provider: ${holding.provider_cost_basis.toFixed(2)}` : 'Total paid'}
@@ -112,13 +112,13 @@ function HoldingModal({ holding, accountName, onClose }: { holding: Holding | nu
             />
           </div>
           <div className="flex-1">
-            <label className="mz-label">Sector</label>
-            <input className="mz-field" placeholder="Technology" value={sector} onChange={(e) => setSector(e.target.value)} />
+            <label htmlFor="investments-sector" className="mz-label">Sector</label>
+            <input id="investments-sector" className="mz-field" placeholder="Technology" value={sector} onChange={(e) => setSector(e.target.value)} />
           </div>
         </div>
         <div>
-          <label className="mz-label">Basis note</label>
-          <input className="mz-field" placeholder="e.g. average of two lots" value={note} onChange={(e) => setNote(e.target.value)} />
+          <label htmlFor="investments-basis-note" className="mz-label">Basis note</label>
+          <input id="investments-basis-note" className="mz-field" placeholder="e.g. average of two lots" value={note} onChange={(e) => setNote(e.target.value)} />
         </div>
         <div className="text-note leading-relaxed text-muted-2">
           Manual basis overrides the provider's number everywhere gains are shown. Clear the field to fall back
