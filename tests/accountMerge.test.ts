@@ -21,13 +21,15 @@ function addHistory(
   securityId: string,
   date: string,
   quantity: number,
-  value: number
+  value: number,
+  costBasis: number | null = null
 ): void {
   db.prepare(`
     INSERT INTO holdings_history
-      (id, account_id, security_id, date, quantity, institution_price, institution_value, created_at)
-    VALUES (?, ?, ?, ?, ?, 1.0, ?, '2026-07-01')
-  `).run(`${accountId}-${securityId}-${date}`, accountId, securityId, date, quantity, value);
+      (id, account_id, security_id, date, quantity, institution_price, institution_value,
+       cost_basis, created_at)
+    VALUES (?, ?, ?, ?, ?, 1.0, ?, ?, '2026-07-01')
+  `).run(`${accountId}-${securityId}-${date}`, accountId, securityId, date, quantity, value, costBasis);
 }
 
 test('merging a provider-linked account does not violate the unique provider id', () => {
@@ -169,5 +171,86 @@ test('remapAccountIdInSnapshots leaves unrelated snapshots alone', () => {
   `).run(JSON.stringify({ [a]: 100 }));
 
   assert.equal(remapAccountIdInSnapshots(db, b, a), 0);
+  db.close();
+});
+
+/**
+ * A colliding history day merges all four numeric columns, not two.
+ *
+ * The collision pass summed `quantity` and `institution_value` and left `cost_basis` and
+ * `institution_price` alone, so the merged row kept the target's basis beside a doubled value and
+ * the position read as having gained everything the source side had cost. The suite could not see
+ * it because `addHistory` did not carry a basis and the collision test asserted only two columns.
+ */
+function historyRow(db: ReturnType<typeof migratedTestDb>, accountId: string, date: string) {
+  return db
+    .prepare(
+      'SELECT quantity, institution_value, cost_basis, institution_price FROM holdings_history WHERE account_id = ? AND date = ?'
+    )
+    .get(accountId, date) as {
+    quantity: number;
+    institution_value: number;
+    cost_basis: number | null;
+    institution_price: number;
+  };
+}
+
+test('a colliding history day sums the cost basis as well as the value', () => {
+  const db = migratedTestDb();
+  const target = insertAccount(db, { type: 'brokerage' });
+  const source = insertAccount(db, { type: 'brokerage' });
+  const vt = seedSecurity(db, 'vt');
+  // Two parts of one position on the same day: 4 units worth $200 costing $150, and 6 units worth
+  // $300 costing $250.
+  addHistory(db, target, vt, '2026-07-01', 4, 20000, 15000);
+  addHistory(db, source, vt, '2026-07-01', 6, 30000, 25000);
+
+  mergeAccounts(db, target, source);
+
+  const row = historyRow(db, target, '2026-07-01');
+  assert.equal(row.quantity, 10);
+  assert.equal(row.institution_value, 50000);
+  // It used to keep 15000 here, so the merged position showed a $350 gain on a $100 one.
+  assert.equal(row.cost_basis, 40000);
+  // A per-unit price does not sum: $500 over 10 units is $50, not $2.
+  assert.equal(row.institution_price, 50);
+  db.close();
+});
+
+test('a basis unknown on either side makes the merged basis unknown, never zero', () => {
+  const db = migratedTestDb();
+  const target = insertAccount(db, { type: 'brokerage' });
+  const source = insertAccount(db, { type: 'brokerage' });
+  const vt = seedSecurity(db, 'vt');
+  addHistory(db, target, vt, '2026-07-01', 4, 20000, 15000);
+  addHistory(db, source, vt, '2026-07-01', 6, 30000, null);
+
+  mergeAccounts(db, target, source);
+
+  const row = historyRow(db, target, '2026-07-01');
+  assert.equal(row.institution_value, 50000);
+  // Migration 043's doctrine: a part-unknown total is unknown. Summing to 15000 would claim the
+  // source side cost nothing, which is the "stored 0 is a provider declining to answer" trap.
+  assert.equal(row.cost_basis, null);
+  db.close();
+});
+
+test('HEALTHY: a non-colliding day keeps its own basis and price untouched', () => {
+  const db = migratedTestDb();
+  const target = insertAccount(db, { type: 'brokerage' });
+  const source = insertAccount(db, { type: 'brokerage' });
+  const vt = seedSecurity(db, 'vt');
+  addHistory(db, target, vt, '2026-07-01', 4, 20000, 15000);
+  // A different date, so nothing collides and nothing may move.
+  addHistory(db, source, vt, '2026-07-02', 6, 30000, 25000);
+
+  mergeAccounts(db, target, source);
+
+  assert.deepEqual(historyRow(db, target, '2026-07-01'), {
+    quantity: 4, institution_value: 20000, cost_basis: 15000, institution_price: 1.0,
+  });
+  assert.deepEqual(historyRow(db, target, '2026-07-02'), {
+    quantity: 6, institution_value: 30000, cost_basis: 25000, institution_price: 1.0,
+  });
   db.close();
 });

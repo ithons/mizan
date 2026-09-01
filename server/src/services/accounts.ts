@@ -283,6 +283,22 @@ export function mergeAccounts(
         )
     `).run(targetAccountId, sourceAccountId, targetAccountId);
 
+    // All FOUR numeric columns, not two. This summed quantity and institution_value and left
+    // `cost_basis` and `institution_price` untouched, so a colliding day kept the target's basis
+    // alone beside a doubled value: the merged position looked like it had gained everything the
+    // source side had cost. The comment above says two rows for the same security on the same day
+    // are two parts of one position, and that has to be true of every column on the row or it is
+    // not true of the row.
+    //
+    // `cost_basis` sums only when BOTH sides know theirs. A part-unknown total is unknown, which is
+    // migration 043's doctrine (a stored 0 is a provider declining to answer, not a free position),
+    // and `effectiveCostBasis` on the client already refuses a non-positive basis for the same
+    // reason. NULL here is what makes the Investments header say "basis missing" instead of booking
+    // the whole market value as gain.
+    //
+    // `institution_price` is a PER-UNIT price and does not sum. The merged row's price is the
+    // value-weighted one, which for two parts of one position is just total value over total
+    // quantity, and it falls back to the target's own price when the merged quantity is zero.
     db.prepare(`
       UPDATE holdings_history AS target
       SET quantity = quantity + COALESCE((
@@ -292,9 +308,50 @@ export function mergeAccounts(
           institution_value = institution_value + COALESCE((
             SELECT s.institution_value FROM holdings_history s
             WHERE s.account_id = ? AND s.security_id = target.security_id AND s.date = target.date
-          ), 0)
+          ), 0),
+          cost_basis = CASE
+            WHEN NOT EXISTS (
+              SELECT 1 FROM holdings_history s
+              WHERE s.account_id = ? AND s.security_id = target.security_id AND s.date = target.date
+            ) THEN target.cost_basis
+            WHEN target.cost_basis IS NULL THEN NULL
+            WHEN (SELECT s.cost_basis FROM holdings_history s
+                   WHERE s.account_id = ? AND s.security_id = target.security_id AND s.date = target.date
+                 ) IS NULL THEN NULL
+            ELSE target.cost_basis + (
+              SELECT s.cost_basis FROM holdings_history s
+              WHERE s.account_id = ? AND s.security_id = target.security_id AND s.date = target.date
+            )
+          END,
+          institution_price = CASE
+            -- Only a row that actually collided is rewritten. Every other target row keeps the
+            -- price it was recorded with; this statement runs over all of them and must be a
+            -- no-op for the ones the source says nothing about.
+            WHEN NOT EXISTS (
+              SELECT 1 FROM holdings_history s
+              WHERE s.account_id = ? AND s.security_id = target.security_id AND s.date = target.date
+            ) THEN target.institution_price
+            WHEN (quantity + (
+                   SELECT s.quantity FROM holdings_history s
+                   WHERE s.account_id = ? AND s.security_id = target.security_id AND s.date = target.date
+                 )) > 0
+            THEN (institution_value + (
+                   SELECT s.institution_value FROM holdings_history s
+                   WHERE s.account_id = ? AND s.security_id = target.security_id AND s.date = target.date
+                 )) / 100.0
+                 / (quantity + (
+                   SELECT s.quantity FROM holdings_history s
+                   WHERE s.account_id = ? AND s.security_id = target.security_id AND s.date = target.date
+                 ))
+            ELSE target.institution_price
+          END
       WHERE target.account_id = ?
-    `).run(sourceAccountId, sourceAccountId, targetAccountId);
+    `).run(
+      sourceAccountId, sourceAccountId,
+      sourceAccountId, sourceAccountId, sourceAccountId,
+      sourceAccountId, sourceAccountId, sourceAccountId, sourceAccountId,
+      targetAccountId
+    );
 
     db.prepare('DELETE FROM holdings_history WHERE account_id = ?').run(sourceAccountId);
 
