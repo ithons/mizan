@@ -11,6 +11,11 @@ import { migratedTestDb } from './helpers/schema';
 
 const NOW = new Date('2026-06-30T12:00:00.000Z');
 
+// The two `getSyncHealth` tests below seed rows dated 2026-08-01 and must judge them against a
+// clock anchored to those rows. Passing nothing reads the wall clock, which is how the healthy
+// case asserted `fresh` on the day it was written and `stale` every day after.
+const SYNC_RUN_CLOCK = new Date('2026-08-01T17:00:00.000Z');
+
 function row(overrides: Partial<SyncHealthConnectionRow>): SyncHealthConnectionRow {
   return {
     id: 'conn_1',
@@ -158,7 +163,7 @@ test('the connection surface states the recorded reason, not a generic one', () 
             '2026-08-01T16:04:20.000Z', '2026-08-01T16:04:22.940Z')
   `).run();
 
-  const health = getSyncHealth(db);
+  const health = getSyncHealth(db, SYNC_RUN_CLOCK);
   const conn = health.connections.find((c) => c.id === 'simplefin_primary');
   assert.ok(conn, 'the connection is missing from sync health');
   assert.match(conn.status_detail, /402 Payment Required/);
@@ -176,11 +181,31 @@ test('HEALTHY: a connection that has never failed carries no failure advice at a
             '2026-08-01T16:04:20.000Z', '2026-08-01T16:04:22.000Z')
   `).run();
 
-  const health = getSyncHealth(db);
+  const health = getSyncHealth(db, SYNC_RUN_CLOCK);
   const conn = health.connections.find((c) => c.id === 'simplefin_primary');
   assert.ok(conn, 'the connection is missing from sync health');
   assert.equal(conn.needs_attention, false);
   assert.equal(conn.freshness, 'fresh');
   assert.doesNotMatch(conn.status_detail, /402|retry|reconnect/i);
+  db.close();
+});
+
+test('getSyncHealth judges freshness against the clock it is handed, not the wall clock', () => {
+  const db = migratedTestDb();
+  db.prepare(`INSERT INTO simplefin_connections (id, status, last_synced_at, created_at) VALUES ('simplefin_primary', 'active', '2026-08-01T16:04:25.000Z', '2026-07-01T00:00:00.000Z')`).run();
+
+  // One hour after the recorded sync: fresh, and it stays fresh however long ago that was in
+  // real time. This is the assertion that rotted, and the parameter is what stops it rotting.
+  const justAfter = getSyncHealth(db, new Date('2026-08-01T17:04:25.000Z'));
+  assert.equal(justAfter.connections[0].freshness, 'fresh');
+  assert.equal(justAfter.status, 'healthy');
+
+  // Four days after: stale. Without a threaded clock this direction is the only one the wall
+  // clock can ever produce, so asserting it alone would prove nothing about the parameter.
+  const fourDaysLater = getSyncHealth(db, new Date('2026-08-05T17:04:25.000Z'));
+  assert.equal(fourDaysLater.connections[0].freshness, 'stale');
+  assert.equal(fourDaysLater.status, 'stale');
+  assert.equal(fourDaysLater.connections[0].age_days, 4);
+
   db.close();
 });

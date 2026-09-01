@@ -241,7 +241,14 @@ export function summarizeSyncHealth(
   };
 }
 
-export function getSyncHealth(db: Database.Database): SyncHealth {
+/**
+ * `now` is a parameter and not an ambient `new Date()` because `classifySyncConnection` already
+ * took one and this function dropped it, so every caller (`routes/insights.ts`, `aiContext.ts`,
+ * and every test) was pinned to the wall clock with no seam to inject. A fixture dated the day it
+ * was written stayed `fresh` on that day and turned `stale` three days later, which is how the
+ * healthy-case test that proves this detector is silent became the one test that failed with age.
+ */
+export function getSyncHealth(db: Database.Database, now = new Date()): SyncHealth {
   const simplefinRows = db.prepare(`
     SELECT
       sc.id,
@@ -289,6 +296,6 @@ export function getSyncHealth(db: Database.Database): SyncHealth {
     GROUP BY cc.id
   `).all() as SyncHealthConnectionRow[];
 
-  const connections = [...simplefinRows, ...coinbaseRows].map((row) => classifySyncConnection(row));
+  const connections = [...simplefinRows, ...coinbaseRows].map((row) => classifySyncConnection(row, now));
   return summarizeSyncHealth(connections, readLastSyncRun(db));
 }
