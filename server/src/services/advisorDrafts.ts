@@ -1529,6 +1529,12 @@ export interface UndoAdvisorActionResult {
   /** Merchant rules un-retired. Counted separately: it is not a row of the owner's ledger. */
   reverted_rules?: number;
   /**
+   * Merchant rules this action CREATED that the undo retired, so auto-categorization on the next
+   * sync cannot re-file the rows the undo just restored. Counted separately from `reverted_rules`
+   * because the two are opposite operations and collapsing them would hide which one happened.
+   */
+  retired_rules?: number;
+  /**
    * Rules this action retired that could not be restored, with the reason. Reported rather than
    * absorbed: a revert that says only what it managed reads as a complete one.
    */
@@ -1549,6 +1555,49 @@ interface RuleUndoOutcome {
  * is `pattern_taken`, where a replacement rule now holds the pattern; reviving the old one would be
  * a second, unasked change to whichever rule they have now.
  */
+/**
+ * Retire the rules an action created, so the undo actually holds.
+ *
+ * The docstring below used to argue that a created rule is left in place because deleting it
+ * "would be a second, unasked change". Deleting it would be. Leaving it is not neutral either:
+ * `revertRevisions` restores each row's prior category, which for a previously-uncategorized row
+ * is NULL, and `autoCategorizeTransactions` runs on every sync
+ * (`syncManager.ts`) calling `applyMerchantRulesToExistingTransactions(db, { onlyUncategorized:
+ * true })`. The surviving rule matched those rows again within the hour. The owner's strongest
+ * signal, reversing an applied answer wholesale, lasted until the next sync.
+ *
+ * Retiring is the reversible middle the app already has. `retire_merchant_rule` is an autonomous
+ * kind, retirement writes a `merchant_rule_revisions` row, and `undoRuleRetirements` above puts one
+ * back. So undoing a creation and undoing a retirement are now inverses of each other, both
+ * recorded, both reversible from Settings.
+ *
+ * The action stays in the audit trail either way: undo means "put the ledger back", not "erase
+ * that this happened".
+ */
+function undoRuleCreations(db: Database.Database, actionId: string, now: string): number {
+  const created = db.prepare(`
+    SELECT v.rule_id
+    FROM merchant_rule_revisions v
+    WHERE v.action_id = ?
+      AND v.operation = 'create'
+      AND v.id = (
+        SELECT v2.id FROM merchant_rule_revisions v2
+        WHERE v2.rule_id = v.rule_id
+        ORDER BY v2.created_at DESC, v2.rowid DESC
+        LIMIT 1
+      )
+    ORDER BY v.rowid
+  `).all(actionId) as Array<{ rule_id: string }>;
+
+  let retired = 0;
+  for (const row of created) {
+    // `retireMerchantRule` returns false when the rule is already retired or gone, which is the
+    // outcome asked for either way.
+    if (retireMerchantRule(db, row.rule_id, { source: 'ai', actionId: null, now })) retired += 1;
+  }
+  return retired;
+}
+
 function undoRuleRetirements(db: Database.Database, actionId: string, now: string): RuleUndoOutcome {
   const retirements = db.prepare(`
     SELECT v.rule_id, v.pattern
@@ -1599,10 +1648,12 @@ function undoRuleRetirements(db: Database.Database, actionId: string, now: strin
  * and this one becomes revertable again. Under the old single-slot scheme the later write simply
  * destroyed the earlier action's record and there was no way back at all.
  *
- * A merchant rule the action created is left in place. Deleting it would be a second, unasked
- * change, and the rule is visible and removable in Settings; undo here means "put the ledger
- * back", not "erase that this happened". The action stays in the audit trail for the same
- * reason.
+ * A merchant rule the action created is RETIRED, not deleted and not left live. See
+ * `undoRuleCreations`: leaving it live meant the next sync's auto-categorization re-filed every
+ * row the undo had just restored to uncategorized, so the undo lasted about an hour. Retiring is
+ * reversible, is recorded in `merchant_rule_revisions`, and is exactly the inverse of the creation
+ * being undone. The action stays in the audit trail: undo means "put the ledger back", not "erase
+ * that this happened".
  *
  * A successful undo also writes an `ai_feedback` row (migration 047). Until then the strongest
  * signal the owner can give -- reversing an applied answer wholesale -- left no record anywhere,
@@ -1622,8 +1673,11 @@ export function undoAdvisorAction(db: Database.Database, actionId: string): Undo
     // undo" has to be judged on both halves or `retire_merchant_rule` would be permanently
     // un-undoable while reporting itself as having nothing to undo.
     const rules = undoRuleRetirements(db, actionId, now);
+    // Ordered after the revisions on purpose: retiring first would leave a window in which the
+    // rows are reverted and the rule is gone, and both happen inside one transaction anyway.
+    const retiredCreations = undoRuleCreations(db, actionId, now);
 
-    if (reverted === 0 && rules.restored === 0) {
+    if (reverted === 0 && rules.restored === 0 && retiredCreations === 0) {
       return {
         ok: false,
         reason: 'nothing_to_undo',
@@ -1634,7 +1688,13 @@ export function undoAdvisorAction(db: Database.Database, actionId: string): Undo
     }
 
     if (reverted > 0) recordUndoFeedback(db, { actionId, revisions, reverted });
-    return { ok: true, reverted, reverted_rules: rules.restored, rule_failures: rules.failures };
+    return {
+      ok: true,
+      reverted,
+      reverted_rules: rules.restored,
+      retired_rules: retiredCreations,
+      rule_failures: rules.failures,
+    };
   });
 
   return undo();

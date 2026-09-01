@@ -16,7 +16,7 @@ import {
 import { AI_JOBS, runAiJob, type AiJobCollect, type AiJobProposal } from '../server/src/services/aiJobs';
 import { buildAiDigest, revertAiDigestSince } from '../server/src/services/aiDigest';
 import { listAiIncidents } from '../server/src/services/aiGuards';
-import { recategorizeAll, upsertMerchantRule } from '../server/src/services/rules';
+import { autoCategorizeTransactions, recategorizeAll, upsertMerchantRule } from '../server/src/services/rules';
 import { refilableTransactions } from '../server/src/services/aiWorker';
 import { buildRecurringForecast } from '../server/src/services/recurringForecast';
 import { refreshTransactionIntegrity } from '../server/src/services/transactionIntegrity';
@@ -837,5 +837,72 @@ test('confirming a recurring pattern moves the confidence bucket and no total th
   assert.equal(after.uncertain_bills, 0);
 
   assert.equal(DRAFT_KIND_AUTONOMY.confirm_recurring.autonomy, 'proposal_only', 'nothing acts on any of it');
+  fx.db.close();
+});
+
+/**
+ * The undo has to survive the next sync.
+ *
+ * `undoAdvisorAction` reverted the transactions and left the rule the action created live, on the
+ * argument that deleting it would be a second unasked change. But `revertRevisions` restores a
+ * previously-uncategorized row to NULL, and `autoCategorizeTransactions` runs on every sync
+ * calling `applyMerchantRulesToExistingTransactions(db, { onlyUncategorized: true })`. The
+ * surviving rule matched the same rows again within the hour, so the strongest signal the owner
+ * can give lasted until the next sync. Retiring is the reversible middle, and it is the exact
+ * inverse of the creation being undone.
+ */
+test('undoing a rule creation holds through the next auto-categorization pass', () => {
+  const fx = setup();
+  // A merchant the text heuristic has no keyword for, so the RULE is the only thing under test.
+  // `autoCategorizeTransactions` applies merchant rules first and then falls back to
+  // `textCategorization.ts`, and that fallback legitimately re-files a recognisable name like
+  // "Blue Bottle Coffee" whatever the rules say. That is a different mechanism and a different
+  // question; using it here would test the heuristic instead of the undo.
+  txn(fx, { id: 'r1', merchant_name: 'Qvist Nordheim' });
+  txn(fx, { id: 'r2', merchant_name: 'Qvist Nordheim' });
+
+  confirmAdvisorDraft(
+    fx.db,
+    draft({ kind: 'create_merchant_rule', pattern: 'Qvist Nordheim', category_id: 'cat_food_coffee', apply_existing: true }),
+    true,
+    'worker_auto'
+  );
+
+  const undone = undoAdvisorAction(fx.db, onlyAction(fx.db));
+  assert.equal(undone.ok, true);
+  assert.equal(undone.retired_rules, 1, 'the rule the action created was left live');
+
+  // The pass that used to put everything back.
+  autoCategorizeTransactions(fx.db);
+
+  const stillReverted = fx.db.prepare(
+    "SELECT COUNT(*) AS n FROM transactions WHERE category_id = 'cat_food_coffee'"
+  ).get() as { n: number };
+  assert.equal(stillReverted.n, 0, 'the next sync re-filed the rows the undo had restored');
+
+  // Retired, not deleted: it is still visible and restorable in Settings.
+  const rule = fx.db.prepare('SELECT retired_at FROM merchant_rules').get() as { retired_at: string | null };
+  assert.ok(rule.retired_at, 'the rule was deleted rather than retired');
+  fx.db.close();
+});
+
+test('HEALTHY: an owner rule untouched by the action is not retired by the undo', () => {
+  const fx = setup();
+  txn(fx, { id: 'o1', merchant_name: 'Shell Gas' });
+  // A rule the owner made, which this action has nothing to do with.
+  upsertMerchantRule(fx.db, 'Shell Gas', 'cat_transport', '2026-07-01T00:00:00.000Z', { source: 'user' });
+  txn(fx, { id: 'r1', merchant_name: 'Qvist Nordheim' });
+
+  confirmAdvisorDraft(
+    fx.db,
+    draft({ kind: 'create_merchant_rule', pattern: 'Qvist Nordheim', category_id: 'cat_food_coffee', apply_existing: true }),
+    true,
+    'worker_auto'
+  );
+  undoAdvisorAction(fx.db, onlyAction(fx.db));
+
+  const owner = fx.db.prepare("SELECT retired_at FROM merchant_rules WHERE pattern = 'Shell Gas'")
+    .get() as { retired_at: string | null };
+  assert.equal(owner.retired_at, null, 'the undo reached a rule the action never created');
   fx.db.close();
 });
