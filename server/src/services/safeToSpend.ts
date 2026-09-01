@@ -1,5 +1,9 @@
 import type Database from 'better-sqlite3';
 import { buildRecurringForecast } from './recurringForecast';
+import { calculateGoalProgress, type GoalProgressInput } from './goalProgress';
+
+/** The columns `calculateGoalProgress` needs, plus the linked account's balance. */
+type GoalEarmarkRow = GoalProgressInput;
 
 /**
  * "Free to spend": what is left after every claim already made on the liquid pool.
@@ -93,10 +97,36 @@ export function computeSafeToSpend(
     return sum + (ceiling > 0 ? Math.min(remaining, ceiling) : remaining);
   }, 0);
 
+  // Resolved through `calculateGoalProgress`, not by reading `goals.current_amount` raw.
+  //
+  // A goal linked to an account does not keep its saved amount in `current_amount`; the linked
+  // balance IS the saved amount, and `calculateGoalProgress` is the shared definition that says so.
+  // `routes/goals.ts`, `routes/insights.ts`, `aiContext.ts` and `advisorTools.ts` all ask it. This
+  // function read the column instead, so one goal had two saved amounts and the disagreement landed
+  // on the subject numeral of the home screen: on 2026-09-01 the live ledger carried `Emergency
+  // Fund` at `current_amount` 100170 against a linked Wealthfront Cash account at `current_balance`
+  // 0, so `/plan` and the advisor reported $0.00 saved and $5,000.00 to go while this function
+  // subtracted $1,001.70 as already earmarked. The Balance screen read "$1,036.75 short this month"
+  // where the honest figure was $35.05, and `readStanding` could name goal earmarks as the largest
+  // claim on money nothing else said was spoken for.
+  //
+  // Reading the linked balance is also the only self-consistent answer: the earmark has to be the
+  // part of the liquid pool this function just counted that is already spoken for, and that is the
+  // money sitting in the goal's own account. It is bidirectional. A linked account that has grown
+  // past `current_amount` was previously UNDERSTATED, so `free` read too high.
+  //
+  // Savings goals only, deliberately: a debt-payoff goal's progress is already carried by
+  // `cardBalances` above, and counting it here would subtract the same money twice.
   const goals = db.prepare(`
-    SELECT current_amount FROM goals WHERE is_archived = 0 AND type = 'savings'
-  `).all() as Array<{ current_amount: number }>;
-  const allocatedGoals = goals.reduce((sum, goal) => sum + goal.current_amount, 0);
+    SELECT g.type, g.target_amount, g.current_amount, g.starting_amount, a.current_balance AS account_balance
+    FROM goals g
+    LEFT JOIN accounts a ON a.id = g.account_id
+    WHERE g.is_archived = 0 AND g.type = 'savings'
+  `).all() as GoalEarmarkRow[];
+  const allocatedGoals = goals.reduce(
+    (sum, goal) => sum + calculateGoalProgress(goal).current_amount,
+    0
+  );
 
   return {
     liquid,
