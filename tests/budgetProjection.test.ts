@@ -626,3 +626,86 @@ test('a budget whose category has a detected pattern projects that pattern', (t)
   assert.equal(budget?.expected_recurring, 1803);
   assert.equal(budget?.forecast_confidence, 'likely');
 });
+
+/**
+ * A budget projects the bill the owner actually expects, not the one before they touched it.
+ *
+ * `recurringOccurrencesForMonth` never consulted `recurring_occurrence_adjustments`, while
+ * `recurringForecast.ts` has honoured skip, snooze and adjust since the table existed. The comment
+ * above the walk claimed the opposite in as many words: "The forecast and the Bills list quote
+ * this same estimate, so a budget cannot project a different figure for the bill it is
+ * projecting." The skip action is wired in the UI today (Ledger.tsx), and snooze and adjust arrive
+ * through a confirmed advisor draft.
+ */
+function adjust(
+  db: Database.Database,
+  recurringId: string,
+  originalDate: string,
+  fields: { action: 'skip' | 'snooze' | 'adjust'; adjusted_date?: string | null; adjusted_amount?: number | null }
+): void {
+  db.prepare(`
+    INSERT INTO recurring_occurrence_adjustments
+      (id, recurring_id, original_date, action, adjusted_date, adjusted_amount, note, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, NULL, '2026-06-10', '2026-06-10')
+  `).run(
+    `adj_${recurringId}_${originalDate}`,
+    recurringId,
+    originalDate,
+    fields.action,
+    fields.adjusted_date ?? null,
+    fields.adjusted_amount ?? null
+  );
+}
+
+const JUNE_15 = new Date('2026-06-15T12:00:00.000Z');
+
+test('a skipped bill is not projected', (t) => {
+  const db = setupBudgetDb();
+  t.after(() => db.close());
+  adjust(db, 'rent', '2026-06-25', { action: 'skip' });
+
+  const home = getMonthlyBudgetsWithProjection(db, 2026, 6, JUNE_15).find((b) => b.category_id === 'cat_home');
+  // It used to project the full $800 the owner had just said would not happen.
+  assert.equal(home?.expected_recurring, 0);
+  assert.equal(home?.projected_spend, 400, 'the projection still carried a skipped bill');
+});
+
+test('a repriced bill is projected at the price the owner set', (t) => {
+  const db = setupBudgetDb();
+  t.after(() => db.close());
+  adjust(db, 'rent', '2026-06-25', { action: 'adjust', adjusted_amount: -50000 });
+
+  const home = getMonthlyBudgetsWithProjection(db, 2026, 6, JUNE_15).find((b) => b.category_id === 'cat_home');
+  assert.equal(home?.expected_recurring, 50000);
+  assert.equal(home?.projected_spend, 50400);
+});
+
+test('a bill snoozed out of the month leaves the month', (t) => {
+  const db = setupBudgetDb();
+  t.after(() => db.close());
+  adjust(db, 'rent', '2026-06-25', { action: 'snooze', adjusted_date: '2026-07-04' });
+
+  const june = getMonthlyBudgetsWithProjection(db, 2026, 6, JUNE_15).find((b) => b.category_id === 'cat_home');
+  // Month membership follows the adjusted date, which is what `buildOccurrence` does.
+  assert.equal(june?.expected_recurring, 0);
+  assert.equal(june?.projected_spend, 400);
+});
+
+test('HEALTHY: an unadjusted bill projects exactly as it always did', (t) => {
+  const db = setupBudgetDb();
+  t.after(() => db.close());
+  // No adjustment rows at all: the figures the first test in this file pins must not move.
+  const home = getMonthlyBudgetsWithProjection(db, 2026, 6, JUNE_15).find((b) => b.category_id === 'cat_home');
+  assert.equal(home?.expected_recurring, 800);
+  assert.equal(home?.projected_spend, 1200);
+});
+
+test('HEALTHY: an adjustment on a DIFFERENT occurrence date leaves this month alone', (t) => {
+  const db = setupBudgetDb();
+  t.after(() => db.close());
+  // Keyed on `${recurring_id}:${original_date}`, so July's skip must not reach June's bill.
+  adjust(db, 'rent', '2026-07-25', { action: 'skip' });
+
+  const home = getMonthlyBudgetsWithProjection(db, 2026, 6, JUNE_15).find((b) => b.category_id === 'cat_home');
+  assert.equal(home?.expected_recurring, 800);
+});

@@ -2,6 +2,7 @@ import type Database from 'better-sqlite3';
 import { excludedFromTotalsSql } from './transactionFilters';
 import { addMonths, format, isBefore, parseISO, subMonths  } from 'date-fns';
 import { occurrenceDate, recentSignedAmounts } from './recurring';
+import { getRecurringAdjustmentMap } from './recurringAdjustments';
 import type { Budget, BudgetRolloverLedgerEntry, RecurringPattern } from '../../../shared/types';
 
 type Frequency = RecurringPattern['frequency'];
@@ -171,6 +172,12 @@ function recurringOccurrencesForMonth(
   // The forecast and the Bills list quote this same estimate, so a budget cannot project a
   // different figure for the bill it is projecting.
   const signedAmounts = recentSignedAmounts(db, patterns.map((pattern) => pattern.id));
+  // ...and the same ADJUSTMENTS, for the same reason. That sentence above was true of the amount
+  // and false of everything the owner had done to the occurrence: this walk never consulted
+  // `recurring_occurrence_adjustments`, so a bill the owner skipped on the Ledger still inflated
+  // `expected_recurring` and `projected_spend` for its category, and a repriced bill projected the
+  // old figure. `recurringForecast.ts` has honoured all three actions since the table existed.
+  const adjustments = getRecurringAdjustmentMap(db, patterns.map((pattern) => pattern.id));
 
   for (const pattern of patterns) {
     const signedAmount = signedAmounts.get(pattern.id)
@@ -188,11 +195,29 @@ function recurringOccurrencesForMonth(
     }
 
     while (!isBefore(parseISO(endDate), expected) && step < OCCURRENCE_LIMIT) {
-      occurrences.push({
-        category_id: pattern.category_id,
-        amount: Math.abs(signedAmount),
-        confidence,
-      });
+      const originalDate = format(expected, 'yyyy-MM-dd');
+      const adjustment = adjustments.get(`${pattern.id}:${originalDate}`);
+
+      // The same three rules `buildOccurrence` applies, in the same order.
+      if (adjustment?.action !== 'skip') {
+        // A snooze moves the occurrence, so it may land outside this month entirely: month
+        // membership is decided by the adjusted date, not the original one.
+        const effectiveDate = adjustment?.action === 'snooze' && adjustment.adjusted_date
+          ? adjustment.adjusted_date
+          : originalDate;
+        const amount = adjustment?.action === 'adjust' && adjustment.adjusted_amount != null
+          ? adjustment.adjusted_amount
+          : signedAmount;
+
+        if (effectiveDate >= forecastStart && effectiveDate <= endDate) {
+          occurrences.push({
+            category_id: pattern.category_id,
+            amount: Math.abs(amount),
+            confidence,
+          });
+        }
+      }
+
       step++;
       expected = occurrenceDate(anchor, pattern.frequency, step);
     }
