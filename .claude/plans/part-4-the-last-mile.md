@@ -619,3 +619,90 @@ minutes of the app being runnable.
 **Corrected mid-flight.** V6 in this document claimed "the detectors are silent on the owner's real
 data" on the strength of three detectors. The one I did not run was firing 83% of the year. The
 claim is struck above and the measurement that replaced it is stated with its query.
+
+## 2026-09-01, second pass: the highs, and a feature that closes the last mile
+
+Another twenty commits. `npm test` 1796 passing, three typechecks clean, build clean. Every fix
+below carries a regression test, and where the fix was not purely additive the test was demonstrated
+to FAIL on the old code before the change was kept.
+
+**Every critical is closed, and every high except the one that is a design commitment rather than a
+defect** (finding 9, `rebuild-part-3.md` Decision 1's "Bone and Signal", which is Phase 8 work).
+
+**Numbers that were wrong.** `list_goals` now asks `calculateGoalProgress`, so the chat tool and the
+system prompt cannot disagree about one goal inside one conversation. Merging two accounts sums all
+four numeric columns on a colliding history day, not two: `cost_basis` summed only when both sides
+know theirs (a part-unknown total is unknown, per migration 043) and `institution_price` recomputed
+value-weighted, because a per-unit price does not sum. The net-worth history cutoff and a budget's
+first month are both built in the local calendar the stored dates use; `setMonth` overflowed 31
+August minus six months into 3 March, and a UTC-sliced `created_at` after 20:00 local put a budget's
+own first month outside its own carryover. Budget projection honours skip, snooze and adjust, which
+`recurringForecast` has always honoured and the comment above the walk claimed this one did too. The
+leftover asset bucket is settled in cents, so float dust stops rendering as an "Other $0" row.
+
+**Things that lied.** The Rules screen counted matches with a raw `LIKE`, which is not the matcher
+the app resolves by and ignores precedence entirely; it now serves the one definition, measured at
+0.76s for 250 rules and stated in the source. Undoing a rule creation retires the rule, because
+leaving it live meant the next sync's auto-categorization re-filed every row the undo had just
+restored. The chat tool told the model a reverted batch left its merchant rule standing, which
+`undoRuleWrites` has made false since it started retiring a creation back out. Forward Cash Flow said
+"Next scheduled items" and showed ten of seventeen under totals covering all seventeen; it now names
+the count and the money it left out, split by direction. The liability-sign doubt is filed once
+rather than every hour: its only silence condition is a pending row in flight and this feed has never
+produced one, so it had re-filed 21 times carrying 5 distinct messages.
+
+**Things that could not say they had failed.** The Coinbase stage has an error channel, so a coin it
+could not price, a v2 ledger import that threw, or a feed with no account rows lands the run
+`skipped` instead of `succeeded`; and a zeroed holding is reported in its own column rather than as a
+modified transaction. The accounts screen and AccountDetail render their error and loading states
+instead of "$0" and "No transactions for this account yet."
+
+**The focus ring did not exist, and the file said it did.** `@tailwindcss/forms` emits
+`input:where([type="text"]):focus { outline: 2px solid transparent }` into the same layer, and
+`:where()` contributes no specificity, so the plugin's selector is (0,1,1) against `:focus-visible`'s
+(0,1,0) and won on every form control. Measured in Chrome on a keyboard-focused input before:
+`matches(':focus-visible')` true, computed outline `solid 2px rgba(0, 0, 0, 0)`. After:
+`solid 2px rgb(60, 137, 66)`. This is the class of defect that needs the app running, and it took
+about a minute once it could be.
+
+### The feature: `LedgerIntegrityPanel`
+
+`GET /api/insights/reconciliation` was the only data route in the app with no client caller. Its own
+comment calls it "the one check that decides whether every other number in the app is true", and it
+reached nothing but the advisor's prompt: the owner could be told the answer by asking, and could not
+see it. This repo already holds that a fetcher with no caller is a dropped capability rather than
+dead code; a route with no fetcher is the same thing one layer down.
+
+It renders on `/accounts`, and it renders **nothing** unless `unreconciled` or `flow_conservation` is
+non-empty, which is rule 3 and is the whole design. It deliberately does not show
+`residual_all_accounts`: that figure includes the market-driven accounts the filter exempts, so it is
+routinely large on a ledger that is entirely fine.
+
+This is also where Phase 6 lands. V1 in this document is a standing finding with no route to the fix:
+`flowConservation` has reported Chase Checking against Fidelity Individual, 20 legs, $700, since
+2026-05-21, and `transaction_field_revisions` still has 0 rows, because acting on it meant going and
+finding twelve rows by hand. The panel now names the pair and links straight into the ledger filtered
+to each side, through a new `accountId` deep link. Driven in the browser: the link lands on 33 entries
+filtered to Fidelity Individual, showing the 18 `Electronic Funds Transfer Received` rows the finding
+is made of. The correction itself is still the owner's to make, which is right, because the app must
+not rewrite what an institution reported.
+
+### The record
+
+Three claims in `CLAUDE.md` were false at HEAD and are corrected: the migration hook IS in a fresh
+clone (tracked at dbb2c2c), the liability-sign correction fires in EITHER direction (since 9b4675c),
+and a market-driven account is exempt from `unreconciled` unconditionally with `direction_conflict`
+never set on one. Its figures are re-derived (251 rules over 58 timestamps, review open 192 /
+reviewed 2,542, migration 058) and `MIZAN_DIR_OVERRIDE` and `listenOnHost` are written down.
+`rules.ts` no longer states counts that moved three times in two days; it states the query and the
+shape. `variance()`'s comment said it centres on the median and the code has never done that; the
+sentence is corrected rather than the arithmetic, because changing the arithmetic would re-decide
+what gets detected. `chartColors.ts` named two grounds the palette no longer has, in a sentence whose
+twin in `index.css` was corrected when the palette landed. `ui-overhaul.md` is trimmed to the
+`/alpha` evidence and a pointer, which is what Decision 4 specified and only half happened.
+
+### Still open
+
+Findings 42, 43, 44, 49, 50, 51, 52, 56, 57 and the eleven lows are not done. Nor is finding 9, which
+is Phase 8. The four out-of-band mutators in `scripts/cleanup/` are still in no tsconfig, and
+`simplefinRelink.ts:340-780` is still unread by anyone and still has never executed.
