@@ -540,7 +540,7 @@ export function DataSection() {
             <div>
               <p className="text-body-lg text-ink">Full Local Backup</p>
               <p className="text-note text-muted mt-1">
-                Download or restore accounts, transactions, categories, budgets, goals, investments, snapshots, and sync history. Provider credentials are not included.
+                Download or restore everything: accounts, transactions, categories, budgets, goals, investments, snapshots, sync history, and all of the advisor's conversations, memory, drafts, actions and run records. Provider credentials are not included.
               </p>
             </div>
             <button
