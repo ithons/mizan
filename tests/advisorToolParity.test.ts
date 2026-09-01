@@ -194,3 +194,57 @@ test('the negative category is still returned, at its signed figure', () => {
   assert.equal(tool.categories.find((c) => c.category === 'Shopping')?.spent, -175);
   db.close();
 });
+
+/**
+ * `list_goals` and the system prompt must not disagree about one goal inside one conversation.
+ *
+ * `aiContext.ts` builds the prompt through `calculateGoalProgress`, which overrides a linked
+ * goal's stored `current_amount` with the account's balance. `list_goals` ran its own SQL with no
+ * join and divided by hand, so on the live ledger the prompt said "$0.00 saved, $5,000.00 to go"
+ * while the tool answered $1,001.70 at 20%.
+ */
+function goal(
+  db: Database.Database,
+  id: string,
+  type: 'savings' | 'debt',
+  fields: { current: number; target: number; starting?: number; accountId?: string | null }
+): void {
+  db.prepare(`
+    INSERT INTO goals (id, name, type, target_amount, current_amount, starting_amount, account_id,
+                       is_archived, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, 0, '2026-01-01', '2026-01-01')
+  `).run(id, id, type, fields.target, fields.current, fields.starting ?? null, fields.accountId ?? null);
+}
+
+test('list_goals reports what calculateGoalProgress reports, for both goal directions', () => {
+  const db = migratedTestDb();
+  const savingsAccount = insertAccount(db, { id: 'acc_sav', type: 'savings', current_balance: 0 });
+  const cardAccount = insertAccount(db, { id: 'acc_card', type: 'credit', current_balance: 40000, is_liability: 1 });
+
+  // The live shape: a linked savings goal whose account holds nothing while the column says $1,001.70.
+  goal(db, 'emergency', 'savings', { current: 100170, target: 500000, accountId: savingsAccount });
+  // The other direction, so a debt goal cannot silently invert.
+  goal(db, 'card_payoff', 'debt', { current: 0, target: 100000, starting: 100000, accountId: cardAccount });
+  // And one with no link at all, where the column is the only answer there is.
+  goal(db, 'laptop', 'savings', { current: 30000, target: 120000, accountId: null });
+
+  const result = runAdvisorTool(db, 'list_goals', {}) as {
+    goals: Array<{ name: string; current: number; remaining: number; progress_pct: number }>;
+  };
+  const byName = new Map(result.goals.map((g) => [g.name, g]));
+
+  // The linked savings goal holds what its account holds: nothing.
+  assert.equal(byName.get('emergency')?.current, 0);
+  assert.equal(byName.get('emergency')?.remaining, 5000);
+  assert.equal(byName.get('emergency')?.progress_pct, 0);
+
+  // The debt goal has paid down $600 of a $1,000 balance.
+  assert.equal(byName.get('card_payoff')?.current, 600);
+  assert.equal(byName.get('card_payoff')?.progress_pct, 60);
+
+  // The unlinked goal still reports its stored amount.
+  assert.equal(byName.get('laptop')?.current, 300);
+  assert.equal(byName.get('laptop')?.progress_pct, 25);
+
+  db.close();
+});

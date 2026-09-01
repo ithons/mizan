@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import type Database from 'better-sqlite3';
+import { calculateGoalProgress, type GoalProgressInput } from './goalProgress';
 import type Anthropic from '@anthropic-ai/sdk';
 import { format, startOfMonth, subMonths } from 'date-fns';
 import { getTransactionById, listTransactions, type TransactionListFilters } from './transactions';
@@ -416,20 +417,38 @@ function getBudgetsTool(db: Database.Database): unknown {
   };
 }
 
+/**
+ * The same goal figures the system prompt is already showing the model.
+ *
+ * This used to run its own SQL with no `LEFT JOIN accounts` and divide `current_amount` by
+ * `target_amount` by hand. `aiContext.ts` builds the prompt through `calculateGoalProgress`, which
+ * overrides `current_amount` with the linked account's balance, so the model could read "$0.00
+ * saved, $5,000.00 to go" in its own context and then call `list_goals` and be told $1,001.70 at
+ * 20%, inside one conversation, about one goal. That is the parallel-SQL drift this file was
+ * created to end: it already delegates every aggregate to `reporting.ts` and friends for exactly
+ * this reason, and goals were the one thing still computed here.
+ */
 function listGoalsTool(db: Database.Database): unknown {
   const rows = db.prepare(`
-    SELECT name, type, target_amount, current_amount, target_date
-    FROM goals WHERE is_archived = 0 ORDER BY name
-  `).all() as Array<{ name: string; type: string; target_amount: number; current_amount: number; target_date: string | null }>;
+    SELECT g.name, g.type, g.target_amount, g.current_amount, g.starting_amount, g.target_date,
+           a.current_balance AS account_balance
+    FROM goals g
+    LEFT JOIN accounts a ON a.id = g.account_id
+    WHERE g.is_archived = 0 ORDER BY g.name
+  `).all() as Array<GoalProgressInput & { name: string; target_date: string | null }>;
   return {
-    goals: rows.map((r) => ({
-      name: r.name,
-      type: r.type,
-      target: toDollars(r.target_amount),
-      current: toDollars(r.current_amount),
-      progress_pct: r.target_amount > 0 ? Math.round((r.current_amount / r.target_amount) * 100) : null,
-      target_date: r.target_date,
-    })),
+    goals: rows.map((r) => {
+      const progress = calculateGoalProgress(r);
+      return {
+        name: r.name,
+        type: r.type,
+        target: toDollars(r.target_amount),
+        current: toDollars(progress.current_amount),
+        remaining: toDollars(progress.remaining_amount),
+        progress_pct: Math.round(progress.progress_percent),
+        target_date: r.target_date,
+      };
+    }),
   };
 }
 
