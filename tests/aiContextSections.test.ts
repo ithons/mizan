@@ -793,7 +793,14 @@ function budgetOn(db: Database.Database, categoryId: string, amountCents: number
   // 2026-07-30 created_at: August's walk added July's own unspent $200 and the row printed
   // "$150.00 spent of $500.00 (30%)" where the fixture had set up $300.00 available and 50%.
   // Opening the budget on the 1st of the current month leaves exactly one month to walk.
-  const createdAt = `${dayInThisMonth(1)}T00:00:00.000Z`;
+  //
+  // Built as the ISO of LOCAL midday on that day, not `${date}T00:00:00.000Z`. The production
+  // writer is `new Date().toISOString()`, an instant, and `walkRolloverLedger` now reads the month
+  // back out of it locally. A UTC-midnight string for a local day is only the same day on a machine
+  // at UTC+0: at UTC-4 it is 20:00 the PREVIOUS evening, so the fixture was asking the walk to
+  // start a month earlier than it meant. Midday is unambiguous in every zone this app runs in.
+  const first = new Date();
+  const createdAt = new Date(first.getFullYear(), first.getMonth(), 1, 12, 0, 0).toISOString();
   db.prepare(`
     INSERT INTO budgets (id, category_id, amount, period, rollover, rollover_balance, created_at, updated_at)
     VALUES (?, ?, ?, 'monthly', ?, ?, ?, ?)
