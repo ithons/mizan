@@ -106,9 +106,16 @@ guessed; the guesses were killed.
   as retryable and `maxAttempts` defaults to 3.
 - **V10 [record]** The Chase Checking $544.18 item that `STATE.md` still carries as open is resolved.
   `reconcileAccounts` on the live copy: residual 54418, boundary_amount 54418, adjusted_residual 0.
-- **V6 [good news]** The detectors are silent on the owner's real data, verified by running them:
-  sync health healthy, data quality one `info` row, personal finance invariants empty. Rule 3 holds
-  where it was measured.
+- **V6 [PARTLY WRONG, corrected by the audit]** I ran three detectors against the live copy (sync
+  health, data quality, personal-finance invariants), found them silent, and wrote "the detectors
+  are silent on the owner's real data". Three is not "the detectors". Audit findings 4, 30, 17 and
+  29 ran the one I skipped: replaying `getAnomalyInsights` once per day over the year to
+  2026-08-31, the spending-spike detector fired on **303 of 365 days** across ten categories, in
+  runs up to 94 days unbroken, printing 1000% or more on 41 of them and topping out at 25000%. I
+  re-derived that independently before accepting it: 303/365, max 25000%. The clause "This refutes
+  the obvious projection that a month unattended would leave standing findings the owner cannot act
+  on" was exactly wrong, and it is the kind of claim rule 2 forbids: a conclusion wider than the
+  measurement behind it. Fixed in Phase 3; the corrected figure is 25 days across 2 events.
 - **V7 [boundary]** One AI call ships 30,560 characters, about 8,042 tokens, 596 lines, 21 sections,
   318 dollar figures and 39 account-name occurrences, including the owner's stated residency and
   income context. `ai_runs` records model, trigger, timing and exact token counts, and does not
