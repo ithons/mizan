@@ -10,6 +10,7 @@ import { invalidateFinancialData } from '../../lib/queryInvalidation';
 import { useAppStore } from '../../store';
 import { Screen, ScreenHeader, SectionLabel, Card, Figure, Row, TextButton, TrendChart } from '../../components/balance';
 import { ConfirmRemoveModal } from '../../components/ConfirmRemoveModal';
+import { QueryErrorBanner } from '../../components/QueryErrorBanner';
 import { SkeletonRows } from '../../components/SkeletonLoader';
 import { AddManualAccountModal, EditAccountModal, MergeAccountModal } from './Modals';
 
@@ -128,7 +129,8 @@ export function Accounts() {
   const [merging, setMerging] = useState<Account | null>(null);
   const [removing, setRemoving] = useState<Account | null>(null);
 
-  const { data: accounts, isLoading } = useQuery({ queryKey: ['accounts'], queryFn: () => accountsApi.list() });
+  const accountsQ = useQuery({ queryKey: ['accounts'], queryFn: () => accountsApi.list() });
+  const { data: accounts, isLoading } = accountsQ;
   const { data: snapshots } = useQuery({
     queryKey: ['networth', 'history', 12],
     queryFn: () => networthApi.history(12),
@@ -332,7 +334,17 @@ export function Accounts() {
         className="mb-6"
       />
 
-      {/* Net worth is the subject; assets and liabilities are the two terms it is made of. */}
+      <QueryErrorBanner items={[{ query: accountsQ, label: 'your accounts' }]} className="mb-5" />
+
+      {/* Net worth is the subject; assets and liabilities are the two terms it is made of.
+          Withheld entirely when the accounts query failed. `assets`, `owed` and `netWorth` are
+          reductions over `accounts ?? []`, so a dead server made all three exactly 0 and this
+          block rendered "$0" as the 44px subject numeral, "$0" assets, and a liabilities Figure
+          whose label and state sentence are COMPUTED from the value, so `owed === 0` selected
+          "Liabilities / nothing outstanding". Three false money claims and a reassuring sentence,
+          on a screen that had simply failed to load. That is the exact defect QueryErrorBanner
+          was written for; this screen was one of the two that never adopted it. */}
+      {!accountsQ.isError && (
       <div className="mb-8 flex-shrink-0 space-y-3 lg:space-y-4">
         <Card padding="lg" elevation={2}>
           <Figure scale="subject" label="Net worth">{formatWholeCurrency(netWorth)}</Figure>
@@ -366,6 +378,7 @@ export function Accounts() {
           </Card>
         </div>
       </div>
+      )}
 
       {netWorthHistory.length >= 2 && (
         <div className="mb-8 flex-shrink-0">
@@ -378,7 +391,10 @@ export function Accounts() {
         {/* Grouped account list */}
         <div className="min-w-0 flex-1">
           {isLoading && <SkeletonRows rows={5} />}
-          {!isLoading && liveVisible.length === 0 && closed.length === 0 && (
+          {/* `!accountsQ.isError` because "No accounts yet" is a statement about the ledger, and a
+              failed request has not learned anything about the ledger. The banner above says what
+              actually happened. */}
+          {!isLoading && !accountsQ.isError && liveVisible.length === 0 && closed.length === 0 && (
             <div className="py-10 text-body-lg text-muted">
               No accounts yet.{' '}
               <button
