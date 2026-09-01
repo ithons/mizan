@@ -9,6 +9,7 @@ import {
   ALLOCATION_LENSES,
   getAllocationSlices,
   getCostBasisStats,
+  isLivePosition,
   getPortfolioDelta,
   holdingGain,
   type AllocationLens,
@@ -388,7 +389,7 @@ export function Investments() {
             <div className="mb-2 text-note leading-relaxed tabular-nums text-muted-2">{notes.reconciliation}</div>
           )}
           {portfolioHoldings
-            .slice()
+            .filter(isLivePosition)
             .sort((a, b) => b.institution_value - a.institution_value)
             .map((h) => {
               const gain = holdingGain(h);

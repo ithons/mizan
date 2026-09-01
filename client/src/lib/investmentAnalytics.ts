@@ -271,14 +271,42 @@ export function effectiveCostBasis(holding: Holding): number | null {
   return basis != null && basis > 0 ? basis : null;
 }
 
+/**
+ * Is this still a position, or one the owner has exited?
+ *
+ * A sold-out position is ZEROED, never deleted: `services/simplefin.ts` and
+ * `services/coinbase.ts` set `quantity = 0, institution_value = 0` and deliberately leave
+ * `cost_basis` alone, because the basis is what we knew and a repurchase should not start blind.
+ * The write path is truthful. Three readers were not.
+ *
+ * `effectiveCostBasis` already refuses a non-positive BASIS, which is a different question, so a
+ * sold row with a real provider basis sailed through it: it counted in `knownCount`, contributed
+ * its whole basis to `knownCostBasis` and its zero to `knownValue`, and booked the entire basis as
+ * an unrealized LOSS. Selling a $1,199.84 VT position took the Investments header from "up $112.79,
+ * 4.90%" to "down $1,175.77, 51.06%" off the same money, and left a permanent
+ * "$0 / -$1,199.84 / 100.0%" row for a security the owner no longer holds, labelled unrealized.
+ *
+ * `getAllocationSlices` already filtered `value > 0` for its own bar, with a comment naming this
+ * exact case. One of three consumers was fixed. This is that filter, named and shared, so the
+ * remaining two ask the same question the same way.
+ */
+export function isLivePosition(holding: Holding): boolean {
+  // A worthless-but-held token still has quantity, so value alone is not the test.
+  return (holding.quantity ?? 0) > 0 || holding.institution_value > 0;
+}
+
 export function holdingGain(holding: Holding): { gain: number; pct: number } | null {
+  if (!isLivePosition(holding)) return null;
   const basis = effectiveCostBasis(holding);
   if (basis == null) return null;
   const gain = holding.institution_value - basis;
   return { gain, pct: (gain / basis) * 100 };
 }
 
-export function getCostBasisStats(holdings: Holding[]): CostBasisStats {
+export function getCostBasisStats(allHoldings: Holding[]): CostBasisStats {
+  // Coverage is about positions the owner still holds. A sold row has nothing left to cover, and
+  // counting it dragged both the return and the coverage percentage.
+  const holdings = allHoldings.filter(isLivePosition);
   const known = holdings.filter((holding) => effectiveCostBasis(holding) != null);
   const manualCount = holdings.filter((holding) => holding.cost_basis_quality === 'manual').length;
   const providerCount = known.filter((holding) =>

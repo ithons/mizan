@@ -8,8 +8,10 @@ import {
   getPortfolioDelta,
   getConcentrationSummary,
   getCostBasisStats,
+  holdingGain,
   getInvestmentDataQualitySummary,
   getInvestmentActivitySummary,
+  isLivePosition,
 } from '../client/src/lib/investmentAnalytics';
 import type { Account, Holding, InvestmentTransaction } from '../shared/types';
 
@@ -523,4 +525,61 @@ test('the delta carries whether its baseline was measured or reconstructed', () 
 
   assert.equal(delta?.baseline.date, '2026-07-30');
   assert.equal(delta?.baseline.estimated, true);
+});
+
+/**
+ * A position the owner sold out of is not a 100% unrealized loss.
+ *
+ * `services/simplefin.ts` and `services/coinbase.ts` zero a vanished position rather than deleting
+ * it, and deliberately keep `cost_basis`, because that is what we knew and a repurchase should not
+ * start blind. The write path is truthful; three readers were not. `effectiveCostBasis` refuses a
+ * non-positive BASIS, which is a different question, so a sold row with a real provider basis
+ * counted in `knownCount`, added its whole basis to `knownCostBasis` and its zero to market value,
+ * and booked the entire basis as unrealized loss.
+ */
+function position(over: Partial<Holding> & { id: string }): Holding {
+  return {
+    id: over.id,
+    account_id: 'acct',
+    security_id: `sec_${over.id}`,
+    quantity: 10,
+    institution_price: 100,
+    institution_value: 100000,
+    cost_basis: 80000,
+    cost_basis_quality: 'provider',
+    ...over,
+  } as Holding;
+}
+
+test('a sold-out position is excluded from the header, the return and the coverage', () => {
+  const live = position({ id: 'live', institution_value: 100000, cost_basis: 80000 });
+  const sold = position({ id: 'sold', quantity: 0, institution_value: 0, cost_basis: 119984 });
+
+  const withSold = getCostBasisStats([live, sold]);
+  const withoutSold = getCostBasisStats([live]);
+
+  // The sale must move nothing about the position still held.
+  assert.deepEqual(withSold, withoutSold);
+  assert.equal(withSold.knownCount, 1);
+  assert.equal(withSold.unrealized, 20000);
+  assert.equal(withSold.coveragePct, 100, 'a sold row dragged coverage as if it were uncovered');
+});
+
+test('a sold-out position reports no gain rather than a total loss', () => {
+  const sold = position({ id: 'sold', quantity: 0, institution_value: 0, cost_basis: 119984 });
+  // It used to answer { gain: -119984, pct: -100 } and render as an unrealized loss forever.
+  assert.equal(holdingGain(sold), null);
+});
+
+test('HEALTHY: an ordinary held position is untouched by the predicate', () => {
+  const live = position({ id: 'live', institution_value: 100000, cost_basis: 80000 });
+  assert.equal(isLivePosition(live), true);
+  assert.deepEqual(holdingGain(live), { gain: 20000, pct: 25 });
+});
+
+test('a worthless but still-held token is a live position, because quantity decides too', () => {
+  // Value alone is not the test: a token can be held and momentarily priced at nothing.
+  const dust = position({ id: 'dust', quantity: 1000, institution_value: 0, cost_basis: 5000 });
+  assert.equal(isLivePosition(dust), true);
+  assert.deepEqual(holdingGain(dust), { gain: -5000, pct: -100 });
 });

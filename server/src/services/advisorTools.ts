@@ -609,10 +609,17 @@ function analyzeInvestments(db: Database.Database): Pick<AdvisorAnalysis, 'answe
   }
 
   const totalValue = holdings.reduce((sum, holding) => sum + holding.institution_value, 0);
+  // A sold-out position is zeroed rather than deleted and keeps its cost basis, so without this it
+  // reads as a 100% unrealized loss on money the owner actually realised. The client resolves the
+  // same question through `isLivePosition`; this is the server's copy of that one predicate, and
+  // both must move together.
+  const livePositions = holdings.filter(
+    (holding) => (holding.quantity ?? 0) > 0 || holding.institution_value > 0
+  );
   // A basis of 0 is unreported, not zero-cost, so it belongs on the missing side of this split.
-  const knownBasis = holdings.filter((holding) => holding.cost_basis != null && holding.cost_basis > 0);
-  const missingBasis = holdings.filter((holding) => holding.cost_basis == null || holding.cost_basis <= 0);
-  const manualBasisCount = holdings.filter((holding) => holding.cost_basis_quality === 'manual').length;
+  const knownBasis = livePositions.filter((holding) => holding.cost_basis != null && holding.cost_basis > 0);
+  const missingBasis = livePositions.filter((holding) => holding.cost_basis == null || holding.cost_basis <= 0);
+  const manualBasisCount = livePositions.filter((holding) => holding.cost_basis_quality === 'manual').length;
   const knownBasisValue = knownBasis.reduce((sum, holding) => sum + (holding.cost_basis ?? 0), 0);
   const knownMarketValue = knownBasis.reduce((sum, holding) => sum + holding.institution_value, 0);
   const unrealized = knownBasis.length > 0 ? knownMarketValue - knownBasisValue : null;
