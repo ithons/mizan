@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { formatAdaptiveCurrency, formatUnitPrice, formatWholeCurrency } from '../client/src/lib/formatters';
+import { formatAdaptiveCurrency, formatQuantity, formatUnitPrice, formatWholeCurrency } from '../client/src/lib/formatters';
 
 /**
  * A per-unit price is a rate, not a total, and rounding it to whole dollars destroys it.
@@ -81,4 +81,30 @@ test('HEALTHY: a dollar and above is unchanged, so the column stays compact', ()
 test('an exact zero stays $0, because there is nothing to lose', () => {
   // A genuinely zero holding is not dust; spelling it "$0.00" would only add noise.
   assert.equal(formatAdaptiveCurrency(0), '$0');
+});
+
+/**
+ * A share count has one formatter and one precision rule.
+ *
+ * Investments capped quantities at four decimals and AccountDetail printed the raw float, which on
+ * the live ledger reached 18 characters (`SELECT length(CAST(quantity AS TEXT))` -> 4, 5, 8, 10,
+ * 14 and 18 across 14 holdings). A count is not money and not a per-unit price, so it gets its own
+ * rule beside those two rather than borrowing either.
+ */
+test('a share count renders to at most eight decimals with trailing zeros dropped', () => {
+  assert.equal(formatQuantity(8.003), '8.003');
+  assert.equal(formatQuantity(0.0031964), '0.0031964');
+  assert.equal(formatQuantity(237.3), '237.3');
+  assert.equal(formatQuantity(0.010477664077), '0.01047766', 'an 18-character float rendered raw');
+  assert.equal(formatQuantity(1), '1');
+  assert.equal(formatQuantity(1234.5), '1,234.5');
+});
+
+test('every screen that prints a quantity uses the one formatter', () => {
+  for (const file of ['client/src/views/Investments.tsx', 'client/src/views/accounts/AccountDetail.tsx']) {
+    const src = readFileSync(join(__dirname, '..', file), 'utf8');
+    assert.doesNotMatch(src, /quantity\.toLocaleString/, `${file} formats a quantity inline`);
+    assert.doesNotMatch(src, /\{h\.quantity\} units/, `${file} prints a raw float quantity`);
+    assert.match(src, /formatQuantity\(/, `${file} does not use formatQuantity`);
+  }
 });

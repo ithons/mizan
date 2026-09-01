@@ -163,3 +163,16 @@ export function formatUnitPrice(price: number): string {
     : Number(trimmed).toFixed(2);
   return `${sign}$${withCents}`;
 }
+
+/**
+ * A share or unit count. Not money, and not a per-unit price either.
+ *
+ * Quantities are REAL in the database on purpose (a crypto position is 0.0031964 BTC), and the
+ * two screens that print them disagreed: Investments capped at four decimals, AccountDetail
+ * printed the raw float, which on the live ledger reached 18 characters. Eight decimals is enough
+ * to show any position this app holds as the number it is, and trailing zeros are dropped so
+ * `8.003` reads as `8.003` and not `8.00300000`.
+ */
+export function formatQuantity(quantity: number): string {
+  return quantity.toLocaleString('en-US', { maximumFractionDigits: 8 });
+}

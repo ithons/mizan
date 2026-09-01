@@ -8,8 +8,7 @@ import {
   formatCompactRelative,
   formatCurrencyColored,
   formatDate,
-  formatWholeCurrency,
-} from '../../lib/formatters';
+  formatWholeCurrency, formatQuantity } from '../../lib/formatters';
 import { creditNote, isInCredit, signedAccountBalance } from '../../lib/accountBalance';
 import { Screen, SectionLabel, TextButton, TrendChart } from '../../components/balance';
 import { SkeletonRows } from '../../components/SkeletonLoader';
@@ -195,7 +194,7 @@ export function AccountDetail() {
             <div key={h.id} className="flex items-baseline justify-between border-b border-line py-2 last:border-0">
               <div className="min-w-0">
                 <div className="truncate text-body-lg text-ink">{h.ticker ?? h.security_name ?? 'Holding'}</div>
-                <div className="text-note text-muted-2">{h.quantity} units</div>
+                <div className="text-note text-muted-2">{formatQuantity(h.quantity)} units</div>
               </div>
               <div className="tabular-nums text-body-lg text-ink">{formatWholeCurrency(h.institution_value)}</div>
             </div>

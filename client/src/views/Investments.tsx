@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { format, subMonths } from 'date-fns';
 import type { Holding } from '@shared/types';
 import { accountsApi, investmentsApi, reportsApi } from '../lib/api';
-import { formatWholeCurrency, formatPercent, formatDateShort, formatUnitPrice, formatAdaptiveCurrency } from '../lib/formatters';
+import { formatWholeCurrency, formatPercent, formatDateShort, formatUnitPrice, formatAdaptiveCurrency, formatQuantity } from '../lib/formatters';
 import { parseDecimalInput } from '../lib/numberInput';
 import {
   ALLOCATION_LENSES,
@@ -89,7 +89,7 @@ function HoldingModal({ holding, accountName, onClose }: { holding: Holding | nu
       <div className="space-y-4">
         <div className="flex items-baseline justify-between">
           <span className="text-body text-muted">
-            {accountName ?? 'Investment account'} · {holding.quantity.toLocaleString('en-US', { maximumFractionDigits: 4 })} share
+            {accountName ?? 'Investment account'} · {formatQuantity(holding.quantity)} share
             {holding.quantity === 1 ? '' : 's'} @ {formatUnitPrice(holding.institution_price)}
           </span>
           <span className="font-serif text-display font-light leading-none tabular-nums text-ink">{formatWholeCurrency(holding.institution_value)}</span>
@@ -403,7 +403,7 @@ export function Investments() {
                     <div className="truncate text-body-lg text-ink">{holdingName(h)}</div>
                     <div className="mt-0.5 text-note text-muted-2">
                       {accountNameById.get(h.account_id) ?? 'Investment account'} ·{' '}
-                      {h.quantity.toLocaleString('en-US', { maximumFractionDigits: 4 })} share{h.quantity === 1 ? '' : 's'}
+                      {formatQuantity(h.quantity)} share{h.quantity === 1 ? '' : 's'}
                     </div>
                   </div>
                   <div className="text-right">
