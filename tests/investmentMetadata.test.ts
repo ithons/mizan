@@ -112,3 +112,33 @@ test('getHoldingHistory throws for an unknown holding id', (t) => {
 
   assert.throws(() => getHoldingHistory(db, 'nonexistent'), /Holding not found/);
 });
+
+/**
+ * The owner can say what an instrument is, and saying so touches nothing else.
+ *
+ * SimpleFIN writes `type` as NULL because it does not report a class (migration 059). This is the
+ * one route that lets the owner classify a security, and it must be able to set `type` without
+ * clearing a sector it was not asked about, and set a sector without clearing a type.
+ */
+test('security metadata can set the instrument class on its own', (t) => {
+  const db = setupDb();
+  t.after(() => db.close());
+
+  setSecurityMetadata(db, 'sec_vti', { sector: 'Broad Market', sector_source: 'manual' });
+  const typed = setSecurityMetadata(db, 'sec_vti', { type: 'etf' });
+  assert.equal(typed.type, 'etf');
+  assert.equal(typed.sector, 'Broad Market', 'setting the class wiped the sector');
+
+  const cleared = setSecurityMetadata(db, 'sec_vti', { type: null });
+  assert.equal(cleared.type, null, 'the class cannot be set back to unclassified');
+  assert.equal(cleared.sector, 'Broad Market');
+});
+
+test('HEALTHY: a sector-only update leaves the class alone', (t) => {
+  const db = setupDb();
+  t.after(() => db.close());
+  setSecurityMetadata(db, 'sec_vti', { type: 'mutual_fund' });
+  const after = setSecurityMetadata(db, 'sec_vti', { sector: 'Bonds' });
+  assert.equal(after.type, 'mutual_fund');
+  assert.equal(after.sector, 'Bonds');
+});

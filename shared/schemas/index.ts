@@ -172,8 +172,10 @@ export const UpdateHoldingCostBasisSchema = z.object({
 });
 
 export const UpdateSecurityMetadataSchema = z.object({
-  sector: z.string().trim().min(1).max(80).nullable(),
+  sector: z.string().trim().min(1).max(80).nullable().optional(),
   sector_source: z.string().trim().min(1).max(40).nullable().optional(),
+  /** The instrument class. NULL means the provider did not say and the owner has not either. */
+  type: z.enum(['equity', 'etf', 'mutual_fund', 'crypto', 'cash', 'other']).nullable().optional(),
 });
 
 export const ExportCsvSchema = z.object({

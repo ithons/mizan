@@ -21,10 +21,13 @@ test('upsertHoldingsFromSimplefin creates securities and holdings from a SimpleF
     { symbol: null, description: 'Money Market Sweep', shares: 100, market_value: 100, cost_basis: null, currency: 'USD' },
   ], '2026-07-03T00:00:00.000Z');
 
-  const securities = db.prepare('SELECT ticker, name, type FROM securities ORDER BY ticker').all() as Array<{ ticker: string | null; name: string; type: string }>;
+  // `type` is NULL for both. SimpleFIN reports no instrument class, and this used to hardcode
+  // 'equity', which is how a money-market sweep read "Equity" on the allocation lens. This
+  // assertion pinned that defect as correct behaviour until 2026-09-01.
+  const securities = db.prepare('SELECT ticker, name, type FROM securities ORDER BY ticker').all() as Array<{ ticker: string | null; name: string; type: string | null }>;
   assert.deepEqual(securities, [
-    { ticker: null, name: 'Money Market Sweep', type: 'equity' },
-    { ticker: 'VTI', name: 'Vanguard Total Stock Market ETF', type: 'equity' },
+    { ticker: null, name: 'Money Market Sweep', type: null },
+    { ticker: 'VTI', name: 'Vanguard Total Stock Market ETF', type: null },
   ]);
 
   const holdings = db.prepare('SELECT quantity, institution_price, institution_value, cost_basis FROM holdings ORDER BY institution_value').all() as Array<{

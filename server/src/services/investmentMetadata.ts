@@ -41,8 +41,15 @@ export interface UpdateHoldingCostBasisInput {
 }
 
 export interface UpdateSecurityMetadataInput {
-  sector: string | null;
+  /** Omitted leaves the stored sector alone; null clears it. */
+  sector?: string | null;
   sector_source?: string | null;
+  /**
+   * The instrument class. Omitted leaves it alone; null means "nobody has said" and renders
+   * "Unclassified". SimpleFIN writes NULL because it does not report a class (migration 059), so
+   * this is how a money-market sweep stops reading as equity: the owner says what it is.
+   */
+  type?: Security['type'];
 }
 
 function httpError(message: string, status: number): Error & { status: number } {
@@ -224,14 +231,24 @@ export function setSecurityMetadata(
   const existing = db.prepare('SELECT id FROM securities WHERE id = ?').get(securityId);
   if (!existing) throw httpError('Security not found', 404);
 
-  const sector = input.sector?.trim() || null;
-  const sectorSource = sector ? input.sector_source?.trim() || 'manual' : null;
-  db.prepare(`
-    UPDATE securities
-    SET sector = ?,
-        sector_source = ?
-    WHERE id = ?
-  `).run(sector, sectorSource, securityId);
+  // Each field is written only when the caller sent it. A PUT that sets `type` alone used to be
+  // impossible (there was no `type`), and a PUT that set `sector` alone now must not touch `type`
+  // or vice versa: two independent facts, two independent writes.
+  const updates: string[] = [];
+  const values: unknown[] = [];
+  if (input.sector !== undefined) {
+    const sector = input.sector?.trim() || null;
+    const sectorSource = sector ? input.sector_source?.trim() || 'manual' : null;
+    updates.push('sector = ?', 'sector_source = ?');
+    values.push(sector, sectorSource);
+  }
+  if (input.type !== undefined) {
+    updates.push('type = ?');
+    values.push(input.type);
+  }
+  if (updates.length > 0) {
+    db.prepare(`UPDATE securities SET ${updates.join(', ')} WHERE id = ?`).run(...values, securityId);
+  }
 
   const row = db.prepare(`
     SELECT id, ticker, name, type, currency, sector, sector_source

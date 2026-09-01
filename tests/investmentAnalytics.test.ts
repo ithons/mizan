@@ -582,3 +582,27 @@ test('a worthless but still-held token is a live position, because quantity deci
   assert.equal(isLivePosition(dust), true);
   assert.deepEqual(holdingGain(dust), { gain: -5000, pct: -100 });
 });
+
+/**
+ * An instrument nobody has classified is labelled as such, not as equity.
+ *
+ * `securities.type` is NULL for every security SimpleFIN introduces (migration 059), because the
+ * provider reports no class and the old hardcoded 'equity' put a money-market sweep under
+ * "Equity" on the lens the Investments screen opens on. The lens already mapped NULL to
+ * "Unclassified"; this pins that the label reaches the slice.
+ */
+test('the asset lens labels a NULL security type Unclassified, beside real classes', () => {
+  const accounts = new Map([['acct_b', account('acct_b', 'brokerage')]]);
+  const slices = getAllocationSlices(
+    [
+      holding({ id: 'h1', account_id: 'acct_b', security_type: null, institution_value: 600 }),
+      holding({ id: 'h2', account_id: 'acct_b', security_type: 'crypto', institution_value: 400 }),
+    ],
+    'asset_type',
+    accounts
+  );
+  assert.deepEqual(
+    slices.map((s) => [s.label, s.value]).sort(),
+    [['Crypto', 400], ['Unclassified', 600]]
+  );
+});

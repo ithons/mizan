@@ -94,9 +94,16 @@ export function upsertHoldingsFromSimplefin(db: Database.Database, accountId: st
   // providers into line. Zeroed rather than deleted so holdings_history keeps its foreign key.
   const seenSecurityIds = new Set<string>();
   const findSecurityByTicker = db.prepare('SELECT id FROM securities WHERE ticker = ? LIMIT 1');
+  // `type` is NULL, not 'equity'. SimpleFIN hands over ticker, name and currency and nothing
+  // about what kind of instrument it is, and this INSERT hardcoded 'equity' for every one: on the
+  // live ledger a government money-market sweep (SPAXX) and two index funds were all "Equity" on
+  // the Investments allocation lens, which is the lens the screen opens on. Migration 059 lets
+  // the column be NULL, the lens already labels NULL "Unclassified"
+  // (`investmentAnalytics.ts`: `holding.security_type ?? 'unclassified'`), and the owner can set
+  // the class through `PUT /securities/:id/metadata`, recorded the way a sector is.
   const insertSecurity = db.prepare(`
     INSERT INTO securities (id, ticker, name, type, currency)
-    VALUES (?, ?, ?, 'equity', ?)
+    VALUES (?, ?, ?, NULL, ?)
   `);
   const upsertHolding = db.prepare(`
     INSERT INTO holdings (id, account_id, security_id, quantity, institution_price, institution_value, cost_basis, currency, updated_at)

@@ -206,7 +206,8 @@ export interface Security {
   id: string;
   ticker?: string | null;
   name: string;
-  type: 'equity' | 'etf' | 'mutual_fund' | 'crypto' | 'cash' | 'other';
+  /** NULL when the provider did not say and the owner has not either; rendered "Unclassified". */
+  type: 'equity' | 'etf' | 'mutual_fund' | 'crypto' | 'cash' | 'other' | null;
   currency: string;
   sector?: string | null;
   sector_source?: string | null;
