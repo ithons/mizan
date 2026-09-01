@@ -673,8 +673,19 @@
     @apply bg-paper text-ink font-sans antialiased selection:bg-sage-tint;
   }
   * { box-sizing: border-box; }
+  /* `!important`, and it is load-bearing rather than lazy.
+     `@tailwindcss/forms` emits element-level rules of the shape
+       [type='text']:focus, select:focus, textarea:focus { outline: 2px solid transparent; ... }
+     into this same layer. `[type='text']:focus` is specificity (0,2,0) against `:focus-visible`'s
+     (0,1,0), so the plugin's TRANSPARENT outline won on every form control in the app and the
+     keyboard affordance did not exist. Measured in Chrome against the running app, on a
+     keyboard-focused input: `matches(':focus-visible')` true, computed outline
+     `solid 2px rgba(0, 0, 0, 0)`.
+     Raising specificity cannot fix it cleanly: `input:focus-visible` is (0,1,1) and still loses,
+     and a selector contrived to beat (0,2,0) is less legible than this. The repo's position is
+     that the outline IS the affordance (see `.mz-field` below), so nothing may override it. */
   :focus-visible {
-    outline: 2px solid var(--mz-sage);
+    outline: 2px solid var(--mz-sage) !important;
     outline-offset: 2px;
     border-radius: 2px;
   }
