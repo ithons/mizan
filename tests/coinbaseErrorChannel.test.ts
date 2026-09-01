@@ -94,3 +94,39 @@ test('HEALTHY: a clean pass records no error text and zeroes nothing', () => {
   assert.equal(row.holdings_zeroed, 0);
   db.close();
 });
+
+/**
+ * A retried Coinbase sync still records the balance movement the run made.
+ *
+ * `syncManager` wraps the whole of `syncCoinbase` in `withRetry`, and `syncCoinbase` read the
+ * account's `current_balance` at the top of every attempt. A first attempt that wrote the new
+ * balance and then threw inside the ledger import (an HTTP call, retryable) was re-run from the
+ * top; the second attempt read the balance the first had just written as "previous",
+ * `balancesDiffer` said no, and the run recorded no Coinbase movement. The write was right and the
+ * record of it was lost. The balance is now read once, before the retry, and passed in.
+ *
+ * Pinned at the source because `syncCoinbase` performs real signed HTTP calls and the suite has no
+ * seam to drive it without them; the two halves below are the whole of the fix.
+ */
+test('the Coinbase balance is read before the retry and handed to every attempt', () => {
+  const sm = code('server/src/services/syncManager.ts');
+  const call = sm.slice(sm.indexOf('const coinbaseBefore'), sm.indexOf('const coinbaseBefore') + 500);
+  assert.match(call, /SELECT current_balance FROM accounts WHERE connection_type = 'coinbase'/);
+  assert.match(
+    call,
+    /withRetry\(\(\)\s*=>\s*syncCoinbase\(\{ previousBalanceCents: coinbaseBefore\?\.current_balance \}\)/,
+    'the retry re-reads the balance on every attempt'
+  );
+  // Order: the read must come before the retry, not inside it.
+  assert.ok(sm.indexOf('const coinbaseBefore') < sm.indexOf('withRetry(() =>\n          syncCoinbase('), 'the pre-read sits inside the retried closure');
+});
+
+test('syncCoinbase measures its balance change against the value it was handed', () => {
+  const cb = code('server/src/services/coinbase.ts');
+  assert.match(cb, /options: \{ previousBalanceCents\?: number \} = \{\}/);
+  assert.match(
+    cb,
+    /const previousCents = options\.previousBalanceCents \?\? existingAcct\?\.current_balance \?\? 0;/,
+    'the previous balance is still read fresh on every attempt'
+  );
+});

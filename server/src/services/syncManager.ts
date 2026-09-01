@@ -674,7 +674,14 @@ async function _runFullSyncInternal(): Promise<void> {
     if (creds.coinbase) {
       emitSyncEvent({ type: 'sync_progress', message: 'Syncing Coinbase...', progress: 50 });
       try {
-        const coinbaseResult = await withRetry(() => syncCoinbase());
+        // Read once, outside the retry, so a retried attempt still measures its balance change
+        // against the balance the RUN started with rather than the one the failed attempt wrote.
+        const coinbaseBefore = db.prepare(
+          "SELECT current_balance FROM accounts WHERE connection_type = 'coinbase' AND type = 'crypto_wallet' LIMIT 1"
+        ).get() as { current_balance: number } | undefined;
+        const coinbaseResult = await withRetry(() =>
+          syncCoinbase({ previousBalanceCents: coinbaseBefore?.current_balance })
+        );
         // `status` is derived from what the stage reported rather than hardcoded 'succeeded'.
         // A pass that could not price a coin, or that skipped the whole v2 ledger import, or that
         // declined to zero holdings because the feed was empty, is not a clean success, and saying

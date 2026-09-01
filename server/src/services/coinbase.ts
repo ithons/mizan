@@ -498,7 +498,17 @@ export async function testConnection(): Promise<{ userId: string; displayName: s
   };
 }
 
-export async function syncCoinbase(): Promise<CoinbaseSyncResult> {
+/**
+ * `previousBalanceCents` is what the balance change is measured AGAINST, and the caller passes it
+ * because this function is wrapped in `withRetry`. The old shape read `current_balance` at the top
+ * of every attempt: a first attempt that wrote the new balance and then threw inside the ledger
+ * import (an HTTP call, and retryable) was re-run from the top, the second attempt read the balance
+ * the first had just written as "previous", `balancesDiffer` said no, and the run recorded no
+ * Coinbase movement at all. The write was right and the record of it was lost.
+ */
+export async function syncCoinbase(
+  options: { previousBalanceCents?: number } = {}
+): Promise<CoinbaseSyncResult> {
   const db = getDb();
   const now = new Date().toISOString();
 
@@ -615,7 +625,7 @@ export async function syncCoinbase(): Promise<CoinbaseSyncResult> {
     'SELECT COALESCE(SUM(institution_value), 0) AS total FROM holdings WHERE account_id = ?'
   ).get(accountId) as { total: number }).total;
 
-  const previousCents = existingAcct?.current_balance ?? 0;
+  const previousCents = options.previousBalanceCents ?? existingAcct?.current_balance ?? 0;
   if (!feedWasEmpty && balancesDiffer(previousCents, totalCents)) {
     balanceChanges.push({
       accountId,
