@@ -706,3 +706,66 @@ twin in `index.css` was corrected when the palette landed. `ui-overhaul.md` is t
 Findings 42, 43, 44, 49, 50, 51, 52, 56, 57 and the eleven lows are not done. Nor is finding 9, which
 is Phase 8. The four out-of-band mutators in `scripts/cleanup/` are still in no tsconfig, and
 `simplefinRelink.ts:340-780` is still unread by anyone and still has never executed.
+
+## 2026-09-01, third pass: the mediums, the lows, and what the audit left unscheduled
+
+Fourteen more commits. `npm test` 1805 passing; **the gate is now five commands**, because
+`scripts/backfill` (the only writer of `backfill_floor_date`, in no tsconfig until today) is
+typechecked by `tsconfig.scripts.json`. The four one-off mutators in `scripts/cleanup/` are deleted:
+each documented itself as a one-shot that had already run, none was referenced anywhere, and they
+were the out-of-band write path the floor finding (V9's neighbour) was about.
+
+**Every audit finding is now closed** except finding 9, which is a design commitment rather than a
+defect and is discussed under Phase 8 below.
+
+**Numbers and units.** A provider balance can no longer be overwritten through
+`PATCH /api/accounts/:id`; the policy comment enumerated the provider-sourced fields and omitted the
+money one, and the falsified figure was being written into net-worth history as a measured sheet.
+`get_transaction_full` ships `provider_amount` in dollars beside `amount`, not cents beside dollars
+under a label saying dollars. Share counts have one formatter (Investments capped at four decimals,
+AccountDetail printed an 18-character float). `bucketsOf` settles the leftover asset bucket in
+cents. A retried Coinbase sync still records its balance movement, because the previous balance is
+read once before the retry rather than at the top of every attempt.
+
+**Detectors and honesty.** `detectRecurring` went from **995.6 / 922.7 / 913.8 ms to
+178.9 / 147.9 / 147.6 ms** on the live ledger with two exact shortcuts (an exact-name hit skips
+the scan; a Dice upper bound from string lengths skips pairs that cannot clear the threshold); the
+bound is pinned against the real library on adversarial pairs. A no-op rule re-proposal resolves the
+draft without being counted as applied or toasted. `recentSignedAmounts` excludes a linked row later
+recategorized as a transfer, which its comment claimed could not exist and four live rows did.
+`securities.type` is nullable (migration 059) and SimpleFIN writes NULL, because it reports no
+instrument class and the old hardcoded `'equity'` had a money-market sweep on the lens as Equity;
+the owner can set the class through the metadata route. Deleting a rule retires it, so the AI's
+history stops counting creations whose rule has vanished.
+
+**The boundary, closed.** The access log records the path and not the query string, so three months
+of Ledger search terms stop persisting to disk, and it rotates at 8 MB. The backup description names
+the advisor tables it contains. And `GET /api/ai/context`, which served the full context "for the UI
+preview panel" that never existed, now has one: Settings shows the owner the exact text every
+advisor call is built from, with its size (34,517 bytes on the live ledger through the running
+server). V7 asked whether the owner could find out what leaves; now they can read it.
+
+**Subtraction.** `advisorPrompts.ts` 824 lines to 116; 14 of 16 builders had no production caller
+because the consolidation deleted their screens, and their 700 lines of tests kept passing. Deleted
+with the argument in the file header, and `tests/advisorPromptCallers.test.ts` fails on any builder
+added without a caller. Net for that commit: +78 / -1,448.
+
+**Phase 14, the half that needed no design.** 35 of 43 `<label>` elements associated with nothing
+(Part III measured 40 of 40 and deferred it behind the graphic layer). Every label now carries
+`htmlFor` or wraps its control, `CategoryPicker` forwards an `id` to its combobox button, the colour
+swatch group carries `aria-labelledby`, and the sync line is `aria-live="polite"`. `aria-sort` and
+sortable headers are a feature and are not done.
+
+**Phase 8, judged rather than deferred.** Finding 9 says `rebuild-part-3.md` Decision 1 commits to
+the "Bone and Signal" palette and the commit that added that file shipped pure black and white
+instead. Both halves are true and the record now says so beside Gate 0. The graphic layer (Phase 13)
+is still unbuilt; it is design work with a written spec, the app is now runnable so its Gate 4 is
+finally possible, and it is the one remaining item from the brief's stage 7.
+
+**Two things the critic named, settled.** `simplefinRelink.ts:340-780` is not unread by tests:
+`proposeSimplefinPairing` is exported and called directly twelve times in
+`tests/simplefinRelink.test.ts`, which holds 41 tests. "Never executed" was true of production only,
+and stays true until the owner's institution re-mints its ids. `scripts/cleanup` is gone, as above.
+
+**Left open.** Sortable headers and `aria-sort`; Phase 13; and finding 9's palette question, which is
+recorded and not re-litigated here.
