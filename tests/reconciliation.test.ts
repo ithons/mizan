@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { reconcileAccounts } from '../server/src/services/reconciliation';
+import { boundaryApplicableTo, reconcileAccounts } from '../server/src/services/reconciliation';
 import { insertAccount, insertTransaction, migratedTestDb } from './helpers/schema';
 
 function snapshot(
@@ -290,4 +290,68 @@ test('with too few snapshots every visible account is skipped for that reason', 
     { account_id: account, account_name: 'Checking', type: 'checking', reason: 'check_did_not_run' },
   ]);
   db.close();
+});
+
+/**
+ * The boundary adjustment may only remove a discrepancy, never create one.
+ *
+ * `boundary_amount` is documented as "the part of `residual` that is an artifact of where the
+ * horizon was cut" and was then subtracted unconditionally. The two agree only when the artifact
+ * is really in the residual. `boundaryAmount = firstDayTotal - lastDayTotal` assumes a boundary
+ * row's balance effect has NOT reached the snapshot; in this app it usually has, because SimpleFIN
+ * sends balance and transactions in one payload and `takeSnapshot()` records that balance in the
+ * same run. Every existing boundary test builds only the mirror state, which is why four
+ * verification rounds could not see this.
+ */
+test('a row on the last snapshot date, already in that balance, is not a discrepancy', () => {
+  const db = migratedTestDb();
+  const account = insertAccount(db, { type: 'checking' });
+  snapshot(db, 's1', '2026-08-01', { [account]: 100000 });
+  snapshot(db, 's2', '2026-08-31', { [account]: 105000 });
+  insertTransaction(db, { account_id: account, date: '2026-08-31', amount: 5000 });
+
+  const report = reconcileAccounts(db);
+  const row = report.accounts.find((a) => a.account_id === account);
+  // The ledger explains the balance exactly.
+  assert.equal(row?.residual, 0);
+  // It used to report +5000 here and list the account as unreconciled.
+  assert.equal(row?.adjusted_residual, 0);
+  assert.deepEqual(report.unreconciled, []);
+  db.close();
+});
+
+test('a row on the first snapshot date, already in that balance, is not a direction conflict', () => {
+  const db = migratedTestDb();
+  const account = insertAccount(db, { type: 'checking' });
+  snapshot(db, 's1', '2026-08-01', { [account]: 102000 });
+  snapshot(db, 's2', '2026-08-31', { [account]: 100000 });
+  insertTransaction(db, { account_id: account, date: '2026-08-01', amount: 7000 });
+  insertTransaction(db, { account_id: account, date: '2026-08-15', amount: -2000 });
+
+  const report = reconcileAccounts(db);
+  const row = report.accounts.find((a) => a.account_id === account);
+  assert.equal(row?.residual, 0);
+  assert.equal(row?.adjusted_residual, 0);
+  // It used to set this, and `aiContext.ts` then told the model the transactions pointed the
+  // opposite way from the balance on a ledger that reconciles to the cent.
+  assert.equal(row?.direction_conflict, false);
+  assert.deepEqual(report.unreconciled, []);
+  db.close();
+});
+
+test('boundaryApplicableTo only ever shrinks a residual toward zero', () => {
+  // The real Chase Checking shape: a genuine artifact, fully explained away.
+  assert.equal(boundaryApplicableTo(54418, 54418), 54418);
+  // Partial: it removes what it can and leaves the rest visible.
+  assert.equal(boundaryApplicableTo(10000, 4000), 4000);
+  // Larger than the residual: capped, so it cannot overshoot into the opposite sign.
+  assert.equal(boundaryApplicableTo(4000, 10000), 4000);
+  // Opposite signs: applying it would move away from zero, so nothing applies.
+  assert.equal(boundaryApplicableTo(-5000, 7000), 0);
+  assert.equal(boundaryApplicableTo(5000, -7000), 0);
+  // Nothing to explain.
+  assert.equal(boundaryApplicableTo(0, -5000), 0);
+  assert.equal(boundaryApplicableTo(5000, 0), 0);
+  // Negative residual with a negative artifact behaves the same way.
+  assert.equal(boundaryApplicableTo(-1326, -1326), -1326);
 });

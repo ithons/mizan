@@ -161,6 +161,51 @@ export interface ReconciliationReport {
  * `adjusted_residual` is 0. Every judged account's `adjusted_residual` is either exempt or exactly
  * zero, so this returns 0.
  */
+/**
+ * How much of `boundaryAmount` the residual can actually be carrying.
+ *
+ * `boundary_amount` is defined as "the part of `residual` that is an artifact of where the horizon
+ * was cut", and it was then subtracted unconditionally, which is a different thing. The two agree
+ * only when the artifact is really in the residual.
+ *
+ * `boundaryAmount = firstDayTotal - lastDayTotal` assumes a first-day row is missing from
+ * `explained` while its balance effect IS inside the horizon, and that a last-day row is in
+ * `explained` while the balance has NOT caught up with it. The first half holds by construction:
+ * the window filter is `date > previous`. The second half is an assumption about timing, and in
+ * this app it is usually false. `SimplefinAccountPayload` carries `balance` and `transactions` in
+ * one object, `syncSimplefinAccounts` writes `current_balance` and then posts the transactions
+ * from that same payload, and `takeSnapshot()` records that balance later in the SAME run. So a
+ * row dated today is normally already inside today's snapshot balance.
+ *
+ * When it is, the residual is already zero and the unconditional subtraction MANUFACTURED one.
+ * Reproduced against `migratedTestDb()`:
+ *
+ *   one checking account, snapshots 2026-08-01 $1,000.00 and 2026-08-31 $1,050.00, one +$50.00 row
+ *   dated 2026-08-31 whose effect is in that balance
+ *     -> observed 5000, explained 5000, residual 0
+ *        boundary_amount -5000, adjusted_residual +5000, reported unreconciled
+ *
+ *   snapshots 2026-08-01 $1,020.00 and 2026-08-31 $1,000.00, a +$70.00 row dated 2026-08-01 whose
+ *   effect is in the first balance, and a -$20.00 row mid-window
+ *     -> observed -2000, explained -2000, residual 0
+ *        boundary_amount 7000, adjusted_residual -7000, direction_conflict TRUE
+ *
+ * Both ledgers reconcile to the cent. The second one then told the owner, through
+ * `aiContext.ts`'s Ledger Integrity block and every prompt built on it, that the transactions
+ * point the opposite way from the balance.
+ *
+ * The rule: the adjustment may only shrink `|residual|`, never grow it and never flip its sign.
+ * The live Chase Checking case is unaffected, which is the point: residual 54418 against
+ * boundary_amount 54418 still cancels exactly to 0.
+ */
+export function boundaryApplicableTo(residual: number, boundaryAmount: number): number {
+  if (residual === 0 || boundaryAmount === 0) return 0;
+  // Opposite signs: subtracting would move the residual further from zero, so nothing applies.
+  if (Math.sign(residual) !== Math.sign(boundaryAmount)) return 0;
+  // Same sign: remove at most the whole residual.
+  return Math.sign(residual) * Math.min(Math.abs(boundaryAmount), Math.abs(residual));
+}
+
 export function unreconciledResidual(report: ReconciliationReport): number {
   return report.unreconciled.reduce((sum, account) => sum + Math.abs(account.adjusted_residual), 0);
 }
@@ -298,10 +343,13 @@ export function reconcileAccounts(
       ? (sumOnDate.get(account.id, lastDate) as { total: number }).total
       : 0;
     const boundaryAmount = firstDayTotal - lastDayTotal;
-    const adjustedResidual = residual - boundaryAmount;
+    // Only ever removes part of a residual that already exists. It cannot create one, and it
+    // cannot push one past zero into the opposite sign.
+    const appliedBoundary = boundaryApplicableTo(residual, boundaryAmount);
+    const adjustedResidual = residual - appliedBoundary;
     // The ledger side of the same adjustment `adjusted_residual` makes, so the conflict is judged
     // against the movement the horizon can actually see.
-    const adjustedExplained = explainedDelta + boundaryAmount;
+    const adjustedExplained = explainedDelta + appliedBoundary;
     results.push({
       account_id: account.id,
       account_name: account.account_name,
