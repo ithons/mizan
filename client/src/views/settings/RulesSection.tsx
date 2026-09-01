@@ -127,7 +127,7 @@ export function RulesSection() {
     mutationFn: rulesApi.delete,
     onSuccess: () => {
       invalidateFinancialData(qc);
-      addToast({ type: 'success', message: 'Rule deleted' });
+      addToast({ type: 'success', message: 'Rule retired. You can put it back from the retired list.' });
     },
     onError: (err: Error) => addToast({ type: 'error', message: err.message }),
   });

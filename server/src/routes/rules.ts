@@ -17,6 +17,7 @@ import {
   upsertMerchantRule,
   countTransactionsHeldByRule,
   countTransactionsHeldByAllRules,
+  retireMerchantRule,
 } from '../services/rules';
 
 const router = Router();
@@ -274,7 +275,15 @@ router.delete('/:id', (req: Request, res: Response, next: NextFunction): void =>
       return;
     }
 
-    db.prepare('DELETE FROM merchant_rules WHERE id = ?').run(id);
+    // Retire, not DELETE. A hard delete left no trace anywhere the prompt could see: the AI's
+    // action history kept counting the creation as "applied" while the rule itself had vanished,
+    // so on the live ledger the model read 63 rule creations applied with four of those rules
+    // gone and nothing saying so. Retiring writes a `merchant_rule_revisions` row (the schema's
+    // `operation` CHECK has no 'delete'; 'retire' is the recorded form), the rules list already
+    // hides `retired_at IS NOT NULL`, and the owner can put it back from the same screen, which
+    // a delete could never offer. Source 'human': this is the owner's decision, and an AI
+    // retirement guard must not mistake it for its own.
+    retireMerchantRule(db, id, { source: 'human' });
     res.json({ data: { success: true } });
   } catch (err) {
     next(err);
