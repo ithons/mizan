@@ -1,6 +1,6 @@
 import type Database from 'better-sqlite3';
 import { excludedFromTotalsSql } from './transactionFilters';
-import { addMonths, format, isBefore, parseISO, subMonths } from 'date-fns';
+import { addMonths, format, isBefore, parseISO, subMonths  } from 'date-fns';
 import { occurrenceDate, recentSignedAmounts } from './recurring';
 import type { Budget, BudgetRolloverLedgerEntry, RecurringPattern } from '../../../shared/types';
 
@@ -366,7 +366,13 @@ function walkRolloverLedger(
   const entries: BudgetRolloverLedgerEntry[] = [];
 
   for (const budget of budgets) {
-    const createdMonth = budget.created_at.slice(0, 7);
+    // `created_at` is a UTC ISO timestamp (`routes/budgets.ts` writes `new Date().toISOString()`)
+    // and `throughMonth` is a LOCAL 'yyyy-MM'. Slicing the UTC string compares two calendars: a
+    // budget created after 20:00 local on the last day of a month (America/New_York, UTC-4) has a
+    // `created_at` in the NEXT month, so `createdMonth > throughMonth` skipped its own first month
+    // out of every later carryover figure. Parsed and reformatted locally so both sides are the
+    // same calendar.
+    const createdMonth = format(parseISO(budget.created_at), 'yyyy-MM');
     if (createdMonth > throughMonth) continue;
 
     const range = monthRangeForLedger(createdMonth, throughMonth, months);

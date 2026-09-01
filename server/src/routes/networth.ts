@@ -1,3 +1,4 @@
+import { format, subMonths } from 'date-fns';
 import { Router, Request, Response, NextFunction } from 'express';
 import { getDb } from '../db/index';
 import { dollarizeFields, toDollars } from '../services/money';
@@ -82,10 +83,21 @@ router.get('/history', (req: Request, res: Response, next: NextFunction): void =
     }
 
     if (months !== undefined) {
-      const cutoff = new Date();
-      cutoff.setMonth(cutoff.getMonth() - months);
+      // `subMonths` + local `format`, not `setMonth` + `toISOString`.
+      //
+      // `net_worth_snapshots.date` is a LOCAL 'yyyy-MM-dd' (`snapshot.ts` writes
+      // `format(new Date(), 'yyyy-MM-dd')`), so a cutoff built in UTC compares two different
+      // calendars. On this machine (America/New_York, UTC-4) `toISOString()` after 20:00 local
+      // already reads tomorrow, so the oldest sheet in a 12-month window silently dropped out
+      // every evening and came back every morning.
+      //
+      // `setMonth` also overflows rather than clamping: on 2026-08-31, `setMonth(getMonth() - 6)`
+      // asks for 31 February and lands on 3 March, losing three days; on 2026-07-31 a one-month
+      // window asks for 31 June and lands on 1 July, which is zero months of history.
+      // `subMonths` clamps to the last valid day of the target month, which is what a
+      // "months back" window means.
       conditions.push('date >= ?');
-      params.push(cutoff.toISOString().split('T')[0]);
+      params.push(format(subMonths(new Date(), months), 'yyyy-MM-dd'));
     } else {
       if (startDate) {
         conditions.push('date >= ?');
