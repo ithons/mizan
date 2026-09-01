@@ -1013,8 +1013,20 @@ export function buildFinancialContext(): string {
     lines.push(`  Scheduled net:    ${fmt(toDollars(forecast.net))}`);
     // `liquid` is dollars (from dollarized balances); forecast.net is cents.
     lines.push(`  Liquid after scheduled net: ${fmt(liquid + toDollars(forecast.net))}`);
-    lines.push('  Next scheduled items:');
-    for (const occurrence of forecast.occurrences.slice(0, 10)) {
+    // The totals three lines above cover EVERY occurrence; this list does not. Say so, with the
+    // count and the money, or the model reads the list as the whole of what is scheduled and
+    // silently disagrees with the totals printed directly above it. On the live ledger the
+    // forecast returns 17 occurrences over 60 days and this list shows 10, leaving three October
+    // bills and four payroll rows unmentioned under a "Scheduled net" that includes them.
+    const SHOWN = 10;
+    const shown = forecast.occurrences.slice(0, SHOWN);
+    const omitted = forecast.occurrences.slice(SHOWN);
+    lines.push(
+      omitted.length === 0
+        ? '  Next scheduled items:'
+        : `  Next scheduled items (${shown.length} of ${forecast.occurrences.length}, soonest first):`
+    );
+    for (const occurrence of shown) {
       const sign = occurrence.amount >= 0 ? '+' : '-';
       const status = occurrence.is_confirmed ? 'confirmed' : 'detected';
       const category = occurrence.category_name ?? 'Uncategorized';
@@ -1023,6 +1035,16 @@ export function buildFinancialContext(): string {
         : '';
       lines.push(
         `    ${occurrence.expected_date}: ${occurrence.merchant_name} ${sign}${fmt(toDollars(Math.abs(occurrence.amount)))} (${category}, ${occurrence.frequency}, ${status}${adjustment})`
+      );
+    }
+    if (omitted.length > 0) {
+      // Split by direction rather than netted: "$2,138.89 more" would hide that it is $2,176.72 of
+      // income against $37.83 of bills, and the two answer different questions.
+      const omittedIn = omitted.reduce((sum, o) => (o.amount > 0 ? sum + o.amount : sum), 0);
+      const omittedOut = omitted.reduce((sum, o) => (o.amount < 0 ? sum - o.amount : sum), 0);
+      lines.push(
+        `    ...and ${omitted.length} more through ${omitted[omitted.length - 1].expected_date}: ` +
+          `${fmt(toDollars(omittedIn))} in, ${fmt(toDollars(omittedOut))} out. The totals above include these.`
       );
     }
   }

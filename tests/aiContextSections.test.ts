@@ -871,3 +871,68 @@ test('HEALTHY: a category with no budget carries no budget clause at all', () =>
 
   db.close();
 });
+
+/**
+ * Forward Cash Flow accounts for what it did not list.
+ *
+ * The totals three lines above cover every occurrence in the window; the list showed the first ten
+ * and stopped, with nothing saying so. On the live ledger that was 10 of 17, leaving three October
+ * bills and four payroll rows unmentioned under a "Scheduled net" that included them. Two other
+ * sections in this same file already account for their own truncation, and the Category Movement
+ * note two blocks down exists because a silent slice dropped exactly the rows the note explained.
+ */
+function weeklyPattern(db: Database.Database, id: string, merchant: string, amountCents: number): void {
+  const soon = new Date();
+  soon.setDate(soon.getDate() + 2);
+  const next = `${soon.getFullYear()}-${String(soon.getMonth() + 1).padStart(2, '0')}-${String(soon.getDate()).padStart(2, '0')}`;
+  db.prepare(`
+    INSERT INTO recurring_patterns
+      (id, merchant_name, average_amount, frequency, last_seen, next_expected,
+       is_active, is_confirmed, transaction_count, created_at, updated_at)
+    VALUES (?, ?, ?, 'weekly', ?, ?, 1, 1, 8, '2026-01-01', '2026-01-01')
+  `).run(id, merchant, amountCents, daysAgo(5), next);
+}
+
+test('a truncated scheduled list says how much it left out, in both directions', (t) => {
+  const db = migratedTestDb();
+  t.after(() => { _setDbForTesting(null); db.close(); });
+  _setDbForTesting(db);
+  insertAccount(db, { id: 'acct', type: 'checking', current_balance: 500000 });
+
+  // Weekly over a 60-day window is roughly nine occurrences per pattern, so two patterns clear the
+  // ten-item cut comfortably in both directions.
+  weeklyPattern(db, 'p_in', 'payroll deposit', 50000);
+  weeklyPattern(db, 'p_out', 'gym membership', -4000);
+
+  const ctx = buildFinancialContext();
+  const section = ctx.slice(ctx.indexOf('### Forward Cash Flow'));
+
+  assert.match(section, /Next scheduled items \(10 of \d+, soonest first\):/);
+  assert.match(section, /\.\.\.and \d+ more through \d{4}-\d{2}-\d{2}: \$[\d,]+\.\d\d in, \$[\d,]+\.\d\d out\./);
+  assert.match(section, /The totals above include these\./);
+});
+
+test('HEALTHY: a list that fits says nothing about truncation', (t) => {
+  const db = migratedTestDb();
+  t.after(() => { _setDbForTesting(null); db.close(); });
+  _setDbForTesting(db);
+  insertAccount(db, { id: 'acct', type: 'checking', current_balance: 500000 });
+
+  // One monthly bill: two occurrences in 60 days, well inside the cut.
+  const soon = new Date();
+  soon.setDate(soon.getDate() + 3);
+  const next = `${soon.getFullYear()}-${String(soon.getMonth() + 1).padStart(2, '0')}-${String(soon.getDate()).padStart(2, '0')}`;
+  db.prepare(`
+    INSERT INTO recurring_patterns
+      (id, merchant_name, average_amount, frequency, last_seen, next_expected,
+       is_active, is_confirmed, transaction_count, created_at, updated_at)
+    VALUES ('p_one', 'spotify', -699, 'monthly', ?, ?, 1, 1, 6, '2026-01-01', '2026-01-01')
+  `).run(daysAgo(28), next);
+
+  const ctx = buildFinancialContext();
+  const section = ctx.slice(ctx.indexOf('### Forward Cash Flow'));
+
+  assert.match(section, /Next scheduled items:/);
+  assert.doesNotMatch(section, /\d+ of \d+, soonest first/, 'a complete list claimed to be partial');
+  assert.doesNotMatch(section, /\.\.\.and \d+ more/, 'a complete list reported an omission');
+});
