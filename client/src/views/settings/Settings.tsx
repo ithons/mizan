@@ -17,6 +17,7 @@ import {
   simplefinApi,
   type AiActionUndoResult,
 } from '../../lib/api';
+import { SkeletonRows } from '../../components/SkeletonLoader';
 import { formatCompactRelative } from '../../lib/formatters';
 import { useThemePreference, type ThemePreference } from '../../lib/theme';
 import { useAppStore } from '../../store';
@@ -30,6 +31,7 @@ import { AdvisorMemorySection } from './AdvisorMemorySection';
 import { SetupSection, useSetupPlan } from './SetupSection';
 
 type PanelId =
+  | 'advisor_context'
   | 'setup'
   | 'simplefin'
   | 'coinbase'
@@ -1019,6 +1021,22 @@ export function Settings() {
               <AdvisorMemorySection />
             </ExpandedPanel>
           )}
+          {/* What actually leaves the machine on an advisor call. `GET /api/ai/context` returned
+              the full financial context for "the UI preview panel", and no such panel existed:
+              two client consumers read `.configured` and `.actions` and nothing read `.context`.
+              The owner could ask the advisor anything and could not see what it had been told.
+              This is the boundary made visible: the text, and its size, exactly as built. */}
+          <SettingsRow
+            title="What the advisor is told"
+            sub="The financial context every advisor call and background pass starts from, exactly as it is sent"
+            trailing={<span className="text-muted">{openPanel === 'advisor_context' ? 'Hide' : 'Open'}</span>}
+            onClick={() => toggle('advisor_context')}
+          />
+          {openPanel === 'advisor_context' && (
+            <ExpandedPanel>
+              <AdvisorContextPanel />
+            </ExpandedPanel>
+          )}
           {/* What the AI applies unattended is a fixed domain boundary, not a dial, so this is
               stated rather than configured. The statement is generated from the server's autonomy
               table, so it cannot fall behind the boundary it describes. Every state of that fetch
@@ -1077,5 +1095,44 @@ export function Settings() {
         </div>
       </div>
     </Screen>
+  );
+}
+
+
+/**
+ * The context, verbatim, with its size stated.
+ *
+ * Fetched only while open: this is the largest payload the API serves (30,560 characters on the
+ * live ledger, about 8,000 tokens) and it is rebuilt from the database on every request. The size
+ * line is the point as much as the text is: "how much of my ledger leaves per call" has a number,
+ * and this is where the owner reads it.
+ */
+function AdvisorContextPanel() {
+  const { data, isPending, isError, error } = useQuery({
+    queryKey: ['ai-context', 'preview'],
+    queryFn: () => aiApi.getContext(),
+    staleTime: 60_000,
+  });
+  if (isPending) return <SkeletonRows rows={6} />;
+  if (isError) {
+    return (
+      <div className="text-note text-clay">
+        Could not load the context{error instanceof Error ? `: ${error.message}` : '.'}
+      </div>
+    );
+  }
+  const chars = data.context.length;
+  const lines = data.context.split('\n').length;
+  return (
+    <div>
+      <div className="mb-3 text-note text-muted-2 tabular-nums">
+        {chars.toLocaleString('en-US')} characters, {lines.toLocaleString('en-US')} lines, roughly{' '}
+        {Math.round(chars / 3.8).toLocaleString('en-US')} tokens · built {new Date(data.generated_at).toLocaleString()}
+        {' · '}{data.configured ? 'sent to the configured provider on every call' : 'no provider is configured, so nothing is sent'}
+      </div>
+      <pre className="max-h-[60vh] overflow-auto whitespace-pre-wrap rounded-lg border border-line bg-well p-3 text-micro leading-relaxed text-ink">
+        {data.context}
+      </pre>
+    </div>
   );
 }

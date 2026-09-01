@@ -43,3 +43,22 @@ test('the backup description names the advisor tables it contains', () => {
   }
   assert.match(sentence, /Provider credentials are not included/);
 });
+
+/**
+ * The owner can read what leaves the machine on an advisor call.
+ *
+ * `GET /api/ai/context` returned the full financial context "for the UI preview panel" and no such
+ * panel existed: two client consumers read `.configured` and `.actions`, and nothing anywhere read
+ * `.context`. The largest payload the API serves (30,560 characters on the live ledger, about
+ * 8,000 tokens, including the owner's stated residency and income context) was rebuilt on every
+ * request for a reader that did not exist, while the one reader who mattered could not see it.
+ */
+test('Settings renders the advisor context, verbatim, with its size', () => {
+  const src = readFileSync(join(__dirname, '..', 'client/src/views/settings/Settings.tsx'), 'utf8');
+  assert.match(src, /title="What the advisor is told"/, 'no row offers the context');
+  assert.match(src, /aiApi\.getContext\(\)/, 'the context fetcher still has no consumer');
+  assert.match(src, /\{data\.context\}/, 'the context text is fetched but not rendered');
+  assert.match(src, /characters, .* lines, roughly/, 'the size is not stated beside the text');
+  // Fetched only while the panel is open: this is the largest payload the API serves.
+  assert.match(src, /openPanel === 'advisor_context' && \(/);
+});

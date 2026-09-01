@@ -371,7 +371,17 @@ literal. Correct the record, do not schedule the work.
 
 ### How it lands, in five gates
 
-**Gate 0, before a single triplet moves: the emitter exists and reproduces today's file.** One new
+**Gate 0, as it actually landed [recorded 2026-09-01].** `scripts/palette-figures.mjs` was never
+written; the triplets and the prose landed in one hand-written commit (4a2db38). What substituted
+for it is `tests/contrastClaims.test.ts`, which walks `client/src` and re-derives every stated
+contrast ratio from the shipped triplets, with a `[historical]` opt-out in the source. That covers
+the contrast half of what the emitter was for and is the accepted substitute. It does NOT cover the
+OKLCh and L* claims, which are asserted by nothing; and it walks `client/src` only, so the server's
+database-derived figures were unguarded until the 2026-09-01 pass re-derived them by hand again,
+which is the mechanism this gate existed to end. The `--mz-info` alias was added. The
+`index.css` census figures were re-derived in that same pass.
+
+**Gate 0, as written: before a single triplet moves, the emitter exists and reproduces today's file.** One new
 script, `scripts/palette-figures.mjs`, which reads the **shipped 8-bit triplets out of `index.css`**
 and emits every figure that any test literal or any docstring states. Prove it by running it against
 the palette as it ships now and diffing its output against the 70 existing prose figures and the 63
