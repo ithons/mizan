@@ -100,8 +100,31 @@ async function main() {
   // Logging to ~/.mizan/logs/
   const logsDir = path.join(MIZAN_DIR, 'logs');
   fs.mkdirSync(logsDir, { recursive: true });
-  const logStream = createWriteStream(path.join(logsDir, 'server.log'), { flags: 'a' });
-  app.use(morgan('combined', { stream: logStream }));
+  // Two things about what this file retains, both measured on the live one (6,770,252 bytes,
+  // 1 June to 31 August, no rotation anywhere in the repo).
+  //
+  // The QUERY STRING is not logged. `morgan('combined')` writes the full request line, and the
+  // Ledger's search box travels as `GET /api/transactions?...&search=<term>`, so three months of
+  // whatever the owner typed into it sat verbatim in a plaintext file that no reset or export
+  // path touches. On a local single-owner app the query string is filters and ids; the method,
+  // path and status are all the log has ever been needed for. `:url` is replaced by the path.
+  //
+  // The FILE IS BOUNDED. At startup, a log over LOG_ROTATE_BYTES is moved to `server.log.1`,
+  // replacing the previous `.1`, so retention is at most two files of roughly that size rather
+  // than everything since install. Startup is the right moment: the stream is opened once, and
+  // rotating a stream that is being written to is more machinery than a bound is worth here.
+  const logPath = path.join(logsDir, 'server.log');
+  const LOG_ROTATE_BYTES = 8 * 1024 * 1024;
+  try {
+    if (fs.existsSync(logPath) && fs.statSync(logPath).size > LOG_ROTATE_BYTES) {
+      fs.renameSync(logPath, `${logPath}.1`);
+    }
+  } catch (err) {
+    console.error('[startup] Could not rotate the access log:', err);
+  }
+  morgan.token('path', (req) => req.url?.split('?')[0] ?? '');
+  const logStream = createWriteStream(logPath, { flags: 'a' });
+  app.use(morgan(':remote-addr - :remote-user [:date[clf]] ":method :path HTTP/:http-version" :status :res[content-length] ":referrer" ":user-agent"', { stream: logStream }));
   app.use(morgan('dev'));
 
   // Security. Helmet's default CSP (script-src 'self') blocks Vite's inline
