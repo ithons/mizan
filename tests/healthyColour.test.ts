@@ -38,7 +38,7 @@ import {
  * THE FIXTURE IS ASSERTED HEALTHY BEFORE SILENCE IS ASSERTED, and by the code's own definitions
  * rather than by hand: `readCalibration` is the function the beam calls, and the `good` predicates
  * are the ones `Instrument` passes to `Delta`. Without that this test proves nothing. The first
- * draft of it reused the shipped fixture, whose sheet is dated 2026-07-31, and on 2026-09-01 the
+ * draft of it reused the shipped fixture, whose sheet is dated 2026-07-30, and on 2026-09-01 the
  * screen correctly raised gold ("Recorded 33 days ago") and estimate (the beam's uncalibrated
  * fill). Those two paths are healthy-silent; the fixture was 33 days stale.
  *

@@ -775,7 +775,7 @@ negative figures) and asserts the instrument renders no `clay`, `gold`, `estimat
 token at all. It asserts the fixture is healthy FIRST, through `readCalibration` rather than by
 restating its four conditions, because a fixture that is quietly stale renders gold correctly and
 the silence assertion then measures nothing. The first draft did exactly that: it reused the shipped
-fixture, whose sheet is dated 2026-07-31, and failed on a screen that was right.
+fixture, whose sheet is dated 2026-07-30, and failed on a screen that was right.
 
 Writing it found one real defect. `<Figure tone="negative" label="Out">` was the only unconditional
 chromatic tone in the client. It painted total spending in the alarm colour every window, so on the
@@ -841,9 +841,15 @@ mis-paired sites were.
 - **Sortable headers, `aria-sort`.** The remaining half of Phase 14, and it should not be built as
   written. The ledger has **no column headers**: it is a day-grouped list on a date spine whose
   today rule is the only thing separating what is expected from what happened. Sorting by amount
-  destroys the spine and makes that rule meaningless. `sortBy` already exists in the API and is
-  unused by this screen. If the underlying want is "my biggest entries", that is a different
-  surface, not a header on this one.
+  destroys the spine and makes that rule meaningless. If the underlying want is "my biggest
+  entries", that is a different surface, not a header on this one.
+
+  Separately: `sortBy` and `sortDir` are plumbed through `TransactionFilters`, the query schema, the
+  service and `transactionsApi.list`, and **no screen passes either**. The only occurrences in
+  `client/src` are the two lines in `api.ts` that append them. By this repo's own rule that is a
+  dropped capability rather than dead code, one layer below a fetcher with no caller: the parameter
+  exists, the server honours it, and nothing can ask. Whoever settles the sorting question should
+  decide whether that plumbing is the beginning of a feature or a leftover to remove.
 - **Finding 9**, the palette question, still a design commitment rather than a defect.
 - **Gate 4 coverage.** The healthy-colour rule is verified by rendering on **one screen of six**.
   The directional clay on Investments, Plan and Accounts is conditional on a measured state and so
