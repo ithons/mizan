@@ -473,6 +473,36 @@ touches the same files, so doing it first creates a merge conflict with itself.
 
 ## Phase 13: the graphic layer, first pass
 
+> **[RE-DERIVED 2026-09-01. Every contrast figure below this line is against a palette that was
+> never built, and the conclusion drawn from them is false on the one that was.]**
+>
+> This section was written before the repalette landed and measures "Bone and Signal", citing a
+> script `band.mjs` that does not exist anywhere in the repo. Commit 4a2db38 shipped pure black and
+> white instead. Re-derived from the triplets in `index.css` through `tests/helpers/palette.ts`,
+> which reads the file live:
+>
+> | stated below | re-derived 2026-09-01 |
+> |---|---|
+> | `faint` on paper 3.26 light, 4.10 dark | **3.84 light, 5.17 dark** |
+> | `line-2` structural at 3.64 to 4.05 light, 3.99 to 4.56 dark | **2.84 to 3.15 light, 2.72 to 3.77 dark** |
+> | `structural = border-line-2` (section boundary, clears 3:1) | **fails 3:1 on rail/light 2.92, well/light 2.84, card-white/dark 2.72** |
+> | `line-2` on `rail` measures 1.10:1 in the current light theme | **2.92:1**, measured in a browser off the rendered element |
+> | `border-line` 30, `border-line-2` 61, `border-line-3` 23, 114 total | 35 / 63 / 24, **126 total** (ordinary drift, not a defect) |
+> | `border-faint` has 0 call sites | still 0, and it is the only figure here that held |
+>
+> **What the ladder actually is.** Exactly two rule tokens clear 3:1 on all six grounds in both
+> themes: `line-3` (min 4.16) and `faint` (min 3.46). `line` is below the floor everywhere, which is
+> correct and deliberate for the quiet rung. `ink-soft` clears by a wide margin and is the datum
+> rung. So the structural rung is `faint`, the quieter of the two that clear, and NOT `line-2` as
+> move 1 declares. `line-3` also clears but is spoken for: it is e3's border in `Card.tsx`, the
+> elevation that carries money, and the `closing` double rule under a sum.
+>
+> `tests/ruleLadder.test.ts` now pins all of this, including the specific refutation that `line-2`
+> clears everywhere, so the claim cannot be re-asserted in prose without a test failing.
+>
+> **What shipped from this phase, and what did not, is recorded at the end of the section.**
+
+
 **The finding that sets the order.** The graphic-layer plan's rule ladder is written against the
 current palette and does not survive the repalette. Its move 1 declares "structural = `border-faint`,
 the only rung that clears 3:1", which is true today (`faint` on paper 3.26 light, 4.10 dark) and
