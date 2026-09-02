@@ -30,7 +30,7 @@ export class ErrorBoundary extends Component<
         <p className="mt-2 text-body leading-relaxed text-muted">
           Your data is safe. This is a display error. Try again, or reload the page.
         </p>
-        <pre className="mt-4 max-h-40 overflow-auto whitespace-pre-wrap rounded-lg border border-line-2 bg-rail p-3 font-mono text-note text-ink">
+        <pre className="mt-4 max-h-40 overflow-auto whitespace-pre-wrap rounded-lg border border-faint bg-rail p-3 font-mono text-note text-ink">
           {error.message}
         </pre>
         <div className="mt-4 flex gap-3">

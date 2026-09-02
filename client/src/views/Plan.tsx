@@ -153,7 +153,7 @@ function CarryoverStrip({ rows }: { rows: BudgetRolloverLedgerEntry[] }) {
   const openMonth = currentMonthKey();
 
   return (
-    <div className="mt-3 rounded-lg border border-line-2 bg-well px-3 py-2.5">
+    <div className="mt-3 rounded-lg border border-faint bg-well px-3 py-2.5">
       <div className="mb-1.5 text-micro font-semibold uppercase tracking-[0.16em] text-muted">Carryover</div>
       <dl className="text-note">
         {rows.map((row) => (

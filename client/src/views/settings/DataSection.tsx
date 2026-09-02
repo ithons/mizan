@@ -162,7 +162,7 @@ function ReconstructedHistoryPanel() {
       </div>
 
       {state && (
-        <div className="rounded-lg border border-line-2 bg-rail p-3 space-y-3">
+        <div className="rounded-lg border border-faint bg-rail p-3 space-y-3">
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-note">
             <div>
               <p className="text-muted mb-0.5">Replayed</p>
@@ -457,7 +457,7 @@ export function DataSection() {
             )}
 
             {csvPreview && (
-              <div className="rounded-lg border border-line-2 bg-rail p-3 space-y-3">
+              <div className="rounded-lg border border-faint bg-rail p-3 space-y-3">
                 <div className="grid grid-cols-2 md:grid-cols-6 gap-3 text-note">
                   <div>
                     <p className="text-muted mb-0.5">Valid</p>
@@ -575,7 +575,7 @@ export function DataSection() {
               )}
 
               {backupPreview && (
-                <div className="rounded-lg border border-line-2 bg-rail p-3 space-y-3">
+                <div className="rounded-lg border border-faint bg-rail p-3 space-y-3">
                   <div className="grid grid-cols-2 md:grid-cols-5 gap-3 text-note">
                     <div>
                       <p className="text-muted mb-0.5">Status</p>
@@ -686,7 +686,7 @@ export function DataSection() {
         {importRuns.length === 0 ? (
           <p className="text-note text-muted">No import or restore runs recorded yet.</p>
         ) : (
-          <div className="divide-y divide-line rounded-lg border border-line-2 bg-rail">
+          <div className="divide-y divide-line rounded-lg border border-faint bg-rail">
             {importRuns.map((run) => (
               <div key={run.id} className="grid grid-cols-[1fr_auto_auto_auto] gap-3 px-3 py-2 text-note items-center">
                 <div className="min-w-0">

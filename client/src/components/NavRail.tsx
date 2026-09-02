@@ -191,8 +191,15 @@ export function NavRail() {
       </div>
 
       {/* A rule, because Settings is a different kind of destination from the five above it: those
-          are the money, this is the machine that reads it. It says that and nothing else. */}
-      <div className="mx-3 border-t border-line-2" />
+          are the money, this is the machine that reads it. It says that and nothing else.
+
+          `faint`, not `line-2`, for the same reason the rail's own left boundary is: this is a
+          structural rule and it sits on `rail` with `rail` on both sides, where `line-2` measures
+          2.92:1 light and 3.55:1 dark. It misses the 3:1 non-text floor on the theme most people
+          read in. `faint` on `rail` is 3.56:1 light and 4.88:1 dark. The left boundary was
+          corrected in 9554379 and this one was missed, which is what `ruleLadder.test.ts` now
+          walks the whole file for rather than checking the one element by name. */}
+      <div className="mx-3 border-t border-faint" />
 
       <div className="pt-[18px]">
         <RailItem to={SETTINGS_ITEM.to} label={SETTINGS_ITEM.label} />

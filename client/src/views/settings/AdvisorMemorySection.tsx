@@ -64,7 +64,7 @@ function ReviseForm({ memory, onDone }: { memory: AiMemory; onDone: () => void }
   });
 
   return (
-    <div className="mt-3 space-y-2 rounded-lg border border-line-2 bg-rail p-3">
+    <div className="mt-3 space-y-2 rounded-lg border border-faint bg-rail p-3">
       <p className="text-note text-muted-2">
         The statement you replace is kept, dated, under this one.
       </p>
@@ -189,7 +189,7 @@ export function AdvisorMemorySection() {
         ))}
       </div>
 
-      <div className="space-y-2 rounded-xl border border-line-2 bg-rail p-4">
+      <div className="space-y-2 rounded-xl border border-faint bg-rail p-4">
         <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
           <Select
             value={kind}

@@ -724,7 +724,7 @@ function AdvisorModelPanel({ open, onToggle }: { open: boolean; onToggle: () => 
             </div>
 
             {selected && (
-              <div className="rounded-lg border border-line-2 bg-rail p-3">
+              <div className="rounded-lg border border-faint bg-rail p-3">
                 <div className="text-note text-muted">
                   {formatTokens(selected.context_window)} context · {formatTokens(selected.max_output_tokens)} max output
                 </div>

@@ -1,10 +1,19 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { ratioOf, THEMES, type Theme } from './helpers/palette';
 
 const ROOT = join(__dirname, '..');
+
+function walk(dir: string, out: string[] = []): string[] {
+  for (const name of readdirSync(dir)) {
+    const p = join(dir, name);
+    if (statSync(p).isDirectory()) walk(p, out);
+    else if (/\.(ts|tsx)$/.test(name)) out.push(p);
+  }
+  return out;
+}
 
 /**
  * What each rule weight can actually carry, on the palette that shipped.
@@ -20,11 +29,44 @@ const ROOT = join(__dirname, '..');
  * 3:1 is the non-text floor (WCAG 1.4.11). A 1px rule between two grounds is seen against both, so
  * a boundary is judged against the ground it sits ON as well as the one it separates from.
  */
-const GROUNDS = ['paper', 'card', 'card-alt', 'card-white', 'rail', 'well'] as const;
+/**
+ * The grounds the app actually paints, read out of the source rather than listed here.
+ *
+ * The first version of this file hand-listed six, and the list was wrong in both directions. It
+ * carried `card-white`, which has ZERO `bg-card-white` call sites in `client/src` and which
+ * `Card.tsx:63` already describes as "not a rung: on light it is the same pure white as `paper`",
+ * so the ladder was being judged against a surface nothing renders. And it omitted `track`, which
+ * 12 call sites paint (`ProgressBar`, `SkeletonLoader`) and which is the darkest ground in the
+ * app. Deriving the list means it cannot drift from what ships again.
+ */
+function paintedGrounds(): string[] {
+  const found = new Set<string>();
+  for (const file of walk(join(ROOT, 'client', 'src'))) {
+    for (const m of readFileSync(file, 'utf8').matchAll(/\bbg-(paper|card|card-alt|card-white|rail|well|track)\b/g)) {
+      found.add(m[1]);
+    }
+  }
+  return [...found].sort();
+}
+
+const GROUNDS = paintedGrounds();
 
 function minAcross(token: string): number {
   return Math.min(...THEMES.flatMap((t: Theme) => GROUNDS.map((g) => ratioOf(token, g, t))));
 }
+
+test('the ground set is derived from what the app paints, and card-white is not one', () => {
+  // Asserted rather than assumed, because every ratio below is a minimum over this list. If the
+  // list silently loses a ground, every "clears on every ground" claim in this file weakens
+  // without any of them failing.
+  assert.ok(GROUNDS.includes('track'), 'track is painted 12 times and must be judged');
+  assert.ok(GROUNDS.includes('rail') && GROUNDS.includes('well') && GROUNDS.includes('paper'));
+  assert.ok(
+    !GROUNDS.includes('card-white'),
+    'card-white grew a call site; it is now a real ground and the ladder below must be re-derived'
+  );
+  assert.ok(GROUNDS.length >= 5, `only ${GROUNDS.length} grounds found; the walk is not reaching the source`);
+});
 
 test('the quiet rung is below the floor on every ground, deliberately', () => {
   // `line` marks an item boundary inside a list. It is meant to be unable to shout, and a future
@@ -40,7 +82,10 @@ test('the quiet rung is below the floor on every ground, deliberately', () => {
 test('the datum rung is unmistakable on every ground', () => {
   // `ink-soft` is the one full-width rule on a sheet: the Ledger's today rule. It separates what is
   // expected from what happened, so it may not be subtle anywhere.
-  assert.ok(minAcross('ink-soft') >= 10, `ink-soft bottoms out at ${minAcross('ink-soft').toFixed(2)}`);
+  // The floor is 9, not 10. 10 was tuned to a ground set that omitted `track`, the darkest ground
+  // in the app; against it `ink-soft` measures 9.81 light. Still four times the non-text floor and
+  // twice the text floor, so the rule holds and the number was the artefact.
+  assert.ok(minAcross('ink-soft') >= 9, `ink-soft bottoms out at ${minAcross('ink-soft').toFixed(2)}`);
 });
 
 test('line-2 is NOT a token that clears the floor everywhere, whatever the plan says', () => {
@@ -50,21 +95,58 @@ test('line-2 is NOT a token that clears the floor everywhere, whatever the plan 
   );
   assert.deepEqual(
     failures.sort(),
-    ['card-white/dark 2.72', 'rail/light 2.92', 'well/light 2.84'],
+    ['rail/light 2.92', 'track/dark 2.44', 'track/light 2.39', 'well/light 2.84'],
     'the grounds line-2 cannot carry a structural rule on have changed; re-derive the ladder'
   );
 });
 
-test('exactly two rule tokens clear the floor on every ground, and faint is the quieter', () => {
+test('exactly one rule token clears the floor on every painted ground, and faint is not it', () => {
+  // This test used to say "exactly two", and that was an artefact of the wrong ground set. Against
+  // the grounds the app actually paints, `faint` measures 2.91 on `track` in light and misses. Only
+  // `line-3` clears everywhere.
   const clears = ['line', 'line-2', 'line-3', 'faint'].filter((t) => minAcross(t) >= 3);
-  assert.deepEqual(clears, ['line-3', 'faint'], 'the set of tokens that can be a structural rung moved');
-  // The quietest token that clears is the honest structural rung: a boundary should be as loud as
-  // it must be and no louder. `line-3` is spoken for by e3 (the elevation that carries money) and
-  // by the closing double rule, so chrome using it would read at the weight of a dialog.
-  assert.ok(
-    minAcross('faint') < minAcross('line-3'),
-    'faint is no longer the quieter of the two tokens that clear'
-  );
+  assert.deepEqual(clears, ['line-3'], 'the set of tokens that can be a structural rung anywhere moved');
+
+  // `faint` is still the right rung for chrome, and the reason is a pairing rather than a minimum.
+  // A boundary should be as loud as it must be and no louder; `line-3` is spoken for by e3 (the
+  // elevation that carries money) and by the closing double rule, so chrome using it would read at
+  // the weight of a dialog. `faint` clears every ground it is DRAWN on, which is the claim that
+  // matters and which the next test enforces directly.
+  for (const ground of ['rail', 'paper'] as const) {
+    for (const theme of THEMES) {
+      assert.ok(ratioOf('faint', ground, theme) >= 3, `faint on ${ground}/${theme} stopped clearing`);
+    }
+  }
+  assert.ok(ratioOf('faint', 'track', 'light') < 3, 'faint now clears track; the carve-out below is stale');
+});
+
+test('no rule token is drawn on a ground it cannot clear', () => {
+  // The claim that actually protects the reader, and the one a minimum-across-grounds test cannot
+  // make. `faint` fails only on `track`; `line-2` fails on `track`, `rail` and `well`. So the
+  // question is not what a token clears everywhere, it is whether any element pairs a token with a
+  // ground it misses. Judged per JSX element, the way graphicRestraint.test.ts judges textures.
+  const CANNOT: Record<string, string[]> = {
+    faint: ['track'],
+    'line-2': ['track', 'rail', 'well'],
+  };
+  const offenders: string[] = [];
+  for (const file of walk(join(ROOT, 'client', 'src'))) {
+    const src = readFileSync(file, 'utf8');
+    for (const tag of src.matchAll(/<[A-Za-z][^>]*>/g)) {
+      for (const [rule, grounds] of Object.entries(CANNOT)) {
+        if (!new RegExp(`\\b(?:border|divide|ring)(?:-[trblxy])?-${rule}\\b`).test(tag[0])) continue;
+        for (const ground of grounds) {
+          // The RESTING ground only. A `hover:bg-well` is a transient state whose border is still
+          // being judged against the surface the element rests on, and treating it as the ground
+          // flagged the Retry button in `QueryState`, whose border is fine at rest.
+          if (!new RegExp(`(^|[\\s"'])bg-${ground}\\b`).test(tag[0])) continue;
+          const line = src.slice(0, tag.index).split('\n').length;
+          offenders.push(`${file.replace(ROOT, '')}:${line} draws ${rule} on ${ground}`);
+        }
+      }
+    }
+  }
+  assert.deepEqual(offenders, [], 'a structural rule is drawn on a ground it cannot clear 3:1 against');
 });
 
 /**
