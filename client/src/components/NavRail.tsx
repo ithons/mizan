@@ -146,7 +146,23 @@ export function NavRail() {
   return (
     <nav
       aria-label="Primary"
-      className="flex h-full w-[var(--mz-rail-w)] flex-shrink-0 flex-col border-l border-line-2 bg-rail py-[26px]"
+      /* The boundary between chrome and money, on `faint` rather than `line-2`.
+         A 1px rule between two grounds is seen against both of them, and this one has `paper` on
+         the content side and `rail` under itself. `line-2` clears the 3:1 non-text floor against
+         the page and misses it against the rail it sits on: `line-2` on `rail`, 2.92:1 light and
+         3.55:1 dark, measured in the browser off the rendered element (borderLeftColor
+         rgb(145,145,145) against backgroundColor rgb(246,246,246)). `faint` on `rail`, 3.56:1
+         light and 4.88:1 dark, and `faint` on `paper`, 3.84:1 light and 5.17:1 dark: both sides,
+         both themes.
+         `faint` and not `line-3`, which also clears everywhere, because `line-3` is spoken for:
+         it is e3's border in `Card.tsx`, the elevation that carries money, and the `closing` rule
+         under a sum. Chrome must not read at the weight of the app's highest elevation. `faint` is
+         the quietest token that clears every ground (min 3.46 against `well` light) and index.css
+         already gives it a non-text contract, rendering it as TrendChart's zero rule.
+         `.claude/plans/rebuild-part-3.md` Phase 13 move 2 called this boundary "1.10:1 in the
+         current light theme" and sent it TO `line-2`. Both halves were measured against a palette
+         that never shipped; see the dated block beside Gate 0 in that file. */
+      className="flex h-full w-[var(--mz-rail-w)] flex-shrink-0 flex-col border-l border-faint bg-rail py-[26px]"
     >
       {/* The one place ⌘K is advertised. It is in the navigation because that is where an owner
           looks for where things are, and it costs no region of its own: search, jump and ask are
