@@ -759,3 +759,92 @@ Two more, specific to this plan:
 - **No page-level background treatment, ever.** Every AA figure in the suite is computed against a
   flat ground. A texture behind a money numeral invalidates all of them silently, which is the same
   failure mode as the `/alpha` bug: correct in the tokens, wrong on the screen, and no test can see it.
+---
+
+## Outcome, 2026-09-01: Phase 13 closed, Phase 14 half closed
+
+Written after the work, against the palette that shipped. Every figure below was re-derived on the
+date of writing; where it contradicts a figure earlier in this file, the earlier one was measured
+against **Bone and Signal**, the candidate palette commit 4a2db38 did not build.
+
+### What shipped
+
+**The healthy-colour rule, which this phase called the point, is now a test.** `healthyColour.test.ts`
+constructs the fixture this file specifies (calibrated sheet, empty review queues, no faults, no
+negative figures) and asserts the instrument renders no `clay`, `gold`, `estimate` or `review-*`
+token at all. It asserts the fixture is healthy FIRST, through `readCalibration` rather than by
+restating its four conditions, because a fixture that is quietly stale renders gold correctly and
+the silence assertion then measures nothing. The first draft did exactly that: it reused the shipped
+fixture, whose sheet is dated 2026-07-31, and failed on a screen that was right.
+
+Writing it found one real defect. `<Figure tone="negative" label="Out">` was the only unconditional
+chromatic tone in the client. It painted total spending in the alarm colour every window, so on the
+screen where clay also marks a short sheet, clay carried no information. This file's own argument
+against icons covers it exactly: a second label for what the word already says. The clay was also
+wrong on data, because `summary.expenses.current` sums the signed `spendAmountSql` = `(-t.amount)`:
+driving `getReportSummary` over all 156 Monday-anchored weeks the ledger covers, **2 come back
+negative**, the week of 2026-07-13 at Out −1,313.17 against In 544.18. Both figures are neutral ink
+now with `value`/`states` carrying the sign, and `net` keeps its tone, so the block has exactly one
+coloured figure and it is the one whose sign varies. `graphicRestraint.test.ts` pins the general
+form across all six screens, since only the instrument has a render harness.
+
+**The rule ladder was re-derived, and my own re-derivation was wrong too.** An adversarial pass found
+`ruleLadder.test.ts`'s ground set wrong in both directions: it carried `card-white`, which has **0**
+`bg-card-white` call sites and which `Card.tsx` already calls "not a rung", and it omitted `track`,
+the darkest ground, painted **12** times. The set is derived from source now.
+
+| | light | dark |
+|---|---|---|
+| `line-2` fails on | rail 2.92, well 2.84, track 2.39 | track 2.44 |
+| `faint` fails on | track 2.91 | none |
+| `line-3` fails on | none | none |
+
+So "exactly two tokens clear on every ground" was an artefact: only `line-3` clears everywhere. But
+min-across-grounds is the wrong question. Asked directly, per element, **nine** pairings drew
+`line-2` on `rail` or `well` and missed the floor; all nine are fixed. The rail's own left boundary
+was corrected earlier and the divider above Settings was missed, same token, same ground.
+
+**Phase 14's drill-down shipped.** A category figure on `/` opens the rows it is made of. The whole
+stack already filtered by category and only the deep link was missing. `six-months` was added to the
+ledger's ranges rather than mapped onto `three-months`, because a drill-down that narrows the window
+shows a subset of what the figure sums. Verified rather than assumed: over the whole ledger, every
+category's report figure equals the sum of the rows the link opens, to the cent.
+
+### What did not ship, and why
+
+**Move 3, cards.** Superseded. `Card.tsx` already carries a reasoned e1-on-`line-2` ladder that
+post-dates this plan, and `cardElevation.test.ts:121-143` is a property loop asserting every rung
+clears 3:1 against its own surface. A demoted e1 measures 1.30 light. The move requires deleting a
+landed invariant, not rewriting a docstring. Confirmed by two independent refuters.
+
+**Move 4, the ledger hatch.** Not shipped, and my first reason for it was the weak one. I argued
+redundancy, that `Ledger.tsx`'s today rule and the estimate ink already say it twice. The stronger
+reason, which survived refutation: `HATCH` is gated on `calibrated ? undefined : HATCH`, so it is
+the app's one **fault** mark, and a scheduled row is a healthy state. Using it here is rule 3 read
+backwards. Also worth recording: I believed `graphicRestraint.test.ts` would catch this move, and
+that was refuted. It exempts `well` by name and its per-tag check passes a transparent wrapper, so
+move 4 would have broken no test.
+
+**Move 5, the series ramp.** Not shipped, and **my stated reason was false.** I recorded that the
+ramp was "already outside the strip". It is not: `Investments.tsx:446-450` still renders the 10px
+stacked `overflow-hidden` strip with each slice filled from `s.color`, and the 9px swatches beside
+the labels are a second surface, not a replacement. The move is undone, not done. It should stay
+undone for a different reason: the ramp's separation guarantee is adjacent-pair only, worst
+all-pairs CVD distance is dE 0.5, and `seriesPalette.test.ts:19-22` already records that eight slots
+cannot clear all-pairs.
+
+**Move 1, a full re-point.** Not taken as written. Re-pointing ~200 sites was not the fix; nine
+mis-paired sites were.
+
+### Left open
+
+- **Sortable headers, `aria-sort`.** The remaining half of Phase 14, and it should not be built as
+  written. The ledger has **no column headers**: it is a day-grouped list on a date spine whose
+  today rule is the only thing separating what is expected from what happened. Sorting by amount
+  destroys the spine and makes that rule meaningless. `sortBy` already exists in the API and is
+  unused by this screen. If the underlying want is "my biggest entries", that is a different
+  surface, not a header on this one.
+- **Finding 9**, the palette question, still a design commitment rather than a defect.
+- **Gate 4 coverage.** The healthy-colour rule is verified by rendering on **one screen of six**.
+  The directional clay on Investments, Plan and Accounts is conditional on a measured state and so
+  falls under this file's own carve-out, but nothing asserts it.
