@@ -158,7 +158,7 @@ const CASHFLOW: CashflowReport = {
   months: [{ month: '2026-07', income: 2715.4, expenses: 1112.99, net: 1602.41 }],
 };
 
-const SUMMARY: ReportSummary = {
+export const SUMMARY: ReportSummary = {
   comparison: 'prior_period',
   comparison_label: 'Prior period',
   comparison_start_date: '2026-05-31',
@@ -308,6 +308,14 @@ export interface Overrides {
    * renders as loading, which is a third thing).
    */
   syncHealthFailed?: boolean;
+  /**
+   * The period-over-period block. Overridable because the shipped fixture is a real window whose
+   * income FELL, and a falling income is a negative figure the healthy fixture is defined to
+   * exclude (`rebuild-part-3.md` Phase 13: "calibrated sheet, zero open review items, zero faults,
+   * zero negative figures, zero refusals"). Without this, no caller can construct the healthy case
+   * and `healthyColour.test.ts` would be measuring a screen that has something to say.
+   */
+  summary?: ReportSummary;
 }
 
 export const SYNC_HEALTH_OK: SyncHealth = {
@@ -383,7 +391,7 @@ export function render(windowId: WindowId, overrides: Overrides = {}): string {
   client.setQueryData(['ai-actions'], []);
   client.setQueryData(['networth', 'history', 12], overrides.recent ?? RECENT_SHEETS);
   client.setQueryData(['networth', 'history', range], snapshot ? [snapshot] : []);
-  client.setQueryData(['reports', 'summary', range, 'prior_period'], SUMMARY);
+  client.setQueryData(['reports', 'summary', range, 'prior_period'], overrides.summary ?? SUMMARY);
   client.setQueryData(['reports', 'cashflow', range], CASHFLOW);
   client.setQueryData(['reports', 'spending', range], overrides.spending ?? SPENDING);
   client.setQueryData(['reports', 'merchants', range], MERCHANTS);

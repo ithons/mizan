@@ -882,17 +882,50 @@ export function Instrument() {
                     )}
                   </Card>
                   <div className="mt-3 grid gap-3 sm:grid-cols-3 lg:gap-4">
+                    {/* Both figures are neutral ink, and that is deliberate.
+
+                        "In" and "Out" are the two halves of an accounting identity: every window
+                        has both, and neither is news. Painting them sage and clay was a second
+                        label for what the word already says, and it spent the only two semantic
+                        hues in the palette on a distinction the layout makes for free. `net`
+                        directly above keeps its sign-derived tone, because its sign is the one
+                        thing here that genuinely varies and genuinely matters. So the block now
+                        carries exactly one coloured figure, the informative one, plus the two
+                        deltas, whose colour is conditional on a measured change.
+
+                        The clay half was also wrong on real data. `summary.expenses.current` is a
+                        SUM of `spendAmountSql` = `(-t.amount)`, which is SIGNED, so a window whose
+                        refunds outweigh its purchases reports negative expenses: money came in, and
+                        the screen painted it in the outgoing colour and printed it with a minus.
+                        Driving `getReportSummary` over all 156 Monday-anchored weeks the ledger
+                        covers, against a copy of `.mizan/mizan.db` on 2026-09-01, 2 come back
+                        negative: the week of 2026-07-13 at Out -1,313.17 against In 544.18, and the
+                        week of 2024-01-15 at Out -39.65 against In 0.00. `value`/`states` handles
+                        that the way `net` does, with the magnitude as children and the word
+                        carrying the direction. */}
                     <Card padding="lg">
-                      <Figure scale="group" tone="positive" label="In">
-                        {formatWholeCurrency(summary.income.current)}
+                      <Figure
+                        scale="group"
+                        tone="ink"
+                        label="In"
+                        value={summary.income.current}
+                        states={{ positive: 'came in', negative: 'reversed out', zero: 'nothing came in' }}
+                      >
+                        {formatWholeCurrency(Math.abs(summary.income.current))}
                       </Figure>
                       {comparisonReading.comparable && (
                         <Delta delta={summary.income.delta} good={(d) => d > 0} format={formatWholeCurrency} />
                       )}
                     </Card>
                     <Card padding="lg">
-                      <Figure scale="group" tone="negative" label="Out">
-                        {formatWholeCurrency(summary.expenses.current)}
+                      <Figure
+                        scale="group"
+                        tone="ink"
+                        label="Out"
+                        value={summary.expenses.current}
+                        states={{ positive: 'went out', negative: 'came back in refunds', zero: 'nothing went out' }}
+                      >
+                        {formatWholeCurrency(Math.abs(summary.expenses.current))}
                       </Figure>
                       {comparisonReading.comparable && (
                         <Delta delta={summary.expenses.delta} good={(d) => d < 0} format={formatWholeCurrency} />
