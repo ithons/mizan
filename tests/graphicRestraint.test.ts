@@ -129,3 +129,36 @@ test('the series ramp is positional and reaches no store', () => {
     .map((f) => f.replace(ROOT, ''));
   assert.deepEqual(persisted, [], 'the series ramp reaches something that persists');
 });
+
+test('no money figure is painted a semantic hue unconditionally', () => {
+  // The structural half of Phase 13's healthy-colour rule, which `healthyColour.test.ts` can only
+  // assert by rendering, and can only render for Instrument. This half covers all six screens.
+  //
+  // `Figure` derives its tone from the sign when given `value` and `states`, which makes the colour
+  // a reading. A hardcoded `tone="positive"` or `tone="negative"` makes it a decoration: it paints
+  // the same hue whatever the number is, so it carries no information, and on the screen where clay
+  // also marks a short sheet it dilutes the one that does.
+  //
+  // This was true of exactly one call site. `<Figure tone="negative" label="Out">` painted total
+  // spending in the alarm colour every window, and because `summary.expenses.current` sums the
+  // SIGNED `spendAmountSql` = `(-t.amount)`, it also painted refunds-exceed-purchases windows as
+  // money going out: 2 of the 156 Monday-anchored weeks the owner's ledger covers, the larger being
+  // the week of 2026-07-13 at -1,313.17 against 544.18 in.
+  const offenders: string[] = [];
+  for (const file of walk(CLIENT).filter((f) => f.endsWith('.tsx'))) {
+    const src = readFileSync(file, 'utf8');
+    for (const tag of src.matchAll(/<Figure\b[^>]*?>/gs)) {
+      const tone = /tone="(positive|negative|estimate)"/.exec(tag[0]);
+      if (tone && !tag[0].includes('value=')) {
+        const line = src.slice(0, tag.index).split('\n').length;
+        offenders.push(`${file.replace(ROOT, '')}:${line} tone="${tone[1]}"`);
+      }
+    }
+  }
+  assert.deepEqual(offenders, [], 'a money figure carries a semantic hue that no value decides');
+
+  // And the check can still see: the call sites exist, and some of them do take a signed value.
+  const tags = walk(CLIENT).filter((f) => f.endsWith('.tsx')).flatMap((f) => [...readFileSync(f, 'utf8').matchAll(/<Figure\b[^>]*?>/gs)].map((m) => m[0]));
+  assert.ok(tags.length >= 8, `only ${tags.length} Figure call sites found; the walk is not reaching them`);
+  assert.ok(tags.some((t) => t.includes('value=')), 'no Figure derives its tone from a value at all');
+});
