@@ -73,6 +73,10 @@ const RANGES = [
   { id: 'this-month', label: 'This month' },
   { id: 'last-month', label: 'Last month' },
   { id: 'three-months', label: 'Last 3 months' },
+  // Present so every window on `/` has an exact counterpart here. A category drill-down that
+  // narrowed six months to three would show a subset of the rows behind the figure it was opened
+  // from, and the two totals would disagree with nothing on screen saying why.
+  { id: 'six-months', label: 'Last 6 months' },
   { id: 'this-year', label: 'This year' },
   { id: 'all', label: 'All time' },
 ] as const;
@@ -90,6 +94,8 @@ function rangeDates(id: RangeId): { startDate?: string; endDate?: string } {
     }
     case 'three-months':
       return { startDate: fmt(startOfMonth(subMonths(now, 2))), endDate: fmt(endOfMonth(now)) };
+    case 'six-months':
+      return { startDate: fmt(startOfMonth(subMonths(now, 5))), endDate: fmt(endOfMonth(now)) };
     case 'this-year':
       return { startDate: fmt(startOfYear(now)), endDate: fmt(now) };
     case 'all':
@@ -140,6 +146,12 @@ export function Ledger() {
     if (requested && RANGES.some((r) => r.id === requested)) setRange(requested as RangeId);
     const account = searchParams.get('accountId');
     if (account) setAccountFilter(account);
+    // The drill-down half of Phase 14. The whole stack already filtered by category: the schema,
+    // the service, the fetcher and this screen's own CategoryPicker. The only thing missing was a
+    // way to ask for it from somewhere else, so a figure on `/` named a category and the owner had
+    // to come here and re-select it by hand to see the rows behind it.
+    const category = searchParams.get('categoryId');
+    if (category) setCategoryFilter(category);
   }, [searchParams]);
 
   useEffect(() => {

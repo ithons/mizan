@@ -182,6 +182,7 @@ function BarRow({
   diverging,
   tone,
   showSign = false,
+  to,
 }: {
   label: string;
   sub?: string;
@@ -196,10 +197,17 @@ function BarRow({
    * magnitude beside a signed value.
    */
   showSign?: boolean;
+  /**
+   * Where the rows behind this figure live. Given, the row becomes a real button rather than a
+   * `div` with a handler, which is the same rule `components/balance/Row.tsx` states: a bare div
+   * with `onClick` is not reachable by keyboard and announces nothing.
+   */
+  to?: string;
 }) {
-  return (
-    <div className="grid grid-cols-[minmax(0,1fr)_minmax(72px,140px)_92px] items-center gap-x-5 py-[7px]">
-      <span className="truncate text-body text-ink">
+  const grid = 'grid w-full grid-cols-[minmax(0,1fr)_minmax(72px,140px)_92px] items-center gap-x-5 py-[7px]';
+  const body = (
+    <>
+      <span className="truncate text-left text-body text-ink">
         {label}
         {sub && <span className="text-muted-2"> · {sub}</span>}
       </span>
@@ -207,8 +215,37 @@ function BarRow({
       <span className={`whitespace-nowrap text-right text-body-lg tabular-nums ${tone ?? 'text-ink'}`}>
         {formatWholeCurrency(amount, { showSign })}
       </span>
-    </div>
+    </>
   );
+  if (!to) return <div className={grid}>{body}</div>;
+  return (
+    // A `Link`, not a button with `navigate`, matching `RailRow` above: this is navigation, so it
+    // should announce as a link, carry a real href, and open in a new tab on the modifier the
+    // reader already knows. `Row.tsx`'s "make it a real button" rule is about ACTIONS.
+    //
+    // No hue and no underline. The row is already a figure the reader is scanning, and making it
+    // look like a link would put a second visual system on a list whose whole job is comparison.
+    // The affordance is the ground lifting under the cursor, the same one `Row.tsx` uses.
+    <Link
+      to={to}
+      className={`${grid} -mx-2 rounded-md px-2 text-left transition-colors hover:bg-well`}
+      aria-label={`${label}, ${formatWholeCurrency(amount, { showSign })}. Open these entries in the ledger.`}
+    >
+      {body}
+    </Link>
+  );
+}
+
+/**
+ * The rows behind a category figure, in the window the figure was read in.
+ *
+ * Every `WindowId` has a range of the same name on the Ledger, which is why `six-months` was added
+ * there rather than mapped onto `three-months`: a drill-down that silently narrowed the window
+ * would show a subset of the rows the figure sums, and the two totals would disagree with nothing
+ * on screen saying why. `null` category ids do not reach here; "Uncategorized" is its own filter.
+ */
+function ledgerLinkFor(categoryId: string, windowId: WindowId): string {
+  return `/ledger?categoryId=${encodeURIComponent(categoryId)}&range=${windowId}`;
 }
 
 /**
@@ -1082,6 +1119,7 @@ export function Instrument() {
                           label={c.category_name}
                           amount={c.amount}
                           tone="text-sage-deep"
+                          to={ledgerLinkFor(c.category_id, windowId)}
                           {...spendingScale}
                         />
                       ))}
@@ -1097,7 +1135,13 @@ export function Instrument() {
                     {split.spent.length === 1 ? 'one category' : `${split.spent.length} categories`}
                   </div>
                   {spendShown.map((c) => (
-                    <BarRow key={c.category_id} label={c.category_name} amount={c.amount} {...spendingScale} />
+                    <BarRow
+                      key={c.category_id}
+                      label={c.category_name}
+                      amount={c.amount}
+                      to={ledgerLinkFor(c.category_id, windowId)}
+                      {...spendingScale}
+                    />
                   ))}
                   {split.spent.length > SPEND_ROWS && (
                     <button
