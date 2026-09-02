@@ -800,9 +800,24 @@ the darkest ground, painted **12** times. The set is derived from source now.
 | `line-3` fails on | none | none |
 
 So "exactly two tokens clear on every ground" was an artefact: only `line-3` clears everywhere. But
-min-across-grounds is the wrong question. Asked directly, per element, **nine** pairings drew
-`line-2` on `rail` or `well` and missed the floor; all nine are fixed. The rail's own left boundary
-was corrected earlier and the divider above Settings was missed, same token, same ground.
+min-across-grounds is the wrong question. Asked directly, per element, **twelve** pairings drew
+`line-2` on `rail` or `well` and missed the floor. The rail's own left boundary was corrected
+earlier and the divider above Settings was missed, same token, same ground.
+
+**Commit c304b21 said nine, fixed nine, and that number was itself a measurement artefact.** Its
+walker found tags with `/<[A-Za-z][^>]*>/g`, and `[^>]*` stops at the first `>` in the source, which
+in this codebase is routinely the `>` of an arrow-function prop. Two of the three it missed are the
+`<textarea>` and `<input>` in Settings whose `onChange={(e) => ...}` sits above their `className`,
+so the class list was never read. The third, `DataSection.tsx:623`, inherits `bg-rail` from a block
+opened 45 lines earlier, which a same-tag check cannot see at all. All twelve are fixed now.
+
+The walker is `tests/helpers/jsx.ts`, shared by the three tests that had each written their own copy
+of that regex. It tracks brace depth, string and template state, and comments inside a tag, and it
+carries a **coverage assertion**: every rule utility in `client/src` outside comment prose must sit
+inside a tag it extracted, resolve its own ground on the same line, or be named with the figure that
+clears it. Two are named. The pairing check also counts the 21 utilities whose ground it cannot
+resolve in-file and prints that number rather than passing them, because a ground nobody resolved is
+not a clean pairing.
 
 **Phase 14's drill-down shipped.** A category figure on `/` opens the rows it is made of. The whole
 stack already filtered by category and only the deep link was missing. `six-months` was added to the

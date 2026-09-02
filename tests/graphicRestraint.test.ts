@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
+import { openingTags } from './helpers/jsx';
 
 const ROOT = join(__dirname, '..');
 const CLIENT = join(ROOT, 'client', 'src');
@@ -70,14 +71,17 @@ test('at most two textures in the whole client, and none on a ground', () => {
   // test used a 400-character window and flagged the beam, whose hatch and whose `bg-well` are on
   // one element and nowhere near a page ground.
   const PAGE_GROUNDS = ['bg-paper', 'bg-rail', 'bg-card', 'bg-card-alt', 'bg-card-white'];
-  for (const file of walk(CLIENT)) {
+  // `openingTags` rather than a `[^>]*` regex: that pattern stops at the first `>` in the source,
+  // which in this codebase is routinely the `>` of an arrow-function prop, so a tag's `className`
+  // is often never reached. Two live contrast defects hid behind exactly that in ruleLadder.
+  for (const file of walk(CLIENT).filter((f) => f.endsWith('.tsx'))) {
     const src = readFileSync(file, 'utf8');
-    for (const tag of src.matchAll(/<[A-Za-z][^>]*>/g)) {
-      if (!/backgroundImage|background-image|HATCH/.test(tag[0])) continue;
+    for (const tag of openingTags(src)) {
+      if (!/backgroundImage|background-image|HATCH/.test(tag.text)) continue;
       for (const ground of PAGE_GROUNDS) {
         assert.ok(
-          !new RegExp(`\\b${ground}\\b`).test(tag[0]),
-          `${file.replace(ROOT, '')} textures an element grounded on ${ground}`
+          !new RegExp(`\\b${ground}\\b`).test(tag.text),
+          `${file.replace(ROOT, '')}:${tag.line} textures an element grounded on ${ground}`
         );
       }
     }
@@ -147,18 +151,19 @@ test('no money figure is painted a semantic hue unconditionally', () => {
   const offenders: string[] = [];
   for (const file of walk(CLIENT).filter((f) => f.endsWith('.tsx'))) {
     const src = readFileSync(file, 'utf8');
-    for (const tag of src.matchAll(/<Figure\b[^>]*?>/gs)) {
-      const tone = /tone="(positive|negative|estimate)"/.exec(tag[0]);
-      if (tone && !tag[0].includes('value=')) {
-        const line = src.slice(0, tag.index).split('\n').length;
-        offenders.push(`${file.replace(ROOT, '')}:${line} tone="${tone[1]}"`);
+    for (const tag of openingTags(src).filter((t) => /^<Figure\b/.test(t.text))) {
+      const tone = /tone="(positive|negative|estimate)"/.exec(tag.text);
+      if (tone && !tag.text.includes('value=')) {
+        offenders.push(`${file.replace(ROOT, '')}:${tag.line} tone="${tone[1]}"`);
       }
     }
   }
   assert.deepEqual(offenders, [], 'a money figure carries a semantic hue that no value decides');
 
   // And the check can still see: the call sites exist, and some of them do take a signed value.
-  const tags = walk(CLIENT).filter((f) => f.endsWith('.tsx')).flatMap((f) => [...readFileSync(f, 'utf8').matchAll(/<Figure\b[^>]*?>/gs)].map((m) => m[0]));
+  const tags = walk(CLIENT)
+    .filter((f) => f.endsWith('.tsx'))
+    .flatMap((f) => openingTags(readFileSync(f, 'utf8')).filter((t) => /^<Figure\b/.test(t.text)).map((t) => t.text));
   assert.ok(tags.length >= 8, `only ${tags.length} Figure call sites found; the walk is not reaching them`);
   assert.ok(tags.some((t) => t.includes('value=')), 'no Figure derives its tone from a value at all');
 });

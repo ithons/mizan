@@ -620,7 +620,7 @@ export function DataSection() {
                     </div>
                   )}
 
-                  <div className="max-h-36 overflow-y-auto divide-y divide-line rounded-lg border border-line-2">
+                  <div className="max-h-36 overflow-y-auto divide-y divide-line rounded-lg border border-faint">
                     {backupPreview.tables
                       .filter((table) => table.restorable || table.backup_rows > 0)
                       .slice(0, 12)

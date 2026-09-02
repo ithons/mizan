@@ -543,7 +543,7 @@ function AdvisorContextEditor({ open, onToggle }: { open: boolean; onToggle: () 
               rows={8}
               maxLength={4000}
               placeholder="e.g. I autopay my cards in full each month; I'm a student with seasonal income; I prefer a taxable brokerage over a Roth IRA."
-              className="w-full resize-y rounded-lg border border-line-2 bg-rail p-3 font-mono text-note leading-relaxed text-ink outline-none focus:border-sage"
+              className="w-full resize-y rounded-lg border border-faint bg-rail p-3 font-mono text-note leading-relaxed text-ink outline-none focus:border-sage"
             />
             <div className="flex items-center justify-between">
               <span className="text-note text-muted-2">{value.length}/4000</span>
@@ -634,7 +634,7 @@ function ProviderKeyRow({ status }: { status: AdvisorProviderStatus }) {
             value={draft}
             onChange={(e) => setDraft(e.target.value)}
             placeholder={status.configured ? 'Replace the stored key' : 'Paste an API key'}
-            className="min-w-0 flex-1 rounded-lg border border-line-2 bg-rail px-3 py-2 font-mono text-note text-ink outline-none focus:border-sage"
+            className="min-w-0 flex-1 rounded-lg border border-faint bg-rail px-3 py-2 font-mono text-note text-ink outline-none focus:border-sage"
           />
           <button
             type="button"

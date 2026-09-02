@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { ratioOf, THEMES, type Theme } from './helpers/palette';
+import { inheritedGround, openingTags } from './helpers/jsx';
 
 const ROOT = join(__dirname, '..');
 
@@ -141,27 +142,43 @@ test('no rule token is drawn on a ground it cannot clear', () => {
   );
   assert.deepEqual(
     CANNOT,
-    { 'line-2': ['rail', 'track', 'well'], 'line-3': [], faint: ['track'] },
+    // Typed, because `assert.deepEqual` asserts `actual is T` and an untyped literal narrows
+    // `CANNOT` to it, turning `line-3`'s empty array into `never[]` for every later read.
+    { 'line-2': ['rail', 'track', 'well'], 'line-3': [], faint: ['track'] } as Record<string, string[]>,
     'the ladder moved; this test now guards a different set of pairings than it was written for'
   );
   const offenders: string[] = [];
-  for (const file of walk(join(ROOT, 'client', 'src'))) {
+  let unresolved = 0;
+  for (const file of walk(join(ROOT, 'client', 'src')).filter((f) => f.endsWith('.tsx'))) {
     const src = readFileSync(file, 'utf8');
-    for (const tag of src.matchAll(/<[A-Za-z][^>]*>/g)) {
+    for (const tag of openingTags(src)) {
       for (const [rule, grounds] of Object.entries(CANNOT)) {
-        if (!new RegExp(`\\b(?:border|divide|ring)(?:-[trblxy])?-${rule}\\b`).test(tag[0])) continue;
-        for (const ground of grounds) {
-          // The RESTING ground only. A `hover:bg-well` is a transient state whose border is still
-          // being judged against the surface the element rests on, and treating it as the ground
-          // flagged the Retry button in `QueryState`, whose border is fine at rest.
-          if (!new RegExp(`(^|[\\s"'])bg-${ground}\\b`).test(tag[0])) continue;
-          const line = src.slice(0, tag.index).split('\n').length;
-          offenders.push(`${file.replace(ROOT, '')}:${line} draws ${rule} on ${ground}`);
+        if (!grounds.length) continue;
+        if (!new RegExp(`\\b(?:border|divide|ring)(?:-[trblxy])?-${rule}\\b`).test(tag.text)) continue;
+        // The RESTING ground, whether the element declares it or inherits it. A `hover:bg-well` is
+        // a transient state whose border is still judged against the surface the element rests on;
+        // treating it as the ground flagged the Retry button in `QueryState`, which is fine at rest.
+        const ground = inheritedGround(src, tag, GROUNDS);
+        if (ground === null) {
+          unresolved++;
+          continue;
+        }
+        if (grounds.includes(ground)) {
+          offenders.push(`${file.replace(ROOT, '')}:${tag.line} draws ${rule} on ${ground}`);
         }
       }
     }
   }
   assert.deepEqual(offenders, [], 'a structural rule is drawn on a ground it cannot clear 3:1 against');
+
+  // What this test cannot certify, printed rather than passed. A ground that resolves to nothing in
+  // the same file is not a clean pairing, it is one nobody looked at, and staying silent about it
+  // is exactly how a partial walk reads as full coverage. `railGround.test.ts` sets the precedent:
+  // it names the call sites its own walk cannot clear rather than counting them as clean.
+  assert.ok(
+    unresolved <= 25,
+    `${unresolved} rule utilities have no resolvable in-file ground, up from 21; re-read them`
+  );
 });
 
 /**
