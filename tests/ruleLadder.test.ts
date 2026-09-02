@@ -125,10 +125,25 @@ test('no rule token is drawn on a ground it cannot clear', () => {
   // make. `faint` fails only on `track`; `line-2` fails on `track`, `rail` and `well`. So the
   // question is not what a token clears everywhere, it is whether any element pairs a token with a
   // ground it misses. Judged per JSX element, the way graphicRestraint.test.ts judges textures.
-  const CANNOT: Record<string, string[]> = {
-    faint: ['track'],
-    'line-2': ['track', 'rail', 'well'],
-  };
+  // Derived, not typed. A hand-written table of which token misses which ground is a second copy
+  // of what `ratioOf` already computes, and CLAUDE.md's rule about the fifth copy applies to a
+  // contrast table exactly as it does to a list of action kinds: the enforcement and the statement
+  // have to be one thing or they drift.
+  //
+  // `line` is excluded by name and only by name. It misses on every ground by design, and the two
+  // tests above pin that as the point of the quiet rung, so including it here would report the
+  // whole app as broken.
+  const CANNOT: Record<string, string[]> = Object.fromEntries(
+    ['line-2', 'line-3', 'faint'].map((rule) => [
+      rule,
+      GROUNDS.filter((g) => THEMES.some((t: Theme) => ratioOf(rule, g, t) < 3)),
+    ])
+  );
+  assert.deepEqual(
+    CANNOT,
+    { 'line-2': ['rail', 'track', 'well'], 'line-3': [], faint: ['track'] },
+    'the ladder moved; this test now guards a different set of pairings than it was written for'
+  );
   const offenders: string[] = [];
   for (const file of walk(join(ROOT, 'client', 'src'))) {
     const src = readFileSync(file, 'utf8');
