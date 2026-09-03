@@ -851,6 +851,26 @@ cannot clear all-pairs.
 **Move 1, a full re-point.** Not taken as written. Re-pointing ~200 sites was not the fix; nine
 mis-paired sites were.
 
+### Phase 15 landed, and this file never said so
+
+Verified item by item on 2026-09-03. All six shipped, most of them through `relink-and-close.md`
+Phases 2 and 3 (commit `58463e7`) about twelve hours after Phase 15 was written, which is why
+nothing here recorded it: the work went out under a different plan's heading and this file's own
+outcome section closed 13 and 14 and skipped 15 entirely.
+
+| item | where it landed |
+|---|---|
+| Investments membership frozen at write time | migration `056_snapshot_portfolio_membership.sql` + `frozenPortfolio()` in `snapshot.ts:154` |
+| `deriveAssetBuckets` re-homed or deleted, and say which | deleted 2026-08-01; `netWorthHistory.ts:124` records the deletion and the grep that proves no caller |
+| refused advisor draft rows bounded | `tests/refusedDraftBound.test.ts` |
+| the stale `rules.ts` docstring re-derived | `rules.ts:561`, re-derived 2026-09-01 to 251 / 58 / 171, with the query printed beside it and the superseded 236 / 41 / 173 named |
+| the stale hex inventory item corrected | corrected in this file at :359 and :367; `#c9963a` survives only in a comment at `SyncActivityPanel.tsx:22` |
+| `CLAUDE.md` and `ui-overhaul.md` tracked | settled both ways: `ui-overhaul.md` is tracked and trimmed, `CLAUDE.md` stays gitignored by the owner's decision |
+
+The gap is worth naming rather than quietly filling. A phase whose work lands under another plan's
+commits is a phase nobody can later tell was finished, and the next reader of this file would have
+re-planned it.
+
 ### Left open
 
 - **Sortable headers, `aria-sort`.** The remaining half of Phase 14, and it should not be built as
