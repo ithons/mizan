@@ -11,7 +11,7 @@ import { useAppStore } from '../store';
  * What this replaces: eleven destinations plus Settings, each rendered as a 7px dot with its label
  * behind `xl:block`. Under 1280px, which includes any laptop window that is not maximised, the
  * whole navigation was twelve identical dots. Measured from the shipped tokens, `dot` on `rail` is
- * **2.74:1 light and 3.88:1 dark** (`--mz-dot-c` over `--mz-rail-c` in index.css, WCAG 2.1 sRGB;
+ * **2.68:1 light and 3.38:1 dark** (`--mz-dot-c` over `--mz-rail-c` in index.css, WCAG 2.1 sRGB;
  * `tests/navigation.test.ts` recomputes both from this file's own triplets and fails if either
  * moves). Under AA in both themes, and on light under the 3:1 floor a non-text mark would need.
  * Twelve marks nobody can tell apart, in a value nobody can see, standing in for the only thing on
@@ -87,7 +87,7 @@ function RailItem({ to, label }: { to: string; label: string }) {
           <span
             aria-hidden
             className={`h-px w-full transition-colors ${
-              isActive ? 'bg-ink' : 'bg-transparent group-hover:bg-line-3'
+              isActive ? 'bg-sage' : 'bg-transparent group-hover:bg-line-3'
             }`}
           />
           <span
@@ -149,10 +149,10 @@ export function NavRail() {
       /* The boundary between chrome and money, on `faint` rather than `line-2`.
          A 1px rule between two grounds is seen against both of them, and this one has `paper` on
          the content side and `rail` under itself. `line-2` clears the 3:1 non-text floor against
-         the page and misses it against the rail it sits on: `line-2` on `rail`, 2.92:1 light and
-         3.55:1 dark, measured in the browser off the rendered element (borderLeftColor
-         rgb(145,145,145) against backgroundColor rgb(246,246,246)). `faint` on `rail`, 3.56:1
-         light and 4.88:1 dark, and `faint` on `paper`, 3.84:1 light and 5.17:1 dark: both sides,
+         the page and misses it against the rail it sits on: `line-2` on `rail`, 2.93:1 light and
+         3.47:1 dark, measured in the browser off the rendered element (borderLeftColor
+         rgb(145,145,145) against backgroundColor rgb(246,246,246)). `faint` on `rail`, 3.40:1
+         light and 4.06:1 dark, and `faint` on `paper`, 3.58:1 light and 4.27:1 dark: both sides,
          both themes.
          `faint` and not `line-3`, which also clears everywhere, because `line-3` is spoken for:
          it is e3's border in `Card.tsx`, the elevation that carries money, and the `closing` rule
@@ -177,9 +177,9 @@ export function NavRail() {
         </span>
         <span className="flex items-baseline gap-2">
           <span className="font-serif text-sub text-ink">mizān</span>
-          {/* Outlined rather than filled: `line` on `rail` is 1.20:1 light, so a chip fill here
+          {/* Outlined rather than filled: `line` on `rail` is 1.16:1 light, so a chip fill here
               would be an invisible rectangle. The border carries the chip and the text carries
-              the contrast (`muted` on `rail`, 7.01:1 light / 9.03:1 dark). */}
+              the contrast (`muted` on `rail`, 6.67:1 light / 7.38:1 dark). */}
           <kbd className="rounded border border-line-3 px-1 py-px font-mono text-micro text-muted">⌘K</kbd>
         </span>
       </button>
@@ -195,8 +195,8 @@ export function NavRail() {
 
           `faint`, not `line-2`, for the same reason the rail's own left boundary is: this is a
           structural rule and it sits on `rail` with `rail` on both sides, where `line-2` measures
-          2.92:1 light and 3.55:1 dark. It misses the 3:1 non-text floor on the theme most people
-          read in. `faint` on `rail` is 3.56:1 light and 4.88:1 dark. The left boundary was
+          2.93:1 light and 3.47:1 dark. It misses the 3:1 non-text floor on the theme most people
+          read in. `faint` on `rail` is 3.40:1 light and 4.06:1 dark. The left boundary was
           corrected in 9554379 and this one was missed, which is what `ruleLadder.test.ts` now
           walks the whole file for rather than checking the one element by name. */}
       <div className="mx-3 border-t border-faint" />
@@ -208,10 +208,10 @@ export function NavRail() {
           onClick={runSync}
           disabled={syncStatus === 'syncing'}
           /* A failure steps up in value rather than changing hue. `clay` on `rail` measures
-             12.05:1 light / 14.18:1 dark, so it would be legible here and this is a stated choice
+              5.85:1 light /  7.85:1 dark, so it would be legible here and this is a stated choice
              rather than a contrast finding: a hue is a legend the owner has to learn, and one that
-             says "error" only if they already know it does. `ink` on `rail` is 19.43:1 against
-             `muted`'s 7.01:1, so the failed state is the one that gets darker, and the word says
+             says "error" only if they already know it does. `ink` on `rail` is 16.10:1 against
+             `muted`'s 6.67:1, so the failed state is the one that gets darker, and the word says
              which state it is either way. */
           className={`mt-3 block w-full pl-3 pr-[22px] text-right text-note transition-colors ${
             syncStatus === 'error' ? 'font-medium text-ink' : 'text-muted hover:text-ink'

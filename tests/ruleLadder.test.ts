@@ -96,7 +96,7 @@ test('line-2 is NOT a token that clears the floor everywhere, whatever the plan 
   );
   assert.deepEqual(
     failures.sort(),
-    ['rail/light 2.92', 'track/dark 2.44', 'track/light 2.39', 'well/light 2.84'],
+    ['rail/light 2.93', 'track/dark 2.78', 'track/light 2.41', 'well/dark 2.93', 'well/light 2.83'],
     'the grounds line-2 cannot carry a structural rule on have changed; re-derive the ladder'
   );
 });

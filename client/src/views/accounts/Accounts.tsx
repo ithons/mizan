@@ -48,9 +48,9 @@ function accountMeta(a: Account): string {
  * It carries its own ground, so its ratios are against that ground and not against the row's.
  * Re-derived from the triplets in `client/src/index.css` (WCAG 2.1, sRGB), light / dark:
  *
- *   clay on pill-bg           11.43 / 12.21   the "Reconnect" pill, AA on both themes
- *   gold on pill-bg            4.08 /  5.05   what the two caution pills used to be, sub-AA on light
- *   review-text on review-bg   4.62 /  4.56   the pair the palette already declares for caution
+ *   clay on pill-bg            5.70 /  6.99   the "Reconnect" pill, AA on both themes
+ *   gold on pill-bg            4.24 /  6.98   what the two caution pills used to be, sub-AA on light
+ *   review-text on review-bg   4.69 /  6.26   the pair the palette already declares for caution
  *
  * `text-rule` is 11px, so the large-text exemption does not apply and 4.5:1 is the bar.
  *
@@ -61,8 +61,8 @@ function accountMeta(a: Account): string {
  *   git show HEAD:client/src/index.css
  *
  * The two caution states moved onto the review pair rather than recolouring `gold`, and the reason
- * is not that `gold` is fine elsewhere. It is not: on light it measures 4.30 on `rail`, 3.52 on
- * `track` and 4.19 on `well`, so `pill-bg` is the fourth ground it fails rather than the only one,
+ * is not that `gold` is fine elsewhere. It is not: on light it measures 4.35 on `rail`, 3.57 on
+ * `track` and 4.20 on `well`, so `pill-bg` is the fourth ground it fails rather than the only one,
  * and `DataSection.tsx` sets `text-gold` on `rail` today. The reason is that `gold` is load-bearing
  * elsewhere as an ink and moving the token would move all of it.
  * Counted 2026-08-01 with (the second `grep` drops this block's own prose)
@@ -236,18 +236,18 @@ export function Accounts() {
    * `client/src/index.css` (WCAG 2.1, sRGB), light / dark:
    *
    *                  rail            card            paper (unselected)
-   *   ink            19.43 / 19.80   21.00 / 19.03   21.00 / 21.00
-   *   muted           7.01 /  9.03    7.57 /  8.67    7.57 /  9.57   the initial in the avatar
-   *   muted-2         5.56 /  7.30    6.01 /  7.02    6.01 /  7.74   the sync/institution line
-   *   sage-deep       4.77 /  5.85    5.16 /  5.62    5.16 /  6.20   a card in credit, and its note
-   *   clay           12.05 / 14.18   13.02 / 13.63   13.02 / 15.04   a balance that is owed
+   *   ink            16.10 / 15.77   17.74 / 15.08   16.91 / 16.57
+   *   muted           6.67 /  7.38    7.35 /  7.06    7.01 /  7.76   the initial in the avatar
+   *   muted-2         5.63 /  6.71    6.21 /  6.41    5.91 /  7.04   the sync/institution line
+   *   sage-deep       4.64 /  6.56    5.11 /  6.27    4.87 /  6.89   a card in credit, and its note
+   *   clay            5.85 /  7.85    6.45 /  7.50    6.15 /  8.25   a balance that is owed
    *
    * On `card` the worst pair in either theme is 5.16. Nothing here is large text: the numeral is
    * `text-sub` and the rest is smaller, so 4.5:1 is the bar for all fifteen cells.
    *
-   * Selection reads as a `sage` edge and nothing else. `card` on `paper` is 1.00 / 1.10, which on
+   * Selection reads as a `sage` edge and nothing else. `card` on `paper` is 1.05 / 1.10, which on
    * light is not a step at all: both tokens are pure white, so the selected fill is invisible and
-   * the ring is the whole signal. It measures 4.20 / 4.39 against `card`, clear of the 3:1 a
+   * the ring is the whole signal. It measures 4.13 / 4.82 against `card`, clear of the 3:1 a
    * non-text boundary needs. `tests/accountsRowContrast.test.ts` recomputes every figure above from
    * the CSS and fails if a tone in this row stops clearing AA.
    *
@@ -255,15 +255,17 @@ export function Accounts() {
    * and left alone rather than passed over in silence:
    *
    *   - `Row`'s own `hover:bg-well` / `focus-visible:bg-well` replaces the ground for as long as the
-   *     pointer is on the row, and `muted-2` on `well` is 5.41 / 6.42, which clears. That ground is
+   *     pointer is on the row, and `muted-2` on `well` is 5.43 / 5.66, which clears. That ground is
    *     every `Row` on every screen, so it belongs to the primitive and not to this view; what it
    *     still cannot carry is `gold` (4.19 light), which this row never sets.
    *   - `dimmed` is `opacity-55`, which the closed and hidden sections apply to the whole row.
-   *     Composited over the ground beneath it, on light/paper: ink 4.76, muted 2.59, muted-2 2.34,
-   *     sage-deep 2.32, clay 3.84. Only `ink` survives the veil, and only just. Raising the alpha
-   *     does not rescue the rest at any strength worth calling a veil: the lowest alpha at which
-   *     each tone still clears 4.5 on light paper is ink 54%, clay 61%, muted 80%, muted-2 88%,
-   *     sage-deep 93%. A de-emphasis that keeps AA has to be a different tone rather than a veil.
+   *     Composited over the ground beneath it, on light/paper: ink 3.90, muted 2.51, muted-2 2.33,
+   *     sage-deep 2.26, clay 2.60. NOT ONE of them survives the veil now. Under the palette before
+   *     Jade & Ink `ink` cleared at 4.76 and was the single exception; `ink` is a cool near-black
+   *     rather than pure black now, so it went under with the rest. Raising the alpha does not
+   *     rescue them at any strength worth calling a veil: the lowest alpha at which each tone
+   *     clears 4.5 on light paper is ink 60%, muted 82%, clay 83%, muted-2 88%, sage-deep 96%.
+   *     A de-emphasis that keeps AA has to be a different tone rather than a veil.
    *     Both sections are behind an explicit "show" toggle and both say what they hold, so this is
    *     recorded here and in `tests/accountsRowContrast.test.ts` rather than fixed in passing.
    *

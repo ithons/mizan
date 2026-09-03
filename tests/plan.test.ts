@@ -447,11 +447,11 @@ describe('bar fills are visible against their own track', () => {
       ])
     );
     assert.deepEqual(measured, {
-      paper: [1.32, 1.55],
-      card: [1.32, 1.4],
-      'card-alt': [1.26, 1.31],
-      well: [1.19, 1.28],
-      rail: [1.22, 1.46],
+      paper: [1.28, 1.31],
+      card: [1.34, 1.2],
+      'card-alt': [1.31, 1.1],
+      well: [1.18, 1.06],
+      rail: [1.22, 1.25],
     });
 
     // What changed on 2026-08-01 is that the finding is closed, and NOT by moving a token: no solid

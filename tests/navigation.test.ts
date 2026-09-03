@@ -96,9 +96,9 @@ function ratio(fg: string, bg: string, theme: 'light' | 'dark'): string {
 }
 
 test('the dot that was the navigation measures what the rail says it measures', () => {
-  assert.equal(ratio('dot', 'rail', 'light'), '2.74');
-  assert.equal(ratio('dot', 'rail', 'dark'), '3.88');
-  assert.match(RAIL_SOURCE, /\*\*2\.74:1 light and 3\.88:1 dark\*\*/);
+  assert.equal(ratio('dot', 'rail', 'light'), '2.68');
+  assert.equal(ratio('dot', 'rail', 'dark'), '3.38');
+  assert.match(RAIL_SOURCE, /\*\*2\.68:1 light and 3\.38:1 dark\*\*/);
   // Below AA in both themes, and below the 3:1 floor a non-text mark would need on light, which is
   // why the marks are gone rather than recoloured: twelve of them said the same thing in a value
   // nobody can see. Both halves of that sentence are asserted, not just the light one.
@@ -107,18 +107,18 @@ test('the dot that was the navigation measures what the rail says it measures', 
 });
 
 test('the other three figures in the rail reproduce too', () => {
-  assert.equal(ratio('line', 'rail', 'light'), '1.20');
-  assert.match(RAIL_SOURCE, /`line` on `rail` is 1\.20:1 light/);
+  assert.equal(ratio('line', 'rail', 'light'), '1.16');
+  assert.match(RAIL_SOURCE, /`line` on `rail` is 1\.16:1 light/);
 
-  assert.equal(ratio('muted', 'rail', 'light'), '7.01');
-  assert.equal(ratio('muted', 'rail', 'dark'), '9.03');
-  assert.match(RAIL_SOURCE, /`muted` on `rail`, 7\.01:1 light \/ 9\.03:1 dark/);
+  assert.equal(ratio('muted', 'rail', 'light'), '6.67');
+  assert.equal(ratio('muted', 'rail', 'dark'), '7.38');
+  assert.match(RAIL_SOURCE, /`muted` on `rail`, 6\.67:1 light \/ 7\.38:1 dark/);
 
-  assert.equal(ratio('clay', 'rail', 'light'), '12.05');
-  assert.equal(ratio('clay', 'rail', 'dark'), '14.18');
-  assert.equal(ratio('ink', 'rail', 'light'), '19.43');
-  assert.match(RAIL_SOURCE, /`clay` on `rail` measures\n\s+12\.05:1 light \/ 14\.18:1 dark/);
-  assert.match(RAIL_SOURCE, /`ink` on `rail` is 19\.43:1 against\n\s+`muted`'s 7\.01:1/);
+  assert.equal(ratio('clay', 'rail', 'light'), '5.85');
+  assert.equal(ratio('clay', 'rail', 'dark'), '7.85');
+  assert.equal(ratio('ink', 'rail', 'light'), '16.10');
+  assert.match(RAIL_SOURCE, /`clay` on `rail` measures\n\s+5\.85:1 light \/\s+7\.85:1 dark/);
+  assert.match(RAIL_SOURCE, /`ink` on `rail` is 16\.10:1 against\n\s+`muted`'s 6\.67:1/);
 });
 
 test('the sync failure is a step in value, and the rail no longer claims clay could not be read', () => {

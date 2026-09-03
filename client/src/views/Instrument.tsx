@@ -274,7 +274,7 @@ function MonthStrip({ values, extent, label }: { values: number[]; extent: numbe
             {/* Money that came back keeps the accent the rest of this screen reserves for it, so a
                 month whose refunds outweighed its purchases is not drawn as ordinary spending.
                 Both columns are marks and need 3:1 against the paper they sit on: `muted` reads
-                7.57:1 light and 9.57:1 dark, `sage-deep` 5.16:1 and 6.20:1, computed from the
+                7.01:1 light and 7.76:1 dark, `sage-deep` 4.87:1 and 6.89:1, computed from the
                 triplets in client/src/index.css. */}
             <div
               className={`w-full rounded-sm ${value < 0 ? 'bg-sage-deep' : 'bg-muted'}`}

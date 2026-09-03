@@ -107,9 +107,13 @@ test('the fills still clear the track, which is the edge the ring does not repla
 /**
  * Why the palette was left alone, stated as arithmetic rather than as taste.
  *
- * Exhaustive over the 256 achromatic values, which is the whole family `track` belongs to (every
- * neutral in index.css is chroma 0.000). If any of them cleared both edges, a one-line token change
- * would be the smaller fix and this ring would be unjustified.
+ * Exhaustive over the 256 achromatic values. That was once the whole family `track` belongs to,
+ * back when every neutral in index.css was chroma 0.000; the Jade & Ink palette gives the neutrals
+ * a slight cool cast, so the scan is now a lower bound rather than a survey of the family. It is
+ * still the right bound: adding chroma to a track moves it toward one fill and away from another,
+ * so no tinted value beats the best achromatic one at clearing FIVE fills at once. If any candidate
+ * cleared both edges, a one-line token change would be the smaller fix and this ring would be
+ * unjustified.
  */
 function bestSolidTrack(theme: Theme): { value: number; againstPage: number } | null {
   const page = triplet('paper', theme);
@@ -169,14 +173,20 @@ test('the figures the component states for that scan are the ones the scan produ
   }
 });
 
-test('the palette itself is unchanged by this fix', () => {
-  // The owner is deciding the visual direction separately. A legibility fix that quietly retuned a
-  // token would pre-empt it, so the property asserted is that `track` is still what the fills were
-  // solved against and still the neutral it always was.
+test('track is still a track, not a second fill', () => {
+  // This used to pin `track` achromatic, and the reason it gave was that the owner was deciding
+  // the visual direction separately and a legibility fix must not pre-empt it. That decision has
+  // been taken: the Jade & Ink palette gives every neutral a slight cool cast on purpose, so the
+  // pin now guards nothing and would only block the direction it was protecting.
+  //
+  // What was load-bearing survives. `track` is a GROUND for the fills, and the property that makes
+  // it one is that it sits nearer the page than any fill does. A track that drifted past a fill
+  // would read as a second bar, and the whole boundary argument in this file would be about the
+  // wrong pair. Chroma was a proxy for that; this is the thing itself.
   for (const theme of THEMES) {
     const [r, g, b] = triplet('track', theme);
-    assert.equal(r, g, `track ${theme} must stay achromatic`);
-    assert.equal(g, b, `track ${theme} must stay achromatic`);
+    const spread = Math.max(r, g, b) - Math.min(r, g, b);
+    assert.ok(spread <= 12, `track ${theme} has a channel spread of ${spread}; it is a tint, not a hue`);
   }
   // And still nearer the page than the fills are, i.e. still a track and not a second fill.
   for (const theme of THEMES) {

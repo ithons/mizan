@@ -112,21 +112,21 @@ test('the row still carries the five tones this file measures, and no sixth', ()
 test('the ratios the row comment prints are the ratios the palette produces', () => {
   const expected: Array<[string, string, number, number]> = [
     // tone            ground   light   dark
-    ['ink', 'rail', 19.43, 19.8],
-    ['muted', 'rail', 7.01, 9.03],
-    ['muted-2', 'rail', 5.56, 7.3],
-    ['sage-deep', 'rail', 4.77, 5.85],
-    ['clay', 'rail', 12.05, 14.18],
-    ['ink', 'card', 21, 19.03],
-    ['muted', 'card', 7.57, 8.67],
-    ['muted-2', 'card', 6.01, 7.02],
-    ['sage-deep', 'card', 5.16, 5.62],
-    ['clay', 'card', 13.02, 13.63],
-    ['ink', 'paper', 21, 21],
-    ['muted', 'paper', 7.57, 9.57],
-    ['muted-2', 'paper', 6.01, 7.74],
-    ['sage-deep', 'paper', 5.16, 6.2],
-    ['clay', 'paper', 13.02, 15.04],
+    ['ink', 'rail', 16.1, 15.77],
+    ['muted', 'rail', 6.67, 7.38],
+    ['muted-2', 'rail', 5.63, 6.71],
+    ['sage-deep', 'rail', 4.64, 6.56],
+    ['clay', 'rail', 5.85, 7.85],
+    ['ink', 'card', 17.74, 15.08],
+    ['muted', 'card', 7.35, 7.06],
+    ['muted-2', 'card', 6.21, 6.41],
+    ['sage-deep', 'card', 5.11, 6.27],
+    ['clay', 'card', 6.45, 7.5],
+    ['ink', 'paper', 16.91, 16.57],
+    ['muted', 'paper', 7.01, 7.76],
+    ['muted-2', 'paper', 5.91, 7.04],
+    ['sage-deep', 'paper', 4.87, 6.89],
+    ['clay', 'paper', 6.15, 8.25],
   ];
   for (const [tone, ground, light, dark] of expected) {
     assert.equal(ratio(tone, ground, 'light'), light, `${tone} on ${ground}, light`);
@@ -189,28 +189,29 @@ test('the initial disc is the one place the row still sets rail, and it sets a t
 
 test('selection is carried entirely by the edge, because on light the surface step is 1.00:1', () => {
   assert.match(SOURCE, /selectedId === a\.id \? 'bg-card ring-1 ring-inset ring-sage'/);
-  // `card` and `paper` are the same triplet on light, so the selected fill is not a weak signal,
-  // it is no signal. This is stricter than the 1.24 this test used to assert, not weaker: it says
-  // the ring is the only thing left, so the ring assertions below are load-bearing.
-  assert.deepEqual(triplet('card', 'light'), triplet('paper', 'light'));
-  assert.equal(ratio('card', 'paper', 'light'), 1);
+  // `card` and `paper` used to be the same triplet on light, so the selected fill was no signal at
+  // all and the ring was the whole of it. Jade & Ink puts the page at 247 250 250 and leaves cards
+  // pure white, so the fill is now a real 1.05:1 step. Still under the 1.15 an edge needs, so the
+  // ring assertions below are still the load-bearing ones; the fill assists rather than carries.
+  assert.notDeepEqual(triplet('card', 'light'), triplet('paper', 'light'));
+  assert.equal(ratio('card', 'paper', 'light'), 1.05);
   assert.equal(ratio('card', 'paper', 'dark'), 1.1);
   // A non-text boundary needs 3:1, and the ring clears it in both themes.
   assert.ok(ratio('sage', 'card', 'light') >= 3, 'the selection edge is invisible on light');
   assert.ok(ratio('sage', 'card', 'dark') >= 3, 'the selection edge is invisible on dark');
-  assert.equal(ratio('sage', 'card', 'light'), 4.2);
-  assert.equal(ratio('sage', 'card', 'dark'), 4.39);
-  assert.match(PROSE, /`card` on `paper` is 1\.00 \/ 1\.10/);
-  assert.match(PROSE, /It measures 4\.20 \/ 4\.39 against `card`/);
+  assert.equal(ratio('sage', 'card', 'light'), 4.13);
+  assert.equal(ratio('sage', 'card', 'dark'), 4.82);
+  assert.match(PROSE, /`card` on `paper` is 1\.05 \/ 1\.10/);
+  assert.match(PROSE, /It measures 4.13 \/ 4.82 against `card`/);
 });
 
 test('the sync badge is measured against its own ground, not against the row', () => {
   // It carries `bg-pill-bg` or `bg-review-bg`, so the row's ground never reaches its text.
-  assert.equal(ratio('clay', 'pill-muted-bg', 'light'), 11.43);
-  assert.equal(ratio('clay', 'pill-muted-bg', 'dark'), 12.21);
+  assert.equal(ratio('clay', 'pill-muted-bg', 'light'), 5.7);
+  assert.equal(ratio('clay', 'pill-muted-bg', 'dark'), 6.99);
   // What the two caution pills used to be, and still could not be. `text-rule` is 11px, so 4.5:1
   // applies; gold moved 3.97 -> 4.08 on light across the 2026-08-01 palette and stayed under it.
-  assert.equal(ratio('gold', 'pill-muted-bg', 'light'), 4.08);
+  assert.equal(ratio('gold', 'pill-muted-bg', 'light'), 4.24);
   assert.ok(ratio('gold', 'pill-muted-bg', 'light') < 4.5);
   assert.ok(
     !/bg-pill-bg[^'`]*\btext-gold\b|\btext-gold\b[^'`]*bg-pill-bg/.test(SOURCE.replace(/\/\*[\s\S]*?\*\//g, '')),
@@ -218,11 +219,11 @@ test('the sync badge is measured against its own ground, not against the row', (
   );
   // Where they went: the pair the palette already declares for a caution state. Both themes are
   // tighter than they were (4.93 / 5.53 before) and both still clear.
-  assert.equal(ratio('review-text', 'review-bg', 'light'), 4.62);
-  assert.equal(ratio('review-text', 'review-bg', 'dark'), 4.56);
+  assert.equal(ratio('review-text', 'review-bg', 'light'), 4.69);
+  assert.equal(ratio('review-text', 'review-bg', 'dark'), 6.26);
   assert.ok(ratio('review-text', 'review-bg', 'light') >= 4.5 && ratio('review-text', 'review-bg', 'dark') >= 4.5);
   assert.match(SOURCE, /border-review-border bg-review-bg text-review-text/);
-  assert.match(PROSE, /review-text on review-bg +4\.62 \/ +4\.56/);
+  assert.match(PROSE, /review-text on review-bg +4.69 \/ +6.26/);
 });
 
 test('the review pair means an open question, which is what the badge note says it means', () => {
@@ -249,9 +250,9 @@ test('the badge note says why gold moved, and it is not "gold is fine elsewhere"
   // is the fourth ground it fails on light, not the only one, and `rail` is one of the other three
   // WITH a live `text-gold` call site on it. Every figure the note prints is recomputed here.
   const grounds: Array<[string, number]> = [
-    ['rail', 4.3],
-    ['track', 3.52],
-    ['well', 4.19],
+    ['rail', 4.35],
+    ['track', 3.57],
+    ['well', 4.2],
   ];
   for (const [ground, light] of grounds) {
     assert.equal(ratio('gold', ground, 'light'), light, `gold on ${ground}, light`);
@@ -259,8 +260,8 @@ test('the badge note says why gold moved, and it is not "gold is fine elsewhere"
     assert.match(PROSE, new RegExp(`${light.toFixed(2).replace('.', '\\.')} on \`${ground}\``));
   }
   // And the two grounds where it does clear, so the note is not the opposite overstatement.
-  assert.equal(ratio('gold', 'paper', 'light'), 4.64);
-  assert.equal(ratio('gold', 'card', 'light'), 4.64);
+  assert.equal(ratio('gold', 'paper', 'light'), 4.57);
+  assert.equal(ratio('gold', 'card', 'light'), 4.8);
   // The live `text-gold` on a rail ground the note points at, so "and DataSection.tsx sets
   // text-gold on rail today" is a checked claim rather than a remembered one.
   const DATA = readFileSync(join(ROOT, 'client/src/views/settings/DataSection.tsx'), 'utf8');
@@ -318,10 +319,10 @@ test('the two other pill-bg call sites cleared, and the note reports them as cle
   const CATEGORY_PILL = readFileSync(join(ROOT, 'client/src/components/balance/CategoryPill.tsx'), 'utf8');
   const CATEGORIES = readFileSync(join(ROOT, 'client/src/views/settings/CategoriesSection.tsx'), 'utf8');
 
-  assert.equal(ratio('muted-2', 'pill-muted-bg', 'light'), 5.27);
-  assert.equal(ratio('muted-2', 'pill-muted-bg', 'dark'), 6.28);
-  assert.equal(ratio('sage-deep', 'pill-muted-bg', 'light'), 4.53);
-  assert.equal(ratio('sage-deep', 'pill-muted-bg', 'dark'), 5.03);
+  assert.equal(ratio('muted-2', 'pill-muted-bg', 'light'), 5.48);
+  assert.equal(ratio('muted-2', 'pill-muted-bg', 'dark'), 5.97);
+  assert.equal(ratio('sage-deep', 'pill-muted-bg', 'light'), 4.51);
+  assert.equal(ratio('sage-deep', 'pill-muted-bg', 'dark'), 5.83);
   // Both are `text-micro`, 11.5px in tailwind.config.js, so no large-text exemption reaches them,
   // and both clear the full 4.5:1 on their own. Asserted as a threshold and not only as a printed
   // figure, so a palette that drags either one back under fails here.
@@ -356,16 +357,18 @@ test('the veil on a closed or hidden row is recorded, not claimed to be fine', (
     const [a, b] = [luminanceOf(composite(fg, 'paper', alpha)), luminanceOf(triplet('paper', 'light'))];
     return Number(((Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05)).toFixed(2));
   };
-  assert.equal(against('ink'), 4.76);
-  assert.equal(against('muted'), 2.59);
-  assert.equal(against('muted-2'), 2.34);
-  assert.equal(against('sage-deep'), 2.32);
-  assert.equal(against('clay'), 3.84);
-  assert.ok(against('ink') >= 4.5, 'ink no longer survives the veil; the note says it does');
-  for (const tone of ['muted', 'muted-2', 'sage-deep', 'clay']) {
+  assert.equal(against('ink'), 3.9);
+  assert.equal(against('muted'), 2.51);
+  assert.equal(against('muted-2'), 2.33);
+  assert.equal(against('sage-deep'), 2.26);
+  assert.equal(against('clay'), 2.6);
+  // Not one survives now. `ink` was the single exception at 4.76 under the palette before Jade &
+  // Ink; it is a cool near-black rather than pure black, so it went under with the rest. The note
+  // says so, and this asserts the whole set rather than carving out the one that used to clear.
+  for (const tone of ['ink', 'muted', 'muted-2', 'sage-deep', 'clay']) {
     assert.ok(against(tone) < 4.5, `${tone} now survives the veil; the note says it does not`);
   }
-  assert.match(SOURCE, /ink 4\.76, muted 2\.59, muted-2 2\.34,\s*\n?\s*\*?\s*sage-deep 2\.32, clay 3\.84/);
+  assert.match(SOURCE, /ink 3\.90, muted 2\.51, muted-2 2\.33,\s*\n?\s*\*?\s*sage-deep 2\.26, clay 2\.60/);
 
   // The note claims a floor per tone rather than the old blanket "no opacity fixes it", which is
   // false now: ink clears at 54%. Each floor is the lowest whole percent that still clears 4.5.
@@ -373,12 +376,12 @@ test('the veil on a closed or hidden row is recorded, not claimed to be fine', (
     for (let a = 1; a <= 100; a++) if (against(tone, a / 100) >= 4.5) return a;
     throw new Error(`${tone} never clears 4.5 on light paper at any alpha`);
   };
-  assert.equal(floor('ink'), 54);
-  assert.equal(floor('clay'), 61);
-  assert.equal(floor('muted'), 80);
+  assert.equal(floor('ink'), 60);
+  assert.equal(floor('clay'), 83);
+  assert.equal(floor('muted'), 82);
   assert.equal(floor('muted-2'), 88);
-  assert.equal(floor('sage-deep'), 93);
-  assert.match(PROSE, /ink 54%, clay 61%, muted 80%, muted-2 88%,\s*sage-deep 93%/);
+  assert.equal(floor('sage-deep'), 96);
+  assert.match(PROSE, /ink 60%, muted 82%, clay 83%, muted-2 88%,\s*\*?\s*sage-deep 96%/);
   assert.match(SOURCE, /`dimmed` is `opacity-55`/);
   assert.ok(SOURCE.includes('opacity-55'), 'the veil is gone but the note about it is not');
 });
@@ -411,14 +414,14 @@ test('the veil nullifies the selection ring, which is why a selected row is not 
   // how it survived unnoticed.
   const veiledRing = (theme: Theme) =>
     contrast(composite('sage', 'paper', 0.55, theme), composite('card', 'paper', 0.55, theme));
-  assert.equal(veiledRing('light'), 2.09);
-  assert.equal(veiledRing('dark'), 2);
+  assert.equal(veiledRing('light'), 2.12);
+  assert.equal(veiledRing('dark'), 2.34);
   // It used to be under 3:1 on light only (1.97 / 3.07). It is under in BOTH themes now, so the
   // case this fixes got wider rather than narrower.
   for (const theme of ['light', 'dark'] as const) {
     assert.ok(veiledRing(theme) < 3, `a non-text boundary needs 3:1 and the veiled ring is ${veiledRing(theme)} in ${theme}`);
   }
-  assert.equal(contrast(composite('card', 'paper', 0.55, 'light'), triplet('paper', 'light')), 1);
+  assert.equal(contrast(composite('card', 'paper', 0.55, 'light'), triplet('paper', 'light')), 1.03);
   assert.equal(contrast(composite('card', 'paper', 0.55, 'dark'), triplet('paper', 'dark')), 1.05);
 
   // The fix, in the write path: the veil is skipped for whichever row is selected.
@@ -453,21 +456,21 @@ test('HEALTHY: an unselected closed or hidden row still carries the veil', () =>
 });
 
 test('index.css states what rail may carry, and states it correctly', () => {
-  assert.match(CSS, /ink 19\.43 \/ 19\.80/);
-  assert.match(CSS, /muted 7\.01 \/ 9\.03/);
-  assert.match(CSS, /muted-2 5\.56 \/ 7\.30/);
-  assert.match(CSS, /sage-deep 4\.77 \/ 5\.85/);
-  assert.match(CSS, /clay 12\.05 \/ 14\.18/);
-  assert.match(CSS, /gold 4\.30 \/ 5\.87/);
-  assert.equal(ratio('gold', 'rail', 'light'), 4.3);
-  assert.equal(ratio('gold', 'rail', 'dark'), 5.87);
+  assert.match(CSS, /ink 16\.10 \/ 15\.77/);
+  assert.match(CSS, /muted 6\.67 \/ 7\.38/);
+  assert.match(CSS, /muted-2 5\.63 \/ 6\.71/);
+  assert.match(CSS, /sage-deep 4\.64 \/ 6\.56/);
+  assert.match(CSS, /clay 5.85 \/ 7.85/);
+  assert.match(CSS, /gold 4.35 \/ 7.85/);
+  assert.equal(ratio('gold', 'rail', 'light'), 4.35);
+  assert.equal(ratio('gold', 'rail', 'dark'), 7.85);
   // The hover ground the row inherits from `Row`. It used to be recorded as a live sub-AA site
   // (4.02 / 4.14); it clears now, and index.css says so rather than keeping the old finding.
-  assert.match(CSS, /`muted-2` on `well` is\s*\n?\s*\*?\s*5\.41 light \/ 6\.42 dark/);
-  assert.equal(ratio('muted-2', 'well', 'light'), 5.41);
-  assert.equal(ratio('muted-2', 'well', 'dark'), 6.42);
+  assert.match(CSS, /`muted-2` on `well` is\s*\n?\s*\*?\s*5.43 light \/ 5.66 dark/);
+  assert.equal(ratio('muted-2', 'well', 'light'), 5.43);
+  assert.equal(ratio('muted-2', 'well', 'dark'), 5.66);
   assert.ok(ratio('muted-2', 'well', 'light') >= 4.5 && ratio('muted-2', 'well', 'dark') >= 4.5);
   // What `well` still cannot carry, so it is not written up as clean either.
-  assert.equal(ratio('gold', 'well', 'light'), 4.19);
-  assert.match(CSS, /`gold` on `well` is 4\.19 \/ 5\.16/);
+  assert.equal(ratio('gold', 'well', 'light'), 4.2);
+  assert.match(CSS, /`gold` on `well` is 4\.20 \/ 6\.62/);
 });

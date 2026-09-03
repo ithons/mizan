@@ -127,22 +127,24 @@ describe('elevation edge', () => {
       const surface = triplet(name, 'dark');
       return contrast(composite(WHITE, alpha, surface), surface);
     };
-    assert.equal(measured('card').toFixed(2), '1.18');
-    assert.equal(measured('card-alt').toFixed(2), '1.21');
+    assert.equal(measured('card').toFixed(2), '1.23');
+    assert.equal(measured('card-alt').toFixed(2), '1.24');
     for (const name of ['card', 'card-alt'] as const) {
       assert.ok(measured(name) > 1.15, `dark edge over ${name} is only ${measured(name).toFixed(2)}:1`);
     }
 
-    // The third ground is `ink`, which on dark IS pure white, so the white edge composites into it
-    // and does exactly nothing. That is the benign direction of the same arithmetic that made the
-    // light edge a defect: a white button on a black page needs no help separating from it.
-    assert.deepEqual(triplet('ink', 'dark'), WHITE);
-    assert.equal(measured('ink').toFixed(2), '1.00');
+    // The third ground is `ink`, a near-white on dark, so the white edge composites almost into it
+    // and does almost nothing. That is the benign direction of the same arithmetic that made the
+    // light edge a defect: a white button on a dark page needs no help separating from it. It used
+    // to be exactly nothing, because `ink` on dark was pure white; Jade & Ink sets it to a cool
+    // near-white so a dark screen is not maximum contrast on every glyph.
+    assert.ok(Math.min(...triplet('ink', 'dark')) > 235, 'ink on dark is no longer a near-white');
+    assert.equal(measured('ink').toFixed(2), '1.01');
 
-    // And the figure that retired `paper` from this list, kept because it is the reason: dark paper
-    // is pure black, and 0.05 of flare in the denominator holds the step under the floor above.
-    assert.deepEqual(triplet('paper', 'dark'), [0, 0, 0]);
-    assert.equal(measured('paper').toFixed(2), '1.12');
+    // And the figure that retired `paper` from this list, kept because it is the reason. Dark paper
+    // used to be pure black; it is a soft near-black now, and the step over it is smaller still.
+    assert.ok(Math.max(...triplet('paper', 'dark')) < 40, 'dark paper is no longer a near-black');
+    assert.equal(measured('paper').toFixed(2), '1.21');
     assert.ok(!edgeGrounds().includes('paper'));
   });
 
@@ -157,11 +159,13 @@ describe('elevation edge', () => {
     // composite is the surface, to the channel.
     assert.deepEqual(triplet('card', 'light'), WHITE);
     assert.equal(measured('card').toFixed(2), '1.00');
-    assert.equal(measured('card-alt').toFixed(2), '1.02');
+    assert.equal(measured('card-alt').toFixed(2), '1.01');
     // `bg-ink shadow-e1` is InkButton, and `ink` is pure black on light. Nothing else on the light
     // theme moved by even 1.02:1.
-    assert.deepEqual(triplet('ink', 'light'), [0, 0, 0]);
-    assert.equal(measured('ink').toFixed(2), '3.01');
+    // `ink` is no longer pure black: Jade & Ink sets it to a cool near-black so the page is not
+    // maximum contrast on every glyph. What the assertion is for survives: nothing on light moves.
+    assert.ok(Math.max(...triplet('ink', 'light')) < 40, 'ink is no longer a near-black');
+    assert.equal(measured('ink').toFixed(2), '3.22');
   });
 
   test('the light shadow is a soft cue and not the boundary, at the value index.css states', () => {
@@ -176,21 +180,24 @@ describe('elevation edge', () => {
     const paper = triplet('paper', 'light');
     const densest = composite(colour, Number(parts[4]), paper);
 
-    assert.deepEqual(densest.map(Math.round), [242, 242, 241]);
+    assert.deepEqual(densest.map(Math.round), [235, 237, 236]);
     assert.equal(contrast(densest, paper).toFixed(2), '1.12');
     assert.ok(contrast(densest, paper) < 1.15, 'the light shadow now clears the step floor');
-    assert.match(CSS, /composites over white\n\s+paper to rgb\(242 242 241\), 1\.12:1/);
+    assert.match(CSS, /composites over the\n\s+page to rgb\(235 237 236\), 1\.12:1/);
 
-    // And on dark the drop shadow falls onto `paper`, which is pure black, in a colour that is
-    // also pure black. There is no cue there at all, which is what the lit edge above is for.
+    // And on dark the drop shadow falls onto `paper` in pure black. That used to be black on black
+    // and measure 1.00:1 exactly, i.e. nothing at all. Jade & Ink softens dark paper off pure
+    // black, so the shadow now puts 1.08:1 on the page: still under the 1.15 step floor, so the lit
+    // edge above is still what carries the separation, but it is a weak cue rather than no cue.
     const all = [...CSS.matchAll(/--mz-e1:\s*([^;]+);/g)];
     const dark = all[all.length - 1][1].match(/rgb\((\d+)\s+(\d+)\s+(\d+)\s*\/\s*([\d.]+)\)/);
     assert.ok(dark, `no rgb(r g b / a) in the dark --mz-e1: ${all[all.length - 1][1]}`);
     const darkPaper = triplet('paper', 'dark');
     const onPaper = composite([Number(dark[1]), Number(dark[2]), Number(dark[3])], Number(dark[4]), darkPaper);
-    assert.deepEqual(onPaper, darkPaper);
-    assert.equal(contrast(onPaper, darkPaper).toFixed(2), '1.00');
-    assert.match(CSS, /composites to the page exactly, 1\.00:1/);
+    assert.notDeepEqual(onPaper, darkPaper, 'the dark shadow is invisible again');
+    assert.equal(contrast(onPaper, darkPaper).toFixed(2), '1.08');
+    assert.ok(contrast(onPaper, darkPaper) < 1.15, 'the dark shadow now clears the step floor');
+    assert.match(CSS, /composites to 1\.08:1 against the page/);
 
     // Card.tsx repeats these figures to say why its ladder is a border ladder, and it states one
     // row per rung. It used to state 1.12:1 for all three, which is e1's figure alone: e2 and e3

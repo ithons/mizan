@@ -81,7 +81,7 @@ export function Modal({ open, onClose, title, children, maxWidth = '480px' }: Mo
         /* e3, matching `Card`. A dialog is the surface that carries money, so what actually
            separates it from the page is worth stating rather than assuming.
 
-           Not the surface step. `card-alt` on `paper` is 1.04:1 light and 1.18:1 dark, and on
+           Not the surface step. `card-alt` on `paper` is 1.03:1 light and 1.20:1 dark, and on
            light that is under the 1.15:1 floor `tests/edgeToken.test.ts` holds a value edge to.
            The note here used to name the surface as half the mechanism, alongside a dark ground
            of L* 13.0; dark `paper` is L* 0.0 now and light `paper` is pure white, so neither half
@@ -93,7 +93,7 @@ export function Modal({ open, onClose, title, children, maxWidth = '480px' }: Mo
            and not an edge.
 
            What is left is the border and the scrim, and between them they are enough. `line-3`
-           on `card-alt` is 4.74:1 light and 4.88:1 dark, the same edge `Card` names for its own
+           on `card-alt` is 4.71:1 light and 4.25:1 dark, the same edge `Card` names for its own
            e3 rung. The scrim is this component's alone, which no elevation rung has: `bg-ink/25`
            composites to rgb(191 191 191) on light and rgb(64 64 64) on dark, and the dialog
            surface stands off it at 1.76:1 and 1.71:1 respectively. Every figure here was

@@ -23,7 +23,7 @@ import { TextButton } from './balance';
  * somewhere else.
  */
 
-/** The transcript's ground is `card`; `ink` measures 21.00:1 light and 19.03:1 dark on it. */
+/** The transcript's ground is `card`; `ink` measures 17.74:1 light and 15.08:1 dark on it. */
 const PROSE =
   'text-body-lg leading-[1.65] text-ink [&_a]:text-sage-deep [&_a]:underline [&_code]:rounded [&_code]:bg-rail [&_code]:px-1 [&_code]:py-0.5 [&_code]:font-mono [&_code]:text-body [&_h1]:mt-4 [&_h1]:text-sub [&_h1]:font-semibold [&_h2]:mt-4 [&_h2]:text-body-lg [&_h2]:font-semibold [&_h3]:mt-3 [&_h3]:font-semibold [&_hr]:my-3 [&_hr]:border-line [&_li]:mb-1 [&_ol]:my-2 [&_ol]:list-decimal [&_ol]:pl-5 [&_p]:mb-3 [&_p:last-child]:mb-0 [&_strong]:font-semibold [&_table]:my-2 [&_table]:w-full [&_td]:border-b [&_td]:border-line-2 [&_td]:py-1 [&_th]:border-b [&_th]:border-line [&_th]:py-1 [&_th]:text-left [&_ul]:my-2 [&_ul]:list-disc [&_ul]:pl-5';
 

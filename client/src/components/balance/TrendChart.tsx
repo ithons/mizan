@@ -532,11 +532,11 @@ const NO_MARKS: TrendMark[] = [];
  * this app and a coverage break is not a judgement about the money. All three strokes are
  * graphics, which WCAG 1.4.11 puts at 3:1. Re-derived from the palette triplets on 2026-08-01,
  * on paper / on card:
- *   sage      light 4.20 / 4.20   dark 4.85 / 4.39
- *   gold      light 4.64 / 4.64   dark 6.22 / 5.64
- *   estimate  light 5.16 / 5.16   dark 6.23 / 5.65
+ *   sage      light 3.93 / 4.13   dark 5.29 / 4.82
+ *   gold      light 4.57 / 4.80   dark 8.25 / 7.50
+ *   estimate  light 4.76 / 4.99   dark 5.60 / 5.10
  * The two light columns are equal on every row, and that is not a transcription slip: light
- * `card` and light `paper` are the same pure white triplet, so `card` on `paper` measures 1.00:1
+ * `card` and light `paper` are the same pure white triplet, so `card` on `paper` measures 1.05:1
  * and splitting the light figures by ground says nothing at all on that theme. The split still
  * says something on dark, where each stroke gives up roughly half a point moving off the page
  * onto a raised surface. `sage` is the one closest to the floor and clears it in both themes on
@@ -716,8 +716,8 @@ export function TrendChart({ history, marks = NO_MARKS, height = 120, className 
             <div
               key={tick.value}
               // Money numerals, so `muted` rather than `muted-2`: `muted` on `paper` measures
-              // 7.57:1 light and 9.57:1 dark, against `muted-2` on `paper` at 6.01:1 light and
-              // 7.74:1 dark. Both clear AA comfortably on this palette, so what the stronger tone
+              // 7.01:1 light and 7.76:1 dark, against `muted-2` on `paper` at 5.91:1 light and
+              // 7.04:1 dark. Both clear AA comfortably on this palette, so what the stronger tone
               // buys here is hierarchy and not compliance. The zero datum wears full ink because
               // every other reading is a distance from it.
               className={`absolute right-2 -translate-y-1/2 whitespace-nowrap text-rule tabular-nums ${
@@ -796,13 +796,13 @@ export function TrendChart({ history, marks = NO_MARKS, height = 120, className 
               // it has to clear 3:1 as a meaningful graphic under WCAG 1.4.11, and it must not
               // out-weigh the series it is a datum for. The reason recorded here before the
               // 2026-08-01 palette was that `line-3` was too pale to see; re-derived, it argues
-              // the opposite. `line-3` on `paper` is 4.95:1 light and 5.77:1 dark, the strongest
+              // the opposite. `line-3` on `paper` is 4.59:1 light and 5.08:1 dark, the strongest
               // of the three candidates, stronger than the trace itself, and already the tone the
               // other value ticks are drawn in, so the datum would read as one more tick.
-              // `dot` on `paper` is 2.96:1 light and 4.12:1 dark and misses the floor on light.
-              // `faint` on `paper` is 3.84:1 light and 5.17:1 dark: it clears the floor in both
+              // `dot` on `paper` is 2.82:1 light and 3.55:1 dark and misses the floor on light.
+              // `faint` on `paper` is 3.58:1 light and 4.27:1 dark: it clears the floor in both
               // themes, it is nobody else's tone in this chart, and on light it sits under the
-              // measured trace, which is `sage` on `paper` at 4.20:1 light and 4.85:1 dark. On
+              // measured trace, which is `sage` on `paper` at 3.93:1 light and 5.29:1 dark. On
               // dark it does not sit under it, so what keeps the rule subordinate there is hue
               // and weight rather than value: the trace is green at 2.6 units, the rule neutral
               // at 2.2.

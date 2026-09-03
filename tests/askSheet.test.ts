@@ -131,9 +131,9 @@ describe('the grounds a money numeral lands on in the sheet', () => {
 
   test('the transcript ground measures what AskPanel says it measures', () => {
     // AskPanel's PROSE comment states these two figures; they are re-derived rather than trusted.
-    assert.equal(contrast(triplet('ink', 'light'), triplet('card', 'light')).toFixed(2), '21.00');
-    assert.equal(contrast(triplet('ink', 'dark'), triplet('card', 'dark')).toFixed(2), '19.03');
-    assert.match(SOURCES[1].text, /21\.00:1 light and 19\.03:1 dark/);
+    assert.equal(contrast(triplet('ink', 'light'), triplet('card', 'light')).toFixed(2), '17.74');
+    assert.equal(contrast(triplet('ink', 'dark'), triplet('card', 'dark')).toFixed(2), '15.08');
+    assert.match(SOURCES[1].text, /17\.74:1 light and 15\.08:1 dark/);
   });
 
   test('the one text colour that is under AA on the lightest ground stays out of the sheet', () => {

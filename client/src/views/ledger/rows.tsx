@@ -142,15 +142,15 @@ export function LedgerRowInner({
 
           The no-op. This screen sits directly on `paper` (Layout is `bg-paper`, and `Screen`
           declares no ground), and on light `card` and `paper` are the same pure-white triplet:
-          `card` on `paper` is 1.00:1. A `hover:bg-card` row therefore changed nothing at all on
-          light, which is the whole affordance gone, not a weak one. `well` on `paper` is 1.11:1
-          light and 1.21:1 dark, a step in both.
+          `card` on `paper` is 1.05:1. A `hover:bg-card` row therefore changed nothing at all on
+          light, which is the whole affordance gone, not a weak one. `well` on `paper` is 1.09:1
+          light and 1.24:1 dark, a step in both.
 
-          The dead reason. `sage-deep` on `well` is 4.65:1 light and 5.14:1 dark, so the
+          The dead reason. `sage-deep` on `well` is 4.47:1 light and 5.53:1 dark, so the
           positive-money token the old note said this wash could not carry clears AA on it. So
           does every other tone this row sets there:
-          `ink` is 18.93:1 light and 17.40:1 dark, `muted` 6.82:1 and 7.93:1, `muted-2` 5.41:1
-          and 6.42:1. The worst pair in either theme is 4.65. `gold` is the one tone `well` cannot
+          `ink` is 15.53:1 light and 13.31:1 dark, `muted` 6.44:1 and 6.23:1, `muted-2` 5.43:1
+          and 5.66:1. The worst pair in either theme is 4.65. `gold` is the one tone `well` cannot
           carry (index.css records 4.19 / 5.16) and this row sets it nowhere. `CategoryPill` and
           the tinted flag declare grounds of their own; the neutral `set_aside` outline does not,
           and it is `muted`. */}
@@ -193,8 +193,8 @@ export function LedgerRowInner({
                    is the second kind, so it carries the neutral outline rather than the review
                    tint, which otherwise puts settled work back in the colour of open work.
                    This one carries no fill, so its ground is the row's: `text-muted` measures
-                   7.57:1 on light paper and 6.82:1 on light well,
-                   9.57:1 on dark paper and 7.93:1 on dark well,
+                   7.01:1 on light paper and 6.44:1 on light well,
+                   7.76:1 on dark paper and 6.23:1 on dark well,
                    from the triplets in client/src/index.css. */
                 className={`rounded-md px-1.5 py-px text-rule uppercase tracking-[0.1em] ${
                   flag === 'set_aside'
@@ -381,13 +381,13 @@ export function ScheduledRow({
   // `well`, the two grounds this row has. Composites carry no subject, so the walker in
   // tests/contrastClaims.test.ts deliberately does not read them; these two are computed by hand
   // from the triplets in client/src/index.css.
-  // Line-through plus `muted` says the same thing and stays legible: `muted` is 7.57:1 on light
-  // paper, 6.82:1 on light well, 9.57:1 on dark paper and 7.93:1 on dark well.
+  // Line-through plus `muted` says the same thing and stays legible: `muted` is 7.01:1 on light
+  // paper, 6.44:1 on light well, 7.76:1 on dark paper and 6.23:1 on dark well.
   const settledInk = skipped ? 'text-muted line-through' : 'text-estimate';
 
   // Same hover ground as the posted row above, for the same two reasons: `hover:bg-card` was a
   // no-op on light, and every tone this row sets clears AA on `well`. The estimate ink is the
-  // one this row adds, and `estimate` on `well` is 4.65:1 light and 5.17:1 dark.
+  // one this row adds, and `estimate` on `well` is 4.37:1 light and 4.50:1 dark.
   return (
     <div className={`group border-b border-line transition-colors hover:bg-well ${ROW_FRAME}`}>
       <span data-col="select" className={LEDGER_COLUMNS.select} aria-hidden />

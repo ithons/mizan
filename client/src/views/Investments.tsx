@@ -296,9 +296,9 @@ export function Investments() {
           )}
           {delta != null && (
             // `sage-deep`, not `sage`: this is a money numeral and the ground is `paper`, where
-            // `sage` measures 4.20:1 light and 4.85:1 dark. That is under AA on light and over it
+            // `sage` measures 3.93:1 light and 5.29:1 dark. That is under AA on light and over it
             // on dark, so `sage` is a tone this numeral would carry in one theme and lose in the
-            // other. `sage-deep` is 5.16:1 light and 6.20:1 dark, which is what every other
+            // other. `sage-deep` is 4.87:1 light and 6.89:1 dark, which is what every other
             // positive numeral in this view already uses.
             //
             // [historical] The 2026-08-01 palette moved both figures and left the argument where

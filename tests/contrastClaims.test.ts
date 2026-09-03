@@ -267,7 +267,7 @@ const pairThemes = (a: string | undefined, b: string | undefined): [Theme, Theme
  */
 const PATTERNS: Pattern[] = [
   {
-    // "`muted` on `rail`, 7.01:1 light / 9.03:1 dark"   "clay on rail measures 12.05:1 light / 14.18:1 dark"
+    // "`muted` on `rail`, 6.67:1 light / 7.38:1 dark"   "clay on rail measures 5.85:1 light / 7.85:1 dark"
     name: 'fg-on-bg, both themes',
     re: rx(`${TOK}\\s+(?:on|against)\\s+${TOK}${gap(45)}${R}(?::1)?\\s*(?:in\\s+|on\\s+)?${TH}\\s*(?:/|and|,)\\s*${R}(?::1)?\\s*(?:in\\s+|on\\s+)?${TH}`),
     build: (m) => {
@@ -651,48 +651,50 @@ test('HEALTHY: a class string that mentions tokens is not a comment', () => {
 });
 
 test('a stated pair is parsed with both themes and checked against the palette', () => {
-  const src = '/* `muted` on `rail`, 7.01:1 light / 9.03:1 dark. */';
+  const src = '/* `muted` on `rail`, 6.67:1 light / 7.38:1 dark. */';
   const found = claimsIn(src).map((c) => [c.fg, c.bg, c.theme, c.claimed]);
   assert.deepEqual(found, [
-    ['muted', 'rail', 'light', 7.01],
-    ['muted', 'rail', 'dark', 9.03],
+    ['muted', 'rail', 'light', 6.67],
+    ['muted', 'rail', 'dark', 7.38],
   ]);
   assert.ok(found.every((_, i) => check(claimsIn(src)[i]).ok), 'the shipped figures for muted on rail no longer hold');
 });
 
 test('a stale figure fails, and the failure names the real value', () => {
+  // Deliberately wrong figures. A previous mechanical re-derivation "fixed" this fixture and
+  // quietly turned the test that proves staleness is caught into a test that proves nothing.
   const src = '/* `muted` on `rail` is 3.67:1 light and 3.99:1 dark. */';
   const checked = claimsIn(src).map(check);
   assert.equal(checked.length, 2);
   assert.ok(checked.every((c) => !c.ok));
-  assert.equal(Number(checked[0].real.toFixed(2)), 7.01);
+  assert.equal(Number(checked[0].real.toFixed(2)), 6.67);
 });
 
 test('the light / dark convention is applied to a bare pair, not guessed per figure', () => {
-  const src = '/*   clay on pill-bg           11.43 / 12.21   the "Reconnect" pill */';
+  const src = '/*   clay on pill-bg            5.70 /  6.99   the "Reconnect" pill */';
   const checked = claimsIn(src).map(check);
   assert.deepEqual(checked.map((c) => c.theme), ['light', 'dark']);
   assert.ok(checked.every((c) => c.ok), 'clay on pill-bg moved');
 });
 
 test('an unthemed figure is held to matching at least one theme, which is all the prose says', () => {
-  // `card` on `paper` is 1.00 light and 1.10 dark, and the sentence names neither.
-  assert.ok(claimsIn('/* `card` on `paper` measures 1.00:1. */').map(check)[0].ok);
+  // `card` on `paper` is 1.05 light and 1.10 dark, and the sentence names neither.
+  assert.ok(claimsIn('/* `card` on `paper` measures 1.05:1. */').map(check)[0].ok);
   assert.ok(claimsIn('/* `card` on `paper` measures 1.10:1. */').map(check)[0].ok);
-  assert.ok(!claimsIn('/* `card` on `paper` measures 1.07:1. */').map(check)[0].ok);
+  assert.ok(!claimsIn('/* `card` on `paper` measures 1.20:1. */').map(check)[0].ok);
 });
 
 test('a ground is carried within a paragraph and dropped at the paragraph break', () => {
   const carried = claimsIn(`
-    /* Both columns need 3:1 against the paper they sit on: \`muted\` reads 7.57:1 light and 9.57:1
-       dark, \`sage-deep\` 5.16:1 and 6.20:1. */`);
+    /* Both columns need 3:1 against the paper they sit on: \`muted\` reads 7.01:1 light and 7.76:1
+       dark, \`sage-deep\` 4.87:1 and 6.89:1. */`);
   assert.deepEqual(
     carried.map((c) => [c.fg, c.bg, c.theme, c.claimed]),
     [
-      ['muted', 'paper', 'light', 7.57],
-      ['muted', 'paper', 'dark', 9.57],
-      ['sage-deep', 'paper', 'light', 5.16],
-      ['sage-deep', 'paper', 'dark', 6.2],
+      ['muted', 'paper', 'light', 7.01],
+      ['muted', 'paper', 'dark', 7.76],
+      ['sage-deep', 'paper', 'light', 4.87],
+      ['sage-deep', 'paper', 'dark', 6.89],
     ]
   );
   assert.ok(carried.map(check).every((c) => c.ok));
@@ -719,7 +721,11 @@ test('HEALTHY: a composite through a veil has no subject, so it is not read as a
 });
 
 test('a figure the source marks [historical] is not held to the current palette', () => {
-  const marked = '/* `muted-2` on `rail` read 3.67:1 light and 3.99:1 dark before 2026-08-01 [historical] */';
+  // Figures that are NOT the current ones, which is the whole premise: the marker has to be what
+  // exempts the sentence, not the sentence happening to be true. The Jade & Ink palette landed on
+  // 5.63 / 6.71 for this exact pair, which is what the fixture used to say, so it was silently
+  // testing nothing until this was changed.
+  const marked = '/* `muted-2` on `rail` read 4.21:1 light and 5.02:1 dark before 2026-08-01 [historical] */';
   assert.deepEqual(claimsIn(marked), []);
   // Without the marker the same sentence is a live claim and fails, so the marker is doing the work
   // rather than the shape of the sentence.
@@ -748,22 +754,22 @@ test('an aligned table is read by column, and a dash is not a figure', () => {
      *
      *                        LIGHT              DARK
      *                     paper   card       paper   card
-     *   ink              21.00   21.00      21.00   19.03
-     *   sage                -     4.20         -     4.39
-     *   pill-text on sage-tint  4.52                 4.53
+     *   ink              16.91   17.74      16.57   15.08
+     *   sage                -     4.13         -     4.82
+     *   pill-text on sage-tint  4.91                 6.45
      */`;
   const checked = claimsIn(src).map(check);
   assert.deepEqual(
     checked.map((c) => [c.fgName, c.bgName, c.theme, c.claimed]),
     [
-      ['ink', 'paper', 'light', 21],
-      ['ink', 'card', 'light', 21],
-      ['ink', 'paper', 'dark', 21],
-      ['ink', 'card', 'dark', 19.03],
-      ['sage', 'card', 'light', 4.2],
-      ['sage', 'card', 'dark', 4.39],
-      ['pill-text', 'sage-tint', 'light', 4.52],
-      ['pill-text', 'sage-tint', 'dark', 4.53],
+      ['ink', 'paper', 'light', 16.91],
+      ['ink', 'card', 'light', 17.74],
+      ['ink', 'paper', 'dark', 16.57],
+      ['ink', 'card', 'dark', 15.08],
+      ['sage', 'card', 'light', 4.13],
+      ['sage', 'card', 'dark', 4.82],
+      ['pill-text', 'sage-tint', 'light', 4.91],
+      ['pill-text', 'sage-tint', 'dark', 6.45],
     ]
   );
   assert.ok(checked.every((c) => c.ok), 'a hand-computed table row disagrees with the palette');

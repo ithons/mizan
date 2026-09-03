@@ -309,19 +309,23 @@ test('the allowance is what the palette says it is, in both themes', () => {
   // Twelve names, not four. Nine distinct tokens: three of the names are the legacy `--color-*`
   // aliases (`negative` -> clay, `positive` -> sage-deep, `sage-text` -> pill-text) and resolve
   // onto a token already in the list.
+  //
+  // The membership moved with the Jade & Ink repalette and the count did not: `clay-scale` left
+  // (it is a bar fill, lifted for chroma, and it now misses AA as an ink on rail) and `info`
+  // joined (it darkened). Both are derived here rather than listed, so the swap is visible.
   assert.deepEqual(allowedOnRail(), [
-    'clay', 'clay-scale', 'estimate', 'ink', 'ink-soft', 'muted',
+    'clay', 'estimate', 'info', 'ink', 'ink-soft', 'muted',
     'muted-2', 'negative', 'positive', 'review-text', 'sage-deep', 'sage-text',
   ]);
   const printed: Array<[string, number, number]> = [
-    ['ink', 19.43, 19.8],
-    ['ink-soft', 14.0, 14.3],
-    ['muted', 7.01, 9.03],
-    ['estimate', 4.78, 5.88],
-    ['muted-2', 5.56, 7.3],
-    ['sage-deep', 4.77, 5.85],
-    ['clay', 12.05, 14.18],
-    ['gold', 4.3, 5.87],
+    ['ink', 16.1, 15.77],
+    ['ink-soft', 12.71, 12.96],
+    ['muted', 6.67, 7.38],
+    ['estimate', 4.53, 5.33],
+    ['muted-2', 5.63, 6.71],
+    ['sage-deep', 4.64, 6.56],
+    ['clay', 5.85, 7.85],
+    ['gold', 4.35, 7.85],
   ];
   for (const [tone, light, dark] of printed) {
     assert.equal(ratio(TEXT_TOKEN[tone], 'rail', 'light'), light, `${tone} on rail, light`);
@@ -416,19 +420,19 @@ test('index.css states the inventory it now claims, and no longer states the uni
 });
 
 test('pill-bg is stated as what it measures, and what it measures is no longer a failure', () => {
-  assert.equal(ratio('muted-2', 'pill-muted-bg', 'light'), 5.27);
-  assert.equal(ratio('muted-2', 'pill-muted-bg', 'dark'), 6.28);
-  assert.equal(ratio('sage-deep', 'pill-muted-bg', 'light'), 4.53);
-  assert.equal(ratio('sage-deep', 'pill-muted-bg', 'dark'), 5.03);
-  assert.equal(ratio('clay', 'pill-muted-bg', 'light'), 11.43);
-  assert.equal(ratio('muted', 'pill-muted-bg', 'light'), 6.65);
+  assert.equal(ratio('muted-2', 'pill-muted-bg', 'light'), 5.48);
+  assert.equal(ratio('muted-2', 'pill-muted-bg', 'dark'), 5.97);
+  assert.equal(ratio('sage-deep', 'pill-muted-bg', 'light'), 4.51);
+  assert.equal(ratio('sage-deep', 'pill-muted-bg', 'dark'), 5.83);
+  assert.equal(ratio('clay', 'pill-muted-bg', 'light'), 5.7);
+  assert.equal(ratio('muted', 'pill-muted-bg', 'light'), 6.5);
   // The two that used to fail here now clear in both themes, which is the claim index.css makes.
   for (const tone of ['muted-2', 'sage-deep', 'clay', 'muted']) {
     assert.ok(ratio(tone, 'pill-muted-bg', 'light') >= 4.5, `${tone} on pill-bg fell under AA on light`);
     assert.ok(ratio(tone, 'pill-muted-bg', 'dark') >= 4.5, `${tone} on pill-bg fell under AA on dark`);
   }
   // And `gold` is the one that still does not, so the ground is not written up as clean.
-  assert.equal(ratio('gold', 'pill-muted-bg', 'light'), 4.08);
+  assert.equal(ratio('gold', 'pill-muted-bg', 'light'), 4.24);
   assert.ok(ratio('gold', 'pill-muted-bg', 'light') < 4.5);
   assert.match(CSS, /`muted-2` is 5\.27 \/ 6\.28/);
   assert.match(CSS, /`sage-deep` 4\.53 \/ 5\.03/);

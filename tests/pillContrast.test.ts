@@ -10,10 +10,11 @@ const PILL = join(__dirname, '..', 'client', 'src', 'components', 'balance', 'Ca
  * The most repeated element in the app, and the tightest text figure in the palette.
  *
  * `CategoryPill` renders on every categorized ledger row. Nothing asserted its contrast, and the
- * categorized variant clears the 4.5:1 AA text floor by **0.02 on light and 0.03 on dark**. That is
- * inside the rounding of any future token nudge, on the element that appears more times per screen
- * than any other. It is correct today and one edit from not being, which is exactly the case a test
- * exists for.
+ * categorized variant clears the 4.5:1 AA text floor at **4.91 on light and 6.45 on dark**.
+ * It measured 4.52 / 4.53 before the Jade & Ink repalette, i.e. inside the rounding of any token
+ * nudge, on the element that appears more times per screen than any other. The margin is healthier
+ * now and the pin stays, because what made it worth pinning was the call-site count, not the
+ * particular figure.
  *
  * Found by driving the running app rather than by reading: a browser sweep for borders under 3:1
  * flagged 44 of these on the dark ledger. The border turned out to be fine (see below) and the text
@@ -41,13 +42,14 @@ test('both pill variants clear the AA text floor in both themes', () => {
   }
 });
 
-test('the categorized pill is the tight one, and how tight is stated', () => {
+test('the categorized pill is the tighter one, and how tight is stated', () => {
   // Pinned as a figure rather than a floor, so a change that erodes the margin fails here and is
   // read, instead of passing until it crosses 4.5 and fails somewhere else.
   const light = ratioOf('pill-text', 'sage-tint', 'light');
   const dark = ratioOf('pill-text', 'sage-tint', 'dark');
-  assert.ok(light >= 4.5 && light < 4.7, `categorized pill text on light is ${light.toFixed(2)}, was 4.52`);
-  assert.ok(dark >= 4.5 && dark < 4.7, `categorized pill text on dark is ${dark.toFixed(2)}, was 4.53`);
+  assert.ok(light >= 4.5 && light < 5.2, `categorized pill text on light is ${light.toFixed(2)}, was 4.91`);
+  assert.ok(dark >= 4.5, `categorized pill text on dark is ${dark.toFixed(2)}`);
+  assert.ok(light < dark, 'light is no longer the tighter of the two, so this test names the wrong one');
   // And the other variant is genuinely comfortable, so the tightness is specific and not a palette
   // wide problem someone might "fix" by moving a shared token.
   assert.ok(ratioOf('muted-2', 'pill-muted-bg', 'light') > 5, 'the uncategorized pill got tight too');

@@ -78,12 +78,12 @@ test('the ladder that ships is surface then border, not both at once', () => {
 test('every L* and ratio in the docstring reproduces from the palette, for the token the step really uses', () => {
   const rows: Array<[Elevation, Theme, number, number, number]> = [
     // step  theme     surface L*  border L*  border on that surface
-    [1, 'light', 100.0, 60.2, 3.15],
-    [2, 'light', 98.3, 60.2, 3.02],
-    [3, 'light', 98.3, 47.2, 4.74],
-    [1, 'dark', 4.7, 44.0, 3.41],
-    [2, 'dark', 8.2, 44.0, 3.19],
-    [3, 'dark', 8.2, 55.9, 4.88],
+    [1, 'light', 100.0, 59.4, 3.23],
+    [2, 'light', 99.1, 59.4, 3.16],
+    [3, 'light', 99.1, 48.0, 4.71],
+    [1, 'dark', 12.4, 47.6, 3.32],
+    [2, 'dark', 15.7, 47.6, 3.05],
+    [3, 'dark', 15.7, 56.9, 4.25],
   ];
   for (const [elevation, theme, surface, border, edge] of rows) {
     const { surface: s, border: b } = step(elevation);
@@ -98,10 +98,10 @@ test('every L* and ratio in the docstring reproduces from the palette, for the t
       `e${elevation} ${theme} row is not stated as measured`
     );
   }
-  assert.equal(lstar('paper', 'light'), 100.0);
-  assert.equal(lstar('paper', 'dark'), 0.0);
-  assert.match(SOURCE, /light \(paper L\* 100\.0\)/);
-  assert.match(SOURCE, /dark \(paper L\* 0\.0\)/);
+  assert.equal(lstar('paper', 'light'), 98.1);
+  assert.equal(lstar('paper', 'dark'), 8.0);
+  assert.match(SOURCE, /light \(paper L\* 98\.1\)/);
+  assert.match(SOURCE, /dark \(paper L\* 8\.0\)/);
 });
 
 test('the two step sizes the docstring names are the two the tokens produce', () => {
@@ -110,12 +110,12 @@ test('the two step sizes the docstring names are the two the tokens produce', ()
   const borderStep = (theme: Theme) =>
     Number((lstar(step(3).border, theme) - lstar(step(2).border, theme)).toFixed(1));
 
-  assert.equal(surfaceStep('light'), -1.7);
-  assert.equal(surfaceStep('dark'), 3.5);
-  assert.equal(borderStep('light'), -13.0);
-  assert.equal(borderStep('dark'), 11.9);
-  assert.match(SOURCE, /-1\.7 L\*\n \* light, \+3\.5 L\* dark/);
-  assert.match(SOURCE, /-13\.0 L\* light, \+11\.9 L\* dark/);
+  assert.equal(surfaceStep('light'), -0.9);
+  assert.equal(surfaceStep('dark'), 3.3);
+  assert.equal(borderStep('light'), -11.4);
+  assert.equal(borderStep('dark'), 9.3);
+  assert.match(SOURCE, /-0\.9 L\*\n \* light, \+3\.3 L\* dark/);
+  assert.match(SOURCE, /-11\.4 L\* light, \+9\.3 L\* dark/);
 });
 
 test('the border carries every rung and the surface step does not, in both themes', () => {
@@ -134,31 +134,33 @@ test('the border carries every rung and the surface step does not, in both theme
   // The surface half is nominal, and the docstring says so rather than claiming a rung it does not
   // deliver. On light it is backwards as well as small: card-alt sits below card, and card itself
   // is the page's own triplet.
-  assert.equal(ratio(step(2).surface, step(1).surface, 'light'), 1.04);
-  assert.equal(ratio(step(2).surface, step(1).surface, 'dark'), 1.07);
-  assert.equal(ratio(step(1).surface, 'paper', 'light'), 1);
+  assert.equal(ratio(step(2).surface, step(1).surface, 'light'), 1.02);
+  assert.equal(ratio(step(2).surface, step(1).surface, 'dark'), 1.09);
+  assert.equal(ratio(step(1).surface, 'paper', 'light'), 1.05);
   assert.ok(lstar(step(2).surface, 'light') < lstar(step(1).surface, 'light'));
-  assert.match(SOURCE, /1\.04:1 light and 1\.07:1 dark/);
-  assert.match(SOURCE, /`card` on `paper` measures 1\.00:1/);
+  assert.match(SOURCE, /1\.02:1 light and 1\.09:1 dark/);
+  assert.match(SOURCE, /`card` on `paper` measures 1\.05:1/);
 });
 
 test('e3 stops raising the surface, and the AA reason it used to give is gone', () => {
   // The recorded reason was that card-white on dark broke AA for a dialog's own text. It does not
   // any more, so the docstring may not keep saying it does.
-  assert.equal(lstar('card-white', 'dark'), 15.2);
-  assert.equal(ratio('clay', 'card-white', 'dark'), 10.84);
-  assert.equal(ratio('muted-2', 'card-white', 'dark'), 5.58);
+  assert.equal(lstar('card-white', 'dark'), 19.5);
+  assert.equal(ratio('clay', 'card-white', 'dark'), 6.17);
+  assert.equal(ratio('muted-2', 'card-white', 'dark'), 5.27);
   assert.ok(ratio('clay', 'card-white', 'dark') >= 4.5 && ratio('muted-2', 'card-white', 'dark') >= 4.5);
-  assert.match(SOURCE, /`card-white` is L\* 15\.2 on dark now\n \* and those two measure 10\.84:1 and 5\.58:1/);
+  assert.match(SOURCE, /`card-white` is L\* 19\.5 on dark now\n \* and those two measure 6\.17:1 and 5\.27:1/);
 
   // The reason that replaces it: card-white is not a rung. On light it is the page's own triplet.
-  assert.equal(lstar('card-white', 'light'), lstar('paper', 'light'));
-  assert.equal(ratio('card-white', 'paper', 'light'), 1);
-  assert.equal(ratio('card-white', step(3).surface, 'light'), 1.04);
-  assert.equal(ratio('card-white', step(3).surface, 'dark'), 1.17);
+  // card-white matches `card`, not `paper`: the Jade & Ink page is L* 98.1 and cards are pure
+  // white, so the two are no longer one triplet and the old identity would assert a lie.
+  assert.equal(lstar('card-white', 'light'), lstar('card', 'light'));
+  assert.equal(ratio('card-white', 'paper', 'light'), 1.05);
+  assert.equal(ratio('card-white', step(3).surface, 'light'), 1.02);
+  assert.equal(ratio('card-white', step(3).surface, 'dark'), 1.12);
   assert.ok(!step(3).surface.includes('white'), 'e3 raised onto card-white');
-  assert.match(SOURCE, /L\* 100\.0, 1\.00:1 against both/);
-  assert.match(SOURCE, /on dark it would buy 1\.17:1/);
+  assert.match(SOURCE, /L\* 100\.0, 1\.00:1 against it and 1\.05:1 against `paper`/);
+  assert.match(SOURCE, /on dark it would buy 1\.12:1/);
 });
 
 test('the NEUTRAL LADDER block in index.css is the ladder the triplets under it produce', () => {
@@ -192,15 +194,17 @@ test('the NEUTRAL LADDER block in index.css is the ladder the triplets under it 
 
   // The claim the block makes about those numbers: on light the four surfaces are one value, and
   // the hover wash inverts by theme.
-  assert.equal(lstar('card-white', 'light'), lstar('paper', 'light'));
-  assert.equal(Number((lstar('card-alt', 'light') - lstar('paper', 'light')).toFixed(1)), -1.7);
-  assert.equal(Number((lstar('card-white', 'dark') - lstar('paper', 'dark')).toFixed(1)), 15.2);
-  assert.equal(Number((lstar('well', 'light') - lstar('card', 'light')).toFixed(1)), -4.2);
-  assert.equal(Number((lstar('well', 'dark') - lstar('card', 'dark')).toFixed(1)), 4.6);
-  assert.match(CSS, /fit inside 1\.7 points and `card` on `paper` is 1\.00:1/);
-  assert.match(CSS, /fit inside 15\.2 points and `card` on `paper` is 1\.10:1/);
-  assert.match(CSS, /card \(-4\.2 L\*\) and rises off a dark one \(\+4\.6 L\*\)/);
-  assert.equal(ratio('card', 'paper', 'light'), 1);
+  // card-white matches `card`, not `paper`: the Jade & Ink page is L* 98.1 and cards are pure
+  // white, so the two are no longer one triplet and the old identity would assert a lie.
+  assert.equal(lstar('card-white', 'light'), lstar('card', 'light'));
+  assert.equal(Number((lstar('card-alt', 'light') - lstar('paper', 'light')).toFixed(1)), 1.0);
+  assert.equal(Number((lstar('card-white', 'dark') - lstar('paper', 'dark')).toFixed(1)), 11.5);
+  assert.equal(Number((lstar('well', 'light') - lstar('card', 'light')).toFixed(1)), -5.3);
+  assert.equal(Number((lstar('well', 'dark') - lstar('card', 'dark')).toFixed(1)), 4.7);
+  assert.match(CSS, /fit inside 1\.9 points/);
+  assert.match(CSS, /fit inside 7\.1 points and `card` on `paper` is 1\.10:1/);
+  assert.match(CSS, /card \(-5\.3 L\*\) and rises off a dark one \(\+4\.7 L\*\)/);
+  assert.equal(ratio('card', 'paper', 'light'), 1.05);
   assert.equal(ratio('card', 'paper', 'dark'), 1.1);
 });
 

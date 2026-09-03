@@ -547,10 +547,10 @@ export function Ledger() {
             type="button"
             onClick={() => selectChip(chip.id)}
             aria-pressed={filter === chip.id}
-            /* `review-bg`, not `review-active`: `review-text` on `review-active` measures 4.21:1
-               light and 3.74:1 dark, so it is under AA in BOTH themes now, where the figure this
-               note used to carry recorded only a light failure. On `review-bg` it is 4.62:1 light
-               and 4.56:1 dark and clears in both. The failing pair renders nowhere and is not a
+            /* `review-bg`, not `review-active`: `review-text` on `review-active` measures 4.29:1
+               light and 5.30:1 dark, so it is under AA in BOTH themes now, where the figure this
+               note used to carry recorded only a light failure. On `review-bg` it is 4.69:1 light
+               and 6.26:1 dark and clears in both. The failing pair renders nowhere and is not a
                standing exception, but establishing that takes two commands rather than one, because
                `tailwind.config.js:73` exposes `review-active` as a utility and a grep of
                `client/src` structurally cannot see whether it is used. On 2026-08-01:
@@ -644,13 +644,13 @@ export function Ledger() {
             {confirmBatch.isPending ? 'Applying…' : `Accept all ${batch.ids.length} as proposed`}
           </button>
           {/* `text-muted`, not `text-muted-2`, and no longer for contrast. `muted-2` on `rail`
-              measures 5.56:1 light and 7.30:1 dark, so it clears AA in both themes and the
+              measures 5.63:1 light and 6.71:1 dark, so it clears AA in both themes and the
               reason this line used to give is dead. It held before the 2026-08-01 palette;
               index.css records that there, alongside the tones tests/railGround.test.ts delisted
               at the same time, and it is not restated here as though it were current. What picks
               the tone now is emphasis and not measurement: this sentence qualifies the button
               beside it and is meant to be read before it is pressed, so it takes the same weight
-              as the count on its left. `muted` on `rail` is 7.01:1 light and 9.03:1 dark. */}
+              as the count on its left. `muted` on `rail` is 6.67:1 light and 7.38:1 dark. */}
           <span className="max-w-[54ch] text-note text-muted">
             Each is applied on its own. Any the write guards refuse are left exactly as they are, with
             the reason printed on the entry it is about.

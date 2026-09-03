@@ -266,7 +266,7 @@ export function RulesSection() {
                   suggestion the owner declines is regenerated on every visit until they give in. */}
               {/* No `hover:!text-clay` here, unlike the Delete button on the rules below. The
                   reason this line used to give was contrast, and that reason is dead: `clay` on
-                  `sage-tint` measures 11.42:1 light and 10.99:1 dark, so it clears AA in both
+                  `sage-tint` measures  5.73:1 light and  6.42:1 dark, so it clears AA in both
                   themes and would separate these two buttons by nothing at all.
                   What separates them is what they do. `clay` is this app's destructive tone, and
                   `deleteMutation` below removes a rule the owner wrote, while this button runs
@@ -284,10 +284,10 @@ export function RulesSection() {
           {skipped.length > 0 && (
             <div className="border-t border-sage-tint-border px-4 py-3">
               {/* Not `text-clay`, and again not for contrast: `clay` on `sage-tint` measures
-                  11.42:1 light and 10.99:1 dark and clears AA in both themes, so the figure this
+                   5.73:1 light and  6.42:1 dark and clears AA in both themes, so the figure this
                   line used to carry is dead. The reason that holds is what the sentence says.
                   Nothing failed here: a suggestion mizān declined to make is not an error, and
-                  clay would report one. `text-ink` is 18.41:1 light and 15.34:1 dark on the same
+                  clay would report one. `text-ink` is 15.76:1 light and 12.90:1 dark on the same
                   ground, and the weight carries the emphasis instead. */}
               <p className="text-note font-medium text-ink">
                 {skipped.length} suggestion{skipped.length === 1 ? ' was' : 's were'} left alone:

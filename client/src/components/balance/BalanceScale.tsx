@@ -374,8 +374,13 @@ export function BalanceScale({
   // and still nothing to draw, so the well stays hatched to say the axis is empty rather than
   // level. Everything else moves the two together.
   const calibrated = calibration.calibrated && !empty;
-  const fillClass = calibrated ? 'bg-ink' : 'bg-estimate';
-  const needleClass = calibrated ? 'bg-ink' : 'bg-estimate';
+  // Jade when the reading can be vouched for, estimate ink when it cannot. The fill was `ink`,
+  // which is correct and says nothing: the primary reading on the primary screen was the same black
+  // as the body text around it. `sage` measures 3.84:1 on `paper` and 3.00:1 on `track` in light,
+  // 5.29 and 4.03 in dark, so it clears the 3:1 a filled UI component owes on every ground the beam
+  // is drawn against. The needle follows the fill so the two never disagree about calibration.
+  const fillClass = calibrated ? 'bg-sage' : 'bg-estimate';
+  const needleClass = calibrated ? 'bg-sage' : 'bg-estimate';
 
   return (
     <figure className={className}>

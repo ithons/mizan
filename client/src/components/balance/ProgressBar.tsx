@@ -7,8 +7,8 @@
  * with `muted`/`sage-deep`. Those two figures are not restated here: the triplets that produced
  * them are gone from index.css, so nothing in the repo can reproduce them.
  *
- * On the tokens as they now stand the original tones would clear, narrowly: `sage` is 3.18:1 light
- * and 3.14:1 dark against `track`, `clay-scale` 5.73:1 and 5.98:1. The map is still the darkest
+ * On the tokens as they now stand the original tones would clear, narrowly: `sage` is 3.07:1 light
+ * and 4.03:1 dark against `track`, `clay-scale` 3.59:1 and 4.88:1. The map is still the darkest
  * member of each family, and the reason is now the one that does not depend on the palette: it is
  * the tone the money numerals already use, so the bar and the figure beside it agree. sage-deep is
  * what a positive figure is set in (3.91:1 / 4.01:1 on track) and clay is what a negative one is
@@ -49,12 +49,12 @@ export function ProgressBar({ fraction, tone = 'sage', height = 6, className = '
        A RING for the same reason, and the ring is what actually carries the extent.
        Re-derived from index.css on 2026-08-01, `track` against the grounds this note tracks
        (light / dark), with `line` for comparison because it is what this class was chosen over:
-           track on paper       1.32 / 1.55
-           track on card        1.32 / 1.40
-           track on card-alt    1.26 / 1.31
-           track on well        1.19 / 1.28
-           track on rail        1.22 / 1.46
-           line on paper        1.30 / 1.39
+           track on paper       1.28 / 1.31
+           track on card        1.34 / 1.20
+           track on card-alt    1.31 / 1.10
+           track on well        1.18 / 1.06
+           track on rail        1.22 / 1.25
+           line on paper        1.22 / 1.31
        The fill-to-track edge clears 3:1 in every tone (see the map above), so the VALUE was
        readable; the bar's own outer extent was not, on any ground, in either theme, and the class
        it was chosen over would not have helped.
@@ -62,21 +62,21 @@ export function ProgressBar({ fraction, tone = 'sage', height = 6, className = '
        3:1 twice at once, page-to-track and track-to-fill, and those two pull in opposite directions.
        Scanning all 256 achromatic values against the five fills this file can draw, the best a solid
        track can manage is, per theme, the value and what it separates from that theme's page by:
-           BEST-SOLID-TRACK light rgb(208 208 208) 1.54 to 1
-           BEST-SOLID-TRACK dark rgb(65 65 65) 2.06 to 1
+           BEST-SOLID-TRACK light rgb(205 205 205) 1.51 to 1
+           BEST-SOLID-TRACK dark rgb(82 82 82) 2.28 to 1
        Both are under three, so a solid track is the wrong instrument and a hairline boundary is the
        right one. That scan is re-run in tests/barBoundary.test.ts, which reads these two lines and
        fails if either the value or the ratio stops reproducing, or if one of them ever clears.
        `line-3` is that boundary because it is the token that clears everywhere a bar can land
        (light / dark):
-           line-3 on paper      4.95 / 5.77
-           line-3 on card       4.95 / 5.23
-           line-3 on card-alt   4.74 / 4.88
-           line-3 on well       4.46 / 4.78
-           line-3 on rail       4.58 / 5.44
-           line-3 on track      3.75 / 3.73
+           line-3 on paper      4.59 / 5.08
+           line-3 on card       4.82 / 4.62
+           line-3 on card-alt   4.71 / 4.25
+           line-3 on well       4.22 / 4.08
+           line-3 on rail       4.37 / 4.83
+           line-3 on track      3.59 / 3.87
        The last row is why it reads as an edge and not as a wider track. `line-2` is the cheaper
-       candidate and is the one that does not clear: line-2 on well 2.84 / 3.12. `ring`, not
+       candidate and is the one that does not clear: line-2 on well 2.83 / 2.93. `ring`, not
        `border`, because a border eats into a 6px bar's own height and the fill is what is measured.
        tests/barBoundary.test.ts reads the ring class out of this file and re-derives all of that, so
        swapping the token fails there rather than passing silently. This is a legibility fix and
@@ -172,7 +172,7 @@ export function SignedBar({ value, extent, diverging, height = 6, className = ''
        accent colour spends colour on nothing; the ordinary direction is structural `muted` and the
        accent is kept for the direction that is unusual, which is money coming back.
        Measured against `track` in both themes, because a mark needs 3:1. Re-derived from the
-       shipped tokens: muted 5.74/6.19, sage-deep 3.91/4.01 and ink-soft 11.46/9.81 all clear it,
+       shipped tokens: muted 5.47/5.91, sage-deep 3.80/5.24 and ink-soft 10.43/10.37 all clear it,
        and ink-soft is the widest margin of the three, which is why the zero rule is set in it. The
        rule is deliberately the most visible thing in the component: it is what makes this a
        measurement rather than a blob. `sage-soft` is the member of the family a lighter fill would

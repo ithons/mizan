@@ -167,8 +167,12 @@ test('an AI suggestion is not rendered as an alarm', () => {
 test('every tone a rail row can take clears AA on the ground the rail sits on', () => {
   // The rail is directly on `paper`; `RailRow` falls back to `muted` for the label and `ink` for
   // the numeral when a queue carries no tone of its own. `gold` is measured rather than assumed:
-  // it is 4.64:1 on paper light and 6.22:1 dark, and it is the tightest of the four in both
-  // themes, which is asserted below rather than stated.
+  // it is 4.57:1 on paper light and 8.25:1 dark.
+  //
+  // Which tone is TIGHTEST is now theme-dependent and is asserted per theme rather than claimed
+  // once. Before the Jade & Ink repalette gold was the tightest in both; on the new dark ground
+  // gold lifted to 8.25 and `muted` at 6.09 became the tightest there. The property that carries
+  // the design is unchanged and is the first loop: all four clear AA on both grounds.
   const CSS = readFileSync(join(import.meta.dirname, '..', 'client/src/index.css'), 'utf8');
   const triplet = (name: string, theme: 'light' | 'dark'): [number, number, number] => {
     const all = [...CSS.matchAll(new RegExp(`--mz-${name}-c:\\s*(\\d+)\\s+(\\d+)\\s+(\\d+)\\s*;`, 'g'))];
@@ -189,11 +193,12 @@ test('every tone a rail row can take clears AA on the ground the rail sits on', 
       assert.ok(ratio(tone, theme) >= 4.5, `${tone} on paper is ${ratio(tone, theme)}:1 in ${theme}`);
     }
   }
-  assert.equal(ratio('gold', 'light'), 4.64);
-  assert.equal(ratio('gold', 'dark'), 6.22);
+  assert.equal(ratio('gold', 'light'), 4.57);
+  assert.equal(ratio('gold', 'dark'), 8.25);
+  const tightest = { light: 'gold', dark: 'muted' } as const;
   for (const theme of ['light', 'dark'] as const) {
     const worst = tones.reduce((a, b) => (ratio(a, theme) <= ratio(b, theme) ? a : b));
-    assert.equal(worst, 'gold', `${worst} is tighter than gold on ${theme}; the comment above is stale`);
+    assert.equal(worst, tightest[theme], `${worst} is the tightest on ${theme}; the comment above is stale`);
   }
 });
 
