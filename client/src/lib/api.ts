@@ -151,8 +151,6 @@ export const transactionsApi = {
     if (params.uncategorized != null) q.set('uncategorized', String(params.uncategorized));
     if (params.reviewStatus) q.set('reviewStatus', params.reviewStatus);
     if (params.type) q.set('type', params.type);
-    if (params.sortBy) q.set('sortBy', params.sortBy);
-    if (params.sortDir) q.set('sortDir', params.sortDir);
     if (params.duplicateStatus) q.set('duplicateStatus', params.duplicateStatus);
     if (params.transferStatus) q.set('transferStatus', params.transferStatus);
     params.accountId?.forEach((id) => q.append('accountId', id));

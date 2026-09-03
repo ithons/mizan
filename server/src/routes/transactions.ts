@@ -21,8 +21,6 @@ import {
   setTransactionReviewStatus,
   updateTransaction,
   type TransactionListFilters,
-  type TransactionSortBy,
-  type TransactionSortDir,
 } from '../services/transactions';
 import {
   CreateManualTransactionSchema,
@@ -81,20 +79,6 @@ function parseBooleanQuery(value: string | string[] | undefined): boolean | null
   return null;
 }
 
-function parseSortBy(value: string | string[] | undefined): TransactionSortBy | null {
-  if (value === undefined || value === '') return 'date';
-
-  const raw = Array.isArray(value) ? value[0] : value;
-  return raw === 'date' || raw === 'amount' || raw === 'merchant' ? raw : null;
-}
-
-function parseSortDir(value: string | string[] | undefined): TransactionSortDir | null {
-  if (value === undefined || value === '') return 'desc';
-
-  const raw = Array.isArray(value) ? value[0] : value;
-  return raw === 'asc' || raw === 'desc' ? raw : null;
-}
-
 /**
  * Every value a repeated query param can arrive as.
  *
@@ -151,22 +135,17 @@ router.get('/', (req: Request, res: Response, next: NextFunction): void => {
       res.status(400).json({ error: 'Invalid limit filter' });
       return;
     }
-    const sortBy = parseSortBy(query.sortBy);
-    if (sortBy === null) {
-      res.status(400).json({ error: 'Invalid sortBy filter' });
-      return;
-    }
-    const sortDir = parseSortDir(query.sortDir);
-    if (sortDir === null) {
-      res.status(400).json({ error: 'Invalid sortDir filter' });
-      return;
-    }
-
     const filters: TransactionListFilters = {
       page,
       limit,
-      sortBy,
-      sortDir,
+      // Fixed, not read from the query. `sortBy`/`sortDir` were accepted here for the life of the
+      // repo and no screen ever sent either: the only occurrences in `client/src` were the two
+      // lines in `api.ts` that appended them. The ledger is a day-grouped list on a date spine
+      // whose today rule separates what is expected from what has happened, and sorting it by
+      // amount destroys that rule, so the parameter had no destination to be wired to. The
+      // capability stays on the service, where `advisorChatTools` is a real caller.
+      sortBy: 'date',
+      sortDir: 'desc',
       accountIds: toStringArray(query.accountId),
       categoryIds: toStringArray(query.categoryId),
     };

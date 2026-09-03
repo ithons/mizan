@@ -1105,8 +1105,6 @@ export interface TransactionFilters {
   uncategorized?: boolean;
   reviewStatus?: 'open' | 'reviewed' | 'dismissed';
   type?: string;
-  sortBy?: 'date' | 'amount' | 'merchant';
-  sortDir?: 'asc' | 'desc';
   /** Exactly these rows. Capped by the server; see MAX_ID_FILTER in routes/transactions.ts. */
   ids?: string[];
   /** `category_source` values to keep. 'none' selects the rows recorded before provenance was. */
