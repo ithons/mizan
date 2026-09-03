@@ -886,6 +886,23 @@ re-planned it.
   exists, the server honours it, and nothing can ask. Whoever settles the sorting question should
   decide whether that plumbing is the beginning of a feature or a leftover to remove.
 - **Finding 9**, the palette question, still a design commitment rather than a defect.
-- **Gate 4 coverage.** The healthy-colour rule is verified by rendering on **one screen of six**.
-  The directional clay on Investments, Plan and Accounts is conditional on a measured state and so
-  falls under this file's own carve-out, but nothing asserts it.
+- **Gate 4 coverage.** The healthy-colour rule is verified by an automated render on **one screen
+  of six**, because Instrument is the only screen with a harness. Building five more is the cost of
+  closing that, and it has not been paid.
+
+  Driven in a browser instead on 2026-09-03, against a scratch copy of the owner's ledger, counting
+  every leaf element whose computed colour is `clay` or `gold`:
+
+  | screen | clay | gold | what each one is |
+  |---|---|---|---|
+  | `/` | 13 | 0 | short by $743.52, the $6,521.37 largest claim, a −$877 measured fall, an overdue Trupanion bill |
+  | `/ledger` | 0 | 0 | nothing to report, and it says nothing |
+  | `/accounts` | 7 | 0 | $6,521 owed, $80 unexplained, the $700 flow-conservation pair, three balances owed |
+  | `/investments` | 1 | 0 | one unrealized loss, −$0.03 |
+  | `/plan` | 2 | 0 | the short figure, stated both ways |
+  | `/settings` | 0 | 0 | nothing to report, and it says nothing |
+
+  Zero gold on any screen, because the sheet is calibrated. Every clay traces to a state the code
+  checked, and the two screens with nothing to say are monochrome. That is the rule holding on real
+  data on all six. What it is not is a regression test: nothing fails if a future condition starts
+  firing on a healthy ledger, and only Instrument would catch it.
