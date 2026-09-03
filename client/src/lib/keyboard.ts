@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, type RefObject } from 'react';
 
 /**
  * The keyboard has one owner.
@@ -417,6 +417,8 @@ interface LiveBinding extends BindingRef {
 
 const bindings: LiveBinding[] = [];
 const overlays: string[] = [];
+/** Per open overlay, the element Tab is kept inside. Absent for an overlay that declared none. */
+const overlayContainers = new Map<string, RefObject<HTMLElement | null>>();
 let armedPrefix: string | null = null;
 let armedAt = 0;
 
@@ -425,6 +427,10 @@ function handleKeyDown(e: KeyboardEvent): void {
   // arrows and typeahead letters this way, and a global that ran anyway would be the second claimant
   // this file exists to remove.
   if (e.defaultPrevented) return;
+
+  // Before the binding table. Tab is not a chord and owns no row; it belongs to whatever dialog is
+  // on top, and containing it is what `aria-modal="true"` promises on that dialog's behalf.
+  if (containTab(e)) return;
 
   const scene: KeyboardScene<LiveBinding> = {
     bindings,
@@ -527,15 +533,112 @@ export function useShortcuts(owner: string, handlers: ShortcutHandlers, enabled 
  * `showAddEntry || showAddScheduled || editing` and could only ever enumerate the overlays it had
  * heard of, which is why the ⌘K sheet reached straight past it.
  */
-export function useOverlay(owner: string, open: boolean): void {
+/**
+ * Everything that must be true while a dialog is open, in the file that already knows what is open.
+ *
+ * The overlay stack was here and the focus half was nowhere: `grep -r activeElement client/src`
+ * returned nothing, so every dialog in the app dropped focus to `<body>` when it closed and the
+ * keyboard reader started again from the top of the page. `rebuild-part-3.md` Decision 5 calls
+ * `role="dialog"` and focus restore "the two items that genuinely do not wait" and pulled them into
+ * Phase 12; only `CommandPalette` ever got the first and nothing got the second.
+ *
+ * `container` is what `aria-modal="true"` obliges. That attribute tells assistive tech the rest of
+ * the page is inert, and no browser enforces it, so a dialog that declares it and lets Tab walk out
+ * behind the scrim is making a claim its own code does not check. Given a container, Tab and
+ * Shift+Tab cycle inside the TOPMOST overlay only, which is the same "an overlay owns the scene"
+ * rule the resolver already applies to every other key.
+ *
+ * `inert` on the app root would be simpler and is not available: `CommandPalette` renders inside
+ * `Layout`, so marking `#root` inert would disable the sheet along with the page under it. `Modal`
+ * portals to `<body>` and could take it; one mechanism for both is worth more than the shortcut.
+ */
+export function useOverlay(
+  owner: string,
+  open: boolean,
+  container?: RefObject<HTMLElement | null>
+): void {
   useEffect(() => {
     if (!open) return;
+    // Captured before the dialog mounts anything, because by cleanup time the element that had
+    // focus is long gone from `document.activeElement`.
+    const restoreTo = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     overlays.push(owner);
+    if (container) overlayContainers.set(owner, container);
+
     return () => {
       const at = overlays.lastIndexOf(owner);
       if (at > -1) overlays.splice(at, 1);
+      overlayContainers.delete(owner);
+
+      // Only when focus was actually lost. A dialog that hands focus to something the owner chose
+      // (a row it filed, a field it opened) must not have it yanked back, and after an unmount the
+      // browser parks focus on `<body>`, which is exactly the case worth repairing.
+      const now = document.activeElement;
+      const lost = now === null || now === document.body || !(now instanceof HTMLElement);
+      if (lost && restoreTo?.isConnected) restoreTo.focus();
     };
-  }, [owner, open]);
+  }, [owner, open, container]);
+}
+
+/**
+ * Tabbable descendants, in document order.
+ *
+ * `disabled`, `[hidden]` and `tabindex="-1"` are excluded because none of them can receive Tab; a
+ * trap that cycles onto one of them silently sends focus nowhere. The dialog panel itself carries
+ * `tabIndex={-1}` for exactly that reason: script may focus it, Tab may not land on it.
+ */
+function tabbableWithin(root: HTMLElement): HTMLElement[] {
+  const sel =
+    'a[href],button,input,select,textarea,[tabindex]:not([tabindex="-1"]),audio[controls],video[controls],[contenteditable]:not([contenteditable="false"])';
+  return [...root.querySelectorAll<HTMLElement>(sel)].filter(
+    (el) =>
+      !el.hasAttribute('disabled') &&
+      !el.hasAttribute('hidden') &&
+      el.getAttribute('aria-hidden') !== 'true' &&
+      (el.offsetWidth > 0 || el.offsetHeight > 0 || el === document.activeElement)
+  );
+}
+
+/**
+ * Keep Tab inside the topmost overlay. Returns true when it handled the keystroke.
+ *
+ * Silent when nothing is open, when the top overlay registered no container, and when the dialog
+ * holds nothing tabbable at all: in that last case there is no cycle to keep focus in, and stealing
+ * the keystroke would strand the reader with Tab doing nothing.
+ */
+function containTab(e: KeyboardEvent): boolean {
+  if (e.key !== 'Tab' || e.metaKey || e.ctrlKey || e.altKey) return false;
+  const top = overlays[overlays.length - 1];
+  if (top === undefined) return false;
+  const root = overlayContainers.get(top)?.current;
+  if (!root) return false;
+
+  const items = tabbableWithin(root);
+  if (items.length === 0) return false;
+
+  const active = document.activeElement;
+  const at = active instanceof HTMLElement ? items.indexOf(active) : -1;
+  e.preventDefault();
+  items[nextTabStop(items.length, at, e.shiftKey)].focus();
+  return true;
+}
+
+/**
+ * Which stop Tab moves to, as arithmetic.
+ *
+ * Split out and exported for the same reason `resolveKeystroke` is pure: this repo has no DOM in
+ * its test environment, so the only part of the trap a test could otherwise reach is the shape of
+ * the JSX around it. The wrapping is the part that needs a browser; the cycle is the part that has
+ * an off-by-one, and it is checkable here.
+ *
+ * `at === -1` means focus is not on any stop in the dialog: it escaped, or script put it on the
+ * panel, which carries `tabIndex={-1}` and is deliberately not a stop. Both enter at the near end
+ * for the direction travelled rather than jumping into the middle.
+ */
+export function nextTabStop(count: number, activeIndex: number, shift: boolean): number {
+  if (count <= 0) throw new Error('nextTabStop called with no stops; the caller must not contain Tab');
+  if (shift) return activeIndex <= 0 ? count - 1 : activeIndex - 1;
+  return activeIndex === -1 || activeIndex === count - 1 ? 0 : activeIndex + 1;
 }
 
 /** The live scene, for assertions in a browser console. Not a subscription and not for rendering. */

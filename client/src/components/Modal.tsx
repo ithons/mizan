@@ -1,4 +1,4 @@
-import React, { useId } from 'react';
+import React, { useEffect, useId, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { X } from 'lucide-react';
 import { useOverlay, useShortcuts } from '../lib/keyboard';
@@ -19,8 +19,26 @@ export function Modal({ open, onClose, title, children, maxWidth = '480px' }: Mo
    * overlay does both jobs, and `overlay.close` reaches only the dialog on top of the stack.
    */
   const owner = useId();
-  useOverlay(owner, open);
+  const panelRef = useRef<HTMLDivElement>(null);
+  const titleId = `${owner}-title`;
+  useOverlay(owner, open, panelRef);
   useShortcuts(owner, { 'overlay.close': onClose }, open);
+
+  /**
+   * Focus enters the dialog when it opens.
+   *
+   * Without this the dialog is announced and unreachable: focus stays on the button that opened it,
+   * which is behind the scrim, so the first Tab walks the page underneath and a screen reader keeps
+   * reading the screen the owner just left. The panel takes it rather than the first field, because
+   * the header and the title have to be read before the form, and because six of the seven dialogs
+   * that use this component open onto something other than an input.
+   *
+   * It is also what makes the restore in `useOverlay` mean anything: something has to take focus
+   * away before giving it back is a repair.
+   */
+  useEffect(() => {
+    if (open) panelRef.current?.focus();
+  }, [open]);
 
   if (!open) return null;
 
@@ -33,13 +51,33 @@ export function Modal({ open, onClose, title, children, maxWidth = '480px' }: Mo
   return createPortal(
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
       {/* Backdrop */}
+      {/* Click-to-close, and nothing else. `aria-hidden` because a screen reader announcing a
+          full-screen unlabelled region ahead of the dialog is noise, and the dialog's own close
+          button and Escape are the reachable ways out. */}
       <div
+        aria-hidden="true"
         className="absolute inset-0 bg-ink/25"
         style={{ backdropFilter: 'blur(4px)' }}
         onClick={onClose}
       />
       {/* Modal */}
       <div
+        ref={panelRef}
+        role="dialog"
+        aria-modal="true"
+        /* Named by its own heading. `aria-modal` without a name announces "dialog" and nothing
+           else, and all seven callers already render the one true title in this header, so the
+           name is there to point at rather than to invent.
+
+           `useId` rather than a constant because this component is instantiated in seven places
+           and `accounts/Accounts.tsx` alone mounts four of them in one tree. Only the open one
+           renders, so a constant would not collide today; it would collide the first time two are
+           open together, and nothing in the component stops that. */
+        aria-labelledby={titleId}
+        /* Focusable by script and not by Tab, the same pairing `CommandPalette` uses: the effect
+           above puts focus here on open, and the Tab cycle in `keyboard.ts` must not offer the
+           panel itself as a stop. */
+        tabIndex={-1}
         /* e3, matching `Card`. A dialog is the surface that carries money, so what actually
            separates it from the page is worth stating rather than assuming.
 
@@ -60,12 +98,12 @@ export function Modal({ open, onClose, title, children, maxWidth = '480px' }: Mo
            composites to rgb(191 191 191) on light and rgb(64 64 64) on dark, and the dialog
            surface stands off it at 1.76:1 and 1.71:1 respectively. Every figure here was
            re-derived from client/src/index.css on 2026-08-01. */
-        className="relative flex max-h-[calc(100vh-2rem)] w-full flex-col rounded-xl border border-line-3 bg-card-alt shadow-e3"
+        className="relative flex max-h-[calc(100vh-2rem)] w-full flex-col rounded-xl border border-line-3 bg-card-alt shadow-e3 focus:outline-none"
         style={{ maxWidth }}
       >
         {/* Header */}
         <div className="flex flex-shrink-0 items-center justify-between border-b border-line px-6 py-4">
-          <h2 className="font-serif text-title text-ink">{title}</h2>
+          <h2 id={titleId} className="font-serif text-title text-ink">{title}</h2>
           <button
             onClick={onClose}
             aria-label="Close"

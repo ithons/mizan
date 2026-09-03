@@ -194,7 +194,10 @@ describe('the sheet is a sheet', () => {
    * that this sheet makes it.
    */
   test('the sheet declares itself an overlay rather than leaving the screen live', () => {
-    assert.match(palette, /useOverlay\('command-palette', open\)/);
+    // The third argument is the element Tab is kept inside. Without it this sheet declared
+    // `aria-modal="true"` and let Tab walk out onto the screen behind it, which is the half of that
+    // promise nothing kept; `tests/dialogSemantics.test.ts` owns the rest of that argument.
+    assert.match(palette, /useOverlay\('command-palette', open, sheetRef\)/);
     assert.ok(!palette.includes("addEventListener('keydown'"), 'the sheet listens for keys itself again');
     assert.match(palette, /'overlay\.close': \(\) => setOpen\(false\)/);
   });

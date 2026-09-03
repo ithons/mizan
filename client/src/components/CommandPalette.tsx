@@ -374,7 +374,9 @@ export function CommandPalette() {
    * done. Declaring the overlay makes every `screen` binding inert for as long as this is open,
    * without the ledger knowing this sheet exists.
    */
-  useOverlay('command-palette', open);
+  // `sheetRef` so Tab is contained too. This sheet already declared `aria-modal="true"` and let
+  // Tab walk out onto the screen behind it, which is the half of that promise nothing kept.
+  useOverlay('command-palette', open, sheetRef);
 
   /**
    * ⌘K is the only modifier chord this app takes, and the audit that left it alone.
