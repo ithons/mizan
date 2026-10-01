@@ -15,7 +15,7 @@ import type {
   SimplefinRelinkPendingResponse,
   SimplefinRelinkStoredCarryView,
 } from '../../../shared/types';
-import { updateSimplefin, removeSimplefin } from '../services/credentials';
+import { assertCredentialsWritable, updateSimplefin, removeSimplefin } from '../services/credentials';
 import {
   adoptRelinkPairs,
   dismissRelinkProposal,
@@ -32,6 +32,22 @@ import { PROVIDER_HTTP_TIMEOUT_MS } from '../services/httpTimeouts';
 
 const router = Router();
 
+/** SimpleFIN answers 403 to a claim URL that was already claimed; say that instead of the bare status. */
+async function claimAccessUrl(claimUrl: string): Promise<string> {
+  try {
+    const r = await axios.post(claimUrl, undefined, { timeout: PROVIDER_HTTP_TIMEOUT_MS });
+    return r.data as string;
+  } catch (err) {
+    if (axios.isAxiosError(err) && err.response?.status === 403) {
+      throw Object.assign(
+        new Error('SimpleFIN refused this setup token: it has already been claimed. Generate a new one in SimpleFIN Bridge.'),
+        { status: 403 }
+      );
+    }
+    throw err;
+  }
+}
+
 // POST /setup
 router.post(
   '/setup',
@@ -40,11 +56,13 @@ router.post(
     try {
       const { setupToken } = req.body as { setupToken: string };
 
+      // Claiming spends a one-time token, so the store must be writable first. This ran after the
+      // claim once: the save was refused, the access URL was discarded, and every retry got a 403.
+      assertCredentialsWritable();
+
       // Decode the base64 setup token to get the claim URL
       const decoded = Buffer.from(setupToken, 'base64').toString('utf-8');
-      const accessUrl = await axios
-        .post(decoded, undefined, { timeout: PROVIDER_HTTP_TIMEOUT_MS })
-        .then((r) => r.data as string);
+      const accessUrl = await claimAccessUrl(decoded);
 
       // The access URL (which embeds basic-auth) is persisted only in the encrypted
       // credentials store, never in the DB. The connection row is a non-secret marker.
@@ -133,14 +151,15 @@ router.post('/resync', async (_req: Request, res: Response, next: NextFunction):
 // DELETE /connection
 router.delete('/connection', (_req: Request, res: Response, next: NextFunction): void => {
   try {
+    // First, so an unreadable store refuses before any account is hidden for a key still on disk.
+    removeSimplefin();
+
     const db = getDb();
     const now = new Date().toISOString();
 
     db.prepare(
       "UPDATE accounts SET is_hidden = 1, updated_at = ? WHERE connection_type = 'simplefin'"
     ).run(now);
-
-    removeSimplefin();
 
     db.prepare(
       "UPDATE simplefin_connections SET status = 'removed'"

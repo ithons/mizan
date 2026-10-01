@@ -194,7 +194,8 @@ export function loadCredentials(): CredentialsStore {
  * store with the single field being written. Failing loudly is the only option that keeps the
  * other secrets: they are still in the file, and the file is still the only copy.
  */
-function assertCredentialsWritable(): void {
+export function assertCredentialsWritable(): void {
+  loadCredentials();
   if (_unreadable === null) return;
   throw new Error(
     `Refusing to write ${CREDENTIALS_PATH}: it exists but could not be decrypted (${_unreadable}). ` +
@@ -240,6 +241,9 @@ export function updateSimplefin(accessUrl: string): void {
 }
 
 export function removeSimplefin(): void {
+  // Without this, an unreadable store has no `simplefin` key, nothing is saved, and the caller
+  // reports a removal that never happened while the access URL stays in the file.
+  assertCredentialsWritable();
   const store = loadCredentials();
   if (store.simplefin) {
     delete store.simplefin.accessUrl;
