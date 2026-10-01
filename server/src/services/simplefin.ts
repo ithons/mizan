@@ -1,5 +1,6 @@
 import axios from 'axios';
 import { restoreAfterReconnect } from './accounts';
+import { withRetry } from './retry';
 import { PROVIDER_HTTP_TIMEOUT_MS } from './httpTimeouts';
 import { v4 as uuidv4 } from 'uuid';
 import { epochSecondsToLocalDate, isoToLocalDate } from './dates';
@@ -1055,19 +1056,29 @@ export async function syncSimplefin(): Promise<SimplefinSyncResult> {
   }
 
   const wider = Math.floor(nowMs / 1000) - (plan.refetchDays * 86400);
-  let againData: unknown;
+  let second: SimplefinSyncResult;
   try {
-    againData = (await client.get(`/accounts?start-date=${wider}`)).data;
+    // Retried here, transient failures only, because the caller's own retry would re-run the first
+    // pass against balances it already stored.
+    const againData = (await withRetry(() => client.get(`/accounts?start-date=${wider}`))).data;
+    // Passed no window: this pass stamps every account it received, and only those, so an account
+    // missing from it, or a pass the relink gate blocks, leaves the absence open.
+    second = applySimplefinResponse(db, againData, now);
   } catch (err) {
-    // Not thrown: the first pass has written, and a throw here would lose its balance changes from
-    // the run and have a retry measure against balances it already stored. The reappeared accounts
-    // stay unstamped, so the next pass asks again.
-    const names = first.reappeared.map((r) => r.accountName).join(', ');
-    notices.push(`The wider SimpleFIN request covering ${names}'s absence failed (${(err as Error).message}); the next sync asks again.`);
+    // Given up once rather than retried every hour: a request that times out on a 90-day payload
+    // would otherwise repeat a notice nobody can act on. The accounts are stamped and the range
+    // that may be missing is named, which leaves the owner a CSV import to make.
+    stampProviderSeen(db, returnedIds, now);
+    const firstWindowStart = isoToLocalDate(new Date(startDate * 1000).toISOString());
+    for (const r of first.reappeared) {
+      notices.push(
+        `${r.accountName} was absent from SimpleFIN from ${isoToLocalDate(r.seenAt)}, and the request for its ` +
+          `transactions before ${firstWindowStart} failed (${(err as Error).message}), so that range may be missing. ` +
+          'Import it by CSV if it matters.'
+      );
+    }
     return { ...first, errors: [...first.errors, ...notices] };
   }
-  const second = applySimplefinResponse(db, againData, now);
-  stampProviderSeen(db, returnedIds, now);
   return {
     ...second,
     added: first.added + second.added,

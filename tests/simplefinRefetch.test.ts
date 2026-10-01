@@ -104,7 +104,7 @@ test('a card back from 120 days asks as far as SimpleFIN serves and names the re
   assert.equal(next.errors.filter((e) => /were not fetched/.test(e)).length, 0);
 });
 
-test('a failed follow-up is reported, not thrown, and the next sync asks for the absence again', async (t) => {
+test('a follow-up that fails is given up once: the range is named, and the next sync is ordinary', async (t) => {
   const db = ledger(daysAgo(45));
   let calls = 0;
   t.mock.method(axios, 'create', () => ({
@@ -115,14 +115,32 @@ test('a failed follow-up is reported, not thrown, and the next sync asks for the
     },
   }));
   const result = await syncSimplefin();
-  assert.equal(calls, 2);
-  assert.equal(result.errors.filter((e) => /wider SimpleFIN request covering card's absence failed \(socket hang up\)/.test(e)).length, 1);
+  assert.equal(calls, 2, 'a non-transient failure is not retried in place');
+  const named = result.errors.filter((e) => /^card was absent from SimpleFIN from .* failed \(socket hang up\), so that range may be missing/.test(e));
+  assert.equal(named.length, 1);
   const card = db.prepare("SELECT provider_seen_at AS s FROM accounts WHERE simplefin_account_id = 'card'").get() as { s: string };
-  assert.ok(Date.now() - Date.parse(card.s) > 44 * DAY, 'the absence was used up by a request that never landed');
+  assert.ok(Date.now() - Date.parse(card.s) < DAY, 'the account was left open, so every hour would repeat the request');
 
+  // No standing finding: the next pass makes one ordinary request and says nothing.
   const asked = stubClient(t);
+  const next = await syncSimplefin();
+  assert.deepEqual(asked.map(daysBack), [30]);
+  assert.equal(next.errors.filter((e) => /absent from SimpleFIN|were not fetched/.test(e)).length, 0);
+});
+
+test('an account the wider response does not contain stays open, so its absence is asked for again', async (t) => {
+  const db = ledger(daysAgo(45));
+  let calls = 0;
+  t.mock.method(axios, 'create', () => ({
+    get: async () => {
+      calls++;
+      const ids = calls === 2 ? ['checking'] : ['checking', 'card'];
+      return { data: { accounts: ids.map((id) => ({ id, name: id, currency: 'USD', balance: '100.00', org: { name: 'Bank' }, transactions: [] })) } };
+    },
+  }));
   await syncSimplefin();
-  assert.equal(asked.length, 2, 'the next sync did not ask for the absence again');
+  const card = db.prepare("SELECT provider_seen_at AS s FROM accounts WHERE simplefin_account_id = 'card'").get() as { s: string };
+  assert.ok(Date.now() - Date.parse(card.s) > 44 * DAY, 'stamped although its absence was never taken');
 });
 
 test.after(() => {
