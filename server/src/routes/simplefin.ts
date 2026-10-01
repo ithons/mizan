@@ -106,7 +106,7 @@ router.get('/connection', (_req: Request, res: Response, next: NextFunction): vo
   }
 });
 
-// POST /resync: force a fresh 730-day lookback by nulling last_synced_at, then sync.
+// POST /resync: re-fetch everything SimpleFIN serves (90 days) by nulling last_synced_at, then sync.
 router.post('/resync', async (_req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
     const db = getDb();

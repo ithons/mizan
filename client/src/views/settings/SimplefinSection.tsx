@@ -72,7 +72,7 @@ export function SimplefinSection() {
   const handleResync = async () => {
     if (
       !confirm(
-        'Re-requests up to 2 years of history from SimpleFIN. Most institutions only expose data from when you connected, so this may not add much, but it doesn\'t hurt to check. Continue?'
+        'Re-fetches the last 90 days from SimpleFIN, which is the most it serves. Older history comes in by CSV import. Continue?'
       )
     )
       return;
@@ -82,11 +82,11 @@ export function SimplefinSection() {
       const result = await simplefinApi.resync();
       await fetchConnection();
       if (result.transactionsAdded === 0 && result.transactionsModified === 0) {
-        addToast({ type: 'info', message: 'Resync complete: no additional history was available' });
+        addToast({ type: 'info', message: 'Re-fetch complete: nothing in the last 90 days was missing' });
       } else {
         addToast({
           type: 'success',
-          message: `Resync complete: ${result.transactionsAdded} new transaction(s), ${result.transactionsModified} updated`,
+          message: `Re-fetch complete: ${result.transactionsAdded} new transaction(s), ${result.transactionsModified} updated`,
         });
       }
     } catch (e: any) {
@@ -150,7 +150,7 @@ export function SimplefinSection() {
           </div>
           <div className="flex items-center gap-5">
             <TextButton onClick={handleResync} disabled={loading || resyncing}>
-              {resyncing ? 'Resyncing…' : 'Resync full history'}
+              {resyncing ? 'Re-fetching…' : 'Re-fetch last 90 days'}
             </TextButton>
             <TextButton onClick={handleDisconnect} disabled={loading || resyncing} className="hover:!text-clay">
               Disconnect

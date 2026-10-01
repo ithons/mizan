@@ -163,29 +163,51 @@ export function upsertHoldingsFromSimplefin(db: Database.Database, accountId: st
 }
 
 const INCREMENTAL_LOOKBACK_DAYS = 30;
-// On a connection's very first sync there's no local history yet, so request as much
-// backlog as SimpleFIN Bridge will serve instead of the normal incremental window.
-// Institutions still cap what they actually return regardless of what's requested.
-const INITIAL_LOOKBACK_DAYS = 730;
+/**
+ * The most SimpleFIN Bridge serves in one request. On 2026-10-01 it answered this app's 730-day
+ * request with "Requested date range exceeds limit of 90 days and was capped." on every first sync
+ * and every resync, so asking for more only produced that notice.
+ */
+export const SIMPLEFIN_MAX_LOOKBACK_DAYS = 90;
 /** Slack past the last pull, so a row posted late with an earlier date is still inside the window. */
 const LOOKBACK_MARGIN_DAYS = 2;
 
+export interface SimplefinLookback {
+  /** Days back the request asks for. */
+  days: number;
+  /** Days before the window the last pull did not reach and Bridge will not serve; 0 when none. */
+  unreachableDays: number;
+}
+
 /**
- * How many days back a sync asks for.
+ * How far back a sync asks, and how much of the gap since the last pull it cannot reach.
  *
- * At least the incremental window, so pending rows still settle, and otherwise far enough to
- * reach the last successful pull. A fixed 30 days meant an app left closed for longer never asked
- * for the rows in between, and nothing said so. Past Bridge's own 90-day cap the request is
- * capped by Bridge, which says so in `errors`, where the sync records it.
+ * At least the incremental window, so pending rows still settle, and otherwise far enough to reach
+ * the last successful pull. A fixed 30 days meant an app left closed for longer never asked for the
+ * rows in between, and nothing said so. A new or force-resynced connection asks for everything
+ * Bridge serves and claims no gap, because there is no earlier pull to have a gap after.
  */
-export function simplefinLookbackDays(lastSyncedAt: string | null | undefined, nowMs: number): number {
-  if (!lastSyncedAt) return INITIAL_LOOKBACK_DAYS;
+export function simplefinLookback(lastSyncedAt: string | null | undefined, nowMs: number): SimplefinLookback {
+  if (!lastSyncedAt) return { days: SIMPLEFIN_MAX_LOOKBACK_DAYS, unreachableDays: 0 };
   const lastMs = Date.parse(lastSyncedAt);
   if (!Number.isFinite(lastMs)) {
     throw new Error(`simplefin_connections.last_synced_at is not a timestamp: ${lastSyncedAt}`);
   }
   const daysSince = Math.ceil(Math.max(0, nowMs - lastMs) / 86_400_000);
-  return Math.max(INCREMENTAL_LOOKBACK_DAYS, daysSince + LOOKBACK_MARGIN_DAYS);
+  const needed = Math.max(INCREMENTAL_LOOKBACK_DAYS, daysSince + LOOKBACK_MARGIN_DAYS);
+  return {
+    days: Math.min(needed, SIMPLEFIN_MAX_LOOKBACK_DAYS),
+    unreachableDays: Math.max(0, needed - SIMPLEFIN_MAX_LOOKBACK_DAYS),
+  };
+}
+
+/** The sync notice for a gap Bridge will not serve, naming the dates so the owner can import them. */
+export function unreachableGapNotice(lastSyncedAt: string, lookback: SimplefinLookback, nowMs: number): string | null {
+  if (lookback.unreachableDays === 0) return null;
+  const from = lastSyncedAt.slice(0, 10);
+  const to = new Date(nowMs - lookback.days * 86_400_000).toISOString().slice(0, 10);
+  return `The last SimpleFIN pull was ${from}, and SimpleFIN serves at most ${SIMPLEFIN_MAX_LOOKBACK_DAYS} days, ` +
+    `so transactions from ${from} to ${to} were not fetched. Import them by CSV if they matter.`;
 }
 
 export interface SimplefinSyncResult {
@@ -247,7 +269,7 @@ export function providerErrorStrings(data: unknown): string[] {
 }
 
 // SimpleFIN puts advisories in the same `errors` array it uses for access failures. The bridge
-// answers this app's own 730-day first-sync request with "Requested date range exceeds limit of 90
+// answered this app's old 730-day first-sync request with "Requested date range exceeds limit of 90
 // days and was capped.", and reading any string in that array as an expired institution login told
 // the owner to re-link the bank, which is the riskiest action the app offers. Only auth-shaped
 // messages may claim reauth; everything else is still reported, just not as a login problem.
@@ -932,10 +954,12 @@ export async function syncSimplefin(): Promise<SimplefinSyncResult> {
   // last_synced_at IS NULL means either a brand-new connection or an explicit
   // user-requested "force full resync" (routes/simplefin.ts POST /resync nulls it).
   const nowMs = Date.now();
-  const lookbackDays = simplefinLookbackDays(connection?.last_synced_at, nowMs);
+  const lookback = simplefinLookback(connection?.last_synced_at, nowMs);
 
-  const startDate = Math.floor(nowMs / 1000) - (lookbackDays * 86400);
+  const startDate = Math.floor(nowMs / 1000) - (lookback.days * 86400);
   const res = await client.get(`/accounts?start-date=${startDate}`);
 
-  return applySimplefinResponse(db, res.data, now);
+  const result = applySimplefinResponse(db, res.data, now);
+  const notice = connection?.last_synced_at ? unreachableGapNotice(connection.last_synced_at, lookback, nowMs) : null;
+  return notice ? { ...result, errors: [...result.errors, notice] } : result;
 }
