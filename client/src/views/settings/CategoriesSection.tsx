@@ -150,7 +150,8 @@ export function CategoryRow({
   depth,
 }: {
   category: Category;
-  onEdit: (id: string, name: string, color: string, icon: string) => void;
+  /** Resolves true once the server has taken the change, so the row stays open on a refusal. */
+  onEdit: (id: string, name: string, color: string, icon: string) => Promise<boolean>;
   onDelete: (id: string) => void;
   onMerge: (id: string) => void;
   onAddChild: (parentId: string) => void;
@@ -161,9 +162,13 @@ export function CategoryRow({
   const [editColor, setEditColor] = useState(category.color || CATEGORY_PRESET_COLORS[0]);
   const [editIcon, setEditIcon] = useState(category.icon || '');
 
-  const handleSave = () => {
-    onEdit(category.id, editName, editColor, editIcon);
-    setEditing(false);
+  const nameMissing = editName.trim() === '';
+
+  // Closing before the server answered made a rejected rename look saved: the row snapped back to
+  // the old name with nothing said.
+  const handleSave = async () => {
+    if (nameMissing) return;
+    if (await onEdit(category.id, editName, editColor, editIcon)) setEditing(false);
   };
 
   const smallField =
@@ -186,7 +191,7 @@ export function CategoryRow({
                 value={editName}
                 onChange={(e) => setEditName(e.target.value)}
                 onKeyDown={(e) => {
-                  if (e.key === 'Enter') handleSave();
+                  if (e.key === 'Enter') void handleSave();
                   if (e.key === 'Escape') setEditing(false);
                 }}
               />
@@ -198,7 +203,13 @@ export function CategoryRow({
                 placeholder="🏠"
                 title="Category icon (emoji)"
               />
-              <button type="button" onClick={handleSave}>
+              <button
+                type="button"
+                onClick={() => void handleSave()}
+                disabled={nameMissing}
+                title={nameMissing ? 'A category needs a name' : 'Save'}
+                className="disabled:opacity-40"
+              >
                 <Check size={13} className="text-sage-deep" />
               </button>
               <button type="button" onClick={() => setEditing(false)}>
@@ -295,6 +306,7 @@ export function CategoriesSection() {
     mutationFn: ({ id, name, color, icon }: { id: string; name: string; color: string; icon: string }) =>
       categoriesApi.update(id, { name, color, icon }),
     onSuccess: () => invalidateCategoryData(qc),
+    onError: (err: Error) => addToast({ type: 'error', message: err.message }),
   });
 
   // Every delete refusal names merge as its remedy, so merge has to be reachable from the same row.
@@ -365,7 +377,13 @@ export function CategoriesSection() {
           <CategoryRow
             key={cat.id}
             category={cat}
-            onEdit={(id, name, color, icon) => editMutation.mutate({ id, name, color, icon })}
+            onEdit={(id, name, color, icon) =>
+              editMutation.mutateAsync({ id, name, color, icon }).then(
+                () => true,
+                // onError has already told the owner; false keeps the row open on what they typed.
+                () => false
+              )
+            }
             onDelete={(id) => deleteMutation.mutate(id)}
             onMerge={(id) => {
               setMergeTargetId('');
