@@ -75,3 +75,47 @@ test('HEALTHY: deleting an unknown rule is still a 404 and writes nothing', asyn
     assert.equal((db.prepare('SELECT COUNT(*) AS n FROM merchant_rule_revisions').get() as { n: number }).n, 0);
   });
 });
+
+/**
+ * PATCH moved a rule's category with a bare UPDATE: no revision, no updated_at, and an AI rule
+ * kept claiming its action, so undo could revert the owner's edit and the revision log said nothing.
+ */
+test('PATCH /api/rules/:id records the recategorize as the owner\'s revision', async () => {
+  const db = migratedTestDb();
+  const from = insertCategory(db, { name: 'Coffee' });
+  const to = insertCategory(db, { name: 'Groceries' });
+  const ruleId = upsertMerchantRule(db, 'Blue Bottle', from, '2026-01-01T00:00:00.000Z', { source: 'ai', actionId: 'act_1' }).ruleId;
+
+  await withServer(db, async (base) => {
+    const res = await fetch(`${base}/api/rules/${ruleId}`, {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ category_id: to }),
+    });
+    assert.equal(res.status, 200);
+    const rule = db.prepare('SELECT category_id, source, action_id FROM merchant_rules WHERE id = ?').get(ruleId);
+    assert.deepEqual(rule, { category_id: to, source: 'human', action_id: null });
+    const revision = db.prepare(
+      "SELECT from_category_id, to_category_id, source FROM merchant_rule_revisions WHERE rule_id = ? AND operation = 'recategorize'"
+    ).all(ruleId);
+    assert.deepEqual(revision, [{ from_category_id: from, to_category_id: to, source: 'human' }]);
+  });
+});
+
+test('HEALTHY: a PATCH that changes nothing writes no revision and leaves provenance alone', async () => {
+  const db = migratedTestDb();
+  const cat = insertCategory(db, { name: 'Coffee' });
+  const ruleId = upsertMerchantRule(db, 'Blue Bottle', cat, '2026-01-01T00:00:00.000Z', { source: 'ai', actionId: 'act_1' }).ruleId;
+  const before = (db.prepare('SELECT COUNT(*) AS n FROM merchant_rule_revisions').get() as { n: number }).n;
+
+  await withServer(db, async (base) => {
+    const res = await fetch(`${base}/api/rules/${ruleId}`, {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ category_id: cat, pattern: 'Blue Bottle' }),
+    });
+    assert.equal(res.status, 200);
+    assert.equal((db.prepare('SELECT COUNT(*) AS n FROM merchant_rule_revisions').get() as { n: number }).n, before);
+    assert.deepEqual(db.prepare('SELECT source, action_id FROM merchant_rules WHERE id = ?').get(ruleId), { source: 'ai', action_id: 'act_1' });
+  });
+});

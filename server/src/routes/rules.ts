@@ -15,6 +15,7 @@ import {
   recategorizeAll,
   suggestMerchantRules,
   upsertMerchantRule,
+  editMerchantRule,
   countTransactionsHeldByRule,
   countTransactionsHeldByAllRules,
   retireMerchantRule,
@@ -200,22 +201,7 @@ router.patch(
         return;
       }
 
-      const updates: string[] = [];
-      const values: unknown[] = [];
-
-      if (body.pattern !== undefined) {
-        updates.push('pattern = ?');
-        values.push(body.pattern.trim());
-      }
-      if (body.category_id !== undefined) {
-        updates.push('category_id = ?');
-        values.push(body.category_id);
-      }
-
-      if (updates.length > 0) {
-        values.push(id);
-        db.prepare(`UPDATE merchant_rules SET ${updates.join(', ')} WHERE id = ?`).run(...values);
-      }
+      editMerchantRule(db, id, body, new Date().toISOString());
 
       res.json({ data: getRule(db, id) });
     } catch (err) {

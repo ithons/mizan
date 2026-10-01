@@ -208,6 +208,44 @@ export interface UpsertMerchantRuleOptions {
 }
 
 /**
+ * The owner editing one rule's pattern or category by id.
+ *
+ * Same provenance as an owner edit through upsertMerchantRule: the rule becomes the owner's, any AI
+ * action it carried stops claiming it, and the change is a revision, because undo and the AI write
+ * guards read the revision log. The PATCH route used to update the row bare.
+ */
+export function editMerchantRule(
+  db: Database.Database,
+  id: string,
+  edit: { pattern?: string; category_id?: string },
+  now: string
+): void {
+  db.transaction(() => {
+    const rule = db.prepare('SELECT pattern, category_id FROM merchant_rules WHERE id = ?').get(id) as
+      | { pattern: string; category_id: string }
+      | undefined;
+    if (!rule) throw new Error(`Merchant rule ${id} does not exist`);
+    const pattern = edit.pattern !== undefined ? edit.pattern.trim() : rule.pattern;
+    const categoryId = edit.category_id ?? rule.category_id;
+    const recategorized = categoryId !== rule.category_id;
+    const renamed = pattern !== rule.pattern;
+    if (!recategorized && !renamed) return;
+
+    db.prepare(`
+      UPDATE merchant_rules SET pattern = ?, category_id = ?, source = 'human', action_id = NULL, updated_at = ?
+      WHERE id = ?
+    `).run(pattern, categoryId, now, id);
+    const revision = db.prepare(`
+      INSERT INTO merchant_rule_revisions
+        (id, rule_id, pattern, from_category_id, to_category_id, source, action_id, operation, created_at)
+      VALUES (?, ?, ?, ?, ?, 'human', NULL, ?, ?)
+    `);
+    if (recategorized) revision.run(uuidv4(), id, pattern, rule.category_id, categoryId, 'recategorize', now);
+    if (renamed) revision.run(uuidv4(), id, pattern, categoryId, categoryId, 'rename', now);
+  })();
+}
+
+/**
  * Create or update a merchant rule, recording every change in `merchant_rule_revisions`.
  *
  * Case-insensitive matching on the pattern is now also a partial unique index (migration 042), so
