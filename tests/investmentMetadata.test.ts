@@ -91,18 +91,22 @@ test('getHoldingHistory returns a holding\'s value-over-time series in date orde
   const db = setupDb();
   t.after(() => db.close());
 
-  db.prepare(`
+  // Relative to today, in UTC like the service's date('now'): fixed dates aged out of the 90-day window.
+  const daysAgo = (n: number): string => new Date(Date.now() - n * 86_400_000).toISOString().slice(0, 10);
+  const older = daysAgo(3);
+  const newer = daysAgo(1);
+  const insert = db.prepare(`
     INSERT INTO holdings_history (id, account_id, security_id, date, quantity, institution_price, institution_value, cost_basis, created_at)
-    VALUES
-      ('h1', 'acct', 'sec_vti', '2026-06-28', 10, 110, 1100, 1000, '2026-06-28T00:00:00.000Z'),
-      ('h2', 'acct', 'sec_vti', '2026-06-30', 10, 120, 1200, 1000, '2026-06-30T00:00:00.000Z'),
-      ('h3', 'acct', 'sec_cash', '2026-06-30', 1, 50, 50, NULL, '2026-06-30T00:00:00.000Z')
-  `).run();
+    VALUES (?, 'acct', ?, ?, ?, ?, ?, ?, ?)
+  `);
+  insert.run('h1', 'sec_vti', older, 10, 110, 1100, 1000, `${older}T00:00:00.000Z`);
+  insert.run('h2', 'sec_vti', newer, 10, 120, 1200, 1000, `${newer}T00:00:00.000Z`);
+  insert.run('h3', 'sec_cash', newer, 1, 50, 50, null, `${newer}T00:00:00.000Z`);
 
   const history = getHoldingHistory(db, 'hold_vti', 90);
   assert.deepEqual(history, [
-    { date: '2026-06-28', quantity: 10, institution_price: 110, institution_value: 1100, cost_basis: 1000 },
-    { date: '2026-06-30', quantity: 10, institution_price: 120, institution_value: 1200, cost_basis: 1000 },
+    { date: older, quantity: 10, institution_price: 110, institution_value: 1100, cost_basis: 1000 },
+    { date: newer, quantity: 10, institution_price: 120, institution_value: 1200, cost_basis: 1000 },
   ]);
 });
 

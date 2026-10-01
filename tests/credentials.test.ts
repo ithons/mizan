@@ -1,10 +1,16 @@
-import test, { mock } from 'node:test';
+import test from 'node:test';
 import assert from 'node:assert';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { Entry } from '@napi-rs/keyring';
-import { MIZAN_DIR } from '../server/src/db/index.js';
+
+// A scratch MIZAN_DIR, set before credentials.ts is loaded. This test used to run against the
+// owner's real .mizan/, writing mizan.key there, and only exercised the migration when a real
+// credentials.json happened to exist for it to decrypt.
+const MIZAN_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'mizan-keymig-'));
+process.env.MIZAN_DIR_OVERRIDE = MIZAN_DIR;
 
 // We import after mocking or inside the test, but since it's a singleton pattern inside credentials,
 // we might need to reset its state or mock before import.
@@ -25,7 +31,10 @@ test('Credentials migration logic with verify-then-delete', async (t) => {
     if (fs.existsSync(keyPath)) {
       fs.unlinkSync(keyPath);
     }
+    fs.rmSync(path.join(MIZAN_DIR, 'credentials.json'), { force: true });
   });
+
+  t.after(() => fs.rmSync(MIZAN_DIR, { recursive: true, force: true }));
 
   await t.test('Retains legacy file if read-back verification fails', async () => {
     // Setup legacy file
@@ -40,10 +49,10 @@ test('Credentials migration logic with verify-then-delete', async (t) => {
 
     // Dynamic import to avoid caching issues if we can, but we'll use a hack to reset module cache or just rely on it
     // Because Node ESM doesn't easily reset module cache, we'll append a query string
-    const { getCredentials } = await import(`../server/src/services/credentials.ts?cacheBust=${Date.now()}`);
+    const { saveCredentials } = await import(`../server/src/services/credentials.ts?cacheBust=${Date.now()}`);
 
-    // Call
-    const creds = getCredentials();
+    // Saving always derives the key; loading skips it when no credentials file exists.
+    saveCredentials({});
     
     // Assert file still exists because verify failed
     assert.ok(fs.existsSync(keyPath), 'Legacy key file should NOT be deleted if verification fails');
@@ -60,10 +69,10 @@ test('Credentials migration logic with verify-then-delete', async (t) => {
     Entry.prototype.setPassword = function (pass: string) { storedPass = pass; };
     Entry.prototype.getPassword = function () { return storedPass; };
 
-    const { getCredentials } = await import(`../server/src/services/credentials.ts?cacheBust=${Date.now()}`);
+    const { saveCredentials } = await import(`../server/src/services/credentials.ts?cacheBust=${Date.now()}`);
 
-    // Call
-    const creds = getCredentials();
+    // Saving always derives the key; loading skips it when no credentials file exists.
+    saveCredentials({});
     
     // Assert file is deleted because verify succeeded
     assert.ok(!fs.existsSync(keyPath), 'Legacy key file SHOULD be deleted if verification succeeds');
