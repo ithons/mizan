@@ -166,6 +166,26 @@ const INCREMENTAL_LOOKBACK_DAYS = 30;
 // backlog as SimpleFIN Bridge will serve instead of the normal incremental window.
 // Institutions still cap what they actually return regardless of what's requested.
 const INITIAL_LOOKBACK_DAYS = 730;
+/** Slack past the last pull, so a row posted late with an earlier date is still inside the window. */
+const LOOKBACK_MARGIN_DAYS = 2;
+
+/**
+ * How many days back a sync asks for.
+ *
+ * At least the incremental window, so pending rows still settle, and otherwise far enough to
+ * reach the last successful pull. A fixed 30 days meant an app left closed for longer never asked
+ * for the rows in between, and nothing said so. Past Bridge's own 90-day cap the request is
+ * capped by Bridge, which says so in `errors`, where the sync records it.
+ */
+export function simplefinLookbackDays(lastSyncedAt: string | null | undefined, nowMs: number): number {
+  if (!lastSyncedAt) return INITIAL_LOOKBACK_DAYS;
+  const lastMs = Date.parse(lastSyncedAt);
+  if (!Number.isFinite(lastMs)) {
+    throw new Error(`simplefin_connections.last_synced_at is not a timestamp: ${lastSyncedAt}`);
+  }
+  const daysSince = Math.ceil(Math.max(0, nowMs - lastMs) / 86_400_000);
+  return Math.max(INCREMENTAL_LOOKBACK_DAYS, daysSince + LOOKBACK_MARGIN_DAYS);
+}
 
 export interface SimplefinSyncResult {
   status: string;
@@ -909,10 +929,10 @@ export async function syncSimplefin(): Promise<SimplefinSyncResult> {
   ).get() as { last_synced_at: string | null } | undefined;
   // last_synced_at IS NULL means either a brand-new connection or an explicit
   // user-requested "force full resync" (routes/simplefin.ts POST /resync nulls it).
-  const isFirstSync = !connection?.last_synced_at;
-  const lookbackDays = isFirstSync ? INITIAL_LOOKBACK_DAYS : INCREMENTAL_LOOKBACK_DAYS;
+  const nowMs = Date.now();
+  const lookbackDays = simplefinLookbackDays(connection?.last_synced_at, nowMs);
 
-  const startDate = Math.floor(Date.now() / 1000) - (lookbackDays * 86400);
+  const startDate = Math.floor(nowMs / 1000) - (lookbackDays * 86400);
   const res = await client.get(`/accounts?start-date=${startDate}`);
 
   return applySimplefinResponse(db, res.data, now);
