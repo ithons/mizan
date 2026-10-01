@@ -33,7 +33,7 @@ conversational LLM chat with full financial context. See [AI Architecture](#ai-a
 
 ## Prerequisites
 
-- Node.js 20+
+- Node.js 22+
 - npm
 
 ## Install & Run
