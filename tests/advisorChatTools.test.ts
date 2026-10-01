@@ -3,12 +3,14 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import Database from 'better-sqlite3';
+import { format, startOfMonth, subMonths } from 'date-fns';
 import {
   ADVISOR_TOOLS,
   CHAT_TOOL_ACTION_PREFIX,
   CHAT_WRITE_KINDS,
   runAdvisorTool,
 } from '../server/src/services/advisorChatTools';
+import { getMonthlyBudgetsWithProjection } from '../server/src/services/budgetProjection';
 
 // The aggregate tools delegate to reporting.ts / budgetProjection.ts / recurringForecast.ts, so
 // this fixture carries the columns those services read: the exclusion flags
@@ -129,6 +131,33 @@ test('get_budgets returns budget vs this-month actual, dollarized', (t) => {
   assert.equal(food?.budget, 300);
   assert.equal(food?.spent, 40);      // the current-month $40 expense (child category rolls up)
   assert.equal(food?.remaining, 260);
+  // The healthy case for the rollover fix below: a budget without rollover is unchanged by it.
+  assert.equal((food as { rollover_balance?: number } | undefined)?.rollover_balance, 0);
+});
+
+// /plan prints "left" as amount + rollover carried in, minus spent (Plan.tsx through
+// `availableBudgetAmount`), and the system prompt uses the same ceiling. The tool used to drop the
+// carryover, so a rollover budget read $612.52 left here and $4,224.18 on /plan for one budget.
+test('get_budgets remaining includes rollover carried in, matching /plan', (t) => {
+  const db = setup();
+  t.after(() => db.close());
+  // Two untouched prior months carry the whole $300 each into this one.
+  const created = format(startOfMonth(subMonths(new Date(), 2)), 'yyyy-MM-dd');
+  db.prepare("UPDATE budgets SET rollover = 1, created_at = ? WHERE id = 'b1'").run(created);
+  db.prepare(`INSERT INTO transactions (id,account_id,date,amount,category_id,created_at,updated_at)
+    VALUES ('tb','chk',?,-4000,'cat_food_restaurants','2026-06-01','2026-06-01')`).run(localToday());
+
+  const now = new Date();
+  const service = getMonthlyBudgetsWithProjection(db, now.getFullYear(), now.getMonth() + 1)
+    .find((budget) => budget.id === 'b1');
+  assert.ok(service && service.rollover_balance > 0, 'fixture must actually carry a rollover');
+
+  const r = runAdvisorTool(db, 'get_budgets', {}) as {
+    budgets: Array<{ category: string; remaining: number; rollover_balance: number }>;
+  };
+  const food = r.budgets.find((b) => b.category === 'Food & Drink');
+  assert.equal(food?.rollover_balance, toDollars(service.rollover_balance));
+  assert.equal(food?.remaining, toDollars(service.amount + service.rollover_balance - (service.spent ?? 0)));
 });
 
 test('list_goals returns progress percentage', (t) => {

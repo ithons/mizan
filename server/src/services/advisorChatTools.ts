@@ -91,7 +91,7 @@ export const ADVISOR_TOOLS: Anthropic.Tool[] = [
   {
     name: 'get_budgets',
     description:
-      'Each monthly budget for the current local month: limit, actual spending so far, remaining, rollover balance, spend already committed via recurring items, and projected month-end spend. Amounts in dollars.',
+      'Each monthly budget for the current local month: limit, actual spending so far, remaining (limit plus rollover carried in, minus spending), rollover balance (0 when the budget does not roll over), spend already committed via recurring items, and projected month-end spend. Amounts in dollars.',
     input_schema: { type: 'object', properties: {} },
   },
   {
@@ -408,11 +408,14 @@ function getBudgetsTool(db: Database.Database): unknown {
       category: budget.category_name ?? 'Unknown category',
       budget: toDollars(budget.amount),
       spent: toDollars(budget.spent ?? 0),
-      remaining: toDollars(budget.amount - (budget.spent ?? 0)),
+      // The ceiling /plan and the system prompt both use: the limit plus what rolled over into
+      // this month. `getMonthlyBudgetsWithProjection` already zeroes rollover_balance when rollover
+      // is off, so a plain budget reads limit minus spent exactly as before.
+      remaining: toDollars(budget.amount + budget.rollover_balance - (budget.spent ?? 0)),
       // Spend already committed for the rest of the month via detected recurring items.
       expected_recurring: toDollars(budget.expected_recurring ?? 0),
       projected_spend: toDollars(budget.projected_spend ?? 0),
-      rollover_balance: toDollars(budget.rollover_balance ?? 0),
+      rollover_balance: toDollars(budget.rollover_balance),
     })),
   };
 }
