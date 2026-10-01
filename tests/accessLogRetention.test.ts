@@ -2,6 +2,11 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import http from 'node:http';
+import { PassThrough } from 'node:stream';
+import express from 'express';
+import morgan from 'morgan';
+import { accessLogPath } from '../server/src/accessLog';
 
 const SRC = readFileSync(join(__dirname, '..', 'server/src/index.ts'), 'utf8')
   .replace(/\/\*[\s\S]*?\*\//g, '')
@@ -23,6 +28,45 @@ test('the persisted access log records the path, never the query string', () => 
   assert.ok(fileFormat, 'the file-backed morgan line is not where this test expects it');
   assert.match(fileFormat[1], /:method :path HTTP/);
   assert.doesNotMatch(fileFormat[1], /:url/, 'the persisted format still carries the query string');
+});
+
+/** One request through a mounted router, returning the line the persisted format writes for it. */
+async function logLineFor(method: string, url: string, respond: 'ok' | 'error'): Promise<string> {
+  const sink = new PassThrough();
+  const lines: string[] = [];
+  sink.on('data', (chunk: Buffer) => lines.push(chunk.toString()));
+  const app = express();
+  morgan.token('path', accessLogPath);
+  app.use(morgan('":method :path"', { stream: sink }));
+  const router = express.Router();
+  router.all('/setup', (_req, res, next) => (respond === 'ok' ? res.json({ data: true }) : next(new Error('boom'))));
+  app.use('/api/simplefin', router);
+  app.use((_err: Error, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
+    res.status(500).json({ error: 'boom' });
+  });
+  const server = http.createServer(app);
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+  try {
+    const addr = server.address();
+    if (!addr || typeof addr === 'string') throw new Error('no server address');
+    await fetch(`http://127.0.0.1:${addr.port}${url}`, { method });
+    // morgan writes on the response's finish, which can trail the client seeing the body.
+    for (let i = 0; i < 50 && lines.length === 0; i++) await new Promise((r) => setTimeout(r, 10));
+  } finally {
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
+  return lines.join('');
+}
+
+test('HEALTHY: a response sent inside a router is logged with its mount prefix', async () => {
+  // This is the ordinary case: every 200 an API router answers. It logged `POST /setup`.
+  assert.match(await logLineFor('POST', '/api/simplefin/setup', 'ok'), /"POST \/api\/simplefin\/setup"/);
+});
+
+test('an error response is logged with its mount prefix too, and neither carries the query', async () => {
+  const line = await logLineFor('GET', '/api/simplefin/setup?search=rent', 'error');
+  assert.match(line, /"GET \/api\/simplefin\/setup"/);
+  assert.doesNotMatch(line, /rent/);
 });
 
 test('the access log is bounded at startup', () => {

@@ -16,6 +16,7 @@ import { reclassifyAutoAccountTypes } from './services/accountClassification';
 import { errorHandler } from './middleware/errorHandler';
 import { buildLocalGuardConfig, localOriginGuard } from './middleware/localGuard';
 import { listenOnHost } from './listen';
+import { accessLogPath } from './accessLog';
 
 import accountsRouter from './routes/accounts';
 import transactionsRouter from './routes/transactions';
@@ -122,7 +123,7 @@ async function main() {
   } catch (err) {
     console.error('[startup] Could not rotate the access log:', err);
   }
-  morgan.token('path', (req) => req.url?.split('?')[0] ?? '');
+  morgan.token('path', accessLogPath);
   const logStream = createWriteStream(logPath, { flags: 'a' });
   app.use(morgan(':remote-addr - :remote-user [:date[clf]] ":method :path HTTP/:http-version" :status :res[content-length] ":referrer" ":user-agent"', { stream: logStream }));
   app.use(morgan('dev'));
