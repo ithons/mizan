@@ -177,3 +177,44 @@ test('the earmark is the whole linked balance, which is exactly what /plan repor
   );
   db.close();
 });
+
+/**
+ * The earmark is a part of the liquid pool, so it can only come from an account the pool counted.
+ *
+ * The goal query joined accounts with no type or visibility filter while `liquid` counts only
+ * visible checking, savings and cash. /plan offers every visible account as a goal's link, so a
+ * savings goal linked to a brokerage subtracted money `liquid` never held: on a copy of the scratch
+ * ledger, relinking the goal to Fidelity Individual moved `free` from 548911 to 260035 with `liquid`
+ * unchanged at 1135049. Linked to a card, it subtracted the amount owed a second time on top of
+ * `cardBalances`.
+ */
+for (const { label, account } of [
+  { label: 'a brokerage', account: { type: 'brokerage', current_balance: 289197 } },
+  { label: 'a credit card', account: { type: 'credit', current_balance: 120000, is_liability: 1 } },
+  { label: 'a hidden savings account', account: { type: 'savings', current_balance: 250000, is_hidden: 1 } },
+]) {
+  test(`a savings goal linked to ${label} earmarks nothing from the liquid pool`, () => {
+    const db = migratedTestDb();
+    insertAccount(db, { id: 'acc_checking', type: 'checking', current_balance: 500000 });
+    insertAccount(db, { id: 'acc_linked', ...account });
+    const before = computeSafeToSpend(db);
+    goalLinkedTo(db, 'acc_linked', { current: 100000, target: 500000 });
+
+    const result = computeSafeToSpend(db);
+    assert.equal(result.allocatedGoals, 0, 'earmarked money the liquid pool never counted');
+    assert.equal(result.free, before.free, 'linking a goal outside the pool moved free to spend');
+    db.close();
+  });
+}
+
+test('HEALTHY: a savings goal linked to a cash account still earmarks its balance', () => {
+  const db = migratedTestDb();
+  insertAccount(db, { id: 'acc_checking', type: 'checking', current_balance: 500000 });
+  insertAccount(db, { id: 'acc_cash', type: 'cash', current_balance: 40000 });
+  goalLinkedTo(db, 'acc_cash', { current: 0, target: 500000 });
+
+  const result = computeSafeToSpend(db);
+  assert.equal(result.allocatedGoals, 40000);
+  assert.equal(result.free, 540000 - 40000);
+  db.close();
+});

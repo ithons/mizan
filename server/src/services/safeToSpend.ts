@@ -2,8 +2,21 @@ import type Database from 'better-sqlite3';
 import { buildRecurringForecast } from './recurringForecast';
 import { calculateGoalProgress, type GoalProgressInput } from './goalProgress';
 
-/** The columns `calculateGoalProgress` needs, plus the linked account's balance. */
-type GoalEarmarkRow = GoalProgressInput;
+/** The columns `calculateGoalProgress` needs, plus enough of the linked account to know whether
+ * the liquid pool counted it. */
+type GoalEarmarkRow = GoalProgressInput & {
+  account_id: string | null;
+  account_type: string | null;
+  account_is_hidden: number | null;
+  account_is_liability: number | null;
+};
+
+const LIQUID_TYPES = new Set(['checking', 'savings', 'cash']);
+
+/** The one definition of the liquid pool, read by both `liquid` and the goal earmark. */
+function isInLiquidPool(account: { type: string; is_hidden: number; is_liability: number }): boolean {
+  return account.is_hidden === 0 && account.is_liability === 0 && LIQUID_TYPES.has(account.type);
+}
 
 /**
  * "Free to spend": what is left after every claim already made on the liquid pool.
@@ -63,12 +76,11 @@ export function computeSafeToSpend(
   const forecastDays = inputs.forecastDays ?? 30;
 
   const accounts = db.prepare(`
-    SELECT type, current_balance, is_liability
+    SELECT type, current_balance, is_liability, is_hidden
     FROM accounts
     WHERE is_hidden = 0 AND type != 'closed'
-  `).all() as Array<{ type: string; current_balance: number; is_liability: number }>;
+  `).all() as Array<{ type: string; current_balance: number; is_liability: number; is_hidden: number }>;
 
-  const liquidTypes = new Set(['checking', 'savings', 'cash']);
   let liquid = 0;
   let cardBalances = 0;
   for (const account of accounts) {
@@ -78,7 +90,7 @@ export function computeSafeToSpend(
       // pool, not another claim on it. Math.abs() here counted three cards in credit on
       // 2026-07-29 as $852.89 of debt, so the shortfall it reported was $1,705.78 too deep.
       cardBalances += account.current_balance;
-    } else if (liquidTypes.has(account.type)) {
+    } else if (isInLiquidPool(account)) {
       liquid += account.current_balance;
     }
   }
@@ -117,16 +129,25 @@ export function computeSafeToSpend(
   //
   // Savings goals only, deliberately: a debt-payoff goal's progress is already carried by
   // `cardBalances` above, and counting it here would subtract the same money twice.
+  //
+  // A goal linked to an account the pool did not count earmarks nothing. /plan offers every visible
+  // account as a link, and a savings goal linked to a brokerage subtracted brokerage money `liquid`
+  // never held (on a copy of the scratch ledger, `free` fell by $2,891.97 with `liquid` unchanged);
+  // linked to a card it subtracted the amount owed a second time on top of `cardBalances`. Falling
+  // back to `current_amount` would not be right either, because for a linked goal the column is not
+  // the saved amount, and wherever the money is, it is not in this pool.
   const goals = db.prepare(`
-    SELECT g.type, g.target_amount, g.current_amount, g.starting_amount, a.current_balance AS account_balance
+    SELECT g.type, g.target_amount, g.current_amount, g.starting_amount, g.account_id,
+           a.current_balance AS account_balance, a.type AS account_type,
+           a.is_hidden AS account_is_hidden, a.is_liability AS account_is_liability
     FROM goals g
     LEFT JOIN accounts a ON a.id = g.account_id
     WHERE g.is_archived = 0 AND g.type = 'savings'
   `).all() as GoalEarmarkRow[];
-  const allocatedGoals = goals.reduce(
-    (sum, goal) => sum + calculateGoalProgress(goal).current_amount,
-    0
-  );
+  const allocatedGoals = goals.reduce((sum, goal) => {
+    if (goal.account_id !== null && !earmarksFromPool(goal)) return sum;
+    return sum + calculateGoalProgress(goal).current_amount;
+  }, 0);
 
   return {
     liquid,
@@ -137,4 +158,12 @@ export function computeSafeToSpend(
     free: liquid - cardBalances - upcomingBills - allocatedBudgets - allocatedGoals,
     forecastDays,
   };
+}
+
+function earmarksFromPool(goal: GoalEarmarkRow): boolean {
+  return goal.account_type !== null && isInLiquidPool({
+    type: goal.account_type,
+    is_hidden: goal.account_is_hidden ?? 1,
+    is_liability: goal.account_is_liability ?? 1,
+  });
 }
