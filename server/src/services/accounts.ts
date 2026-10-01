@@ -16,6 +16,36 @@ type AccountRow = Record<string, unknown> & {
 // per-account breakdown out of net_worth_snapshots, which meant an account's chart described when
 // the app was running rather than when its money moved.
 
+/**
+ * Hide a provider's accounts on disconnect, marking the ones this hid.
+ *
+ * An account the owner already hid is left unmarked, so a reconnect cannot unhide it.
+ * Returns how many were hidden.
+ */
+export function hideAccountsForDisconnect(
+  db: Database.Database,
+  connectionType: 'simplefin' | 'coinbase',
+  now: string
+): number {
+  return db.prepare(`
+    UPDATE accounts SET is_hidden = 1, hidden_by_disconnect = 1, updated_at = ?
+    WHERE connection_type = ? AND is_hidden = 0
+  `).run(now, connectionType).changes;
+}
+
+/**
+ * Undo a disconnect's hide once a sync has seen the account again.
+ *
+ * Without this, reconnecting refreshed the balances of accounts that stayed out of every total.
+ * A no-op on any account the disconnect did not hide.
+ */
+export function restoreAfterReconnect(db: Database.Database, accountId: string, now: string): void {
+  db.prepare(`
+    UPDATE accounts SET is_hidden = 0, hidden_by_disconnect = 0, updated_at = ?
+    WHERE id = ? AND hidden_by_disconnect = 1
+  `).run(now, accountId);
+}
+
 // The list endpoint coerces the SQLite integer booleans to real booleans (so the client
 // doesn't render a literal "0"); the single-account responses deliberately return the raw
 // row, matching long-standing behavior. Don't unify the two without checking the client.
@@ -158,7 +188,8 @@ export function updateAccount(db: Database.Database, id: string, input: UpdateAc
     values.push(input.color);
   }
   if (input.is_hidden !== undefined) {
-    updates.push('is_hidden = ?');
+    // The owner has now decided this account's visibility, so a reconnect must not override it.
+    updates.push('is_hidden = ?', 'hidden_by_disconnect = 0');
     values.push(input.is_hidden ? 1 : 0);
   }
   if (input.sort_order !== undefined) {

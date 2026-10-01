@@ -143,7 +143,7 @@ export function CoinbaseSection() {
         open={showDisconnectConfirm}
         onClose={() => setShowDisconnectConfirm(false)}
         title="Disconnect Coinbase"
-        description="This will remove your Coinbase API credentials. Existing Coinbase accounts and transactions will be hidden, not deleted."
+        description="This will remove your Coinbase API credentials. Existing Coinbase accounts and transactions will be hidden, not deleted, and come back when you reconnect."
         confirmLabel="Disconnect Coinbase"
         onConfirm={() => disconnectMutation.mutate()}
         isPending={disconnectMutation.isPending}

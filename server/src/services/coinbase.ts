@@ -9,6 +9,7 @@ import { balancesDiffer, type AccountBalanceChange } from './balanceChanges';
 import { toCents, toDollars } from './money';
 import { isoToLocalDate } from './dates';
 import { isBelowBackfillFloor } from './backfillFloor';
+import { restoreAfterReconnect } from './accounts';
 
 export interface CoinbaseSyncResult {
   accountCount: number;
@@ -637,6 +638,8 @@ export async function syncCoinbase(
       currency: 'USD',
     });
   }
+  // Every page answered, so the connection works again whether or not it reported any coin.
+  restoreAfterReconnect(db, accountId, now);
   if (!feedWasEmpty) {
     db.prepare('UPDATE accounts SET current_balance = ?, updated_at = ? WHERE id = ?').run(totalCents, now, accountId);
     console.log(`[coinbase] Consolidated account: ${coinCount} coin${coinCount === 1 ? '' : 's'} held, ${zeroedCount} zeroed, ${toDollars(totalCents).toFixed(2)} total`);

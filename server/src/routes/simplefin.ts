@@ -26,6 +26,7 @@ import {
   type SimplefinRelinkProposal,
 } from '../services/simplefinRelink';
 import { runFullSync, isSyncActive } from '../services/syncManager';
+import { hideAccountsForDisconnect } from '../services/accounts';
 import { listSyncRuns } from '../services/syncHistory';
 import axios from 'axios';
 import { PROVIDER_HTTP_TIMEOUT_MS } from '../services/httpTimeouts';
@@ -157,9 +158,7 @@ router.delete('/connection', (_req: Request, res: Response, next: NextFunction):
     const db = getDb();
     const now = new Date().toISOString();
 
-    db.prepare(
-      "UPDATE accounts SET is_hidden = 1, updated_at = ? WHERE connection_type = 'simplefin'"
-    ).run(now);
+    hideAccountsForDisconnect(db, 'simplefin', now);
 
     db.prepare(
       "UPDATE simplefin_connections SET status = 'removed'"

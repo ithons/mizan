@@ -1,4 +1,5 @@
 import axios from 'axios';
+import { restoreAfterReconnect } from './accounts';
 import { PROVIDER_HTTP_TIMEOUT_MS } from './httpTimeouts';
 import { v4 as uuidv4 } from 'uuid';
 import { epochSecondsToLocalDate } from './dates';
@@ -828,6 +829,7 @@ export function applySimplefinResponse(
         now,
         existingAcct.id
       );
+      restoreAfterReconnect(db, existingAcct.id, now);
     } else {
       accountId = uuidv4();
       const guessed = guessAccountTypeAndLiability(acct.name, institutionName);

@@ -12,6 +12,7 @@ import {
   syncCoinbase,
 } from '../services/coinbase';
 import { takeSnapshot } from '../services/snapshot';
+import { hideAccountsForDisconnect } from '../services/accounts';
 import {
   finishSyncRun,
   recordSyncRunItem,
@@ -166,13 +167,10 @@ router.delete('/disconnect', (_req: Request, res: Response, next: NextFunction):
     const db = getDb();
     const now = new Date().toISOString();
 
-    // Hide coinbase accounts
-    db.prepare(
-      "UPDATE accounts SET is_hidden = 1, updated_at = ? WHERE connection_type = 'coinbase'"
-    ).run(now);
-
-    // Remove credentials
+    // Credentials first, so a store that cannot be written refuses before any account is hidden.
     removeCoinbaseCredentials();
+
+    hideAccountsForDisconnect(db, 'coinbase', now);
 
     // Mark connection as removed
     db.prepare(

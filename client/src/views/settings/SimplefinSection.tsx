@@ -57,7 +57,7 @@ export function SimplefinSection() {
   };
 
   const handleDisconnect = async () => {
-    if (!confirm('Are you sure you want to disconnect SimpleFIN?')) return;
+    if (!confirm('Disconnect SimpleFIN? Its accounts are hidden from every total, not deleted, and come back when you reconnect. Accounts you hid yourself stay hidden.')) return;
     setLoading(true);
     try {
       await simplefinApi.disconnect();
