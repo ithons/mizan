@@ -58,9 +58,16 @@ export interface AccountReconciliation {
    * with no gap over 8 days.
    *
    * Bounded by one calendar day of activity at each end, so it cannot mask a mid-horizon gap.
+   *
+   * This is the RAW boundary, and it is not always part of `residual`: when the boundary rows are
+   * already inside both balances it explains nothing. Only `boundaryApplicableTo(residual,
+   * boundary_amount)` is subtracted.
    */
   boundary_amount: number;
-  /** residual minus boundary_amount. This is the figure judged, and both parts stay visible. */
+  /**
+   * residual minus `boundaryApplicableTo(residual, boundary_amount)`, which may only shrink the
+   * residual toward zero. This is the figure judged, and both parts stay visible.
+   */
   adjusted_residual: number;
   /**
    * The ledger's own transaction direction disagrees with how the balance moved.
@@ -78,7 +85,8 @@ export interface AccountReconciliation {
    * Fidelity Individual is a brokerage. flowConservation.ts carries that case, by comparing two
    * ledger rows to each other instead of to a balance.
    *
-   * Judged on the BOUNDARY-ADJUSTED ledger, `explained_delta + boundary_amount`, for the reason
+   * Judged on the BOUNDARY-ADJUSTED ledger, `explained_delta` plus the clamped boundary
+   * `boundaryApplicableTo` returns (not the raw `boundary_amount`), for the reason
    * `boundary_amount` exists. An ordinary checking month whose horizon opens on a payday has that
    * payroll outside `explained` and inside the balance movement, which is enough on its own to
    * point the two sides in opposite directions with nothing at all missing from the ledger.
@@ -151,8 +159,8 @@ export interface ReconciliationReport {
  * direction is not readable off the total; it is on each account's own `adjusted_residual`.
  *
  * `total_residual` sums raw `residual` over every account, which is the two things the filter above
- * deliberately removes: a market-driven account's residual IS its price move, and `boundary_amount`
- * is the horizon-cut artifact `adjusted_residual` subtracts. Publishing it next to `unreconciled`
+ * deliberately removes: a market-driven account's residual IS its price move, and the clamped part
+ * of `boundary_amount` is the horizon-cut artifact `adjusted_residual` subtracts. Publishing it next to `unreconciled`
  * reads as the size of the gap, and the two disagree on a clean ledger. Re-derived 2026-07-31
  * against a copy of `.mizan/mizan.db` at migration 054 taken with `.backup`, `reconcileAccounts(db)`
  * over 14 accounts returns `total_residual` 134748 cents ($1,347.48) with `unreconciled` empty:

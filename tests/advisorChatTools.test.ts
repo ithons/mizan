@@ -850,6 +850,48 @@ test('a transaction dated on the first snapshot is reported as a boundary artifa
   assert.deepEqual(tool.unreconciled, []);
 });
 
+// `boundaryApplicableTo` clamps the boundary so it can only shrink a residual toward zero, and the
+// field meanings used to tell the model adjusted_residual = residual - boundary_amount anyway. On
+// a ledger that reconciles to the cent with a row on the last snapshot date, the model was handed
+// boundary_amount -$500 and an identity that would put adjusted_residual at +$500.
+test('HEALTHY: a reconciled account with a boundary-dated row is handed an identity that holds', (t) => {
+  const db = migratedTestDb();
+  t.after(() => db.close());
+
+  const { checking } = seedReconciliation(db);
+  // Dated on the last snapshot and already inside that balance: explained and observed agree.
+  insertTransaction(db, { account_id: checking, date: '2026-07-30', amount: 50000 });
+
+  const tool = runAdvisorTool(db, 'get_reconciliation', {}) as {
+    unreconciled: unknown[];
+    accounts: Array<{
+      account_id: string;
+      residual: number;
+      boundary_amount: number;
+      boundary_applied: number;
+      adjusted_residual: number;
+      direction_conflict: boolean;
+    }>;
+    field_meanings: Record<string, string>;
+  };
+
+  const account = tool.accounts.find((a) => a.account_id === checking);
+  assert.ok(account);
+  assert.equal(account.residual, 0);
+  assert.equal(account.boundary_amount, -500, 'fixture must carry a boundary the clamp discards');
+  assert.equal(account.boundary_applied, 0);
+  assert.equal(account.adjusted_residual, 0);
+  assert.equal(account.direction_conflict, false);
+  assert.deepEqual(tool.unreconciled, []);
+  for (const row of tool.accounts) {
+    assert.equal(row.residual - row.boundary_applied, row.adjusted_residual, `${row.account_id} identity`);
+  }
+  assert.match(tool.field_meanings.adjusted_residual, /residual minus boundary_applied/);
+  assert.doesNotMatch(tool.field_meanings.adjusted_residual, /minus boundary_amount/);
+  assert.match(tool.field_meanings.direction_conflict, /explained_delta \+ boundary_applied/);
+  assert.doesNotMatch(tool.field_meanings.direction_conflict, /\+ boundary_amount/);
+});
+
 // ─── Weight ───
 //
 // Tool results land uncached inside a loop that runs up to 8 rounds, so the size of an answer is

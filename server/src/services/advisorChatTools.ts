@@ -18,7 +18,7 @@ import { revertableRevisionsForAction } from './categoryWrites';
 import { merchantMatchesRulePattern } from './rules';
 import { getHoldingHistory } from './investmentMetadata';
 import { getSyncRunDetail, listSyncRuns } from './syncHistory';
-import { reconcileAccounts, unreconciledResidual } from './reconciliation';
+import { boundaryApplicableTo, reconcileAccounts, unreconciledResidual } from './reconciliation';
 import { buildSchemaDoc, describeTables, getCategoryProvenance, transactionReportInclusion } from './schemaDoc';
 import type { AdvisorToolSpec } from './aiProviders/types';
 import type { AdvisorDraftAction, AdvisorDraftPayload } from '../../../shared/types';
@@ -194,7 +194,7 @@ export const ADVISOR_TOOLS: Anthropic.Tool[] = [
   {
     name: 'get_reconciliation',
     description:
-      'Does the ledger explain each account\'s balance? Compares measured balance sheets against the transactions between them, cumulatively, in dollars. Read adjusted_residual, not residual: boundary_amount is the part that is an artifact of where the horizon was cut, and it is reported separately rather than hidden. A market-driven account (brokerage, IRA, crypto wallet) moves when prices move with no transaction recording it, so its residual is expected and it is never listed as unreconciled. direction_conflict means the ledger and the balance moved in OPPOSITE directions on an account whose balance only moves when a transaction moves it; it is not a claim that a specific transaction is missing or mis-signed. Every derived field is defined in the "field_meanings" block of the result: read it before quoting one. An empty "unreconciled" list means nothing is unexplained beyond tolerance; it does not mean every number is right.',
+      'Does the ledger explain each account\'s balance? Compares measured balance sheets against the transactions between them, cumulatively, in dollars. Read adjusted_residual, not residual: boundary_applied is the part that is an artifact of where the horizon was cut, and it is reported separately rather than hidden. A market-driven account (brokerage, IRA, crypto wallet) moves when prices move with no transaction recording it, so its residual is expected and it is never listed as unreconciled. direction_conflict means the ledger and the balance moved in OPPOSITE directions on an account whose balance only moves when a transaction moves it; it is not a claim that a specific transaction is missing or mis-signed. Every derived field is defined in the "field_meanings" block of the result: read it before quoting one. An empty "unreconciled" list means nothing is unexplained beyond tolerance; it does not mean every number is right.',
     input_schema: {
       type: 'object',
       properties: { since: { type: 'string', description: 'Only use measured snapshots on or after this date, YYYY-MM-DD.' } },
@@ -735,6 +735,7 @@ const RECONCILIATION_MONEY_FIELDS = [
   'explained_delta',
   'residual',
   'boundary_amount',
+  'boundary_applied',
   'adjusted_residual',
   'largest_window_residual',
 ] as const;
@@ -750,10 +751,12 @@ const RECONCILIATION_FIELD_MEANINGS: Record<string, string> = {
   explained_delta: 'Dollars the transactions in that horizon account for, same net-worth sign convention.',
   residual: 'observed_delta minus explained_delta. Not the figure to judge: read adjusted_residual.',
   boundary_amount:
-    'The part of residual that is an artifact of where the horizon was cut. The window is date > previous AND date <= current, so a row dated on the FIRST snapshot is outside explained_delta while its balance effect is inside the horizon. Reported separately rather than netted away.',
-  adjusted_residual: 'residual minus boundary_amount. THIS is the figure judged, and what unreconciled is decided on.',
+    'Net activity dated on the first snapshot minus net activity dated on the last: the most that where the horizon was cut could account for. The window is date > previous AND date <= current, so a row dated on the FIRST snapshot is outside explained_delta while its balance effect may be inside the horizon. It is NOT always part of residual: when the boundary rows are already inside both balances it explains nothing, so it is never subtracted as is. Read boundary_applied for the part that was.',
+  boundary_applied:
+    'The part of boundary_amount actually removed from residual. It may only shrink residual toward zero: 0 when residual is 0 or the two have opposite signs, otherwise boundary_amount capped at the size of residual.',
+  adjusted_residual: 'residual minus boundary_applied. THIS is the figure judged, and what unreconciled is decided on.',
   direction_conflict:
-    'The ledger and the balance point OPPOSITE WAYS: observed_delta and the boundary-adjusted ledger movement (explained_delta + boundary_amount) have different signs, both are non-zero, and the ledger side is over $5.00. It says the transactions claim money came IN while the balance went DOWN, or the reverse. Reported for non-market-driven accounts ONLY, because on a brokerage observed_delta is transfers plus market profit and loss and a deposit during a down month produces opposite signs with nothing wrong at all. It is a direction disagreement, NOT a claim that a transaction is missing or mis-signed, and it does not on its own put the account in unreconciled.',
+    'The ledger and the balance point OPPOSITE WAYS: observed_delta and the boundary-adjusted ledger movement (explained_delta + boundary_applied) have different signs, both are non-zero, and the ledger side is over $5.00. It says the transactions claim money came IN while the balance went DOWN, or the reverse. Reported for non-market-driven accounts ONLY, because on a brokerage observed_delta is transfers plus market profit and loss and a deposit during a down month produces opposite signs with nothing wrong at all. It is a direction disagreement, NOT a claim that a transaction is missing or mis-signed, and it does not on its own put the account in unreconciled.',
   largest_window_residual: 'The largest single-window residual, roughly the size of the provider posting lag.',
   residual_ratio:
     'adjusted_residual as a share of the transaction volume through the account (a ratio, not dollars). An account is listed in unreconciled when it is not market-driven, its adjusted_residual exceeds $5.00, and either this ratio exceeds 0.02 or it is NULL because no volume moved at all.',
@@ -770,8 +773,14 @@ const RECONCILIATION_FIELD_MEANINGS: Record<string, string> = {
 
 function getReconciliationTool(db: Database.Database, input: ToolInput): unknown {
   const report = reconcileAccounts(db, { since: str(input.since) });
+  // The service publishes the raw boundary and folds the clamped one into adjusted_residual. The
+  // clamped one is published here too, so the identity the field meanings state is one the payload
+  // satisfies: residual - boundary_applied is adjusted_residual on every row.
   const dollarize = (account: (typeof report.accounts)[number]): Record<string, unknown> =>
-    dollarizeFields(account as unknown as Record<string, unknown>, RECONCILIATION_MONEY_FIELDS);
+    dollarizeFields(
+      { ...account, boundary_applied: boundaryApplicableTo(account.residual, account.boundary_amount) },
+      RECONCILIATION_MONEY_FIELDS
+    );
 
   return {
     measured_snapshot_count: report.measured_snapshot_count,
@@ -785,7 +794,7 @@ function getReconciliationTool(db: Database.Database, input: ToolInput): unknown
     unreconciled: report.unreconciled.map(dollarize),
     accounts: report.accounts.map(dollarize),
     reading:
-      'adjusted_residual is the figure judged; boundary_amount is the part explained by where the horizon was cut and is reported separately rather than netted away silently. Market-driven accounts are never listed as unreconciled because a price move is not a gap in the ledger. unreconciled_residual is the total of what is unexplained; residual_all_accounts is a wider sum that includes both exemptions and is not a gap.',
+      'adjusted_residual is the figure judged; boundary_applied is the part of residual explained by where the horizon was cut, and both it and the raw boundary_amount are reported rather than netted away silently. Market-driven accounts are never listed as unreconciled because a price move is not a gap in the ledger. unreconciled_residual is the total of what is unexplained; residual_all_accounts is a wider sum that includes both exemptions and is not a gap.',
     field_meanings: RECONCILIATION_FIELD_MEANINGS,
   };
 }
