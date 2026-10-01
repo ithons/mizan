@@ -110,7 +110,8 @@ export function correctLiabilitySigns(db: Database.Database, now: string): Liabi
       // correction has already run, not the provider's number, so a card sitting in credit records
       // a negative here and refusing it would leave that card unanchored forever. What makes an
       // adoption safe is the exactness triple below, and that holds against an anchor of any sign.
-      // Walking newest to oldest already keeps an anchor from before the correction out of reach.
+      // What keeps an anchor from before the correction out of reach is that the walk stops at the
+      // first anchor that agrees with the stored direction; see the break below.
       if (typeof anchorValue !== 'number' || !Number.isFinite(anchorValue)) continue;
 
       const strict = (sumAfter.get(account.id, snapshot.date) as { total: number }).total;
@@ -149,7 +150,10 @@ export function correctLiabilitySigns(db: Database.Database, now: string): Liabi
       // disagree only about which way it points.
       if (expectedOwed === 0) continue;
       if (account.current_balance === 0) continue;
-      if (Math.sign(expectedOwed) === Math.sign(account.current_balance)) continue;
+      // An agreeing anchor settles the direction, so the walk ends here. Moving on let an older,
+      // longer chain overrule it: a card whose snapshots recorded the poisoned sign before the
+      // correction ran, then the right one after, would be flipped back to the poisoned sign.
+      if (Math.sign(expectedOwed) === Math.sign(account.current_balance)) break;
       if (Math.abs(expectedOwed) !== Math.abs(account.current_balance)) {
         // The two sides disagree about direction and about magnitude, so the magnitude cannot be
         // adopted. Moving on in silence would report the direction as settled, and this is the case

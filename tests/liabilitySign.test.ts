@@ -316,3 +316,49 @@ test('HEALTHY: a liability whose stored sign already agrees with the ledger is l
   );
   db.close();
 });
+
+/**
+ * Newest anchor wins, including when it agrees. An agreeing newest anchor used to be skipped like a
+ * missing one, so an older snapshot of the opposite sign (Discover's measured snapshots carry exactly
+ * that: +$563.26 on 2026-07-27..29, then -$563.26 from 07-30) could overrule it and flip a balance
+ * that was right into one that was wrong, with a sync_changes row calling the damage a correction.
+ */
+test('an older opposite-signed anchor cannot overrule a newer anchor that agrees with the stored balance', () => {
+  const db = migratedTestDb();
+  const card = insertAccount(db, { type: 'credit', current_balance: 5000, is_liability: 1 });
+  snapshot(db, 's_old', '2026-07-01', { [card]: -5000 });
+  snapshot(db, 's_new', '2026-07-20', { [card]: 5000 });
+
+  const report = correctLiabilitySigns(db, NOW);
+  assert.deepEqual(report.corrections, []);
+  assert.deepEqual(report.unverifiable, []);
+  assert.equal(balanceOf(db, card), 5000);
+  db.close();
+});
+
+test('the same holds for a card in credit whose newest anchor agrees', () => {
+  const db = migratedTestDb();
+  const card = insertAccount(db, { type: 'credit', current_balance: -5000, is_liability: 1 });
+  snapshot(db, 's_old', '2026-07-01', { [card]: 5000 });
+  snapshot(db, 's_new', '2026-07-20', { [card]: -5000 });
+
+  const report = correctLiabilitySigns(db, NOW);
+  assert.deepEqual(report.corrections, []);
+  assert.deepEqual(report.unverifiable, []);
+  assert.equal(balanceOf(db, card), -5000);
+  db.close();
+});
+
+test('a newest snapshot that never recorded the card still lets an older anchor settle it', () => {
+  const db = migratedTestDb();
+  const card = insertAccount(db, { type: 'credit', current_balance: 582, is_liability: 1 });
+  snapshot(db, 's_old', '2026-07-23', { [card]: 0 });
+  snapshot(db, 's_new', '2026-07-26', {});
+  insertTransaction(db, { account_id: card, date: '2026-07-24', amount: 582 });
+
+  const report = correctLiabilitySigns(db, NOW);
+  assert.equal(report.corrections.length, 1);
+  assert.equal(report.corrections[0].anchor_date, '2026-07-23');
+  assert.equal(balanceOf(db, card), -582);
+  db.close();
+});
