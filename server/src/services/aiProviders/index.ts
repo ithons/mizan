@@ -3,6 +3,7 @@ import { anthropicProvider } from './anthropic';
 import { geminiProvider } from './gemini';
 import { openaiProvider } from './openai';
 import { isProviderConfigured, resolveCredential } from './credentials';
+import type { AdvisorProviderStatus } from '../../../../shared/types';
 import { AI_PROVIDER_IDS, type AiProvider, type AiProviderId } from './types';
 
 const PROVIDERS: Readonly<Record<AiProviderId, AiProvider>> = {
@@ -28,16 +29,16 @@ export function providerForModel(modelId: string): AiProvider {
   return PROVIDERS[caps.provider];
 }
 
-/** Per-provider credential status, for the settings surface. Never returns a secret. */
-export function providerStatuses(): Array<{
-  id: AiProviderId;
-  configured: boolean;
-  source: ReturnType<typeof resolveCredential>['source'];
-}> {
+/**
+ * Per-provider credential status, for the settings surface. Never returns a secret.
+ * Typed as the shared interface because the client reads these responses as it; an inline
+ * shape here once sent `source` where the client reads `credential_source`.
+ */
+export function providerStatuses(): AdvisorProviderStatus[] {
   return AI_PROVIDER_IDS.map((id) => ({
     id,
     configured: isProviderConfigured(id),
-    source: resolveCredential(id).source,
+    credential_source: resolveCredential(id).source,
   }));
 }
 

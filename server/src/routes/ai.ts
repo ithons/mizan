@@ -736,7 +736,7 @@ router.delete('/providers/:provider/key', (req: Request, res: Response, next: Ne
     }
     clearProviderKey(provider);
     const after = providerStatuses().find((p) => p.id === provider);
-    if (after?.source === 'env') {
+    if (after?.credential_source === 'env') {
       res.status(409).json({
         error: `The stored key was removed, but ${provider} is still configured from the environment.`,
       });
