@@ -395,6 +395,80 @@ test('a ledger where every row records its source says nothing about unrecorded 
 
 // ── The model's own actions and their outcomes ─────────────────────────────
 
+/**
+ * A budget the owner set back by hand was invisible to the model.
+ *
+ * The section tells the model that where the owner changed something back their choice is correct,
+ * but only category writes were ever checked for that. On the scratch ledger an `update_budget`
+ * to $850 for Shopping was confirmed on 2026-09-01, the owner put it back to $500 on 2026-09-18,
+ * and the history said only "update_budget: 1 (1 after the owner confirmed a proposal)". The next
+ * pass proposed $900.
+ */
+function appliedTargetAction(db: Database.Database, id: string, kind: string, payload: object): void {
+  db.prepare(`
+    INSERT INTO advisor_actions (id, kind, label, summary, source, payload, created_at)
+    VALUES (?, ?, 'target', 'target', 'user_confirm', ?, '2026-09-01T12:00:00.000Z')
+  `).run(id, kind, JSON.stringify(payload));
+}
+
+function shoppingBudget(db: Database.Database, amountCents: number): void {
+  db.prepare(`
+    INSERT INTO budgets (id, category_id, amount, period, rollover, rollover_balance, created_at, updated_at)
+    VALUES ('budget_shop', 'cat_shop', ?, 'monthly', 0, 0, '2026-08-01T00:00:00.000Z', '2026-09-18T20:37:30.000Z')
+  `).run(amountCents);
+}
+
+function emergencyGoal(db: Database.Database, targetCents: number): void {
+  db.prepare(`
+    INSERT INTO goals (id, name, type, target_amount, current_amount, created_at, updated_at)
+    VALUES ('goal_ef', 'Emergency fund', 'savings', ?, 0, '2026-08-01T00:00:00.000Z', '2026-09-18T20:37:30.000Z')
+  `).run(targetCents);
+}
+
+test('a budget or goal target the model set and that now reads otherwise is named', (t) => {
+  const db = migratedTestDb();
+  t.after(() => { _setDbForTesting(null); db.close(); });
+  _setDbForTesting(db);
+  appliedTargetAction(db, 'act_budget', 'update_budget', { kind: 'update_budget', category_id: 'cat_shop', amount: 850, period: 'monthly', rollover: false });
+  shoppingBudget(db, 50000);
+  appliedTargetAction(db, 'act_goal', 'update_goal_target', { kind: 'update_goal_target', goal_id: 'goal_ef', target_amount: 12000 });
+  emergencyGoal(db, 10000_00);
+
+  const context = buildFinancialContext();
+  assert.match(context, /Targets you set that now read otherwise, with no later action of yours setting them:/);
+  assert.match(context, /Shopping budget: you set \$850\.00 on 2026-09-01, it now reads \$500\.00/);
+  assert.match(context, /Emergency fund goal target: you set \$12,000\.00 on 2026-09-01, it now reads \$10,000\.00/);
+});
+
+test('HEALTHY: a target that still reads what the model set carries no reversal line', (t) => {
+  const db = migratedTestDb();
+  t.after(() => { _setDbForTesting(null); db.close(); });
+  _setDbForTesting(db);
+  appliedTargetAction(db, 'act_budget', 'update_budget', { kind: 'update_budget', category_id: 'cat_shop', amount: 850, period: 'monthly', rollover: false });
+  shoppingBudget(db, 85000);
+  appliedTargetAction(db, 'act_goal', 'update_goal_target', { kind: 'update_goal_target', goal_id: 'goal_ef', target_amount: 12000 });
+  emergencyGoal(db, 12000_00);
+
+  const context = buildFinancialContext();
+  assert.match(context, /update_budget: 1 \(1 after the owner confirmed a proposal\)/);
+  assert.doesNotMatch(context, /now read otherwise/);
+  assert.doesNotMatch(context, /it now reads/);
+});
+
+test('HEALTHY: a later action of the model\'s own is not reported as the owner reversing an earlier one', (t) => {
+  const db = migratedTestDb();
+  t.after(() => { _setDbForTesting(null); db.close(); });
+  _setDbForTesting(db);
+  appliedTargetAction(db, 'act_budget_1', 'update_budget', { kind: 'update_budget', category_id: 'cat_shop', amount: 850, period: 'monthly', rollover: false });
+  db.prepare(`
+    INSERT INTO advisor_actions (id, kind, label, summary, source, payload, created_at)
+    VALUES ('act_budget_2', 'update_budget', 'target', 'target', 'user_confirm', ?, '2026-09-10T12:00:00.000Z')
+  `).run(JSON.stringify({ kind: 'update_budget', category_id: 'cat_shop', amount: 600, period: 'monthly', rollover: false }));
+  shoppingBudget(db, 60000);
+
+  assert.doesNotMatch(buildFinancialContext(), /it now reads/);
+});
+
 test('applied actions report how many of their category writes still stand', () => {
   const db = migratedTestDb();
   _setDbForTesting(db);
@@ -942,4 +1016,54 @@ test('HEALTHY: a list that fits says nothing about truncation', (t) => {
   assert.match(section, /Next scheduled items:/);
   assert.doesNotMatch(section, /\d+ of \d+, soonest first/, 'a complete list claimed to be partial');
   assert.doesNotMatch(section, /\.\.\.and \d+ more/, 'a complete list reported an omission');
+});
+
+/**
+ * An overdue occurrence is not upcoming income.
+ *
+ * The list printed `is_confirmed ? 'confirmed' : 'detected'` and never `status`, so a weekly
+ * paycheck seven days late on the scratch ledger read "2026-09-23: mass inst payroll ppd +$544.18
+ * (Paycheck, weekly, confirmed)" under "next 60 days", inside a Scheduled income that counted it,
+ * while get_upcoming_bills told the model the same row was overdue. `is_confirmed` is about the
+ * pattern; whether this occurrence has arrived is a different fact and the line has to carry it.
+ */
+test('an overdue occurrence says it is overdue, and the totals say how much of them is overdue', (t) => {
+  const db = migratedTestDb();
+  t.after(() => { _setDbForTesting(null); db.close(); });
+  _setDbForTesting(db);
+  insertAccount(db, { id: 'acct', type: 'checking', current_balance: 500000 });
+  const paycheck = insertCategory(db, { name: 'Paycheck Test', is_income: 1 });
+  const late = daysAgo(7);
+  db.prepare(`
+    INSERT INTO recurring_patterns
+      (id, merchant_name, category_id, average_amount, frequency, last_seen, next_expected,
+       is_active, is_confirmed, transaction_count, created_at, updated_at)
+    VALUES ('p_late', 'payroll deposit', ?, 50000, 'weekly', ?, ?, 1, 1, 8, '2026-01-01', '2026-01-01')
+  `).run(paycheck, daysAgo(14), late);
+
+  const ctx = buildFinancialContext();
+  const section = ctx.slice(ctx.indexOf('### Forward Cash Flow'));
+
+  const line = section.split('\n').find((l) => l.includes(`${late}: payroll deposit`)) ?? '';
+  assert.match(line, /confirmed pattern/);
+  assert.match(line, new RegExp(`overdue: expected ${late}, no posting matched to it yet`));
+  assert.match(
+    section,
+    /Overdue and counted in the totals above: \$500\.00 in, \$0\.00 out\./,
+    'the totals must say they include money that has not arrived'
+  );
+});
+
+test('HEALTHY: a forecast with nothing late says nothing about being overdue', (t) => {
+  const db = migratedTestDb();
+  t.after(() => { _setDbForTesting(null); db.close(); });
+  _setDbForTesting(db);
+  insertAccount(db, { id: 'acct', type: 'checking', current_balance: 500000 });
+  weeklyPattern(db, 'p_in', 'payroll deposit', 50000);
+
+  const ctx = buildFinancialContext();
+  const section = ctx.slice(ctx.indexOf('### Forward Cash Flow'));
+
+  assert.match(section, /payroll deposit [+-]\$500\.00 \(Uncategorized, weekly, confirmed pattern\)/);
+  assert.doesNotMatch(section, /overdue/i);
 });

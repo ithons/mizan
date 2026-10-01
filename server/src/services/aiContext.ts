@@ -10,7 +10,7 @@ import type {
   TransactionReviewSummary,
 } from '../../../shared/types';
 import { getDb } from '../db/index';
-import { toDollars, toDollarsOrNull } from './money';
+import { toCents, toDollars, toDollarsOrNull } from './money';
 import { calculateGoalProgress } from './goalProgress';
 import { buildRecurringForecast } from './recurringForecast';
 import { getMonthlyBudgetsWithProjection } from './budgetProjection';
@@ -602,6 +602,65 @@ interface RepeatPatternRow {
   categories: number;
 }
 
+interface TargetActionRow {
+  label: string;
+  payload_amount: number | null;
+  current_amount: number;
+  applied_at: string;
+}
+
+/**
+ * Budgets and goal targets the model set that no longer read what it set.
+ *
+ * The history's header tells the model the owner's reversal is correct, and for a long time only
+ * category writes were checked for one. A Shopping budget confirmed at $850 was put back to $500 by
+ * hand and the history said only "update_budget: 1", so the next pass proposed $900: an owner
+ * carve-out kind, re-proposed against the owner's own figure.
+ *
+ * Only the newest action per target is compared, so a later action of the model's own is never
+ * read as a reversal of an earlier one. Payload amounts are dollars and the columns are cents, so
+ * the comparison is made after `toCents`, never in floats. A budget is matched by category alone,
+ * as `confirmBudget` matches it, and skipped when the category holds more than one budget row,
+ * because then which row the action wrote cannot be told from what is stored.
+ */
+function pushTargetsSetOtherwise(db: Database.Database, lines: string[]): void {
+  const newest = (kind: string, key: string) => `
+    a.kind = '${kind}' AND NOT EXISTS (
+      SELECT 1 FROM advisor_actions b
+      WHERE b.kind = a.kind
+        AND json_extract(b.payload, '${key}') = json_extract(a.payload, '${key}')
+        AND (b.created_at > a.created_at OR (b.created_at = a.created_at AND b.id > a.id))
+    )`;
+  const budgets = db.prepare(`
+    SELECT c.name || ' budget' AS label, json_extract(a.payload, '$.amount') AS payload_amount,
+           bu.amount AS current_amount, a.created_at AS applied_at
+    FROM advisor_actions a
+    JOIN budgets bu ON bu.category_id = json_extract(a.payload, '$.category_id')
+    JOIN categories c ON c.id = bu.category_id
+    WHERE ${newest('update_budget', '$.category_id')}
+      AND (SELECT COUNT(*) FROM budgets x WHERE x.category_id = bu.category_id) = 1
+  `).all() as TargetActionRow[];
+  const goals = db.prepare(`
+    SELECT g.name || ' goal target' AS label, json_extract(a.payload, '$.target_amount') AS payload_amount,
+           g.target_amount AS current_amount, a.created_at AS applied_at
+    FROM advisor_actions a
+    JOIN goals g ON g.id = json_extract(a.payload, '$.goal_id')
+    WHERE ${newest('update_goal_target', '$.goal_id')}
+  `).all() as TargetActionRow[];
+
+  const moved = [...budgets, ...goals].filter(
+    (row) => typeof row.payload_amount === 'number' && toCents(row.payload_amount) !== row.current_amount
+  );
+  if (moved.length === 0) return;
+
+  lines.push('  Targets you set that now read otherwise, with no later action of yours setting them:');
+  for (const row of moved) {
+    lines.push(
+      `    ${row.label}: you set ${fmt(row.payload_amount as number)} on ${row.applied_at.slice(0, 10)}, it now reads ${fmt(toDollars(row.current_amount))}`
+    );
+  }
+}
+
 /**
  * What the model has already done, and what became of it.
  *
@@ -649,7 +708,7 @@ function pushAdvisorHistory(db: Database.Database, lines: string[]): void {
       : '### Your Own History With This Ledger'
   );
   lines.push(
-    '  Your own history, so you can stop repeating yourself. Where the owner has changed something back, their choice is the correct one.'
+    '  Your own history, so you can stop repeating yourself. Where this section shows the owner changed something back, their choice is the correct one.'
   );
   for (const row of byKind) {
     const split = [
@@ -710,6 +769,8 @@ function pushAdvisorHistory(db: Database.Database, lines: string[]): void {
       );
     }
   }
+
+  pushTargetsSetOtherwise(db, lines);
 
   const ruleTotals = db.prepare(`
     SELECT COUNT(*) AS proposals, COUNT(DISTINCT lower(json_extract(payload, '$.pattern'))) AS patterns
@@ -1013,6 +1074,19 @@ export function buildFinancialContext(): string {
     lines.push(`  Scheduled net:    ${fmt(toDollars(forecast.net))}`);
     // `liquid` is dollars (from dollarized balances); forecast.net is cents.
     lines.push(`  Liquid after scheduled net: ${fmt(liquid + toDollars(forecast.net))}`);
+    // The forecast counts an overdue occurrence in its totals, so the totals above include money
+    // whose date has already passed without arriving. Saying how much keeps the model from reading
+    // a late paycheck as income it can plan on. Skipped rows are out of the totals and stay out here.
+    const overdue = forecast.occurrences.filter(
+      (o) => o.status === 'overdue' && o.adjustment_action !== 'skip'
+    );
+    if (overdue.length > 0) {
+      const overdueIn = overdue.reduce((sum, o) => (o.amount > 0 ? sum + o.amount : sum), 0);
+      const overdueOut = overdue.reduce((sum, o) => (o.amount < 0 ? sum - o.amount : sum), 0);
+      lines.push(
+        `  Overdue and counted in the totals above: ${fmt(toDollars(overdueIn))} in, ${fmt(toDollars(overdueOut))} out.`
+      );
+    }
     // The totals three lines above cover EVERY occurrence; this list does not. Say so, with the
     // count and the money, or the model reads the list as the whole of what is scheduled and
     // silently disagrees with the totals printed directly above it. On the live ledger the
@@ -1028,7 +1102,13 @@ export function buildFinancialContext(): string {
     );
     for (const occurrence of shown) {
       const sign = occurrence.amount >= 0 ? '+' : '-';
-      const status = occurrence.is_confirmed ? 'confirmed' : 'detected';
+      // `is_confirmed` is about the pattern. Whether this occurrence has arrived is `status`, and
+      // the forecast marks it overdue when the pattern's next expected date has passed without
+      // recurring detection matching a posting to it.
+      const pattern = occurrence.is_confirmed ? 'confirmed pattern' : 'detected pattern';
+      const status = occurrence.status === 'overdue'
+        ? `${pattern}, overdue: expected ${occurrence.expected_date}, no posting matched to it yet`
+        : pattern;
       const category = occurrence.category_name ?? 'Uncategorized';
       const adjustment = occurrence.adjustment_action
         ? `, ${occurrence.adjustment_action} adjustment from ${occurrence.original_expected_date ?? occurrence.expected_date}`
