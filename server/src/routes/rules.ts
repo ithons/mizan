@@ -185,9 +185,17 @@ router.patch(
         return;
       }
 
-      const existing = db.prepare('SELECT id FROM merchant_rules WHERE id = ?').get(id);
+      const existing = db.prepare('SELECT id, retired_at FROM merchant_rules WHERE id = ?').get(id) as
+        | { id: string; retired_at: string | null }
+        | undefined;
       if (!existing) {
         res.status(404).json({ error: 'Rule not found' });
+        return;
+      }
+      // A retired rule is a record of what a merchant used to be filed as; editing it would rewrite
+      // that history, and it files nothing either way.
+      if (existing.retired_at) {
+        res.status(409).json({ error: 'This rule is retired. Create a new rule instead of editing a retired one.' });
         return;
       }
 
@@ -199,6 +207,16 @@ router.patch(
       if (body.category_id && !categoryExists(db, body.category_id)) {
         res.status(404).json({ error: 'Category not found' });
         return;
+      }
+
+      if (body.pattern !== undefined) {
+        const holder = db.prepare(
+          'SELECT id FROM merchant_rules WHERE lower(pattern) = lower(?) AND retired_at IS NULL AND id != ?'
+        ).get(body.pattern.trim(), id);
+        if (holder) {
+          res.status(409).json({ error: `Another rule already matches "${body.pattern.trim()}". Edit that rule instead.` });
+          return;
+        }
       }
 
       editMerchantRule(db, id, body, new Date().toISOString());

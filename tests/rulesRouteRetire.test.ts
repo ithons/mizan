@@ -119,3 +119,29 @@ test('HEALTHY: a PATCH that changes nothing writes no revision and leaves proven
     assert.deepEqual(db.prepare('SELECT source, action_id FROM merchant_rules WHERE id = ?').get(ruleId), { source: 'ai', action_id: 'act_1' });
   });
 });
+
+/** The id of a rule the call created or matched; a null here means the fixture itself is wrong. */
+function ruleIdOf(result: { ruleId: string | null }): string {
+  if (!result.ruleId) throw new Error('upsertMerchantRule returned no rule id');
+  return result.ruleId;
+}
+
+test('PATCH refuses a retired rule and a pattern another live rule holds, instead of a 500', async () => {
+  const db = migratedTestDb();
+  const cat = insertCategory(db, { name: 'Coffee' });
+  const a = ruleIdOf(upsertMerchantRule(db, 'Blue Bottle', cat, '2026-01-01T00:00:00.000Z', { source: 'human' }));
+  const b = ruleIdOf(upsertMerchantRule(db, 'Starbucks', cat, '2026-01-01T00:00:00.000Z', { source: 'human' }));
+  db.prepare("UPDATE merchant_rules SET retired_at = '2026-02-01T00:00:00.000Z' WHERE id = ?").run(a);
+
+  await withServer(db, async (base) => {
+    const patch = (id: string, body: unknown) => fetch(`${base}/api/rules/${id}`, {
+      method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body),
+    });
+    assert.equal((await patch(a, { pattern: 'Blue Bottle Coffee' })).status, 409);
+    const c = ruleIdOf(upsertMerchantRule(db, 'Peets', cat, '2026-01-01T00:00:00.000Z', { source: 'human' }));
+    const collide = await patch(c, { pattern: 'starbucks' });
+    assert.equal(collide.status, 409);
+    assert.match(((await collide.json()) as { error: string }).error, /Another rule already matches/);
+    assert.equal((db.prepare('SELECT pattern FROM merchant_rules WHERE id = ?').get(b) as { pattern: string }).pattern, 'Starbucks');
+  });
+});
