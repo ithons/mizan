@@ -209,9 +209,10 @@ function deleteBlockers(db: ReturnType<typeof getDb>, id: string): DeleteBlocker
   // Retired rules count: the cascade does not spare them, and a retired rule is the only record of
   // what a merchant used to be filed as. That is also why merge is the only remedy named: retiring
   // a rule from Settings leaves it counted here, and repointing one (re-entering its pattern under
-  // another category in Settings) appends a `merchant_rule_revisions` row naming this category,
-  // which the revisions blocker below then counts. "Repoint the rule first" (which this used to
-  // say) was advice that could be followed and still never unblocked the delete.
+  // another category in Settings) does not unblock the delete either: the rule's history in
+  // `merchant_rule_revisions` already names this category from the moment the rule was created,
+  // and the revisions blocker below counts it. "Repoint the rule first" (which this used to say)
+  // was advice that could be followed and still never unblocked the delete.
   const rules = countReferences(db, 'SELECT COUNT(*) as count FROM merchant_rules WHERE category_id = ?', id);
   if (rules > 0) {
     blockers.push({

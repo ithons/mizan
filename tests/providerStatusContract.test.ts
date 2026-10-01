@@ -21,6 +21,13 @@ const MIZAN_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'mizan-provider-status-'
 process.env.MIZAN_DIR_OVERRIDE = MIZAN_DIR;
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const { migratedTestDb } = require('./helpers/schema') as typeof import('./helpers/schema');
+// Checked at load, before any test below can write: a hoisted import would have frozen the owner's
+// directory into db/index.ts and the DELETE would run against their credential store.
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+const { MIZAN_DIR: STORE_IN_USE } = require('../server/src/db/index') as typeof import('../server/src/db/index');
+if (path.resolve(STORE_IN_USE) !== path.resolve(MIZAN_DIR)) {
+  throw new Error(`refusing to run: credential store resolves to ${STORE_IN_USE}, not the scratch ${MIZAN_DIR}`);
+}
 const ENV_KEYS = ['ANTHROPIC_API_KEY', 'OPENAI_API_KEY', 'GEMINI_API_KEY'] as const;
 
 async function withEnvKeys(fn: () => Promise<void>): Promise<void> {
@@ -88,9 +95,4 @@ test('DELETE of a key the environment still supplies says so instead of reportin
       assert.match(body.error, /still configured from the environment/);
     })
   );
-});
-
-test('the credential store this file writes is the scratch one, never the owner\'s', async () => {
-  const { MIZAN_DIR: inUse } = await import('../server/src/db/index');
-  assert.equal(path.resolve(inUse), path.resolve(MIZAN_DIR));
 });
