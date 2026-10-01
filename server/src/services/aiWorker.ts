@@ -13,6 +13,8 @@ import type {
 } from '../../../shared/types';
 import { buildRecurringForecast } from './recurringForecast';
 import { toDollars } from './money';
+import { countTransactionsHeldByAllRules } from './rules';
+import { format } from 'date-fns';
 import { AiWorkerDraftSchema } from '../../../shared/schemas';
 import { describeAutonomyForPrompt } from './draftAutonomy';
 import type { ProviderUsage } from './aiProviders/types';
@@ -184,6 +186,19 @@ function lastPassStartedAt(db: Database.Database, runId: string): string | null 
 }
 
 /**
+ * The instant before which everything was already in front of a pass.
+ *
+ * One watermark for every leg of the gate, so "new" means the same thing for a detection, a row, a
+ * rule and a recurring occurrence.
+ */
+export function reviewWatermark(db: Database.Database, runId: string, startedAt: string): string {
+  return (
+    lastPassStartedAt(db, runId) ??
+    new Date(Date.parse(startedAt) - FIRST_PASS_LOOKBACK_HOURS * 3600_000).toISOString()
+  );
+}
+
+/**
  * The detections this pass has not already seen.
  *
  * `sync_changes` where `change_type = 'detected'` is not a delta. Every such row on the owner's
@@ -203,20 +218,14 @@ function lastPassStartedAt(db: Database.Database, runId: string): string | null 
  * sync finalizes, so that is where its `started_at` lands):
  *   -> 11 of the 107 runs with a predecessor carried a detection whose exact text was not already
  *      on record. The other 96 restated a backlog a previous pass had already been shown.
- * This is about the detections leg only. The gate is an OR, and the recurring legs are left alone
- * deliberately: an overdue or adjusted recurring item is something this job's declared `writes` can
- * actually act on, where no draft kind it may emit addresses a transfer pair or a duplicate group.
- * On this database today that leg alone holds the gate open (one overdue pattern, 'mass inst
- * payroll ppd'), so a quiet pass is not yet the common case and nothing here should claim it is.
+ * The other legs of the gate are windowed by the same watermark; see `collectBackgroundReview`.
  */
 export function newDetections(
   db: Database.Database,
   runId: string,
   startedAt: string
 ): DetectedChange[] {
-  const since =
-    lastPassStartedAt(db, runId) ??
-    new Date(Date.parse(startedAt) - FIRST_PASS_LOOKBACK_HOURS * 3600_000).toISOString();
+  const since = reviewWatermark(db, runId, startedAt);
 
   return db
     .prepare(
@@ -491,7 +500,7 @@ const DECLINED_CATEGORIES_SQL = `(
  * This is the widening, and its whole safety is in the WHERE clause, so read it before
  * changing it. Separated from the pass so the exclusions can be asserted without a model call.
  */
-export function refilableTransactions(db: Database.Database): PromptRefilableTransaction[] {
+export function refilableTransactions(db: Database.Database, since?: string): PromptRefilableTransaction[] {
   //   category_source IN ('rule','heuristic')  the two machine authors that are not this model.
   //     NULL is excluded and that is the load-bearing exclusion: migration 041 says NULL means the
   //     author was never recorded, not that a machine wrote it. On a copy of .mizan/mizan.db,
@@ -528,34 +537,69 @@ export function refilableTransactions(db: Database.Database): PromptRefilableTra
   //     disappears from the model while sitting in the owner's own uncategorized queue.
   //     `stale = 1` dismissals are omitted for the reason `ownerDeclinedProposal` gives: declining
   //     a late suggestion is not declining the merchant.
+  //
+  //   ORDER  rows that entered the pool since `since` first, when a watermark is given. Those are
+  //     what opened the gate, and ordered by date alone a re-check that refiled an old row would
+  //     put it below the fifteen newest and buy a pass that never shows it.
+  const freshFirst = since === undefined ? '' : `${ENTERED_POOL_SINCE_SQL} DESC,`;
+  const params = since === undefined ? [] : [since, since];
   return db.prepare(`
     SELECT t.id, t.merchant_name, t.original_name, t.amount, t.date,
            t.category_id, c.name AS category_name, t.category_source,
            ${DECLINED_CATEGORIES_SQL} AS declined_categories
     FROM transactions t
     JOIN categories c ON c.id = t.category_id
-    WHERE t.pending = 0
+    WHERE ${REFILABLE_POOL_SQL}
+    ORDER BY ${freshFirst} t.date DESC
+    LIMIT 15
+  `).all(...params) as PromptRefilableTransaction[];
+}
+
+const REFILABLE_POOL_SQL = `t.pending = 0
       AND t.manually_categorized = 0
       AND t.category_source IN ('rule', 'heuristic')
       AND NOT EXISTS (
         SELECT 1 FROM transaction_category_revisions r
          WHERE r.transaction_id = t.id AND r.to_source = 'ai'
-      )
-    ORDER BY t.date DESC
-    LIMIT 15
-  `).all() as PromptRefilableTransaction[];
+      )`;
+
+/**
+ * A row reached its current category after the watermark: it was inserted then, or a category
+ * write landed then. Every category write appends a revision (categoryWrites.ts), so the revision
+ * log answers when the row last moved; `created_at` covers a row inserted already filed.
+ */
+const ENTERED_POOL_SINCE_SQL = `(t.created_at > ? OR EXISTS (
+        SELECT 1 FROM transaction_category_revisions er
+         WHERE er.transaction_id = t.id AND er.created_at > ?
+      ))`;
+
+/**
+ * How many refilable rows no earlier pass could have been shown.
+ *
+ * The pool itself is a standing state: a row the model looked at and judged fine stays in it, so
+ * gating on the pool bought a call every sync for the same fifteen rows.
+ */
+export function refilableEnteredSince(db: Database.Database, since: string): number {
+  const row = db.prepare(`
+    SELECT COUNT(*) AS n FROM transactions t
+    JOIN categories c ON c.id = t.category_id
+    WHERE ${REFILABLE_POOL_SQL} AND ${ENTERED_POOL_SINCE_SQL}
+  `).get(since, since) as { n: number };
+  return row.n;
 }
 
 /**
- * The model's own live rules, the only ones it may propose retiring.
+ * The model's own live rules that currently file nothing, the only ones it may propose retiring.
  *
  * Owner rules are deliberately absent: `checkRuleIsRetirableByAi` refuses them, and listing what
- * will be refused invites the proposal it refuses. Exported for the same reason
+ * will be refused invites the proposal it refuses. A rule that holds rows is absent for the same
+ * reason, since the guard refuses that too, and the held count comes from the same definition the
+ * guard asks (`countTransactionsHeldByAllRules` agrees with `countTransactionsHeldByRule` per rule). Exported for the same reason
  * `refilableTransactions` is: the exclusion below is the interesting part and a test that copies the
  * SQL into itself proves only that the copy agrees with itself.
  */
 export function retirableOwnRules(db: Database.Database): PromptRule[] {
-  return db.prepare(`
+  const rules = db.prepare(`
     SELECT r.id, r.pattern, c.name AS category_name
     FROM merchant_rules r
     LEFT JOIN categories c ON c.id = r.category_id
@@ -576,8 +620,55 @@ export function retirableOwnRules(db: Database.Database): PromptRule[] {
            AND COALESCE(f.stale, 0) <> 1
       )
     ORDER BY r.created_at DESC
-    LIMIT 25
   `).all() as PromptRule[];
+  const held = countTransactionsHeldByAllRules(db);
+  return rules.filter((rule) => held.get(rule.id) === 0).slice(0, 25);
+}
+
+/**
+ * Whether the owner's rules changed since the watermark.
+ *
+ * A rule comes to hold nothing when a rule that outranks it appears, or when the rows it held are
+ * renamed or deleted. Only the first is a rule change, and only it is looked for here: a rule
+ * emptied by an edit to its rows is still listed by any pass that runs, but does not by itself
+ * open the gate. Without some window, one inert rule the model chose to keep held the gate open on
+ * every sync for as long as it lived.
+ *
+ * Owner rules only. The model's own create_merchant_rule applies unattended, so counting its rules
+ * made every pass that wrote one buy the next pass, whenever any inert rule of its own existed.
+ * The cost of that exclusion: a new model rule that outranks an older model rule does not by itself
+ * reopen the gate for the older one. A retirement is not looked for either, since retiring a rule
+ * can only give rows back to the rules below it, never take them away.
+ */
+export function rulesChangedSince(db: Database.Database, since: string): boolean {
+  return db.prepare(`
+    SELECT 1 FROM merchant_rules
+     WHERE source <> 'ai' AND (created_at > ? OR updated_at > ?)
+     LIMIT 1
+  `).get(since, since) !== undefined;
+}
+
+/**
+ * Overdue or owner-adjusted occurrences no earlier pass could have been shown.
+ *
+ * An occurrence becomes overdue at the local midnight after its expected date (the forecast's own
+ * `expected_date < today`), so it is new when that midnight falls after the watermark. An
+ * adjustment is new when it was written after the watermark.
+ */
+export function recurringChangedSince(
+  db: Database.Database,
+  occurrences: readonly RecurringForecastOccurrence[],
+  since: string
+): RecurringForecastOccurrence[] {
+  const sinceLocalDate = format(new Date(since), 'yyyy-MM-dd');
+  const adjustedSince = new Set(
+    (db.prepare('SELECT id FROM recurring_occurrence_adjustments WHERE updated_at > ?').all(since) as Array<{ id: string }>)
+      .map((row) => row.id)
+  );
+  return occurrences.filter((o) =>
+    (o.status === 'overdue' && o.expected_date >= sinceLocalDate)
+    || (o.adjustment_id != null && adjustedSince.has(o.adjustment_id))
+  );
 }
 
 function promptOccurrence(o: RecurringForecastOccurrence): PromptOccurrence {
@@ -636,8 +727,11 @@ export const collectBackgroundReview: AiJobCollect = async ({ db, assignment, ru
   `).all() as PromptTransaction[];
   const uncategorizedCount = reviewSummary.queues.find(q => q.id === 'uncategorized')?.count ?? 0;
 
+  // Everything before the watermark was already in front of a pass that completed or found nothing.
+  const since = reviewWatermark(db, runId, startedAt);
+
   // 1b. Rows a MACHINE filed that the model may refile. See refilableTransactions.
-  const recategorizable = refilableTransactions(db);
+  const recategorizable = refilableTransactions(db, since);
 
   // 1c. The model's OWN live rules, so it can name one to retire.
   const ownRules = retirableOwnRules(db);
@@ -663,17 +757,27 @@ export const collectBackgroundReview: AiJobCollect = async ({ db, assignment, ru
   // about a delta a month old.
   const freshDetects = newDetections(db, runId, startedAt);
 
+  // The gate opens on what changed since the last pass, never on a standing state, except for the
+  // uncategorized leg: a row nothing has filed holds it open for as long as it stays unfiled. Each
+  // other leg used to test the whole pool, and each pool was never empty. Measured 2026-10-01 on a
+  // copy of .mizan-scratch/mizan.db at migration 059:
+  //   SELECT COUNT(*) FROM merchant_rules WHERE retired_at IS NULL AND source = 'ai'      -> 23
+  //   the refilableTransactions WHERE clause, unlimited                                 -> 231 rows
+  //   SELECT status, skipped_reason, COUNT(*) FROM ai_runs
+  //    WHERE job = 'background_review' AND started_at >= '2026-08-15' GROUP BY 1, 2
+  //     -> completed 100, failed 6, running 1, skipped/already_running 1; no 'nothing_to_do'.
+  // What was already shown is still listed whenever a pass does run; it just no longer buys one.
+  const recurringNews = recurringChangedSince(db, [...overdueRecurring, ...adjustedRecurring], since);
   if (
     uncategorizedTransactions.length === 0
-    && recategorizable.length === 0
-    && ownRules.length === 0
-    && adjustedRecurring.length === 0
-    && overdueRecurring.length === 0
+    && refilableEnteredSince(db, since) === 0
+    && !(ownRules.length > 0 && rulesChangedSince(db, since))
+    && recurringNews.length === 0
     && freshDetects.length === 0
   ) {
     return {
       status: 'nothing_to_do',
-      detail: 'no transactions to file or refile, no rules of its own to review, no adjusted or overdue recurring items, no new detections',
+      detail: 'nothing uncategorized, nothing refilable, retirable or recurring that an earlier pass had not been shown, no new detections',
     };
   }
 

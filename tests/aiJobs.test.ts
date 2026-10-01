@@ -20,11 +20,14 @@ import {
   buildBackgroundReviewPrompt,
   collectBackgroundReview,
   newDetections,
+  retirableOwnRules,
   type BackgroundReviewPromptInput,
   type DetectedChange,
 } from '../server/src/services/aiWorker';
 import { _setDbForTesting } from '../server/src/db/index';
 import { upsertMerchantRule } from '../server/src/services/rules';
+import { providerForModel } from '../server/src/services/aiProviders';
+import { checkRuleIsRetirableByAi } from '../server/src/services/aiWriteGuards';
 import { migratedTestDb, insertTransaction } from './helpers/schema';
 
 // The framework's job is to make a job's declarations true rather than descriptive. Two of them
@@ -947,6 +950,201 @@ test('HEALTHY: a sync with nothing new records that it looked and calls no model
   assert.equal(row.status, 'skipped');
   assert.equal(row.skipped_reason, 'nothing_to_do');
   assert.equal(row.input_tokens, null, 'no call was made');
+});
+
+// ─── The gate opens on a delta, not on a standing state ──────────────────────
+//
+// The gate used to open whenever the model had ANY live rule, any machine-filed row or any overdue
+// item, all of which are standing states; the measurement is beside the gate in aiWorker.ts. These
+// run the real collector with the provider's call replaced, so a gate that opens is a recorded
+// call, never a network request.
+
+interface StubbedCall {
+  calls: string[];
+  restore: () => void;
+}
+
+/** `replies` are returned in order, one per call; once they run out every call answers no drafts. */
+function stubModelCall(replies: readonly unknown[][] = []): StubbedCall {
+  const provider = providerForModel(AI_JOBS.background_review.model);
+  const original = provider.generateStructured;
+  const calls: string[] = [];
+  provider.generateStructured = async (request) => {
+    const drafts = replies[calls.length] ?? [];
+    calls.push(request.systemText);
+    return {
+      text: JSON.stringify({ drafts }),
+      truncated: false,
+      usage: { uncachedInputTokens: 1, outputTokens: 1, cacheReadTokens: 0, cacheWriteTokens: null },
+    };
+  };
+  return { calls, restore: () => { provider.generateStructured = original; } };
+}
+
+function minutesAgo(minutes: number): string {
+  return new Date(Date.now() - minutes * 60_000).toISOString();
+}
+
+function localDate(daysFromToday: number): string {
+  const d = new Date();
+  d.setDate(d.getDate() + daysFromToday);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+/** A completed pass, so the next one has something to measure "new" against. */
+function insertCompletedPass(db: Database.Database, startedAt: string): void {
+  db.prepare(`
+    INSERT INTO ai_runs (id, job, trigger_source, model, digest_section, status, started_at, completed_at, created_at)
+    VALUES (?, 'background_review', 'after_sync', 'claude-sonnet-5', 'review', 'completed', ?, ?, ?)
+  `).run(`run_prior_${startedAt}`, startedAt, startedAt, startedAt);
+}
+
+function insertMonthlyPattern(db: Database.Database, nextExpected: string): string {
+  const id = `rp_${nextExpected}`;
+  db.prepare(`
+    INSERT INTO recurring_patterns
+      (id, merchant_name, category_id, average_amount, frequency, last_seen, next_expected,
+       is_active, is_confirmed, transaction_count, created_at, updated_at)
+    VALUES (?, ?, 'cat_income_paycheck', 250000, 'monthly', ?, ?, 1, 1, 6, ?, ?)
+  `).run(id, `Payroll ${nextExpected}`, nextExpected, nextExpected, minutesAgo(60 * 24 * 90), minutesAgo(60 * 24 * 90));
+  return id;
+}
+
+/**
+ * The owner's ledger in its ordinary quiet state, every leg already shown to a previous pass.
+ *
+ * The model's one rule holds the row it was written for; that row is machine-filed and so stays in
+ * the refile pool; a payroll pattern went overdue days ago. All of it predates the last pass.
+ */
+function quietLedger(db: Database.Database): { aiRuleId: string; lastPass: string } {
+  insertTransaction(db, { merchant_name: 'Qvist Nordheim', category_id: 'cat_health', category_source: 'rule' });
+  const aiRuleId = upsertMerchantRule(db, 'Qvist Nordheim', 'cat_health', minutesAgo(60 * 24 * 30), { source: 'ai' }).ruleId as string;
+  insertMonthlyPattern(db, localDate(-40));
+  const lastPass = minutesAgo(5);
+  insertCompletedPass(db, lastPass);
+  return { aiRuleId, lastPass };
+}
+
+async function runRealPass(db: Database.Database): Promise<Awaited<ReturnType<typeof runAiJob>>> {
+  return runAiJob(AI_JOBS.background_review, collectBackgroundReview, { db, trigger: 'after_sync' });
+}
+
+test('HEALTHY: a ledger whose every item a previous pass already saw calls no model', async (t) => {
+  const db = migratedTestDb();
+  const env = withCredentials();
+  const stub = stubModelCall();
+  _setDbForTesting(db);
+  t.after(() => { stub.restore(); db.close(); env.restore(); });
+
+  const { aiRuleId } = quietLedger(db);
+  assert.equal(checkRuleIsRetirableByAi(db, aiRuleId).ok, false, 'fixture: the rule holds its row');
+
+  const outcome = await runRealPass(db);
+  assert.equal(outcome.status === 'skipped' ? outcome.reason : outcome.status, 'nothing_to_do');
+  assert.deepEqual(stub.calls, [], 'a standing state bought a model call');
+});
+
+test('the model is only offered rules the retire guard would accept', (t) => {
+  // Listing a rule that holds rows invites a proposal checkRuleIsRetirableByAi refuses, which is
+  // the argument retirableOwnRules already made for leaving out the owner's rules.
+  const db = migratedTestDb();
+  t.after(() => db.close());
+  const { aiRuleId } = quietLedger(db);
+  const inert = upsertMerchantRule(db, 'Brandt Okafor', 'cat_health', minutesAgo(60), { source: 'ai' }).ruleId as string;
+
+  assert.deepEqual(retirableOwnRules(db).map((r) => r.id), [inert]);
+  assert.equal(checkRuleIsRetirableByAi(db, inert).ok, true);
+  assert.equal(checkRuleIsRetirableByAi(db, aiRuleId).ok, false);
+});
+
+test('a row machine-filed since the last pass opens the gate, and is listed first', async (t) => {
+  const db = migratedTestDb();
+  const env = withCredentials();
+  const stub = stubModelCall();
+  _setDbForTesting(db);
+  t.after(() => { stub.restore(); db.close(); env.restore(); });
+
+  quietLedger(db);
+  const fresh = insertTransaction(db, {
+    merchant_name: 'Lindqvist Hardware', category_id: 'cat_shop', category_source: 'heuristic', date: '2020-01-01',
+  });
+  db.prepare('UPDATE transactions SET created_at = ? WHERE id = ?').run(minutesAgo(1), fresh);
+
+  const outcome = await runRealPass(db);
+  assert.equal(outcome.status, 'completed');
+  assert.equal(stub.calls.length, 1);
+  // Dated years back on purpose: ordered by date alone it would sort last and could fall off the
+  // list, leaving a pass paid for by a row it never shows.
+  assert.ok(lineUnderHeading(stub.calls[0], REFILABLE_HEADING).includes(`id: "${fresh}"`));
+});
+
+test('an owner rule that leaves the model\'s rule holding nothing opens the gate once', async (t) => {
+  const db = migratedTestDb();
+  const env = withCredentials();
+  const stub = stubModelCall();
+  _setDbForTesting(db);
+  t.after(() => { stub.restore(); db.close(); env.restore(); });
+
+  const { aiRuleId } = quietLedger(db);
+  upsertMerchantRule(db, 'Qvist Nordheim Oy', 'cat_pets', minutesAgo(1), { source: 'human' });
+  assert.equal(checkRuleIsRetirableByAi(db, aiRuleId).ok, true, 'fixture: the owner rule outranks it');
+
+  await runRealPass(db);
+  assert.equal(stub.calls.length, 1);
+  assert.ok(stub.calls[0].includes(`id: "${aiRuleId}"`));
+
+  // The model saw it and left it. That is an answer, and the next sync is quiet.
+  const second = await runRealPass(db);
+  assert.equal(second.status === 'skipped' ? second.reason : second.status, 'nothing_to_do');
+  assert.equal(stub.calls.length, 1);
+});
+
+test('HEALTHY: a pass\'s own rule, applied unattended, does not buy the next pass', async (t) => {
+  // The ordinary thing a pass does is write. A gate keyed on "the rule set changed" opened again for
+  // the pass's own create_merchant_rule while any inert rule of its own existed, which on the
+  // owner's ledger is always: an echo pass per pass that wrote a rule.
+  const db = migratedTestDb();
+  const env = withCredentials();
+  quietLedger(db);
+  upsertMerchantRule(db, 'Brandt Okafor', 'cat_health', minutesAgo(60 * 24 * 30), { source: 'ai' });
+  const row = insertTransaction(db, {
+    merchant_name: 'Lindqvist Hardware', category_id: 'cat_shop', category_source: 'heuristic',
+  });
+  db.prepare('UPDATE transactions SET created_at = ? WHERE id = ?').run(minutesAgo(1), row);
+  const stub = stubModelCall([[{
+    kind: 'create_merchant_rule',
+    label: 'Always categorize Lindqvist Hardware as Shopping',
+    summary: 'Auto-categorize future Lindqvist Hardware charges as Shopping.',
+    route: '/ledger',
+    payload: { kind: 'create_merchant_rule', pattern: 'Lindqvist Hardware', category_id: 'cat_shop', apply_existing: true },
+    changes: [],
+  }]]);
+  _setDbForTesting(db);
+  t.after(() => { stub.restore(); db.close(); env.restore(); });
+
+  const first = await runRealPass(db);
+  assert.equal(first.status, 'completed');
+  const written = db.prepare(`SELECT COUNT(*) AS n FROM merchant_rules WHERE pattern = 'Lindqvist Hardware' AND source = 'ai'`).get() as { n: number };
+  assert.equal(written.n, 1, 'fixture: the first pass wrote its rule');
+
+  const second = await runRealPass(db);
+  assert.equal(second.status === 'skipped' ? second.reason : second.status, 'nothing_to_do');
+  assert.equal(stub.calls.length, 1);
+});
+
+test('an occurrence that went overdue since the last pass opens the gate', async (t) => {
+  const db = migratedTestDb();
+  const env = withCredentials();
+  const stub = stubModelCall();
+  _setDbForTesting(db);
+  t.after(() => { stub.restore(); db.close(); env.restore(); });
+
+  insertMonthlyPattern(db, localDate(-1));
+  insertCompletedPass(db, new Date(Date.now() - 3 * 86_400_000).toISOString());
+
+  await runRealPass(db);
+  assert.equal(stub.calls.length, 1);
+  assert.ok(stub.calls[0].includes(`original_date: "${localDate(-1)}"`));
 });
 
 // ─── Invariants, judged on the rows the pass produced ────────────────────────
