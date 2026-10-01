@@ -95,3 +95,24 @@ test('last_synced_at still advances on a pass with an absent account, so freshne
   const row = db.prepare("SELECT last_synced_at FROM simplefin_connections WHERE id = 'simplefin_primary'").get() as { last_synced_at: string };
   assert.equal(row.last_synced_at, NOW);
 });
+
+test('HEALTHY: an absence of 89 days is wholly inside what SimpleFIN serves, so no notice is written', () => {
+  const plan = reappearanceRefetch([{ accountId: 'a', accountName: 'Card', seenAt: daysBefore(89) }], 30, NOW_MS);
+  assert.equal(plan.refetchDays, 90);
+  assert.deepEqual(plan.notices, []);
+});
+
+test('a reappeared account is left unstamped by the pass, so a failed follow-up cannot use up its absence', () => {
+  const db = fixture({ checking: daysBefore(1 / 24), card: daysBefore(45) });
+  applySimplefinResponse(db, payload(['checking', 'card']), NOW, { windowStartMs: WINDOW_30 });
+  assert.equal(seenAt(db, 'checking'), NOW);
+  assert.equal(seenAt(db, 'card'), daysBefore(45));
+});
+
+test('a closed account returning is stamped, never treated as an absence to chase', () => {
+  const db = fixture({ old: daysBefore(200) });
+  db.prepare("UPDATE accounts SET type = 'closed' WHERE simplefin_account_id = 'old'").run();
+  const result = applySimplefinResponse(db, payload(['old']), NOW, { windowStartMs: WINDOW_30 });
+  assert.deepEqual(result.reappeared, []);
+  assert.equal(seenAt(db, 'old'), NOW);
+});

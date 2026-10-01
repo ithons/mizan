@@ -104,6 +104,27 @@ test('a card back from 120 days asks as far as SimpleFIN serves and names the re
   assert.equal(next.errors.filter((e) => /were not fetched/.test(e)).length, 0);
 });
 
+test('a failed follow-up is reported, not thrown, and the next sync asks for the absence again', async (t) => {
+  const db = ledger(daysAgo(45));
+  let calls = 0;
+  t.mock.method(axios, 'create', () => ({
+    get: async () => {
+      calls++;
+      if (calls === 2) throw new Error('socket hang up');
+      return { data: response() };
+    },
+  }));
+  const result = await syncSimplefin();
+  assert.equal(calls, 2);
+  assert.equal(result.errors.filter((e) => /wider SimpleFIN request covering card's absence failed \(socket hang up\)/.test(e)).length, 1);
+  const card = db.prepare("SELECT provider_seen_at AS s FROM accounts WHERE simplefin_account_id = 'card'").get() as { s: string };
+  assert.ok(Date.now() - Date.parse(card.s) > 44 * DAY, 'the absence was used up by a request that never landed');
+
+  const asked = stubClient(t);
+  await syncSimplefin();
+  assert.equal(asked.length, 2, 'the next sync did not ask for the absence again');
+});
+
 test.after(() => {
   mock.restoreAll();
   fs.rmSync(SCRATCH, { recursive: true, force: true });

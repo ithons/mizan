@@ -41,7 +41,7 @@ test('a new or force-resynced connection asks for what the bridge serves, never 
 test('a gap past the bridge limit is capped and the unreachable dates are named', () => {
   const last = daysBefore(120);
   const lookback = simplefinLookback(last, NOW);
-  assert.deepEqual(lookback, { days: 90, unreachableDays: 32 });
+  assert.deepEqual(lookback, { days: 90, unreachableDays: 30 });
   const notice = unreachableGapNotice(last, lookback, NOW);
   assert.ok(notice);
   assert.match(notice, /from 2026-06-03 to 2026-07-03 were not fetched/);
@@ -51,4 +51,11 @@ test('a gap past the bridge limit is capped and the unreachable dates are named'
 
 test('an unparseable last_synced_at raises instead of guessing a window', () => {
   assert.throws(() => simplefinLookback('not a date', NOW), /not a timestamp/);
+});
+
+test('HEALTHY: a pull 89 days ago is fully inside the 90-day request, so nothing is claimed missing', () => {
+  const last = daysBefore(89);
+  const lookback = simplefinLookback(last, NOW);
+  assert.deepEqual(lookback, { days: 90, unreachableDays: 0 });
+  assert.equal(unreachableGapNotice(last, lookback, NOW), null);
 });

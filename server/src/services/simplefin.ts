@@ -2,7 +2,7 @@ import axios from 'axios';
 import { restoreAfterReconnect } from './accounts';
 import { PROVIDER_HTTP_TIMEOUT_MS } from './httpTimeouts';
 import { v4 as uuidv4 } from 'uuid';
-import { epochSecondsToLocalDate } from './dates';
+import { epochSecondsToLocalDate, isoToLocalDate } from './dates';
 import type Database from 'better-sqlite3';
 import { getCredentials } from './credentials';
 import { getDb } from '../db/index';
@@ -197,15 +197,16 @@ export function simplefinLookback(lastSyncedAt: string | null | undefined, nowMs
   const needed = Math.max(INCREMENTAL_LOOKBACK_DAYS, daysSince + LOOKBACK_MARGIN_DAYS);
   return {
     days: Math.min(needed, SIMPLEFIN_MAX_LOOKBACK_DAYS),
-    unreachableDays: Math.max(0, needed - SIMPLEFIN_MAX_LOOKBACK_DAYS),
+    // The gap itself, not the gap plus margin: a pull 89 days ago is fully inside a 90-day request.
+    unreachableDays: Math.max(0, daysSince - SIMPLEFIN_MAX_LOOKBACK_DAYS),
   };
 }
 
 /** The sync notice for a gap Bridge will not serve, naming the dates so the owner can import them. */
 export function unreachableGapNotice(lastSyncedAt: string, lookback: SimplefinLookback, nowMs: number): string | null {
   if (lookback.unreachableDays === 0) return null;
-  const from = lastSyncedAt.slice(0, 10);
-  const to = new Date(nowMs - lookback.days * 86_400_000).toISOString().slice(0, 10);
+  const from = isoToLocalDate(lastSyncedAt);
+  const to = isoToLocalDate(new Date(nowMs - SIMPLEFIN_MAX_LOOKBACK_DAYS * 86_400_000).toISOString());
   return `The last SimpleFIN pull was ${from}, and SimpleFIN serves at most ${SIMPLEFIN_MAX_LOOKBACK_DAYS} days, ` +
     `so transactions from ${from} to ${to} were not fetched. Import them by CSV if they matter.`;
 }
@@ -233,11 +234,13 @@ export function reappearanceRefetch(
   const neededFor = (r: SimplefinReappearance): number =>
     Math.ceil(Math.max(0, nowMs - Date.parse(r.seenAt)) / 86_400_000) + LOOKBACK_MARGIN_DAYS;
   const days = Math.min(Math.max(...reappeared.map(neededFor)), SIMPLEFIN_MAX_LOOKBACK_DAYS);
-  const reach = new Date(nowMs - SIMPLEFIN_MAX_LOOKBACK_DAYS * 86_400_000).toISOString().slice(0, 10);
+  const reachMs = nowMs - SIMPLEFIN_MAX_LOOKBACK_DAYS * 86_400_000;
+  const reach = isoToLocalDate(new Date(reachMs).toISOString());
   const notices = reappeared
-    .filter((r) => neededFor(r) > SIMPLEFIN_MAX_LOOKBACK_DAYS)
+    // Only a sighting older than anything Bridge serves leaves rows out of reach.
+    .filter((r) => Date.parse(r.seenAt) < reachMs)
     .map((r) => {
-      const from = r.seenAt.slice(0, 10);
+      const from = isoToLocalDate(r.seenAt);
       return `${r.accountName} was last returned by SimpleFIN on ${from}, and SimpleFIN serves at most ` +
         `${SIMPLEFIN_MAX_LOOKBACK_DAYS} days, so its transactions from ${from} to ${reach} were not fetched. ` +
         'Import them by CSV if they matter.';
@@ -775,6 +778,12 @@ export function upsertSimplefinTransaction(
   return 'modified';
 }
 
+/** Record that the provider returned these accounts in a pass that took their rows. */
+export function stampProviderSeen(db: Database.Database, accountIds: readonly string[], now: string): void {
+  const stamp = db.prepare('UPDATE accounts SET provider_seen_at = ? WHERE id = ?');
+  for (const id of accountIds) stamp.run(now, id);
+}
+
 /**
  * Everything this sync writes, given a response body that has already been fetched.
  *
@@ -854,7 +863,7 @@ export function applySimplefinResponse(
     }
 
     const existingAcct = db.prepare(`
-      SELECT id, account_name, current_balance, is_liability, currency, backfill_floor_date, name_source,
+      SELECT id, account_name, type, current_balance, is_liability, currency, backfill_floor_date, name_source,
              provider_seen_at
       FROM accounts
       WHERE simplefin_account_id = ?
@@ -936,11 +945,19 @@ export function applySimplefinResponse(
 
     // Stamped here, after the account parsed and before its rows, because this response carries
     // them. A NULL previous sighting predates the column and never counts as a reappearance.
+    // A reappeared account is NOT stamped here: if the follow-up request for its absence fails,
+    // the next pass has to see the absence again rather than an hour-old sighting. syncSimplefin
+    // stamps it once the absence has been asked for (stampProviderSeen).
     const previousSeen: string | null = existingAcct?.provider_seen_at ?? null;
-    if (previousSeen && options.windowStartMs !== undefined && Date.parse(previousSeen) < options.windowStartMs) {
+    const isReappearance = previousSeen !== null
+      && existingAcct.type !== 'closed'
+      && options.windowStartMs !== undefined
+      && Date.parse(previousSeen) < options.windowStartMs;
+    if (isReappearance) {
       reappeared.push({ accountId, accountName: existingAcct.account_name, seenAt: previousSeen });
+    } else {
+      stampProviderSeen(db, [accountId], now);
     }
-    db.prepare('UPDATE accounts SET provider_seen_at = ? WHERE id = ?').run(now, accountId);
 
     // Process transactions
     for (const txn of (acct.transactions ?? [])) {
@@ -1030,21 +1047,37 @@ export async function syncSimplefin(): Promise<SimplefinSyncResult> {
   if (first.relinkBlock) return { ...first, errors: [...first.errors, ...notices] };
 
   const plan = reappearanceRefetch(first.reappeared, lookback.days, nowMs);
-  notices.push(...plan.notices);
-  if (plan.refetchDays === null) return { ...first, errors: [...first.errors, ...notices] };
+  const returnedIds = first.reappeared.map((r) => r.accountId);
+  if (plan.refetchDays === null) {
+    // The first request already reached as far as Bridge serves: the absence has been asked for.
+    stampProviderSeen(db, returnedIds, now);
+    return { ...first, errors: [...first.errors, ...notices, ...plan.notices] };
+  }
 
   const wider = Math.floor(nowMs / 1000) - (plan.refetchDays * 86400);
-  const again = await client.get(`/accounts?start-date=${wider}`);
-  const second = applySimplefinResponse(db, again.data, now);
+  let againData: unknown;
+  try {
+    againData = (await client.get(`/accounts?start-date=${wider}`)).data;
+  } catch (err) {
+    // Not thrown: the first pass has written, and a throw here would lose its balance changes from
+    // the run and have a retry measure against balances it already stored. The reappeared accounts
+    // stay unstamped, so the next pass asks again.
+    const names = first.reappeared.map((r) => r.accountName).join(', ');
+    notices.push(`The wider SimpleFIN request covering ${names}'s absence failed (${(err as Error).message}); the next sync asks again.`);
+    return { ...first, errors: [...first.errors, ...notices] };
+  }
+  const second = applySimplefinResponse(db, againData, now);
+  stampProviderSeen(db, returnedIds, now);
   return {
     ...second,
     added: first.added + second.added,
     modified: first.modified + second.modified,
     removed: first.removed + second.removed,
-    skipped: first.skipped + second.skipped,
+    // The wider response contains the first window, so its skips already include the first's.
+    skipped: second.skipped,
     balanceChanges: [...first.balanceChanges, ...second.balanceChanges],
     // Both responses carry the provider's messages; say each once.
-    errors: [...new Set([...first.errors, ...second.errors, ...notices])],
+    errors: [...new Set([...first.errors, ...second.errors, ...notices, ...plan.notices])],
     reappeared: first.reappeared,
   };
 }

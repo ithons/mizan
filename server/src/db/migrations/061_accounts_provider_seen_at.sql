@@ -1,4 +1,10 @@
--- When the provider last returned this account, with its transactions, in a pass that processed it.
+-- When the provider last returned this account in a pass that took its rows.
+--
+-- What this does NOT establish: that the rows were fresh. It catches an institution whose accounts
+-- drop out of the response. If Bridge instead keeps returning a lapsed institution's accounts with
+-- cached data, this advances through the outage and never fires; nothing here or in the tests shows
+-- which Bridge does. The reauth message in the response is still triaged and recorded as
+-- reauth_required on the run, which is what tells the owner in that case.
 --
 -- The SimpleFIN request is sized from the connection's last_synced_at, which every pass advances.
 -- When one institution needs a fresh login its accounts drop out of the response while the others
