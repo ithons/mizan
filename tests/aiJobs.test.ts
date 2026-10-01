@@ -434,6 +434,41 @@ test('HEALTHY: every id the prompt offers is one the pass actually read', () => 
   }
 });
 
+/** The worked example at the foot of the prompt, which the model imitates more readily than any rule. */
+function exampleBlock(prompt: string): string {
+  const at = prompt.indexOf('Example format');
+  assert.notEqual(at, -1, 'the prompt has no worked example');
+  return prompt.slice(at);
+}
+
+function escapeRegExp(text: string): string {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+test('the worked example names no real merchant and no real category', () => {
+  // It used to file Trupanion under Health while its own summary called it pet insurance, on a
+  // ledger where the owner's live rule files Trupanion under Pets and the context embedded above it
+  // says not to propose a rule for a merchant that already has one. Whatever a concrete example
+  // asserts is a claim about the owner's ledger that nothing here checks, so it asserts none.
+  const db = migratedTestDb();
+  const taxonomy = (db.prepare('SELECT name FROM categories').all() as Array<{ name: string }>).map((c) => c.name);
+  db.close();
+
+  const example = exampleBlock(buildBackgroundReviewPrompt(promptInput()));
+  assert.ok(!example.includes('Trupanion'), 'the example still names a merchant on the owner\'s ledger');
+  const named = taxonomy.filter((name) =>
+    new RegExp(`(^|[^A-Za-z&])${escapeRegExp(name)}($|[^A-Za-z&])`).test(example)
+  );
+  assert.deepEqual(named, [], `the example names real categories: ${named.join(', ')}`);
+});
+
+test('HEALTHY: the worked example still shows the shape of both kinds it is there to teach', () => {
+  const example = exampleBlock(buildBackgroundReviewPrompt(promptInput()));
+  assert.ok(example.includes('"kind": "categorize_transaction"'));
+  assert.ok(example.includes('"kind": "create_merchant_rule"'));
+  assert.ok(example.includes('"apply_existing": true'));
+});
+
 // ─── `writes` is enforced, not documented ────────────────────────────────────
 
 test('a proposal outside the job\'s declared writes never reaches a write path', async (t) => {

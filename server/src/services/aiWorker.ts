@@ -376,23 +376,23 @@ ${section(SECTION.detections, ':', input.detections.map((d) => `- [${d.entity_ty
 
 Every payload object MUST repeat "kind" inside it, identical to the draft's own top-level "kind". A draft whose payload.kind doesn't match its own kind is silently rejected.
 
-Example format for each kind you're likely to use:
+Example format for each kind you're likely to use. Every <angle-bracketed> value is a placeholder for something read from the lists above, not a suggestion:
 {
   "drafts": [
     {
       "kind": "categorize_transaction",
-      "label": "Categorize Trupanion",
-      "summary": "Trupanion (-$39.02) is pet insurance.",
+      "label": "Categorize <merchant>",
+      "summary": "<merchant> (<amount>) is <what the merchant sells>.",
       "route": "/ledger",
       "payload": { "kind": "categorize_transaction", "transaction_id": "<id copied from the lists above>", "category_id": "<id copied from the lists above>" },
-      "changes": [{ "field": "category", "before": "Uncategorized", "after": "Health" }]
+      "changes": [{ "field": "category", "before": "<its current category, or Uncategorized>", "after": "<the name of the category whose id is in the payload>" }]
     },
     {
       "kind": "create_merchant_rule",
-      "label": "Always categorize Trupanion as Health",
-      "summary": "Auto-categorize future Trupanion charges as Health.",
+      "label": "Always categorize <merchant> as <category name>",
+      "summary": "Auto-categorize future <merchant> charges as <category name>.",
       "route": "/ledger",
-      "payload": { "kind": "create_merchant_rule", "pattern": "Trupanion", "category_id": "<id copied from the lists above>", "apply_existing": true },
+      "payload": { "kind": "create_merchant_rule", "pattern": "<merchant>", "category_id": "<id copied from the lists above>", "apply_existing": true },
       "changes": []
     }
   ]
