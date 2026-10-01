@@ -18,8 +18,10 @@ import { TEST_NOW, insertAccount, insertCategory, insertTransaction, migratedTes
  * A category delete refusal names a remedy, and the remedy has to be something the app offers.
  *
  * The 409s said "Merge it first", "Move or merge them first" and "repoint the rule(s) first" while
- * `categoriesApi.merge` had no caller anywhere in client/src, nothing could change a subcategory's
- * parent, and nothing could change a rule's category. Both categories the owner had made carried
+ * `categoriesApi.merge` had no caller anywhere in client/src and nothing could change a
+ * subcategory's parent. A rule can be repointed from Settings, but the repoint appends a rule
+ * revision naming the old category, and that revision blocks the delete on its own, so the advice
+ * could be followed and never worked. Both categories the owner had made carried
  * transactions and rules, so neither could ever be deleted and the only advice given was
  * unreachable. Merge is offered on the row again; the other two were dropped from the copy.
  */
@@ -102,7 +104,7 @@ test('a delete refusal names no remedy the app does not offer', async (t) => {
   const refusal = await request(db, 'DELETE', `/${blockedByEverything(db)}`);
   assert.equal(refusal.status, 409);
   const error = refusal.error ?? '';
-  assert.doesNotMatch(error, /repoint (the|those) rules?/i, 'nothing in the client can change a rule\'s category');
+  assert.doesNotMatch(error, /repoint (the|those) rules?/i, 'a repoint leaves a rule revision naming this category, and that revision blocks the delete too');
   assert.doesNotMatch(error, /\bMove\b/, 'nothing in the client can change a subcategory\'s parent');
   assert.doesNotMatch(error, /Merge it first/, 'a merge deletes the source, so there is no delete after it');
   for (const { phrase } of REMEDIES.slice(0, 3)) assert.match(error, phrase);
@@ -191,4 +193,21 @@ test('HEALTHY: a category with no subcategories can merge into any other, subcat
   const source = category('fines');
   assert.equal(mergeTargetAllowed(source, category('parking', { parent_id: 'transport' })), true);
   assert.equal(mergeTargetAllowed(source, category('transport')), true);
+});
+
+test('repointing a rule away from a category still leaves the delete refused, by the revision it wrote', async (t) => {
+  const db = migratedTestDb();
+  t.after(() => db.close());
+  const toll = insertCategory(db, { name: 'Toll' });
+  const travel = insertCategory(db, { name: 'Road travel' });
+  upsertMerchantRule(db, 'E-ZPass', toll, TEST_NOW, { source: 'human' });
+
+  // What Settings does when the owner re-enters the pattern under another category.
+  assert.equal(upsertMerchantRule(db, 'E-ZPass', travel, TEST_NOW, { source: 'human' }).status, 'recategorized');
+  const pointing = db.prepare('SELECT COUNT(*) AS n FROM merchant_rules WHERE category_id = ?').get(toll) as { n: number };
+  assert.equal(pointing.n, 0, 'the repoint did not move the rule');
+
+  const refusal = await request(db, 'DELETE', `/${toll}`);
+  assert.equal(refusal.status, 409);
+  assert.match(refusal.error ?? '', /change history/);
 });
