@@ -1,0 +1,13 @@
+-- When the provider last returned this account, with its transactions, in a pass that processed it.
+--
+-- The SimpleFIN request is sized from the connection's last_synced_at, which every pass advances.
+-- When one institution needs a fresh login its accounts drop out of the response while the others
+-- keep syncing hourly, so after the owner logs back in the next request reached back an ordinary
+-- 30 days and the outage's earlier rows were never asked for. Holding last_synced_at instead would
+-- make the whole connection read stale while it is syncing fine, so the watermark has to be per
+-- account: a pass that sees an account return after a longer absence asks once more, far enough
+-- back to cover it.
+--
+-- No backfill. NULL means "not yet observed under this column", and a NULL account never widens a
+-- request; the first pass after this migration stamps every account it sees.
+ALTER TABLE accounts ADD COLUMN provider_seen_at TEXT;
