@@ -172,9 +172,10 @@ function countReferences(db: ReturnType<typeof getDb>, sql: string, ...params: u
  *
  * Each is reported as a 409 naming the count and the remedy rather than deleted along with the
  * category, because a merge is the operation that keeps all of it: it repoints every one of these at
- * the surviving category, which is why "merge it instead" is an instruction the owner can act on. A
- * declined proposal has a second remedy, which is why blocking on one is not a dead end: Settings
- * lists every one and can take it back (`restoreDeclinedProposal`), and the row goes with it.
+ * the surviving category, and Settings offers it on the category's row (`CategoriesSection`), which
+ * is why "merge it instead" is an instruction the owner can act on. A declined proposal has a
+ * second remedy, which is why blocking on one is not a dead end: Settings lists every one and can
+ * take it back (`restoreDeclinedProposal`), and the row goes with it.
  *
  * MEASURED on a copy of .mizan/mizan.db at migration 054 taken 2026-07-31 with
  * `sqlite3 .mizan/mizan.db ".backup ..."`, one query over all seven counts:
@@ -197,21 +198,23 @@ function deleteBlockers(db: ReturnType<typeof getDb>, id: string): DeleteBlocker
 
   const linked = countReferences(db, 'SELECT COUNT(*) as count FROM transactions WHERE category_id = ?', id);
   if (linked > 0) {
-    blockers.push({ count: linked, error: `Cannot delete category with ${linked} linked transactions. Merge it first.` });
+    blockers.push({ count: linked, error: `Cannot delete category with ${linked} linked transactions. Merge it instead, which moves them to the category you merge it into.` });
   }
 
   const children = countReferences(db, 'SELECT COUNT(*) as count FROM categories WHERE parent_id = ?', id);
   if (children > 0) {
-    blockers.push({ count: children, error: `Cannot delete category with ${children} subcategories. Move or merge them first.` });
+    blockers.push({ count: children, error: `Cannot delete category with ${children} subcategories. Merge it instead, which moves them under the category you merge it into, or delete them first.` });
   }
 
   // Retired rules count: the cascade does not spare them, and a retired rule is the only record of
-  // what a merchant used to be filed as.
+  // what a merchant used to be filed as. That is also why merge is the only remedy named: retiring
+  // a rule from Settings leaves it counted here, and nothing in the client changes a rule's
+  // category, so "repoint the rule first" (which this used to say) was advice nobody could follow.
   const rules = countReferences(db, 'SELECT COUNT(*) as count FROM merchant_rules WHERE category_id = ?', id);
   if (rules > 0) {
     blockers.push({
       count: rules,
-      error: `Cannot delete category with ${rules} merchant rule${rules === 1 ? '' : 's'} pointing at it: deleting it would delete ${rules === 1 ? 'that rule' : 'those rules'} too. Merge it instead, or repoint ${rules === 1 ? 'the rule' : 'the rules'} first.`,
+      error: `Cannot delete category with ${rules} merchant rule${rules === 1 ? '' : 's'} pointing at it: deleting it would delete ${rules === 1 ? 'that rule' : 'those rules'} too. Merge it instead, which repoints ${rules === 1 ? 'it' : 'them'}.`,
     });
   }
 

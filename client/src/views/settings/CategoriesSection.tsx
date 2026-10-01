@@ -1,12 +1,12 @@
 import { useState } from 'react';
 import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query';
-import { Plus, Trash2, Edit2, X, Check } from 'lucide-react';
+import { Plus, Trash2, Edit2, X, Check, Merge } from 'lucide-react';
 import { categoriesApi } from '../../lib/api';
 import { useAppStore } from '../../store';
 import { invalidateFinancialData } from '../../lib/queryInvalidation';
 import { Modal } from '../../components/Modal';
 import { PageLoader } from '../../components/LoadingSpinner';
-import { InkButton, SectionLabel, TextButton } from '../../components/balance';
+import { CategoryPicker, InkButton, SectionLabel, TextButton } from '../../components/balance';
 import type { Category } from '@shared/types';
 
 /**
@@ -145,12 +145,14 @@ export function CategoryRow({
   category,
   onEdit,
   onDelete,
+  onMerge,
   onAddChild,
   depth,
 }: {
   category: Category;
   onEdit: (id: string, name: string, color: string, icon: string) => void;
   onDelete: (id: string) => void;
+  onMerge: (id: string) => void;
   onAddChild: (parentId: string) => void;
   depth: number;
 }) {
@@ -240,6 +242,14 @@ export function CategoryRow({
                 </button>
                 <button
                   type="button"
+                  className="p-1 text-muted transition-colors hover:text-ink"
+                  title="Merge into another category"
+                  onClick={() => onMerge(category.id)}
+                >
+                  <Merge size={12} />
+                </button>
+                <button
+                  type="button"
                   className="p-1 text-muted transition-colors hover:text-clay"
                   onClick={() => onDelete(category.id)}
                 >
@@ -256,6 +266,7 @@ export function CategoryRow({
           category={child}
           onEdit={onEdit}
           onDelete={onDelete}
+          onMerge={onMerge}
           onAddChild={onAddChild}
           depth={depth + 1}
         />
@@ -272,6 +283,8 @@ export function CategoriesSection() {
   const [addColor, setAddColor] = useState(CATEGORY_PRESET_COLORS[0]);
   const [addIcon, setAddIcon] = useState('');
   const [showAddModal, setShowAddModal] = useState(false);
+  const [mergeSourceId, setMergeSourceId] = useState<string | null>(null);
+  const [mergeTargetId, setMergeTargetId] = useState('');
 
   const { data: categories = [], isLoading } = useQuery({
     queryKey: ['categories'],
@@ -282,6 +295,20 @@ export function CategoriesSection() {
     mutationFn: ({ id, name, color, icon }: { id: string; name: string; color: string; icon: string }) =>
       categoriesApi.update(id, { name, color, icon }),
     onSuccess: () => invalidateCategoryData(qc),
+  });
+
+  // Every delete refusal names merge as its remedy, so merge has to be reachable from the same row.
+  // The server moves the transactions, rules, budget, subcategories and change history across.
+  const mergeMutation = useMutation({
+    mutationFn: ({ sourceId, targetId }: { sourceId: string; targetId: string }) =>
+      categoriesApi.merge(sourceId, targetId),
+    onSuccess: () => {
+      invalidateCategoryData(qc);
+      setMergeSourceId(null);
+      setMergeTargetId('');
+      addToast({ type: 'success', message: 'Categories merged' });
+    },
+    onError: (err: Error) => addToast({ type: 'error', message: err.message }),
   });
 
   const deleteMutation = useMutation({
@@ -314,6 +341,9 @@ export function CategoriesSection() {
   });
 
   const rootCategories = categories.filter((c) => !c.parent_id);
+  const mergeSource = mergeSourceId
+    ? categories.flatMap((c) => [c, ...(c.children ?? [])]).find((c) => c.id === mergeSourceId)
+    : undefined;
 
   if (isLoading) return <PageLoader />;
 
@@ -337,6 +367,10 @@ export function CategoriesSection() {
             category={cat}
             onEdit={(id, name, color, icon) => editMutation.mutate({ id, name, color, icon })}
             onDelete={(id) => deleteMutation.mutate(id)}
+            onMerge={(id) => {
+              setMergeTargetId('');
+              setMergeSourceId(id);
+            }}
             onAddChild={(parentId) => {
               setAddParentId(parentId);
               setShowAddModal(true);
@@ -383,6 +417,45 @@ export function CategoriesSection() {
               {addMutation.isPending ? 'Creating…' : 'Create'}
             </InkButton>
             <TextButton onClick={() => setShowAddModal(false)}>Cancel</TextButton>
+          </div>
+        </div>
+      </Modal>
+
+      <Modal
+        open={mergeSourceId !== null}
+        onClose={() => setMergeSourceId(null)}
+        title={mergeSource ? `Merge ${mergeSource.name}` : 'Merge category'}
+      >
+        <div className="space-y-4">
+          <p className="text-note text-muted">
+            Its transactions, merchant rules, budget, subcategories and change history move to the
+            category you choose, and then it is deleted.
+          </p>
+          <div>
+            <label htmlFor="categoriessection-merge-target" className="mz-label">Merge into</label>
+            <CategoryPicker
+              id="categoriessection-merge-target"
+              variant="field"
+              value={mergeTargetId}
+              categories={categories}
+              onChange={setMergeTargetId}
+              placeholder="Pick a category…"
+              clearable={false}
+              filter={(c) => c.id !== mergeSourceId}
+            />
+          </div>
+          <div className="flex items-center gap-5 pt-1">
+            <InkButton
+              onClick={() => {
+                if (mergeSourceId && mergeTargetId) {
+                  mergeMutation.mutate({ sourceId: mergeSourceId, targetId: mergeTargetId });
+                }
+              }}
+              disabled={mergeMutation.isPending || !mergeTargetId}
+            >
+              {mergeMutation.isPending ? 'Merging…' : 'Merge'}
+            </InkButton>
+            <TextButton onClick={() => setMergeSourceId(null)}>Cancel</TextButton>
           </div>
         </div>
       </Modal>
