@@ -125,6 +125,19 @@ function ColorPicker({
   );
 }
 
+/**
+ * Whether `target` may receive a merge of `source`.
+ *
+ * A merge moves the source's subcategories under the target. The tree is two levels deep (only a
+ * top-level row offers "Add subcategory", and CategoryPicker's grouped view draws one level of
+ * children), so moving them under a subcategory would file their transactions somewhere no picker
+ * shows. A source with no subcategories can go anywhere.
+ */
+export function mergeTargetAllowed(source: Category | undefined, target: Category): boolean {
+  if (!source || target.id === source.id) return false;
+  return (source.children?.length ?? 0) === 0 || !target.parent_id;
+}
+
 export function invalidateCategoryData(queryClient: ReturnType<typeof useQueryClient>): void {
   void queryClient.invalidateQueries({ queryKey: ['categories'] });
   invalidateFinancialData(queryClient);
@@ -459,7 +472,7 @@ export function CategoriesSection() {
               onChange={setMergeTargetId}
               placeholder="Pick a category…"
               clearable={false}
-              filter={(c) => c.id !== mergeSourceId}
+              filter={(c) => mergeTargetAllowed(mergeSource, c)}
             />
           </div>
           <div className="flex items-center gap-5 pt-1">

@@ -10,7 +10,7 @@ import type Database from 'better-sqlite3';
 import { _setDbForTesting } from '../server/src/db/index';
 import categoriesRouter from '../server/src/routes/categories';
 import { upsertMerchantRule } from '../server/src/services/rules';
-import { CategoryRow } from '../client/src/views/settings/CategoriesSection';
+import { CategoryRow, mergeTargetAllowed } from '../client/src/views/settings/CategoriesSection';
 import type { Category } from '../shared/types';
 import { TEST_NOW, insertAccount, insertCategory, insertTransaction, migratedTestDb } from './helpers/schema';
 
@@ -164,4 +164,31 @@ test('HEALTHY: the merge the row offers goes through, so the remedy is real', as
   const merged = await request(db, 'POST', `/${source}/merge`, { targetId: target });
   assert.equal(merged.status, 200);
   assert.equal(db.prepare('SELECT 1 FROM categories WHERE id = ?').get(source), undefined);
+});
+
+function category(id: string, overrides: Partial<Category> = {}): Category {
+  return {
+    id,
+    name: id,
+    parent_id: null,
+    is_income: false,
+    is_system: false,
+    is_investment: false,
+    sort_order: 0,
+    children: [],
+    ...overrides,
+  };
+}
+
+test('a category with subcategories cannot be merged into a subcategory, which would nest them out of sight', () => {
+  const source = category('toll', { children: [category('bridge', { parent_id: 'toll' })] });
+  assert.equal(mergeTargetAllowed(source, category('parking', { parent_id: 'transport' })), false);
+  assert.equal(mergeTargetAllowed(source, category('transport')), true);
+  assert.equal(mergeTargetAllowed(source, source), false);
+});
+
+test('HEALTHY: a category with no subcategories can merge into any other, subcategory or not', () => {
+  const source = category('fines');
+  assert.equal(mergeTargetAllowed(source, category('parking', { parent_id: 'transport' })), true);
+  assert.equal(mergeTargetAllowed(source, category('transport')), true);
 });
