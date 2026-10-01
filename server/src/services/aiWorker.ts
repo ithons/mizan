@@ -9,10 +9,12 @@ import type {
   AdvisorCitation,
   AdvisorDraftChange,
   AdvisorDraftPayload,
+  GoalType,
   RecurringForecastOccurrence,
 } from '../../../shared/types';
 import { buildRecurringForecast } from './recurringForecast';
 import { toDollars } from './money';
+import { calculateGoalProgress } from './goalProgress';
 import { countTransactionsHeldByAllRules } from './rules';
 import { format } from 'date-fns';
 import { AiWorkerDraftSchema } from '../../../shared/schemas';
@@ -565,8 +567,10 @@ const REFILABLE_POOL_SQL = `t.pending = 0
 
 /**
  * A row reached its current category after the watermark: it was inserted then, or a category
- * write landed then. Every category write appends a revision (categoryWrites.ts), so the revision
- * log answers when the row last moved; `created_at` covers a row inserted already filed.
+ * write landed then. The writes in categoryWrites.ts append a revision, so the revision log answers
+ * when the row last moved; `created_at` covers a row inserted already filed. A category merge
+ * (routes/categories.ts) moves rows without a revision, so rows refiled by a merge do not open the
+ * gate; that is the owner's own consolidation, not a new filing for the pass to review.
  */
 const ENTERED_POOL_SINCE_SQL = `(t.created_at > ? OR EXISTS (
         SELECT 1 FROM transaction_category_revisions er
@@ -742,11 +746,7 @@ export const collectBackgroundReview: AiJobCollect = async ({ db, assignment, ru
 
   // update_goal_target is a declared write, and a goal named only by its title is a goal_id the
   // model has to invent.
-  const goals = db.prepare(`
-    SELECT id, name, type, target_amount, current_amount FROM goals
-    WHERE is_archived = 0
-    ORDER BY created_at
-  `).all() as PromptGoal[];
+  const goals = promptGoals(db);
 
   // 2. Adjusted or overdue recurring items
   const adjustedRecurring = forecast.occurrences.filter(o => o.adjustment_action != null);
@@ -869,6 +869,25 @@ export const collectBackgroundReview: AiJobCollect = async ({ db, assignment, ru
 
   return { status: 'collected', proposals, malformed, usage: readUsage(response.usage) };
 };
+
+/**
+ * The goals the review pass may retarget, each by id, with `current` as /plan shows it: for a
+ * linked goal the stored current_amount is never updated, and the account balance is the progress.
+ */
+export function promptGoals(db: Database.Database): PromptGoal[] {
+  const rows = db.prepare(`
+    SELECT g.id, g.name, g.type, g.target_amount, g.current_amount, g.starting_amount,
+           a.current_balance AS account_balance
+    FROM goals g
+    LEFT JOIN accounts a ON a.id = g.account_id
+    WHERE g.is_archived = 0
+    ORDER BY g.created_at
+  `).all() as Array<PromptGoal & { type: GoalType; starting_amount: number | null; account_balance: number | null }>;
+  return rows.map(({ starting_amount, account_balance, ...goal }) => ({
+    ...goal,
+    current_amount: calculateGoalProgress({ ...goal, starting_amount, account_balance }).current_amount,
+  }));
+}
 
 /**
  * Run a background review pass directly.

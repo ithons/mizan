@@ -23,12 +23,13 @@ import {
   retirableOwnRules,
   type BackgroundReviewPromptInput,
   type DetectedChange,
+  promptGoals,
 } from '../server/src/services/aiWorker';
 import { _setDbForTesting } from '../server/src/db/index';
 import { upsertMerchantRule } from '../server/src/services/rules';
 import { providerForModel } from '../server/src/services/aiProviders';
 import { checkRuleIsRetirableByAi } from '../server/src/services/aiWriteGuards';
-import { migratedTestDb, insertTransaction } from './helpers/schema';
+import { migratedTestDb, insertTransaction, insertAccount } from './helpers/schema';
 
 // The framework's job is to make a job's declarations true rather than descriptive. Two of them
 // are enforceable and are enforced here: `writes` (a kind the job did not declare never reaches a
@@ -1321,4 +1322,20 @@ test('HEALTHY: a rule that is genuinely new is still applied and still announced
   const [row] = runRows(db);
   assert.equal(row.applied, 1);
   assert.equal(events.events.filter((e) => e.type === 'ai_pass_applied').length, 1);
+});
+
+test('the review prompt gives a linked goal the current figure /plan shows, not its stale stored one', () => {
+  const db = migratedTestDb();
+  const savings = insertAccount(db, { account_name: 'Savings', type: 'savings', current_balance: 250000 });
+  db.prepare(`
+    INSERT INTO goals (id, name, type, target_amount, current_amount, account_id, is_archived, created_at, updated_at)
+    VALUES ('g_linked', 'Emergency fund', 'savings', 500000, 0, ?, 0, '2026-01-01', '2026-01-01'),
+           ('g_free', 'Trip', 'savings', 200000, 40000, NULL, 0, '2026-01-02', '2026-01-02')
+  `).run(savings);
+
+  const byId = new Map(promptGoals(db).map((g) => [g.id, g.current_amount]));
+  // Linked: the stored 0 was never updated; the account holds the progress.
+  assert.equal(byId.get('g_linked'), 250000);
+  // HEALTHY: an unlinked goal keeps the amount the owner recorded.
+  assert.equal(byId.get('g_free'), 40000);
 });
