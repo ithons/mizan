@@ -5,7 +5,12 @@ import { canonicalRoute } from '../../../shared/routes';
 import { literal } from './aiProviders/schema';
 import { buildFinancialContext } from './aiContext';
 import { getTransactionReviewSummary } from './transactionReview';
-import type { AdvisorCitation, AdvisorDraftChange, AdvisorDraftPayload } from '../../../shared/types';
+import type {
+  AdvisorCitation,
+  AdvisorDraftChange,
+  AdvisorDraftPayload,
+  RecurringForecastOccurrence,
+} from '../../../shared/types';
 import { buildRecurringForecast } from './recurringForecast';
 import { toDollars } from './money';
 import { AiWorkerDraftSchema } from '../../../shared/schemas';
@@ -259,6 +264,8 @@ const SECTION = {
   uncategorized: 'Uncategorized transactions',
   refilable: 'Already filed by a machine, and open to being refiled',
   ownRules: 'Merchant rules you wrote yourself',
+  recurring: 'Recurring occurrences that are overdue or that the user adjusted',
+  goals: 'Goals',
   detections: 'System detections new since the last review pass',
 } as const;
 
@@ -269,7 +276,7 @@ const SECTION = {
  * contradiction rather than an emphasis, because the model cannot obey both.
  */
 const ID_RULE =
-  `THE ONE RULE ABOUT IDS. A 'categorize_transaction' payload's "transaction_id" MUST be copied exactly from the "id" field of a row listed under "${SECTION.uncategorized}" or under "${SECTION.refilable}" below. Those two lists together are every transaction you may name, and no other sentence here narrows that. Either list can be empty; an empty one reads "(none)", which means there are none, not that some were left out. "payload.category_id" MUST likewise be copied exactly from the "id" field of a row under "${SECTION.categories}", and a 'retire_merchant_rule' payload's "rule_id" from a row under "${SECTION.ownRules}". Never invent an id, and never put a display name where an id belongs: an id that does not match exactly will silently fail to apply.`;
+  `THE ONE RULE ABOUT IDS. A 'categorize_transaction' payload's "transaction_id" MUST be copied exactly from the "id" field of a row listed under "${SECTION.uncategorized}" or under "${SECTION.refilable}" below. Those two lists together are every transaction you may name, and no other sentence here narrows that. Either list can be empty; an empty one reads "(none)", which means there are none, not that some were left out. Any payload's "category_id" MUST likewise be copied exactly from the "id" field of a row under "${SECTION.categories}"; a 'retire_merchant_rule' payload's "rule_id" from a row under "${SECTION.ownRules}"; a 'create_recurring_adjustment' payload's "recurring_id" and "original_date" both from one row under "${SECTION.recurring}"; and an 'update_goal_target' payload's "goal_id" from the "id" field of a row under "${SECTION.goals}". Never invent an id, and never put a display name where an id belongs: an id that does not match exactly will silently fail to apply.`;
 
 /** A heading and its list, never a heading and a blank line. `note` carries its own leading space. */
 function section(heading: string, note: string, lines: readonly string[]): string {
@@ -308,6 +315,33 @@ export interface PromptRule {
   category_name: string | null;
 }
 
+/**
+ * One forecast occurrence, keyed the way `create_recurring_adjustment` keys it.
+ *
+ * `original_date` is the date the pattern predicted, not the date it is now expected: a snoozed
+ * occurrence has moved, and `upsertRecurringAdjustment` matches on the original.
+ */
+export interface PromptOccurrence {
+  recurring_id: string;
+  original_date: string;
+  merchant_name: string;
+  expected_date: string;
+  /** Cents, signed: negative is a bill, positive is income. */
+  amount: number;
+  status: 'overdue' | 'upcoming';
+  adjustment_action: string | null;
+}
+
+export interface PromptGoal {
+  id: string;
+  name: string;
+  type: string;
+  /** Cents. */
+  target_amount: number;
+  /** Cents. */
+  current_amount: number;
+}
+
 export interface BackgroundReviewPromptInput {
   context: string;
   categories: readonly PromptCategory[];
@@ -316,8 +350,9 @@ export interface BackgroundReviewPromptInput {
   ownRules: readonly PromptRule[];
   /** Every uncategorized row, not just the ones listed. */
   uncategorizedTotal: number;
-  adjustedRecurringCount: number;
-  overdueRecurringCount: number;
+  /** Overdue or owner-adjusted occurrences, each by the ids an adjustment needs. */
+  recurring: readonly PromptOccurrence[];
+  goals: readonly PromptGoal[];
   detections: readonly DetectedChange[];
 }
 
@@ -326,6 +361,15 @@ function transactionLine(t: PromptTransaction): string {
     ? `, already declined for this row: "${t.declined_categories}"`
     : '';
   return `- id: "${t.id}", date: ${t.date}, amount: ${toDollars(t.amount)}, merchant: "${t.merchant_name || t.original_name}"${declined}`;
+}
+
+function occurrenceLine(o: PromptOccurrence): string {
+  const adjusted = o.adjustment_action ? `, already adjusted by the user: ${o.adjustment_action}` : '';
+  return `- recurring_id: "${o.recurring_id}", original_date: "${o.original_date}", merchant: "${o.merchant_name}", expected: ${o.expected_date}, amount: ${toDollars(o.amount)}, ${o.status}${adjusted}`;
+}
+
+function goalLine(g: PromptGoal): string {
+  return `- id: "${g.id}", name: "${g.name}", type: ${g.type}, target: ${toDollars(g.target_amount)}, current: ${toDollars(g.current_amount)}`;
 }
 
 /**
@@ -367,10 +411,12 @@ ${section(
 
 ${section(SECTION.ownRules, ' (the only ones you may retire; the user\'s own rules are not listed and are refused):', input.ownRules.map((r) => `- id: "${r.id}", pattern: "${r.pattern}", category: "${r.category_name ?? 'a category that no longer exists'}"`))}
 
+${section(SECTION.recurring, ' (an occurrence the user already adjusted is their decision; propose a different one only with a reason they would not already have):', input.recurring.map(occurrenceLine))}
+
+${section(SECTION.goals, ':', input.goals.map(goalLine))}
+
 Review Summary:
 ${input.uncategorizedTotal} total uncategorized transactions (${input.uncategorized.length} shown above).
-${input.adjustedRecurringCount} adjusted recurring items.
-${input.overdueRecurringCount} overdue recurring items.
 
 ${section(SECTION.detections, ':', input.detections.map((d) => `- [${d.entity_type}] ${d.description}`))}
 
@@ -534,6 +580,18 @@ export function retirableOwnRules(db: Database.Database): PromptRule[] {
   `).all() as PromptRule[];
 }
 
+function promptOccurrence(o: RecurringForecastOccurrence): PromptOccurrence {
+  return {
+    recurring_id: o.pattern_id,
+    original_date: o.original_expected_date ?? o.expected_date,
+    merchant_name: o.merchant_name,
+    expected_date: o.expected_date,
+    amount: o.amount,
+    status: o.status,
+    adjustment_action: o.adjustment_action ?? null,
+  };
+}
+
 /**
  * One background review pass, up to the point where something would be written.
  *
@@ -588,6 +646,14 @@ export const collectBackgroundReview: AiJobCollect = async ({ db, assignment, ru
     SELECT id, name FROM categories ORDER BY sort_order
   `).all() as PromptCategory[];
 
+  // update_goal_target is a declared write, and a goal named only by its title is a goal_id the
+  // model has to invent.
+  const goals = db.prepare(`
+    SELECT id, name, type, target_amount, current_amount FROM goals
+    WHERE is_archived = 0
+    ORDER BY created_at
+  `).all() as PromptGoal[];
+
   // 2. Adjusted or overdue recurring items
   const adjustedRecurring = forecast.occurrences.filter(o => o.adjustment_action != null);
   const overdueRecurring = forecast.occurrences.filter(o => o.status === 'overdue');
@@ -618,8 +684,8 @@ export const collectBackgroundReview: AiJobCollect = async ({ db, assignment, ru
     refilable: recategorizable,
     ownRules,
     uncategorizedTotal: uncategorizedCount,
-    adjustedRecurringCount: adjustedRecurring.length,
-    overdueRecurringCount: overdueRecurring.length,
+    recurring: [...overdueRecurring, ...adjustedRecurring.filter((o) => o.status !== 'overdue')].map(promptOccurrence),
+    goals,
     detections: freshDetects,
   });
 

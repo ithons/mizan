@@ -353,8 +353,15 @@ function promptInput(
     ],
     ownRules: [{ id: 'rule_1', pattern: 'Trupanion', category_name: 'Health' }],
     uncategorizedTotal: 1,
-    adjustedRecurringCount: 0,
-    overdueRecurringCount: 0,
+    recurring: [
+      {
+        recurring_id: 'rp_1', original_date: '2026-07-23', merchant_name: 'Mass Inst Payroll',
+        expected_date: '2026-07-23', amount: 250000, status: 'overdue', adjustment_action: null,
+      },
+    ],
+    goals: [
+      { id: 'goal_1', name: 'Emergency fund', type: 'savings', target_amount: 500000, current_amount: 120000 },
+    ],
     detections: [{ entity_type: 'integrity', description: '2 transfer pair(s) need review' }],
     ...overrides,
   };
@@ -431,6 +438,58 @@ test('HEALTHY: every id the prompt offers is one the pass actually read', () => 
   const prompt = buildBackgroundReviewPrompt(input);
   for (const id of ['txn_new', 'txn_refile', 'cat_health', 'rule_1']) {
     assert.ok(prompt.includes(`id: "${id}"`), `${id} was collected and never reached the prompt`);
+  }
+});
+
+/** The id rule's own paragraph, which is the only place the prompt says where an id may come from. */
+function idRuleParagraph(prompt: string): string {
+  const paragraph = prompt.split('\n\n').find((p) => p.startsWith('THE ONE RULE ABOUT IDS.'));
+  assert.ok(paragraph, 'the prompt has no id rule');
+  return paragraph;
+}
+
+test('every id a declared write kind needs is one the id rule says where to copy from', () => {
+  // `writes` declared update_goal_target and create_recurring_adjustment while the prompt carried
+  // a goal's name and a count of overdue items, never a goal_id or a recurring_id. The one
+  // update_goal_target draft that pass ever produced named goal "emergency_fund", which exists
+  // nowhere, so a declared kind could only be filled in by inventing its id. Derived from the
+  // output schema rather than listed, so a kind added to `writes` is covered without editing this.
+  const schema = WORKER_DRAFTS_SCHEMA as unknown as {
+    properties: { drafts: { items: { properties: { payload: { anyOf: Array<{ properties: Record<string, { enum?: string[] }> }> } } } } };
+  };
+  const declared = new Set<string>(AI_JOBS.background_review.writes);
+  const needed = schema.properties.drafts.items.properties.payload.anyOf
+    .filter((variant) => declared.has(variant.properties.kind.enum?.[0] ?? ''))
+    .flatMap((variant) => Object.keys(variant.properties))
+    .filter((field) => field.endsWith('_id') || field === 'original_date');
+
+  const prompt = buildBackgroundReviewPrompt(promptInput());
+  const rule = idRuleParagraph(prompt);
+  for (const field of new Set(needed)) {
+    assert.ok(rule.includes(`"${field}"`), `the id rule never says where "${field}" comes from`);
+  }
+
+  // And every list the rule points at is a heading the prompt actually prints.
+  const pointedAt = [...rule.matchAll(/under "([^"]+)"/g)].map((m) => m[1]);
+  assert.ok(pointedAt.length > 0);
+  const lines = prompt.split('\n');
+  for (const heading of pointedAt) {
+    assert.ok(lines.some((line) => line.startsWith(heading)), `the id rule points at "${heading}", which the prompt never prints`);
+  }
+});
+
+test('HEALTHY: a goal and a recurring occurrence reach the prompt by their real ids', () => {
+  const prompt = buildBackgroundReviewPrompt(promptInput());
+  assert.ok(prompt.includes('id: "goal_1"'), 'the goal id was collected and never reached the prompt');
+  assert.ok(prompt.includes('recurring_id: "rp_1"'));
+  assert.ok(prompt.includes('original_date: "2026-07-23"'));
+});
+
+test('HEALTHY: with no goals and nothing overdue or adjusted, both lists say they are empty', () => {
+  const prompt = buildBackgroundReviewPrompt(promptInput({ recurring: [], goals: [] }));
+  const rule = idRuleParagraph(prompt);
+  for (const heading of [...rule.matchAll(/under "([^"]+)"/g)].map((m) => m[1])) {
+    assert.notEqual(lineUnderHeading(prompt, heading), '', `"${heading}" renders as a heading followed by a blank line`);
   }
 });
 
