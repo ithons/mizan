@@ -993,12 +993,24 @@ function getExcludedFlowSummary(
   return Array.from(byType.values()).sort((a, b) => b.count - a.count);
 }
 
+export class ReportComparisonRangeError extends Error {
+  readonly statusCode = 400;
+  constructor() {
+    super('A report summary needs a valid startDate and endDate to compare against a prior window');
+    this.name = 'ReportComparisonRangeError';
+  }
+}
+
 export function getReportSummary(
   db: Database.Database,
   range: ReportDateRange
 ): ReportSummary {
   const comparison = range.comparison ?? 'prior_period';
   const previous = comparisonRange(range, comparison);
+  // An empty range means all time to every query below, so an underivable comparison window
+  // compared the ledger with itself (or a bounded window with the whole ledger) and labelled the
+  // zero delta "Prior period". Refuse instead of reporting a comparison that was never made.
+  if (!previous.startDate || !previous.endDate) throw new ReportComparisonRangeError();
 
   const currentCashflow = totalsFromCashflow(getCashflowReport(db, range));
   const previousCashflow = totalsFromCashflow(getCashflowReport(db, previous));

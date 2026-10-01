@@ -1,5 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import http from 'node:http';
+import express from 'express';
 import Database from 'better-sqlite3';
 import { migratedTestDb, insertAccount } from './helpers/schema';
 import {
@@ -13,7 +15,11 @@ import {
   getSpendingTrendsReport,
   getNetWorthAttribution,
   getTopMerchantsReport,
+  ReportComparisonRangeError,
 } from '../server/src/services/reporting';
+import reportsRouter from '../server/src/routes/reports';
+import { errorHandler } from '../server/src/middleware/errorHandler';
+import { _setDbForTesting } from '../server/src/db/index';
 
 interface TransactionFixture {
   id: string;
@@ -546,4 +552,69 @@ test('an account that appears only in the later snapshot counts its full balance
   assert.equal(added?.start_balance, 0);
   assert.equal(added?.delta, 400);
   assert.equal(added?.account_name, null); // unknown to the accounts table, still attributed
+});
+
+// With no window there is nothing before it to compare against: an empty range means all time,
+// so the "prior period" was the same rows again and every delta read as a measured zero. A
+// half-open or unparseable window fell through to the same empty range and compared a bounded
+// window with the whole ledger. The summary refuses rather than state a comparison it never made.
+test('report summary refuses a window it cannot derive a comparison window from', (t) => {
+  const db = setupReportingDb();
+  t.after(() => db.close());
+
+  for (const range of [
+    {},
+    { startDate: '2026-06-01' },
+    { endDate: '2026-06-30' },
+    { startDate: 'not-a-date', endDate: '2026-06-30' },
+  ]) {
+    assert.throws(
+      () => getReportSummary(db, range),
+      (err: unknown) => err instanceof ReportComparisonRangeError && err.statusCode === 400,
+      JSON.stringify(range)
+    );
+  }
+});
+
+test('a bounded report summary still states a comparison window before it', (t) => {
+  const db = setupReportingDb();
+  t.after(() => db.close());
+
+  for (const comparison of ['prior_period', 'prior_month', 'same_month_last_year', 'trailing_3', 'trailing_12'] as const) {
+    const summary = getReportSummary(db, { startDate: '2026-06-01', endDate: '2026-06-30', comparison });
+    assert.ok(summary.comparison_start_date, comparison);
+    assert.ok(summary.comparison_end_date, comparison);
+    assert.ok(summary.comparison_end_date < '2026-06-01', comparison);
+  }
+});
+
+async function getSummaryOverHttp(db: Database.Database, query: string): Promise<{ status: number; body: unknown }> {
+  _setDbForTesting(db);
+  const app = express();
+  app.use('/api/reports', reportsRouter);
+  app.use(errorHandler);
+  const server = http.createServer(app);
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+  try {
+    const addr = server.address();
+    if (!addr || typeof addr === 'string') throw new Error('no server address');
+    const res = await fetch(`http://127.0.0.1:${addr.port}/api/reports/summary${query}`);
+    return { status: res.status, body: await res.json() };
+  } finally {
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
+}
+
+test('GET /api/reports/summary with no window is a 400, not a prior period equal to itself', async (t) => {
+  const db = setupReportingDb();
+  t.after(() => db.close());
+
+  const unranged = await getSummaryOverHttp(db, '');
+  assert.equal(unranged.status, 400);
+
+  const ranged = await getSummaryOverHttp(db, '?startDate=2026-06-01&endDate=2026-06-30');
+  assert.equal(ranged.status, 200);
+  const data = (ranged.body as { data: { comparison_label: string; income: { previous: number } } }).data;
+  assert.equal(data.comparison_label, 'Prior period');
+  assert.equal(data.income.previous, 9);
 });
