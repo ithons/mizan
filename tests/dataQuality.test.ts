@@ -10,6 +10,7 @@ import {
 import { getTransactionReviewSummary } from '../server/src/services/transactionReview';
 import { indexDrafts, suggestedChipCount } from '../client/src/views/ledger/spine';
 import { getReportSummary } from '../server/src/services/reporting';
+import { ALL_NAV_ITEMS } from '../client/src/components/NavRail';
 import {
   insertAccount,
   insertCategory,
@@ -130,6 +131,24 @@ test('a broken connection is critical and opens the accounts screen', () => {
   assert.equal(summary.issues[0].route, '/accounts');
 });
 
+/**
+ * Every issue opens a screen that exists. The cash-flow issue sent the owner to `/bills`, a screen
+ * the consolidation retired; a redirect caught it, which is the only reason it was not a dead link.
+ */
+test('every issue opens one of the six screens, not a retired path', () => {
+  const screens = new Set(ALL_NAV_ITEMS.map((item) => item.to));
+  const summary = summarizeDataQuality({
+    syncHealth: baseSyncHealth({ status: 'attention', status_detail: '1 connection needs action.', attention_count: 1 }),
+    reviewSummary: baseReviewSummary({ uncategorized: 8, rule_suggestions: 2, recurring_candidates: 2 }),
+    forecast: baseForecast({ review_count: 3, overdue_count: 1 }),
+  });
+  assert.ok(summary.issues.some((issue) => issue.id === 'cash-flow-review'), 'the fixture no longer raises the cash-flow issue');
+  for (const issue of summary.issues) {
+    const path = issue.route.split('?')[0];
+    assert.ok(screens.has(path), `${issue.id} opens ${issue.route}, which is not one of the six screens`);
+  }
+});
+
 test('critical issues sort ahead of warnings and notes', () => {
   const summary = summarizeDataQuality({
     syncHealth: baseSyncHealth(),
@@ -153,7 +172,7 @@ test('critical issues sort ahead of warnings and notes', () => {
   assert.deepEqual(summary.issues.map((issue) => issue.route), [
     '/investments',
     '/ledger',
-    '/bills',
+    '/ledger',
   ]);
   assert.ok(!summary.issues.some((issue) => 'weight' in issue), 'weight must not be serialized');
 });

@@ -148,14 +148,14 @@ export function buildAdvisorReadTools(
       '/accounts'
     ),
     tool('accounts', 'Accounts', accountCount > 0 ? 'available' : 'empty', accountCount, '/accounts'),
-    tool('transactions', 'Transactions', transactionCount > 0 ? 'available' : 'empty', transactionCount, '/transactions'),
-    tool('reports', 'Reports', hasReportData ? 'available' : 'empty', hasReportData ? 1 : 0, '/reports'),
-    tool('budgets', 'Budgets', budgets.length > 0 ? 'available' : 'empty', budgets.length, '/budget'),
-    tool('rollover_ledger', 'Rollover ledger', rolloverLedger.length > 0 ? 'available' : 'empty', rolloverLedger.length, '/budget'),
-    tool('goals', 'Goals', goalCount > 0 ? 'available' : 'empty', goalCount, '/goals'),
-    tool('recurring', 'Bills and recurring', forecast.occurrences.length > 0 ? 'available' : 'empty', forecast.occurrences.length, '/bills'),
-    tool('recurring_adjustments', 'Recurring adjustments', recurringAdjustmentCount > 0 ? 'available' : 'empty', recurringAdjustmentCount, '/bills'),
-    tool('review', 'Review inbox', reviewSummary.total_open > 0 ? 'attention' : 'available', reviewSummary.total_open, '/review'),
+    tool('transactions', 'Transactions', transactionCount > 0 ? 'available' : 'empty', transactionCount, '/ledger'),
+    tool('reports', 'Reports', hasReportData ? 'available' : 'empty', hasReportData ? 1 : 0, '/?window=this-month'),
+    tool('budgets', 'Budgets', budgets.length > 0 ? 'available' : 'empty', budgets.length, '/plan'),
+    tool('rollover_ledger', 'Rollover ledger', rolloverLedger.length > 0 ? 'available' : 'empty', rolloverLedger.length, '/plan'),
+    tool('goals', 'Goals', goalCount > 0 ? 'available' : 'empty', goalCount, '/plan'),
+    tool('recurring', 'Bills and recurring', forecast.occurrences.length > 0 ? 'available' : 'empty', forecast.occurrences.length, '/ledger'),
+    tool('recurring_adjustments', 'Recurring adjustments', recurringAdjustmentCount > 0 ? 'available' : 'empty', recurringAdjustmentCount, '/ledger'),
+    tool('review', 'Review inbox', reviewSummary.total_open > 0 ? 'attention' : 'available', reviewSummary.total_open, '/ledger?uncategorized=1'),
     tool('investment_quality', 'Investment quality', holdingCount === 0 ? 'empty' : investmentQualityIssues > 0 ? 'attention' : 'available', investmentQualityIssues, '/investments'),
     tool('sector_allocation', 'Sector allocation', holdingCount === 0 ? 'empty' : sectorKnownCount === 0 ? 'attention' : 'available', sectorKnownCount, '/investments'),
     tool('import_audits', 'Import audits', importRunCount > 0 ? 'available' : 'empty', importRunCount, '/settings?section=data'),
@@ -182,17 +182,28 @@ function selectIntent(question: string): AdvisorIntent {
   return 'overview';
 }
 
-function citationKindForRoute(route: string): AdvisorCitationKind {
-  if (route.startsWith('/accounts')) return 'sync';
-  if (route.startsWith('/review')) return 'review';
-  if (route.startsWith('/transactions')) return 'transaction';
-  if (route.startsWith('/budget')) return 'budget';
-  if (route.startsWith('/goals')) return 'goal';
-  if (route.startsWith('/bills')) return 'recurring';
-  if (route.startsWith('/investments')) return 'investment';
-  if (route.startsWith('/reports')) return 'report';
-  if (route.startsWith('/settings')) return 'import';
-  return 'data_quality';
+/**
+ * What each data-quality and invariant issue is about, by id.
+ *
+ * This used to be read off the issue's route, so pointing an issue at the screen that exists
+ * (`/bills` became `/ledger`) silently changed what it was cited as. A route is where a link goes,
+ * not what the issue is. The kinds are the ones the route mapping produced before it was replaced.
+ */
+const ISSUE_CITATION_KIND: Readonly<Record<string, AdvisorCitationKind>> = {
+  'sync-attention': 'sync',
+  'sync-stale': 'sync',
+  'sync-empty': 'sync',
+  'transaction-review': 'data_quality',
+  'cash-flow-review': 'recurring',
+  'net-worth-breakdown-invalid': 'report',
+  'hidden-account-net-worth': 'sync',
+  'stale-pending-transactions': 'transaction',
+  'orphan-holdings': 'investment',
+  'closed-account-nonzero': 'sync',
+};
+
+export function citationKindForIssue(issueId: string): AdvisorCitationKind {
+  return ISSUE_CITATION_KIND[issueId] ?? 'data_quality';
 }
 
 function analyzeSync(db: Database.Database): Pick<AdvisorAnalysis, 'answer' | 'citations'> {
@@ -245,7 +256,7 @@ function analyzeReview(db: Database.Database): Pick<AdvisorAnalysis, 'answer' | 
         kind: 'review',
         label: queue.label,
         detail: `${queue.count} open`,
-        route: `/review?queue=${queue.id}`,
+        route: `/ledger?uncategorized=1`,
       })
     ),
   };
@@ -295,7 +306,7 @@ function analyzeBudget(
           kind: 'budget' as const,
           label: budget.category_name ?? 'Budget',
           detail: `${Math.round(budget.projected_percent ?? 0)}% projected`,
-          route: '/budget',
+          route: '/plan',
           record_id: budget.id,
           amount: toDollarsOpt(budget.projected_spend),
         })
@@ -306,7 +317,7 @@ function analyzeBudget(
           kind: 'budget' as const,
           label: `${row.category_name ?? 'Budget'} ${row.month}`,
           detail: `Ending rollover ${fmt(toDollars(row.ending_rollover))}`,
-          route: '/budget',
+          route: '/plan',
           record_id: row.id,
           amount: toDollars(row.ending_rollover),
           date: `${row.month}-01`,
@@ -354,7 +365,7 @@ function analyzeRecurring(db: Database.Database): Pick<AdvisorAnalysis, 'answer'
         detail: item.adjustment_action
           ? `${item.frequency}, ${item.confidence_label}, ${adjustmentLabel(item.adjustment_action)}`
           : `${item.frequency}, ${item.confidence_label}`,
-        route: '/bills',
+        route: '/ledger',
         record_id: item.pattern_id,
         amount: toDollars(item.amount),
         date: item.expected_date,
@@ -382,7 +393,7 @@ function analyzeSubscriptions(db: Database.Database): Pick<AdvisorAnalysis, 'ans
           kind: 'recurring',
           label: 'Subscription summary',
           detail: '0 detected',
-          route: '/bills',
+          route: '/ledger',
         }),
       ],
     };
@@ -422,7 +433,7 @@ function analyzeSubscriptions(db: Database.Database): Pick<AdvisorAnalysis, 'ans
         kind: 'recurring',
         label: 'Subscription summary',
         detail: `${insights.subscription_count} detected`,
-        route: '/bills',
+        route: '/ledger',
         amount: toDollars(insights.total_monthly_amount),
       }),
       ...Array.from(citedSubscriptions.values()).map((item) =>
@@ -431,7 +442,7 @@ function analyzeSubscriptions(db: Database.Database): Pick<AdvisorAnalysis, 'ans
           kind: 'recurring' as const,
           label: item.merchant_name,
           detail: `${item.frequency}, ${item.confidence_label}`,
-          route: '/bills',
+          route: '/ledger',
           record_id: item.pattern_id,
           amount: toDollars(item.monthly_amount),
           date: item.next_expected,
@@ -489,7 +500,7 @@ function analyzeGoals(db: Database.Database): Pick<AdvisorAnalysis, 'answer' | '
         kind: 'goal',
         label: goal.name,
         detail: `${Math.round(goal.progress.progress_percent)}% complete`,
-        route: '/goals',
+        route: '/plan',
         record_id: goal.id,
         amount: toDollars(goal.progress.remaining_amount),
         date: goal.target_date,
@@ -512,7 +523,7 @@ function analyzeInsights(
           kind: 'insight',
           label: 'Anomaly scan',
           detail: 'No active anomaly insights',
-          route: '/reports',
+          route: '/?window=this-month',
         }),
       ],
     };
@@ -529,7 +540,7 @@ function analyzeInsights(
         kind: 'insight',
         label: insight.title,
         detail: insight.metric ?? insight.severity,
-        route: insight.action_route ?? '/reports',
+        route: insight.action_route ?? '/?window=this-month',
         record_id: insight.id,
       })
     ),
@@ -539,7 +550,7 @@ function analyzeInsights(
 function dataQualityCitation(issue: DataQualityIssue): AdvisorCitation {
   return citation({
     id: `data-quality:${issue.id}`,
-    kind: citationKindForRoute(issue.route),
+    kind: citationKindForIssue(issue.id),
     label: issue.label,
     detail: issue.message,
     route: issue.route,
@@ -760,7 +771,7 @@ function analyzeReports(
       kind: 'report',
       label: 'Current month report summary',
       detail: `${startDate} to ${endDate}`,
-      route: '/reports',
+      route: '/?window=this-month',
       amount: toDollars(report.net.current),
     }),
     ...report.top_spending.slice(0, 5).map((category) =>
@@ -769,7 +780,7 @@ function analyzeReports(
         kind: 'report' as const,
         label: category.category_name,
         detail: 'Top spending category',
-        route: '/reports',
+        route: '/?window=this-month',
         record_id: category.category_id,
         amount: toDollars(category.current),
       })

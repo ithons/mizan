@@ -68,7 +68,7 @@ function hiddenAccountSnapshotIssue(db: Database.Database): PersonalFinanceInvar
       'net-worth-breakdown-invalid',
       'Net worth evidence is unreadable',
       `The latest net worth snapshot on ${snapshot.date} has an invalid account breakdown, so Mizān cannot explain that number reliably.`,
-      '/reports',
+      '/?window=this-month',
       'critical',
       35
     );
@@ -113,7 +113,7 @@ function stalePendingTransactionsIssue(
     'stale-pending-transactions',
     'Old pending transactions',
     `${stalePending} pending ${stalePending === 1 ? 'transaction is' : 'transactions are'} older than 7 days and may never post. Pending rows stay out of reports until they post or are removed.`,
-    '/transactions?range=all',
+    '/ledger?range=all',
     'warning',
     Math.min(15, stalePending * 3)
   );

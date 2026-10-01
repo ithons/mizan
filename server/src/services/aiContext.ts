@@ -135,7 +135,7 @@ export function buildAdvisorActions({
     actions.push(action(
       'review-transactions',
       'Review transactions',
-      '/review',
+      '/ledger?uncategorized=1',
       'Help me prioritize my transaction review queue and explain what reports these issues affect.',
       `${uncategorized} uncategorized transactions and ${ruleSuggestions} rule suggestions are open.`,
       uncategorized > 10 ? 'warning' : 'info'
@@ -146,7 +146,7 @@ export function buildAdvisorActions({
     actions.push(action(
       'review-cash-flow',
       'Review cash flow',
-      '/bills',
+      '/ledger',
       'Explain my recurring cash flow items that need review and how they affect the next 60 days.',
       `${forecast.review_count} recurring items need review, including ${forecast.overdue_count} overdue.`,
       forecast.overdue_count > 0 ? 'warning' : 'info'
@@ -157,7 +157,7 @@ export function buildAdvisorActions({
     actions.push(action(
       'explain-spending-change',
       'Explain spending change',
-      '/reports',
+      '/?window=this-month',
       'What drove the increase in my spending this period, and which categories should I inspect first?',
       `Spending is up ${fmt(toDollars(reportSummary.expenses.delta))} versus the prior comparable period.`,
       reportSummary.expenses.delta_percent !== null && reportSummary.expenses.delta_percent > 20 ? 'warning' : 'info'
@@ -168,7 +168,7 @@ export function buildAdvisorActions({
     actions.push(action(
       'improve-savings-rate',
       'Improve savings rate',
-      '/reports',
+      '/?window=this-month',
       'What practical changes would improve my savings rate based on this period?',
       `Savings rate is ${reportSummary.savings_rate.current!.toFixed(1)}% for the selected period.`,
       'warning'
@@ -179,7 +179,7 @@ export function buildAdvisorActions({
     actions.push(action(
       'financial-health-review',
       'Review financial health',
-      '/reports',
+      '/?window=this-month',
       'Give me a concise overview of my financial health and what I should watch next.',
       'No urgent workflow issues are open.',
       'positive'

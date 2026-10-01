@@ -174,7 +174,7 @@ function cashFlowReviewIssue(forecast: RecurringForecast): WeightedIssue | null 
     forecast.overdue_count > 0
       ? sentence(subject, 'needs', 'need', `review, including ${overdue.text}.`)
       : sentence(subject, 'needs', 'need', 'confirmation before the forecast is dependable.'),
-    '/bills',
+    '/ledger',
     forecast.overdue_count > 0 ? 'warning' : 'info',
     Math.min(20, forecast.overdue_count * 8 + (forecast.review_count - forecast.overdue_count) * 4)
   );

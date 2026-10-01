@@ -1,6 +1,7 @@
 import type Database from 'better-sqlite3';
 import { getDb } from '../db/index';
 import { providerForModel } from './aiProviders';
+import { canonicalRoute } from '../../../shared/routes';
 import { literal } from './aiProviders/schema';
 import { buildFinancialContext } from './aiContext';
 import { getTransactionReviewSummary } from './transactionReview';
@@ -382,7 +383,7 @@ Example format for each kind you're likely to use:
       "kind": "categorize_transaction",
       "label": "Categorize Trupanion",
       "summary": "Trupanion (-$39.02) is pet insurance.",
-      "route": "/transactions",
+      "route": "/ledger",
       "payload": { "kind": "categorize_transaction", "transaction_id": "<id copied from the lists above>", "category_id": "<id copied from the lists above>" },
       "changes": [{ "field": "category", "before": "Uncategorized", "after": "Health" }]
     },
@@ -390,7 +391,7 @@ Example format for each kind you're likely to use:
       "kind": "create_merchant_rule",
       "label": "Always categorize Trupanion as Health",
       "summary": "Auto-categorize future Trupanion charges as Health.",
-      "route": "/transactions",
+      "route": "/ledger",
       "payload": { "kind": "create_merchant_rule", "pattern": "Trupanion", "category_id": "<id copied from the lists above>", "apply_existing": true },
       "changes": []
     }
@@ -688,7 +689,8 @@ export const collectBackgroundReview: AiJobCollect = async ({ db, assignment, ru
       kind: payload.kind,
       label: parsed.data.label,
       summary: parsed.data.summary,
-      route: parsed.data.route || '/review',
+      // The model writes this field; a retired path it learned anywhere becomes the screen that exists.
+      route: canonicalRoute(parsed.data.route || '/ledger?uncategorized=1'),
       payload,
       changes: parsed.data.changes as AdvisorDraftChange[],
       citations: parsed.data.citations as AdvisorCitation[],

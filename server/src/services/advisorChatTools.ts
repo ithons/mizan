@@ -998,7 +998,7 @@ function applyWriteDraft(
         kind: payload.kind,
         label: `${CHAT_TOOL_ACTION_PREFIX}${label}`,
         summary,
-        route: '/transactions',
+        route: '/ledger',
         payload,
         changes: [],
         citations: [],

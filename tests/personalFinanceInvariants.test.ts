@@ -57,7 +57,7 @@ test('personal finance invariants flag old pending transactions', (t) => {
   assert.equal(issues[0].id, 'stale-pending-transactions');
   // Transactions reads `uncategorized` and `range`, never `pending`, so the old route promised a
   // filter that never applied. `range=all` is honoured and guarantees a 7-day-old row is visible.
-  assert.equal(issues[0].route, '/transactions?range=all');
+  assert.equal(issues[0].route, '/ledger?range=all');
   assert.match(issues[0].message, /older than 7 days/);
 });
 
