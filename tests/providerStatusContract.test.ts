@@ -5,7 +5,6 @@ import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
 import express from 'express';
-import { migratedTestDb } from './helpers/schema';
 
 // /api/ai/providers and the provider-key PUT/DELETE responses are typed on the client as
 // `AdvisorProviderStatus[]`, which carries `credential_source`. The server used to build its
@@ -13,11 +12,15 @@ import { migratedTestDb } from './helpers/schema';
 // would have read every provider as "no credential found". This drives the real router and
 // asserts the wire shape is the shared one, and the same one /api/ai/settings already sends.
 
-// A scratch MIZAN_DIR, set before credentials.ts loads, so the DELETE below cannot reach the
-// owner's credential store. Env keys beat the store in `resolveCredential`, which makes the
-// statuses hermetic on any machine.
+// A scratch MIZAN_DIR, so the DELETE below cannot reach the owner's credential store. It has to be
+// set before anything loads db/index.ts, which freezes MIZAN_DIR at module load, and a static import
+// is hoisted above any assignment here. So helpers/schema (which imports db/index) is required
+// below the assignment rather than imported. Env keys beat the store in `resolveCredential`, which
+// makes the statuses hermetic on any machine.
 const MIZAN_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'mizan-provider-status-'));
 process.env.MIZAN_DIR_OVERRIDE = MIZAN_DIR;
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+const { migratedTestDb } = require('./helpers/schema') as typeof import('./helpers/schema');
 const ENV_KEYS = ['ANTHROPIC_API_KEY', 'OPENAI_API_KEY', 'GEMINI_API_KEY'] as const;
 
 async function withEnvKeys(fn: () => Promise<void>): Promise<void> {
@@ -85,4 +88,9 @@ test('DELETE of a key the environment still supplies says so instead of reportin
       assert.match(body.error, /still configured from the environment/);
     })
   );
+});
+
+test('the credential store this file writes is the scratch one, never the owner\'s', async () => {
+  const { MIZAN_DIR: inUse } = await import('../server/src/db/index');
+  assert.equal(path.resolve(inUse), path.resolve(MIZAN_DIR));
 });
