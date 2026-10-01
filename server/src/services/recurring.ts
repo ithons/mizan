@@ -314,6 +314,20 @@ function variance(values: number[], med: number): number {
   return stdDev / Math.abs(mean);
 }
 
+// Approximate days per period for the stale check: a pattern is stale two periods past its last charge.
+const FREQUENCY_DAYS: Record<string, number> = {
+  weekly: 7,
+  biweekly: 14,
+  monthly: 30,
+  quarterly: 91,
+  annual: 365,
+};
+
+function isStale(lastSeen: string, frequency: string, today: string): boolean {
+  const approxGap = FREQUENCY_DAYS[frequency] || 30;
+  return format(addDays(parseISO(lastSeen), 2 * approxGap), 'yyyy-MM-dd') < today;
+}
+
 export function detectRecurring(): void {
   const db = getDb();
   const cutoff = format(subMonths(new Date(), 13), 'yyyy-MM-dd');
@@ -496,7 +510,14 @@ export function detectRecurring(): void {
       // A dismissal is honoured on its own terms, not only through the is_active/is_confirmed
       // pair, so a future change to either flag cannot quietly revive a pattern the owner refused.
       if (existing.dismissed_at) continue;
-      if (!existing.is_active && !existing.is_confirmed) continue;
+      // Inactive-and-unconfirmed is also what step 6 leaves behind when a bill merely pauses, so it
+      // cannot be read as a refusal: skipping it held every paused-then-resumed bill down forever,
+      // its new charges unlinked. Revive it once a charge brings it back inside the stale window;
+      // until then there is nothing new, and writing it active only for step 6 to retire it again
+      // in the same pass would be churn.
+      if (!existing.is_active && !existing.is_confirmed && isStale(lastTxn.date, frequency, today)) {
+        continue;
+      }
 
       patternId = existing.id;
       db.prepare(`
@@ -557,22 +578,8 @@ export function detectRecurring(): void {
     average_amount: number;
   }>;
 
-  // Map frequency to approximate days for stale check
-  const freqDays: Record<string, number> = {
-    weekly: 7,
-    biweekly: 14,
-    monthly: 30,
-    quarterly: 91,
-    annual: 365,
-  };
-
   for (const pattern of allPatterns) {
-    const approxGap = freqDays[pattern.frequency] || 30;
-    const staleThreshold = format(
-      addDays(parseISO(pattern.last_seen), 2 * approxGap),
-      'yyyy-MM-dd'
-    );
-    if (staleThreshold < today) {
+    if (isStale(pattern.last_seen, pattern.frequency, today)) {
       db.prepare(
         'UPDATE recurring_patterns SET is_active = 0, updated_at = ? WHERE id = ?'
       ).run(new Date().toISOString(), pattern.id);

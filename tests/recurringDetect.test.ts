@@ -604,3 +604,100 @@ test('HEALTHY: ordinary linked rows still feed the estimate unchanged', () => {
     teardown(db);
   }
 });
+
+/**
+ * A bill that pauses long enough to go stale comes back when it resumes.
+ *
+ * Step 6 retires a pattern two periods past its last charge by setting `is_active = 0` and nothing
+ * else. The upsert used to skip every inactive, unconfirmed row, a test written as the dismissal
+ * check before migration 057 gave dismissal its own column, so it held down every stale-retired
+ * pattern too: the resumed charges were never linked and last_seen never moved again.
+ */
+function seedNetflixRun(db: Database.Database, daysAgo: number[], idPrefix: string): void {
+  const accountId = insertAccount(db);
+  daysAgo.forEach((d, i) => {
+    insertTransaction(db, {
+      id: `${idPrefix}_${i}`,
+      account_id: accountId,
+      date: format(subDays(new Date(), d), 'yyyy-MM-dd'),
+      amount: -2000,
+      merchant_name: 'Netflix',
+      original_name: 'NETFLIX',
+    });
+  });
+}
+
+function linkedTo(db: Database.Database, idPrefix: string): Array<string | null> {
+  return (
+    db
+      .prepare('SELECT recurring_id FROM transactions WHERE id LIKE ? ORDER BY id')
+      .all(`${idPrefix}_%`) as Array<{ recurring_id: string | null }>
+  ).map((r) => r.recurring_id);
+}
+
+test('a stale-retired pattern is reactivated and links its charges when the bill resumes', () => {
+  const db = setupDb();
+  try {
+    seedNetflixRun(db, [330, 300, 270], 'old');
+    detectRecurring();
+    const retired = patternFor(db, 'netflix');
+    assert.ok(retired, 'detection never found the pattern, so this test proves nothing');
+    assert.equal(retired.is_active, 0, 'the first pass was supposed to retire the paused pattern');
+    assert.equal(retired.dismissed_at, null);
+
+    seedNetflixRun(db, [60, 30, 0], 'new');
+    detectRecurring();
+
+    const revived = patternFor(db, 'netflix');
+    assert.ok(revived);
+    assert.equal(revived.id, retired.id, 'the pattern was re-created instead of revived');
+    assert.equal(revived.is_active, 1, 'a resumed bill stayed retired');
+    assert.equal(revived.last_seen, format(new Date(), 'yyyy-MM-dd'));
+    assert.equal(revived.transaction_count, 6);
+    assert.deepEqual(linkedTo(db, 'new'), [retired.id, retired.id, retired.id]);
+  } finally {
+    teardown(db);
+  }
+});
+
+test('HEALTHY: a dismissed pattern stays dismissed when its bill resumes', () => {
+  const db = setupDb();
+  try {
+    seedNetflixRun(db, [150, 120, 90], 'old');
+    detectRecurring();
+    const found = patternFor(db, 'netflix');
+    assert.ok(found, 'detection never found the pattern, so this test proves nothing');
+    dismissPattern(db, found.id as string);
+
+    seedNetflixRun(db, [60, 30, 0], 'new');
+    detectRecurring();
+
+    const after = patternFor(db, 'netflix');
+    assert.ok(after);
+    assert.equal(after.is_active, 0, 'a dismissed pattern was revived by a resumed charge');
+    assert.ok(after.dismissed_at, 'the dismissal marker was lost');
+    assert.deepEqual(linkedTo(db, 'new'), [null, null, null]);
+    assert.deepEqual(linkedTo(db, 'old'), [null, null, null]);
+  } finally {
+    teardown(db);
+  }
+});
+
+test('HEALTHY: a stale-retired pattern with no new charge is left exactly as it was', () => {
+  const db = setupDb();
+  try {
+    seedNetflixRun(db, [330, 300, 270], 'old');
+    detectRecurring();
+    const before = patternFor(db, 'netflix');
+    assert.ok(before, 'detection never found the pattern, so this test proves nothing');
+    assert.equal(before.is_active, 0);
+
+    detectRecurring();
+    detectRecurring();
+
+    // No write at all, not a reactivate-then-retire flip inside one pass that only updated_at shows.
+    assert.deepEqual(patternFor(db, 'netflix'), before);
+  } finally {
+    teardown(db);
+  }
+});
