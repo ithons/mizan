@@ -1,5 +1,6 @@
 import type Database from 'better-sqlite3';
 import type {
+  AdvisorDraftActionKind,
   DataQualityIssue,
   DataQualitySummary,
   InsightSeverity,
@@ -137,21 +138,76 @@ const REVIEW_QUEUE_NOUNS: ReadonlyArray<readonly [string, string]> = [
 
 export const REVIEW_QUEUE_IDS_NAMED: ReadonlyArray<string> = REVIEW_QUEUE_NOUNS.map(([id]) => id);
 
+/**
+ * The queues whose resolution can move a reported figure, which is the only work the row may say
+ * reports are waiting on. Uncategorized rows and rule suggestions decide category totals; a
+ * duplicate candidate still counts until it is confirmed and a transfer candidate is already left
+ * out until it is rejected (`excludedFromTotalsSql`), so resolving either moves spend. Pending rows
+ * stay out of reports until they post whatever the owner does (`t.pending = 0` in reporting.ts),
+ * and a recurring candidate moves only the forecast, so neither is a reason to distrust a report.
+ */
+const QUEUES_THAT_MOVE_REPORTS: ReadonlySet<string> = new Set([
+  'uncategorized',
+  'rule_suggestions',
+  'duplicate_candidates',
+  'transfer_candidates',
+]);
+
+/**
+ * Which draft kinds write a transaction's category, declared over the whole union so a new kind is
+ * a compile error until someone decides. `ai_insights` counts every open draft whatever its kind,
+ * and a queue holding one `update_budget` draft on a fully categorized ledger used to read
+ * "before reports can be fully trusted". A retirement is false because the model may only retire a
+ * rule that files zero rows (draftAutonomy.ts), so no current figure moves when it lands.
+ */
+const DRAFT_KIND_MOVES_REPORTS: Readonly<Record<AdvisorDraftActionKind, boolean>> = {
+  categorize_transaction: true,
+  create_merchant_rule: true,
+  retire_merchant_rule: false,
+  update_budget: false,
+  update_goal_target: false,
+  confirm_recurring: false,
+  create_recurring_adjustment: false,
+  set_manual_cost_basis: false,
+  set_sector_metadata: false,
+};
+
+function reviewQueueCounts(reviewSummary: TransactionReviewSummary): { reports: Counted[]; other: Counted[] } {
+  const reports: Counted[] = [];
+  const other: Counted[] = [];
+  for (const [id, noun] of REVIEW_QUEUE_NOUNS) {
+    const total = queueCount(reviewSummary, id);
+    const moving = id === 'ai_insights'
+      ? reviewSummary.ai_drafts.filter((draft) => DRAFT_KIND_MOVES_REPORTS[draft.kind]).length
+      : QUEUES_THAT_MOVE_REPORTS.has(id) ? total : 0;
+    if (moving > 0) reports.push(counted(moving, noun));
+    if (total - moving > 0) other.push(counted(total - moving, noun));
+  }
+  return { reports, other };
+}
+
+function transactionReviewMessage(reviewSummary: TransactionReviewSummary): string {
+  const { reports, other } = reviewQueueCounts(reviewSummary);
+  const parts = [
+    reports.length > 0
+      ? sentence(joinCounted(reports), 'needs', 'need', 'review before reports can be fully trusted.')
+      : null,
+    other.length > 0 ? sentence(joinCounted(other), 'is', 'are', 'waiting for review.') : null,
+  ].filter((part): part is string => part !== null);
+  return parts.length > 0
+    ? parts.join(' ')
+    : sentence(counted(reviewSummary.total_open, 'review item'), 'needs', 'need', 'attention.');
+}
+
 function transactionReviewIssue(reviewSummary: TransactionReviewSummary): WeightedIssue | null {
   if (reviewSummary.total_open <= 0) return null;
 
   const uncategorized = queueCount(reviewSummary, 'uncategorized');
-  const named = REVIEW_QUEUE_NOUNS
-    .map(([id, noun]) => [queueCount(reviewSummary, id), noun] as const)
-    .filter(([count]) => count > 0)
-    .map(([count, noun]) => counted(count, noun));
 
   return issue(
     'transaction-review',
     'Transaction review backlog',
-    named.length > 0
-      ? sentence(joinCounted(named), 'needs', 'need', 'review before reports can be fully trusted.')
-      : sentence(counted(reviewSummary.total_open, 'review item'), 'needs', 'need', 'attention.'),
+    transactionReviewMessage(reviewSummary),
     // `/review` redirected to `/ledger?uncategorized=1`, a filter that holds none of the AI
     // suggestions and, on the measured state above, no rows at all: the row's only action landed on
     // an empty list. `/ledger` is the screen every queue named here is worked on, and it carries a

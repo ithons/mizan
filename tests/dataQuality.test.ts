@@ -754,3 +754,68 @@ test('every review queue the summary reports has a noun this panel can name it w
     );
   }
 });
+
+/**
+ * A BUDGET PROPOSAL IS NOT A REASON TO DISTRUST A REPORT.
+ *
+ * Every queue in the row used to share one tail, "review before reports can be fully trusted", and
+ * `ai_insights` counts every open draft whatever its kind. On the scratch ledger the only open work
+ * was one `update_budget` draft (Shopping $500 to $900) with every transaction categorized, and the
+ * panel told the owner their reports could not be trusted. A budget target moves no spending,
+ * income, cash flow or net worth figure, so that clause was a claim nothing had checked.
+ */
+function openBudgetDraft(db: Database.Database, id: string): void {
+  db.prepare(`
+    INSERT INTO budgets (id, category_id, amount, period, rollover, rollover_balance, created_at, updated_at)
+    VALUES ('budget_shop', 'cat_shop', 50000, 'monthly', 0, 0, ?, ?)
+  `).run(TODAY.toISOString(), TODAY.toISOString());
+  db.prepare(`
+    INSERT INTO advisor_drafts (id, kind, label, summary, route, payload, changes, citations, status, created_at, updated_at)
+    VALUES (?, 'update_budget', 'Raise Shopping budget', 'Raise Shopping budget to match actual spending', '/plan', ?, '[]', '[]', 'open', ?, ?)
+  `).run(
+    id,
+    JSON.stringify({ kind: 'update_budget', category_id: 'cat_shop', amount: 900, period: 'monthly', rollover: false }),
+    TODAY.toISOString(),
+    TODAY.toISOString()
+  );
+}
+
+test('HEALTHY: a queue holding only a budget proposal does not call the reports untrustworthy', (t) => {
+  const db = freshlySyncedDb();
+  t.after(() => db.close());
+
+  const checking = insertAccount(db, { account_name: 'Checking', current_balance: 300000 });
+  insertTransaction(db, { account_id: checking, date: daysAgo(2), amount: -2750, category_id: 'cat_food' });
+  openBudgetDraft(db, 'draft_budget');
+
+  assert.equal(getTransactionReviewSummary(db).queues.find((q) => q.id === 'ai_insights')?.count, 1);
+  const issues = getDataQualitySummary(db).issues;
+  assert.equal(issues.length, 1);
+  assert.equal(issues[0].id, 'transaction-review');
+  assert.doesNotMatch(issues[0].message, /reports/, 'a budget target moves no report figure');
+  assert.equal(issues[0].message, '1 AI suggestion is waiting for review.');
+});
+
+test('a backlog that does move reports keeps the reports clause, and names the rest apart from it', (t) => {
+  const db = freshlySyncedDb();
+  t.after(() => db.close());
+
+  const checking = insertAccount(db, { account_name: 'Checking', current_balance: 300000 });
+  insertTransaction(db, { account_id: checking, date: daysAgo(2), amount: -2750, category_id: null });
+  openBudgetDraft(db, 'draft_budget');
+
+  assert.equal(
+    getDataQualitySummary(db).issues[0].message,
+    '1 uncategorized transaction needs review before reports can be fully trusted. 1 AI suggestion is waiting for review.'
+  );
+});
+
+test('HEALTHY: recurring candidates move only the forecast and are not blamed on reports', () => {
+  const summary = summarizeDataQuality({
+    syncHealth: baseSyncHealth(),
+    reviewSummary: baseReviewSummary({ recurring_candidates: 2 }),
+    forecast: baseForecast(),
+  });
+
+  assert.equal(summary.issues[0].message, '2 recurring candidates are waiting for review.');
+});
