@@ -21,27 +21,10 @@ import { migratedTestDb, insertAccount, insertCategory, TEST_NOW } from './helpe
 import { recordFieldRevision } from '../server/src/services/categoryWrites';
 
 /**
- * The mis-signed brokerage transfers, and the mechanism that makes correcting them stick.
- *
- * Fidelity reports "Electronic Funds Transfer Received" with the sign inverted: money arriving is
- * stored as money leaving. Re-derived on a `.backup` copy of `.mizan/mizan.db` taken 2026-08-01,
- * latest applied migration `055_simplefin_relink_proposals.sql`:
- *
- *   SELECT COUNT(*), SUM(t.amount), SUM(t.amount < 0)
- *     FROM transactions t JOIN accounts a ON a.id = t.account_id
- *    WHERE a.institution_name LIKE '%Fidelity%'
- *      AND (t.original_name LIKE '%Electronic Funds Transfer%'
- *           OR t.merchant_name LIKE '%Electronic Funds%');
- *   -> 14 | -110000 | 14
- *
- * So fourteen rows, every one of them negative, $1,100.00 of ledger error. And none of them is
- * corrected, because nothing could hold a correction:
- *
- *   SELECT COALESCE(amount_source, 'NULL'), COUNT(*) FROM transactions GROUP BY 1;
- *   -> NULL 2588, provider 12
- *   SELECT COUNT(*) FROM transaction_field_revisions;  -> 0
- *
- * The fixture below is the same shape at 1/10 the size, driven through the real sync path.
+ * An owner's amount correction, and the mechanism that makes it stick against a provider that keeps
+ * re-sending its own figure. The fixture is a Fidelity contribution whose descriptor states no
+ * direction, so the importer's descriptor rule (investmentTrades.directedAmount) cannot settle it
+ * and only the owner can.
  */
 
 const PROVIDER_ACCOUNT_ID = 'ACT-fidelity-individual';
@@ -67,8 +50,8 @@ function response(overrides: { amount?: number | string; pending?: boolean } = {
             id: PROVIDER_TXN_ID,
             posted: POSTED_EPOCH,
             amount: overrides.amount ?? '-100.00',
-            payee: 'Electronic Funds Transfer Received',
-            description: 'Electronic Funds Transfer Received (Cash)',
+            payee: 'Fidelity contribution',
+            description: 'Fidelity contribution',
             pending: overrides.pending ?? false,
           },
         ],

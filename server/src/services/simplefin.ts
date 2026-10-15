@@ -13,7 +13,7 @@ import { isBelowBackfillFloor } from './backfillFloor';
 import { toCents, toCentsOrNull, toDollars } from './money';
 import { recordFieldRevision } from './categoryWrites';
 import { cleanProviderMerchant } from './merchantNames';
-import { isInternalTrade } from './investmentTrades';
+import { directedAmount, isInternalTrade } from './investmentTrades';
 import {
   guardSimplefinRelink,
   toProviderSnapshot,
@@ -546,6 +546,8 @@ export interface SimplefinTransactionValues {
   date: string;
   /** Integer cents, already negative for spend. */
   amount: number;
+  /** What the provider sent, when the importer stored a different sign. */
+  providerAmount?: number;
   merchantName: string | null;
   originalName: string;
   pending: number;
@@ -630,6 +632,7 @@ export function upsertSimplefinTransaction(
   `).get(values.providerId) as ExistingTransactionRow | undefined;
 
   if (!existing) {
+    const id = uuidv4();
     db.prepare(`
       INSERT INTO transactions
         (id, simplefin_transaction_id, account_id, date, amount, merchant_name,
@@ -637,7 +640,7 @@ export function upsertSimplefinTransaction(
          date_source, amount_source, merchant_name_source, created_at, updated_at)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, 'simplefin', ?, 'provider', 'provider', 'provider', ?, ?)
     `).run(
-      uuidv4(),
+      id,
       values.providerId,
       accountId,
       values.date,
@@ -649,6 +652,7 @@ export function upsertSimplefinTransaction(
       now,
       now
     );
+    recordDirectedAmount(db, id, values, now);
     return 'added';
   }
 
@@ -780,7 +784,26 @@ export function upsertSimplefinTransaction(
     now,
     values.providerId
   );
+  if (!ownerOwnsAmount && existing.amount !== amount) recordDirectedAmount(db, existing.id, values, now);
   return 'modified';
+}
+
+function recordDirectedAmount(
+  db: Database.Database,
+  transactionId: string,
+  values: SimplefinTransactionValues,
+  now: string
+): void {
+  if (values.providerAmount === undefined) return;
+  recordFieldRevision(db, {
+    transactionId,
+    field: 'amount',
+    fromValue: String(values.providerAmount),
+    toValue: String(values.amount),
+    fromSource: 'provider',
+    toSource: 'provider',
+    origin: 'import_rule',
+  }, now);
 }
 
 /** Record that the provider returned these accounts in a pass that took their rows. */
@@ -986,12 +1009,15 @@ export function applySimplefinResponse(
         skipped++;
         continue;
       }
+      const description = txn.description || '';
+      const directed = directedAmount(amount, description);
       const write = upsertSimplefinTransaction(db, accountId, {
         providerId: txn.id,
         date,
-        amount,
-        merchantName: cleanProviderMerchant(txn.payee || null, txn.description || ''),
-        originalName: txn.description || '',
+        amount: directed,
+        ...(directed !== amount ? { providerAmount: amount } : {}),
+        merchantName: cleanProviderMerchant(txn.payee || null, description),
+        originalName: description,
         // Not every institution reports this via SimpleFIN Bridge - defaults to posted (0)
         // when the field is absent from the payload, matching the column's schema default.
         pending: txn.pending === true ? 1 : 0,

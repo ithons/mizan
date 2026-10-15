@@ -1,6 +1,6 @@
 import type Database from 'better-sqlite3';
 import { merchantFromWalletDescriptor, payeeHasWalletTail } from '../services/merchantNames';
-import { isInternalTrade } from '../services/investmentTrades';
+import { descriptorDirection, isInternalTrade } from '../services/investmentTrades';
 
 /** SQL functions a repair migration may call, so a repair applies the same rule the importer does. */
 export function registerMigrationFunctions(db: Database.Database): void {
@@ -12,5 +12,8 @@ export function registerMigrationFunctions(db: Database.Database): void {
   );
   db.function('mizan_is_internal_trade', { deterministic: true }, (description: unknown) =>
     typeof description === 'string' && isInternalTrade(description) ? 1 : 0
+  );
+  db.function('mizan_descriptor_direction', { deterministic: true }, (description: unknown) =>
+    typeof description === 'string' ? descriptorDirection(description) : 0
   );
 }
