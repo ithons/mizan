@@ -71,7 +71,8 @@
  * insets its right edge by this plus a gutter so it lands over the content column rather than
  * over the navigation. */
 :root {
-  --mz-rail-w: 164px;
+  /* 164px from 1000px wide up, 64px (icons only) below. */
+  --mz-rail-w: clamp(64px, calc((100vw - 999px) * 999), 164px);
 }
 
 /* Balance palette, light and dark.

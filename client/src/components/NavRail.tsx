@@ -1,5 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 import { NavLink, useNavigate } from 'react-router-dom';
+import { Landmark, List, MessageSquare, Scale, Settings as SettingsIcon, Target, TrendingUp, type LucideIcon } from 'lucide-react';
 import { syncApi } from '../lib/api';
 import { formatCompactRelative } from '../lib/formatters';
 import { useShortcuts, type ShortcutHandlers, type ShortcutId } from '../lib/keyboard';
@@ -37,6 +38,8 @@ import { useAppStore } from '../store';
 interface NavItem {
   to: string;
   label: string;
+  /** Drawn in place of the word when the rail collapses below 1000px. */
+  icon: LucideIcon;
   /**
    * The chord that goes here, as a row in the one shortcut table. The letters live there rather
    * than in this file so that a screen claiming `a` for itself collides with `g a` at import time
@@ -46,15 +49,15 @@ interface NavItem {
 }
 
 export const NAV_ITEMS: readonly NavItem[] = [
-  { to: '/', label: 'Balance', shortcut: 'nav.balance' },
-  { to: '/ledger', label: 'Ledger', shortcut: 'nav.ledger' },
-  { to: '/accounts', label: 'Accounts', shortcut: 'nav.accounts' },
-  { to: '/investments', label: 'Investments', shortcut: 'nav.investments' },
-  { to: '/plan', label: 'Plan', shortcut: 'nav.plan' },
-  { to: '/advisor', label: 'Advisor', shortcut: 'nav.advisor' },
+  { to: '/', label: 'Balance', icon: Scale, shortcut: 'nav.balance' },
+  { to: '/ledger', label: 'Ledger', icon: List, shortcut: 'nav.ledger' },
+  { to: '/accounts', label: 'Accounts', icon: Landmark, shortcut: 'nav.accounts' },
+  { to: '/investments', label: 'Investments', icon: TrendingUp, shortcut: 'nav.investments' },
+  { to: '/plan', label: 'Plan', icon: Target, shortcut: 'nav.plan' },
+  { to: '/advisor', label: 'Advisor', icon: MessageSquare, shortcut: 'nav.advisor' },
 ];
 
-export const SETTINGS_ITEM: NavItem = { to: '/settings', label: 'Settings', shortcut: 'nav.settings' };
+export const SETTINGS_ITEM: NavItem = { to: '/settings', label: 'Settings', icon: SettingsIcon, shortcut: 'nav.settings' };
 
 export const ALL_NAV_ITEMS: readonly NavItem[] = [...NAV_ITEMS, SETTINGS_ITEM];
 
@@ -76,23 +79,30 @@ function useNavShortcuts(onNavigate: (to: string) => void): void {
   useShortcuts('nav-rail', handlers);
 }
 
-function RailItem({ to, label }: { to: string; label: string }) {
+function RailItem({ to, label, icon: Icon }: { to: string; label: string; icon: LucideIcon }) {
   return (
     <NavLink
       to={to}
       end={to === '/'}
-      className="group grid grid-cols-[18px_1fr] items-center gap-x-2 py-[7px] pl-3 pr-[22px]"
+      title={label}
+      className="group grid grid-cols-[18px_1fr] items-center gap-x-2 py-[7px] pl-3 pr-[22px] max-[999px]:flex max-[999px]:justify-center max-[999px]:px-0"
     >
       {({ isActive }) => (
         <>
           <span
             aria-hidden
-            className={`h-px w-full transition-colors ${
+            className={`h-px w-full transition-colors max-[999px]:hidden ${
               isActive ? 'bg-sage' : 'bg-transparent group-hover:bg-line-3'
             }`}
           />
+          <Icon
+            aria-hidden
+            size={18}
+            strokeWidth={1.6}
+            className={`hidden max-[999px]:block ${isActive ? 'text-ink' : 'text-muted group-hover:text-ink'}`}
+          />
           <span
-            className={`text-right text-sub transition-colors ${
+            className={`text-right text-sub transition-colors max-[999px]:sr-only ${
               isActive ? 'font-medium text-ink' : 'text-muted group-hover:text-ink'
             }`}
           >
@@ -171,12 +181,13 @@ export function NavRail() {
       <button
         type="button"
         onClick={() => window.dispatchEvent(new Event('mizan:open-palette'))}
-        className="flex items-center justify-between gap-2 pb-[22px] pl-3 pr-[22px]"
+        aria-label="Search, jump or ask"
+        className="flex items-center justify-between gap-2 pb-[22px] pl-3 pr-[22px] max-[999px]:justify-center max-[999px]:px-0"
       >
         <span className="flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-md bg-ink text-body-lg font-semibold text-paper">
           م
         </span>
-        <span className="flex items-baseline gap-2">
+        <span className="flex items-baseline gap-2 max-[999px]:hidden">
           <span className="font-serif text-sub text-ink">mizān</span>
           {/* Outlined rather than filled: `line` on `rail` is 1.16:1 light, so a chip fill here
               would be an invisible rectangle. The border carries the chip and the text carries
@@ -187,7 +198,7 @@ export function NavRail() {
 
       <div className="flex flex-1 flex-col gap-0.5 overflow-y-auto py-2">
         {NAV_ITEMS.map((item) => (
-          <RailItem key={item.to} to={item.to} label={item.label} />
+          <RailItem key={item.to} to={item.to} label={item.label} icon={item.icon} />
         ))}
       </div>
 
@@ -203,7 +214,7 @@ export function NavRail() {
       <div className="mx-3 border-t border-faint" />
 
       <div className="pt-[18px]">
-        <RailItem to={SETTINGS_ITEM.to} label={SETTINGS_ITEM.label} />
+        <RailItem to={SETTINGS_ITEM.to} label={SETTINGS_ITEM.label} icon={SETTINGS_ITEM.icon} />
         <button
           type="button"
           onClick={runSync}
@@ -214,13 +225,14 @@ export function NavRail() {
              says "error" only if they already know it does. `ink` on `rail` is 16.10:1 against
              `muted`'s 6.67:1, so the failed state is the one that gets darker, and the word says
              which state it is either way. */
-          className={`mt-3 block w-full pl-3 pr-[22px] text-right text-note transition-colors ${
+          className={`mt-3 block w-full pl-3 pr-[22px] text-right text-note transition-colors max-[999px]:px-1 max-[999px]:text-center max-[999px]:text-micro ${
             syncStatus === 'error' ? 'font-medium text-ink' : 'text-muted hover:text-ink'
           }`}
           // The one line on every screen that changes on its own. A screen reader hears the new
           // state when a sync finishes or fails without the owner having to go looking; 'polite'
           // because nothing here is urgent enough to interrupt what they were reading.
           aria-live="polite"
+          title={syncLabel}
         >
           {syncLabel}
         </button>
