@@ -252,7 +252,12 @@ export function Investments() {
   const stats = useMemo(() => getCostBasisStats(portfolioHoldings), [portfolioHoldings]);
 
   const history = report?.history ?? [];
-  const delta = getPortfolioDelta(marketValue, history, report?.portfolio_account_ids.length ?? null);
+  const delta = getPortfolioDelta(
+    marketValue,
+    history,
+    report?.portfolio_account_ids.length ?? null,
+    report?.external_flows ?? []
+  );
   // Looked up by date rather than read off `delta.baseline`, because `PortfolioSeriesPoint` is the
   // shape `getPortfolioDelta` reasons about (value, estimated, coverage) and provenance is not part
   // of that arithmetic. `date` is UNIQUE on net_worth_snapshots and that function already refuses a
@@ -314,6 +319,12 @@ export function Investments() {
               {delta.change >= 0 ? '↑' : '↓'} {formatWholeCurrency(Math.abs(delta.change))} since{' '}
               {delta.baseline.estimated ? 'the estimated ' : ''}
               {formatDateShort(delta.baseline.date)}
+              {delta.deposited !== 0 && (
+                <span className="text-muted">
+                  {' '}
+                  · {formatWholeCurrency(Math.abs(delta.deposited))} {delta.deposited > 0 ? 'added' : 'withdrawn'}
+                </span>
+              )}
             </div>
           )}
           {/*

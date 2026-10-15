@@ -1,4 +1,5 @@
 import type { ReportBasis } from '../services/transactionFilters';
+import { portfolioExternalFlows } from '../services/portfolioFlows';
 import { Router, Request, Response, NextFunction } from 'express';
 import { getDb } from '../db/index';
 import {
@@ -460,6 +461,8 @@ router.get('/investments', (req: Request, res: Response, next: NextFunction): vo
         invested_balance: toDollars(investedBalance),
         crypto_value: toDollars(cryptoValue),
         portfolio_account_ids: portfolioAccountIds,
+        external_flows: portfolioExternalFlows(db, portfolioAccountIds)
+          .map((flow) => ({ date: flow.date, amount: toDollars(flow.amount) })),
         allocation,
         holdings,
         history,

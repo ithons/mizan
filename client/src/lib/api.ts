@@ -569,7 +569,7 @@ export const reportsApi = {
     // before migration 056 is the latter, because the set it was summed over was never stored and
     // the only evidence left is today's accounts. It is the same distinction `estimated` draws one
     // level up: `estimated` is about the balances, this is about which accounts they belong to.
-    return apiFetch<{ portfolio_value: number; holdings_value: number; invested_balance: number; crypto_value: number; portfolio_account_ids: string[]; history: Array<{ date: string; value: number; estimated: boolean; covered_accounts: number; membership: 'recorded' | 'reconstructed' }>; allocation: Array<{ security_type: string; total_value: number }>; holdings: unknown[] }>(`/api/reports/investments?${q.toString()}`);
+    return apiFetch<{ portfolio_value: number; holdings_value: number; invested_balance: number; crypto_value: number; portfolio_account_ids: string[]; external_flows: Array<{ date: string; amount: number }>; history: Array<{ date: string; value: number; estimated: boolean; covered_accounts: number; membership: 'recorded' | 'reconstructed' }>; allocation: Array<{ security_type: string; total_value: number }>; holdings: unknown[] }>(`/api/reports/investments?${q.toString()}`);
   },
 };
 

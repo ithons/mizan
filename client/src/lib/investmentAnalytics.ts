@@ -80,7 +80,10 @@ export interface PortfolioSeriesPoint {
 }
 
 export interface PortfolioDelta {
+  /** What the market did: the value change less the money moved in or out since the baseline. */
   change: number;
+  /** Money the owner moved in (positive) or out since the baseline, kept out of `change`. */
+  deposited: number;
   /** The snapshot the change is measured from, so the screen can name the date it used. */
   baseline: PortfolioSeriesPoint;
 }
@@ -113,7 +116,8 @@ export interface PortfolioDelta {
 export function getPortfolioDelta(
   marketValue: number | null,
   history: PortfolioSeriesPoint[],
-  portfolioAccountCount: number | null
+  portfolioAccountCount: number | null,
+  flows: ReadonlyArray<{ date: string; amount: number }> = []
 ): PortfolioDelta | null {
   if (marketValue == null || portfolioAccountCount == null || history.length === 0) return null;
 
@@ -132,7 +136,11 @@ export function getPortfolioDelta(
   const baseline = Math.abs(newest.value - marketValue) < 0.005 ? history[history.length - 2] : newest;
   if (!baseline || !covers(baseline)) return null;
 
-  return { change: marketValue - baseline.value, baseline };
+  const depositedCents = flows
+    .filter((flow) => flow.date > baseline.date)
+    .reduce((sum, flow) => sum + Math.round(flow.amount * 100), 0);
+  const changeCents = Math.round((marketValue - baseline.value) * 100) - depositedCents;
+  return { change: changeCents / 100, deposited: depositedCents / 100, baseline };
 }
 
 export const STARTER_ASSET_TARGETS = [
