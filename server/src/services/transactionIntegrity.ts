@@ -26,9 +26,12 @@ interface TransferRow {
   id: string;
   account_id: string;
   account_name: string;
+  account_type: string;
+  is_liability: number;
   date: string;
   amount: number;
   category_id: string | null;
+  category_source: string | null;
   merchant_name: string | null;
   original_name: string;
   is_transfer_category: number;
@@ -82,10 +85,17 @@ export interface DuplicateDetectionResult {
 }
 
 export interface TransferDetectionResult {
+  /** Pairs waiting on the owner. */
   pairCount: number;
   transactionCount: number;
-  /** Pairs that did not exist before this run. */
+  /** Pairs waiting on the owner that did not exist before this run. */
   newPairCount: number;
+  /**
+   * Pairs settled without review: card payments, pairs whose legs both name a transfer, and pairs
+   * with one named leg between two accounts the owner has confirmed a transfer between before.
+   */
+  autoPairCount: number;
+  newAutoPairCount: number;
 }
 
 export interface TransactionIntegrityResult {
@@ -236,31 +246,49 @@ export function getDuplicateCandidateGroups(
   }));
 }
 
-// The two categories this detector writes, and the only ones it is allowed to take back.
-const TRANSFER_LEG_CATEGORIES = new Set(['cat_xfer_in', 'cat_xfer_out']);
+// The categories this detector writes, and the only ones it is allowed to take back.
+const TRANSFER_LEG_CATEGORIES = new Set(['cat_xfer_in', 'cat_xfer_out', 'cat_xfer_cc']);
 
-// Money moving between two of the owner's own accounts says so on the row. Amount symmetry on its
-// own is a coincidence, and on the live ledger it is a coincidence that happens: a $100.00 charge at
-// ARTS STUDIOS on 2026-02-11 matches a $100.00 Fidelity Roth IRA contribution on 2026-02-09 on every
-// structural test below (opposite signs, different accounts, inside the 3-day window, exactly one
-// candidate each way). Pairing those would move a real entertainment expense out of spending and
-// relabel a real retirement contribution as an internal transfer.
-//
-// So a row whose category the machine already assigned re-enters the pool only if the row's own text
-// names a transfer. That is what separates the two cases, and it is what makes the widened
-// eligibility below safe: measured on the live ledger, the widening admits 22 more rows and finds
-// exactly the same 3 pairs it found before.
+// Amount symmetry alone is a coincidence that happens on this ledger (a $100.00 ARTS STUDIOS charge
+// against a $100.00 Roth contribution two days apart), so a machine-categorized row joins the pool
+// only when its own text names a transfer.
 const TRANSFER_TEXT =
-  /\btransfers?\b|\bautopay\b|\bzelle\b|\bwire\b|\bcontribution\b|automatic payment|online payment|internet payment|payment thank you|credit card payment|bill pay/i;
+  /\btransfers?\b|\bautopay\b|\bzelle\b|\bwire\b|\bcontribution\b|automatic payment|online payment|internet payment|payment thank you|credit card payment|bill pay|crcardpmt|\be-?payment\b|directpay|moneyline|online\/mobile recurring|\baccount \*+\d{3,4}\b/i;
+
+export const PAIR_WINDOW_BUSINESS_DAYS = 5;
+
+const FUNDING_TYPES = new Set(['checking', 'savings', 'cash']);
 
 function looksLikeTransfer(row: TransferRow): boolean {
   return TRANSFER_TEXT.test(`${row.merchant_name ?? ''} ${row.original_name}`);
 }
 
+// Evidence the detector did not write itself: its own text, or a transfer category someone or
+// something other than this detector chose.
+function hasIndependentEvidence(row: TransferRow): boolean {
+  if (looksLikeTransfer(row)) return true;
+  return row.is_transfer_category === 1 && row.category_source !== 'heuristic';
+}
+
+function isCardPayment(outflow: TransferRow, inflow: TransferRow): boolean {
+  return inflow.is_liability === 1 && outflow.is_liability === 0 && FUNDING_TYPES.has(outflow.account_type);
+}
+
+/** Weekdays after the earlier date, up to and including the later one. */
+export function businessDaysBetween(a: string, b: string): number {
+  const [from, to] = a <= b ? [dateToDay(a), dateToDay(b)] : [dateToDay(b), dateToDay(a)];
+  let count = 0;
+  for (let day = from + 1; day <= to; day++) {
+    const weekday = (day + 4) % 7;
+    if (weekday !== 0 && weekday !== 6) count++;
+  }
+  return count;
+}
+
 function transferCandidateRows(db: Database.Database): TransferRow[] {
   const rows = db.prepare(`
     WITH RECURSIVE transfer_categories(id) AS (
-      SELECT id FROM categories WHERE id = 'cat_xfer'
+      SELECT id FROM categories WHERE id IN ('cat_xfer', 'cat_inv_transfer')
       UNION ALL
       SELECT c.id
       FROM categories c
@@ -270,30 +298,29 @@ function transferCandidateRows(db: Database.Database): TransferRow[] {
       t.id,
       t.account_id,
       a.account_name,
+      a.type AS account_type,
+      a.is_liability,
       t.date,
       t.amount,
       t.category_id,
+      t.category_source,
       t.merchant_name,
       t.original_name,
       CASE WHEN t.category_id IN (SELECT id FROM transfer_categories) THEN 1 ELSE 0 END
         AS is_transfer_category
     FROM transactions t
     JOIN accounts a ON a.id = t.account_id
-    -- ELIGIBILITY IS ABOUT THE ROW'S HISTORY, NOT ITS CURRENT CATEGORY.
-    -- This clause used to be "category_id IS NULL OR transfer class". Categorization runs on every
-    -- sync, so the first pass to assign a row any other category made that row permanently
-    -- unpairable: a transfer whose two legs post on different days, with a categorization pass in
-    -- between, could never be found. One chance ever instead of one chance per row.
-    -- The gate is now the two things a later machine pass cannot rewrite: the owner never made this
-    -- choice, and the pair was not already settled. Both resolutions stay sticky for the same reason
-    -- duplicates do.
+    -- Eligibility is about the row's history, not its current category: a categorization pass
+    -- between two legs posting must not make the second one unpairable. Owner decisions are sticky;
+    -- the detector's own auto-confirmations are re-derived every run.
     WHERE t.pending = 0
       AND t.is_internal_trade = 0
       AND t.manually_categorized = 0
       AND COALESCE(t.category_source, '') <> 'human'
-      AND COALESCE(t.transfer_status, 'none') NOT IN ('dismissed', 'confirmed')
-      -- Ignore trivial amounts under 1 dollar. amount is integer cents (migrations
-      -- 018/022); the old threshold of 1 silently became "1 cent" after that migration.
+      AND (
+        COALESCE(t.transfer_status, 'none') IN ('none', 'candidate')
+        OR (t.transfer_status = 'confirmed' AND t.transfer_source = 'auto')
+      )
       AND ABS(t.amount) >= 100
     ORDER BY t.date DESC, ABS(t.amount) DESC
   `).all() as TransferRow[];
@@ -303,43 +330,162 @@ function transferCandidateRows(db: Database.Database): TransferRow[] {
   );
 }
 
-interface CandidateState {
-  pairId: string | null;
-  categoryId: string | null;
+interface PairEdge {
+  outflow: TransferRow;
+  inflow: TransferRow;
+  businessGap: number;
+  calendarGap: number;
+}
+
+function edgeOrder(a: PairEdge, b: PairEdge): number {
+  return a.businessGap - b.businessGap
+    || a.calendarGap - b.calendarGap
+    || a.outflow.id.localeCompare(b.outflow.id)
+    || a.inflow.id.localeCompare(b.inflow.id);
+}
+
+function candidateEdges(rows: TransferRow[]): PairEdge[] {
+  const byAbsAmount = new Map<number, { inflows: TransferRow[]; outflows: TransferRow[] }>();
+  for (const row of rows) {
+    const bucket = byAbsAmount.get(Math.abs(row.amount)) ?? { inflows: [], outflows: [] };
+    (row.amount > 0 ? bucket.inflows : bucket.outflows).push(row);
+    byAbsAmount.set(Math.abs(row.amount), bucket);
+  }
+
+  const edges: PairEdge[] = [];
+  for (const { inflows, outflows } of byAbsAmount.values()) {
+    for (const outflow of outflows) {
+      for (const inflow of inflows) {
+        if (outflow.account_id === inflow.account_id) continue;
+        const businessGap = businessDaysBetween(outflow.date, inflow.date);
+        if (businessGap > PAIR_WINDOW_BUSINESS_DAYS) continue;
+        edges.push({
+          outflow,
+          inflow,
+          businessGap,
+          calendarGap: Math.abs(dateToDay(outflow.date) - dateToDay(inflow.date)),
+        });
+      }
+    }
+  }
+  return edges.sort(edgeOrder);
+}
+
+/**
+ * Nearest legs first. A weekly transfer puts next week's leg exactly at the edge of the window, so
+ * uniqueness inside the window cannot be the test; distance is. Two equally near counterparts are
+ * a genuine ambiguity, and both rows are left alone rather than guessed at.
+ */
+function assignPairs(edges: PairEdge[]): PairEdge[] {
+  const settled = new Set<string>();
+  const chosen: PairEdge[] = [];
+  for (const edge of edges) {
+    if (settled.has(edge.outflow.id) || settled.has(edge.inflow.id)) continue;
+    const rival = edges.find((other) =>
+      other !== edge
+      && other.businessGap === edge.businessGap
+      && other.calendarGap === edge.calendarGap
+      && (other.outflow.id === edge.outflow.id || other.inflow.id === edge.inflow.id)
+      && !settled.has(other.outflow.id)
+      && !settled.has(other.inflow.id)
+    );
+    settled.add(edge.outflow.id);
+    settled.add(edge.inflow.id);
+    if (!rival) chosen.push(edge);
+  }
+  return chosen;
 }
 
 interface TransferLeg {
   pairId: string;
-  categoryId: string;
+  status: 'candidate' | 'confirmed';
+  source: 'auto' | null;
+  categoryId: string | null;
 }
 
-function existingTransferCandidates(db: Database.Database): Map<string, CandidateState> {
+interface CandidateState {
+  pairId: string | null;
+  status: string;
+  source: string | null;
+  categoryId: string | null;
+}
+
+function existingTransferLegs(db: Database.Database): Map<string, CandidateState> {
   const rows = db.prepare(`
-    SELECT id, transfer_pair_id, category_id
+    SELECT id, transfer_pair_id, transfer_status, transfer_source, category_id
     FROM transactions
     WHERE transfer_status = 'candidate'
-  `).all() as Array<{ id: string; transfer_pair_id: string | null; category_id: string | null }>;
+       OR (transfer_status = 'confirmed' AND transfer_source = 'auto')
+  `).all() as Array<{
+    id: string;
+    transfer_pair_id: string | null;
+    transfer_status: string;
+    transfer_source: string | null;
+    category_id: string | null;
+  }>;
 
-  return new Map(rows.map((row) => [row.id, { pairId: row.transfer_pair_id, categoryId: row.category_id }]));
+  return new Map(rows.map((row) => [row.id, {
+    pairId: row.transfer_pair_id,
+    status: row.transfer_status,
+    source: row.transfer_source,
+    categoryId: row.category_id,
+  }]));
+}
+
+function legCategory(row: TransferRow, side: 'out' | 'in', cardPayment: boolean): string | null {
+  if (row.is_transfer_category === 1) return row.category_id;
+  if (cardPayment) return 'cat_xfer_cc';
+  return side === 'out' ? 'cat_xfer_out' : 'cat_xfer_in';
+}
+
+function accountPairKey(a: string, b: string): string {
+  return a < b ? `${a}|${b}` : `${b}|${a}`;
+}
+
+// Account pairs the owner has already confirmed a transfer between.
+function ownerConfirmedAccountPairs(db: Database.Database): Set<string> {
+  const rows = db.prepare(`
+    SELECT DISTINCT o.account_id AS a, i.account_id AS b
+    FROM transactions o
+    JOIN transactions i ON i.transfer_pair_id = o.transfer_pair_id AND i.id <> o.id
+    WHERE o.transfer_status = 'confirmed' AND o.transfer_source = 'owner'
+  `).all() as Array<{ a: string; b: string }>;
+  return new Set(rows.map((row) => accountPairKey(row.a, row.b)));
+}
+
+function desiredLegs(pairs: PairEdge[], confirmedBefore: Set<string>): Map<string, TransferLeg> {
+  const desired = new Map<string, TransferLeg>();
+  for (const { outflow, inflow } of pairs) {
+    const cardPayment = isCardPayment(outflow, inflow);
+    const auto = cardPayment
+      || (hasIndependentEvidence(outflow) && hasIndependentEvidence(inflow))
+      || ((hasIndependentEvidence(outflow) || hasIndependentEvidence(inflow))
+        && confirmedBefore.has(accountPairKey(outflow.account_id, inflow.account_id)));
+    const pairId = `xfer_${shortHash([outflow.id, inflow.id].sort().join('|'))}`;
+    const shared = {
+      pairId,
+      status: auto ? 'confirmed' as const : 'candidate' as const,
+      source: auto ? 'auto' as const : null,
+    };
+    desired.set(outflow.id, { ...shared, categoryId: legCategory(outflow, 'out', cardPayment) });
+    desired.set(inflow.id, { ...shared, categoryId: legCategory(inflow, 'in', cardPayment) });
+  }
+  return desired;
 }
 
 /**
  * Hand a row back the category the pairing displaced, then drop it out of the pair.
  *
- * The reset this replaces NULLed the category instead, on every sync, which was survivable only
- * because the old pool held nothing but uncategorized and transfer-class rows. With the pool widened
- * it would destroy a machine-assigned category hourly and hand the row back to the categorizer to
- * re-guess. Restoring needs the displaced value, and the only place that exists is the revision log,
- * which is why the write side goes through `categoryWrites` too.
+ * Restoring needs the displaced value, and the only place that exists is the revision log, which
+ * is why the write side goes through `categoryWrites` too.
  */
 function releaseTransferLeg(db: Database.Database, transactionId: string, now: string): void {
   const revision = latestRevertableRevision(db, transactionId);
   if (revision && TRANSFER_LEG_CATEGORIES.has(revision.to_category_id ?? '')) {
     revertRevisions(db, [revision], now);
   } else {
-    // Either a later pass wrote this row (its decision is newer than ours and stands), or the pair
-    // predates the revision log and there is no record of what it displaced. In the second case the
-    // old behaviour is the only one available, but it is now logged rather than silent.
+    // A later pass wrote this row (its decision stands), or the pair predates the revision log and
+    // nothing records what it displaced.
     const current = db.prepare('SELECT category_id FROM transactions WHERE id = ?')
       .get(transactionId) as { category_id: string | null } | undefined;
     if (current && TRANSFER_LEG_CATEGORIES.has(current.category_id ?? '')) {
@@ -350,133 +496,67 @@ function releaseTransferLeg(db: Database.Database, transactionId: string, now: s
       );
     }
   }
-}
-
-function claimTransferLeg(
-  db: Database.Database,
-  transactionId: string,
-  pairId: string,
-  categoryId: string,
-  now: string
-): void {
   db.prepare(`
     UPDATE transactions
-    SET transfer_pair_id = ?,
-        transfer_status = 'candidate',
-        updated_at = ?
+    SET transfer_pair_id = NULL, transfer_status = 'none', transfer_source = NULL, updated_at = ?
     WHERE id = ?
-  `).run(pairId, now, transactionId);
+  `).run(now, transactionId);
+}
 
-  writeTransactionCategory(db, { transactionId, categoryId, source: 'heuristic' }, now);
+function claimTransferLeg(db: Database.Database, transactionId: string, leg: TransferLeg, now: string): void {
+  db.prepare(`
+    UPDATE transactions
+    SET transfer_pair_id = ?, transfer_status = ?, transfer_source = ?, updated_at = ?
+    WHERE id = ?
+  `).run(leg.pairId, leg.status, leg.source, now, transactionId);
+
+  const current = db.prepare('SELECT category_id FROM transactions WHERE id = ?')
+    .get(transactionId) as { category_id: string | null };
+  if (leg.categoryId !== null && current.category_id !== leg.categoryId) {
+    writeTransactionCategory(db, { transactionId, categoryId: leg.categoryId, source: 'heuristic' }, now);
+  }
 }
 
 export function refreshTransferCandidates(db: Database.Database): TransferDetectionResult {
-  const rows = transferCandidateRows(db);
-  const byAbsAmount = new Map<number, { inflows: TransferRow[]; outflows: TransferRow[] }>();
-
-  for (const row of rows) {
-    const cents = Math.abs(row.amount); // already integer cents
-    const bucket = byAbsAmount.get(cents) ?? { inflows: [], outflows: [] };
-    if (row.amount > 0) {
-      bucket.inflows.push(row);
-    } else if (row.amount < 0) {
-      bucket.outflows.push(row);
-    }
-    byAbsAmount.set(cents, bucket);
-  }
-
-  const outflowCandidates = new Map<string, TransferRow[]>();
-  const inflowCandidates = new Map<string, TransferRow[]>();
-
-  for (const bucket of byAbsAmount.values()) {
-    for (const outflow of bucket.outflows) {
-      for (const inflow of bucket.inflows) {
-        if (outflow.account_id === inflow.account_id) continue;
-        if (Math.abs(dateToDay(outflow.date) - dateToDay(inflow.date)) > 3) continue;
-
-        outflowCandidates.set(outflow.id, [
-          ...(outflowCandidates.get(outflow.id) ?? []),
-          inflow,
-        ]);
-        inflowCandidates.set(inflow.id, [
-          ...(inflowCandidates.get(inflow.id) ?? []),
-          outflow,
-        ]);
-      }
-    }
-  }
-
+  const pairs = assignPairs(candidateEdges(transferCandidateRows(db)));
+  const desired = desiredLegs(pairs, ownerConfirmedAccountPairs(db));
   const now = new Date().toISOString();
-  const used = new Set<string>();
-  const pairs: Array<{ outflow: TransferRow; inflow: TransferRow; pairId: string }> = [];
 
-  for (const bucket of byAbsAmount.values()) {
-    for (const outflow of bucket.outflows) {
-      if (used.has(outflow.id)) continue;
-
-      const candidates = outflowCandidates.get(outflow.id) ?? [];
-      if (candidates.length !== 1) continue;
-
-      const inflow = candidates[0];
-      if (used.has(inflow.id)) continue;
-      if ((inflowCandidates.get(inflow.id) ?? []).length !== 1) continue;
-
-      const orderedIds = [outflow.id, inflow.id].sort();
-      const pairId = `xfer_${shortHash(orderedIds.join('|'))}`;
-      pairs.push({ outflow, inflow, pairId });
-      used.add(outflow.id);
-      used.add(inflow.id);
-    }
-  }
-
-  const desired = new Map<string, TransferLeg>();
-  for (const pair of pairs) {
-    desired.set(pair.outflow.id, { pairId: pair.pairId, categoryId: 'cat_xfer_out' });
-    desired.set(pair.inflow.id, { pairId: pair.pairId, categoryId: 'cat_xfer_in' });
-  }
-
-  // Apply the difference rather than tearing every candidate down and rebuilding it. Detection is
-  // deterministic, so on an unchanged ledger the difference is empty and this stage writes nothing
-  // at all: no revision rows, no updated_at churn, no hourly "modified" entries in the sync panel.
-  // The rebuild-every-sync shape is exactly how this codebase produced ~123 phantom modified rows an
-  // hour once already.
-  const existing = existingTransferCandidates(db);
+  // Apply the difference rather than rebuilding: on an unchanged ledger this stage writes nothing,
+  // so it produces no revision rows and no phantom "modified" entries in the sync panel.
+  const existing = existingTransferLegs(db);
   const unchanged = (id: string, next: TransferLeg): boolean => {
     const current = existing.get(id);
     return current !== undefined
       && current.pairId === next.pairId
-      && current.categoryId === next.categoryId;
+      && current.status === next.status
+      && current.source === next.source
+      && (next.categoryId === null || current.categoryId === next.categoryId);
   };
 
   for (const [id] of existing) {
     const next = desired.get(id);
     if (next && unchanged(id, next)) continue;
     releaseTransferLeg(db, id, now);
-    db.prepare(`
-      UPDATE transactions
-      SET transfer_pair_id = NULL,
-          transfer_status = 'none',
-          updated_at = ?
-      WHERE id = ?
-    `).run(now, id);
   }
-
   for (const [id, next] of desired) {
     if (unchanged(id, next)) continue;
-    claimTransferLeg(db, id, next.pairId, next.categoryId, now);
+    claimTransferLeg(db, id, next, now);
   }
 
-  // `existing` was read before any of the writes above, so this is the set of pairs that were
-  // already standing when this run began. A pair id is a hash of its two transaction ids, so a
-  // re-detected pair keeps its id and is correctly not new.
-  const knownPairIds = new Set(
-    [...existing.values()].map((state) => state.pairId).filter((id): id is string => id !== null)
+  const known = new Set(
+    [...existing.values()].map((state) => `${state.pairId}|${state.status}`)
   );
+  const legs = pairs.map((pair) => desired.get(pair.outflow.id) as TransferLeg);
+  const candidates = legs.filter((leg) => leg.status === 'candidate');
+  const automatic = legs.filter((leg) => leg.status === 'confirmed');
 
   return {
-    pairCount: pairs.length,
-    transactionCount: pairs.length * 2,
-    newPairCount: pairs.filter((pair) => !knownPairIds.has(pair.pairId)).length,
+    pairCount: candidates.length,
+    transactionCount: candidates.length * 2,
+    newPairCount: candidates.filter((leg) => !known.has(`${leg.pairId}|candidate`)).length,
+    autoPairCount: automatic.length,
+    newAutoPairCount: automatic.filter((leg) => !known.has(`${leg.pairId}|confirmed`)).length,
   };
 }
 
@@ -572,6 +652,7 @@ export function confirmTransferPair(db: Database.Database, pairId: string): numb
   const result = db.prepare(`
     UPDATE transactions
     SET transfer_status = 'confirmed',
+        transfer_source = 'owner',
         review_status = 'reviewed',
         updated_at = ?
     WHERE transfer_pair_id = ?
@@ -590,20 +671,16 @@ export function dismissTransferPair(db: Database.Database, pairId: string): numb
   const now = new Date().toISOString();
   const legs = db.prepare(`
     SELECT id FROM transactions
-    WHERE transfer_pair_id = ? AND transfer_status = 'candidate'
+    WHERE transfer_pair_id = ?
+      AND (transfer_status = 'candidate' OR (transfer_status = 'confirmed' AND transfer_source = 'auto'))
   `).all(pairId) as Array<{ id: string }>;
   if (legs.length === 0) return 0;
 
   const dismiss = db.transaction(() => {
     for (const leg of legs) {
       releaseTransferLeg(db, leg.id, now);
-      db.prepare(`
-        UPDATE transactions
-        SET transfer_status = 'dismissed',
-            transfer_pair_id = NULL,
-            updated_at = ?
-        WHERE id = ?
-      `).run(now, leg.id);
+      db.prepare("UPDATE transactions SET transfer_status = 'dismissed', updated_at = ? WHERE id = ?")
+        .run(now, leg.id);
     }
   });
   dismiss();

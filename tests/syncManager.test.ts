@@ -43,7 +43,7 @@ function insertProviderRunItem(db: Database.Database): void {
 
 const emptyIntegrity: TransactionIntegrityResult = {
   duplicates: { groupCount: 0, transactionCount: 0, newGroupCount: 0, newTransactionCount: 0 },
-  transfers: { pairCount: 0, transactionCount: 0, newPairCount: 0 },
+  transfers: { pairCount: 0, transactionCount: 0, newPairCount: 0, autoPairCount: 0, newAutoPairCount: 0 },
 };
 
 test('runPostSyncStages: all stages succeed, no deferred error', (t) => {

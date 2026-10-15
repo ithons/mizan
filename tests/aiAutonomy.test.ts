@@ -674,7 +674,7 @@ test('a pass whose categorization pairs a transfer moves the month and still bre
     // The pairing really did happen, so the silence above is silence about a real movement rather
     // than about nothing.
     const paired = fx.db.prepare(
-      "SELECT COUNT(*) AS n FROM transactions WHERE transfer_status = 'candidate'"
+      "SELECT COUNT(*) AS n FROM transactions WHERE transfer_pair_id IS NOT NULL"
     ).get() as { n: number };
     assert.equal(paired.n, 2, 'the two legs were paired by the categorization pass');
 
@@ -702,7 +702,7 @@ test('a pass that un-pairs a transfer the owner touched is silent, and keeps its
     });
     refreshTransactionIntegrity(fx.db);
     assert.equal(
-      (fx.db.prepare("SELECT COUNT(*) AS n FROM transactions WHERE transfer_status = 'candidate'").get() as { n: number }).n,
+      (fx.db.prepare("SELECT COUNT(*) AS n FROM transactions WHERE transfer_pair_id IS NOT NULL").get() as { n: number }).n,
       2,
       'the pair exists before the owner touches it'
     );
@@ -738,7 +738,7 @@ test('a pass that un-pairs a transfer the owner touched is silent, and keeps its
     assert.equal(row.category_id, 'cat_food_coffee');
     assert.equal(row.category_source, 'ai');
     assert.equal(
-      (fx.db.prepare("SELECT COUNT(*) AS n FROM transactions WHERE transfer_status = 'candidate'").get() as { n: number }).n,
+      (fx.db.prepare("SELECT COUNT(*) AS n FROM transactions WHERE transfer_pair_id IS NOT NULL").get() as { n: number }).n,
       0,
       'the pair really did break, so the silence is about a real movement'
     );

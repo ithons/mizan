@@ -569,8 +569,10 @@ test('two legs of one transfer imported from a CSV that carried categories still
   assert.equal(result.imported, 2, result.errors.join('; '));
 
   const detected = refreshTransferCandidates(db);
-  assert.equal(detected.pairCount, 1, 'the imported transfer is found');
-  assert.equal(getTransferCandidatePairs(db).length, 1);
+  assert.equal(detected.pairCount + detected.autoPairCount, 1, 'the imported transfer is found');
+  const paired = db.prepare('SELECT COUNT(*) AS n FROM transactions WHERE transfer_pair_id IS NOT NULL')
+    .get() as { n: number };
+  assert.equal(paired.n, 2);
 });
 
 /**

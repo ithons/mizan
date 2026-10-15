@@ -35,6 +35,18 @@ function rowStates(db: Database.Database): RowState[] {
   `).all() as RowState[];
 }
 
+function pairedLegs(db: Database.Database): Array<{
+  id: string;
+  transfer_pair_id: string | null;
+  transfer_status: string;
+  transfer_source: string | null;
+}> {
+  return db.prepare(`
+    SELECT id, transfer_pair_id, transfer_status, transfer_source
+    FROM transactions WHERE transfer_pair_id IS NOT NULL ORDER BY id
+  `).all() as Array<{ id: string; transfer_pair_id: string | null; transfer_status: string; transfer_source: string | null }>;
+}
+
 function revisionCount(db: Database.Database): number {
   return (db.prepare('SELECT COUNT(*) AS n FROM transaction_category_revisions').get() as { n: number }).n;
 }
@@ -82,20 +94,14 @@ test('a transfer leg categorized on an earlier sync can still pair when its othe
 
   syncCycle(db);
 
-  const pairs = getTransferCandidatePairs(db);
-  assert.equal(pairs.length, 1);
-  assert.equal(pairs[0].outflow_transaction_id, outflow);
-  assert.equal(pairs[0].inflow_transaction_id, inflow);
-  assert.deepEqual(categoryOf(db, outflow), { category_id: 'cat_xfer_out', category_source: 'heuristic' });
+  // Both legs name a transfer, so the pair settles without review, and the leg that already held
+  // a transfer category keeps it rather than being relabelled.
+  const legs = pairedLegs(db);
+  assert.deepEqual(legs.map((leg) => leg.id).sort(), [outflow, inflow].sort());
+  for (const leg of legs) assert.deepEqual([leg.transfer_status, leg.transfer_source], ['confirmed', 'auto']);
+  assert.deepEqual(categoryOf(db, outflow), { category_id: 'cat_inv_transfer', category_source: 'heuristic' });
   assert.deepEqual(categoryOf(db, inflow), { category_id: 'cat_xfer_in', category_source: 'heuristic' });
-
-  // The displaced category is recorded, not lost: that is what makes the pairing reversible.
-  const displaced = db.prepare(`
-    SELECT from_category_id, to_category_id
-    FROM transaction_category_revisions
-    WHERE transaction_id = ? AND to_category_id = 'cat_xfer_out'
-  `).get(outflow) as { from_category_id: string | null; to_category_id: string } | undefined;
-  assert.deepEqual(displaced, { from_category_id: 'cat_inv_transfer', to_category_id: 'cat_xfer_out' });
+  assert.equal(getTransferCandidatePairs(db).length, 0, 'nothing waits in possible transfers');
 });
 
 test('dismissing a pair gives each leg back the category the pairing displaced', (t) => {
@@ -120,11 +126,9 @@ test('dismissing a pair gives each leg back the category the pairing displaced',
   });
   syncCycle(db);
 
-  const pair = getTransferCandidatePairs(db)[0];
-  assert.equal(dismissTransferPair(db, pair.pair_id), 2);
+  const pairId = pairedLegs(db)[0].transfer_pair_id as string;
+  assert.equal(dismissTransferPair(db, pairId), 2, 'an automatic pair is the owner\'s to undo');
 
-  // Before this, dismissal NULLed the category, spending the owner's correction on erasing a
-  // classification that was never in question.
   assert.deepEqual(categoryOf(db, outflow), { category_id: 'cat_inv_transfer', category_source: 'heuristic' });
   // The inflow really did arrive uncategorized: detection runs before categorization, so it was
   // paired in the same cycle it appeared. Restoring gives back what was there, not a better guess.
@@ -260,10 +264,7 @@ test('a hand-categorized row is never pulled into a pair', (t) => {
   assert.deepEqual(categoryOf(db, outflow), { category_id: 'cat_gifts', category_source: 'human' });
 });
 
-// A confirmed pair is settled. It stays in the widened pool's SQL reach only through the
-// transfer_status gate, so that gate is the whole guard and it is worth pinning here as well as in
-// tests/transactionIntegrity.test.ts.
-test('a confirmed pair is left alone and writes nothing on later syncs', (t) => {
+test('a settled pair is left alone and writes nothing on later syncs', (t) => {
   const db = migratedTestDb();
   t.after(() => db.close());
 
@@ -284,11 +285,7 @@ test('a confirmed pair is left alone and writes nothing on later syncs', (t) => 
   });
 
   syncCycle(db);
-  const pair = getTransferCandidatePairs(db)[0];
-  assert.ok(pair);
-
-  db.prepare("UPDATE transactions SET transfer_status = 'confirmed' WHERE transfer_pair_id = ?")
-    .run(pair.pair_id);
+  assert.equal(pairedLegs(db).length, 2);
 
   const settled = rowStates(db);
   const settledRevisions = revisionCount(db);

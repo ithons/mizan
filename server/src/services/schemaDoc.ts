@@ -77,6 +77,14 @@ export const TABLE_MEANINGS: Record<string, TableMeaning> = {
       },
       pending: { unit: FLAG, note: 'A pending row can still change amount, date or merchant, and reconciliation ignores it.' },
       transfer_status: { unit: 'enum, see enums.transfer_status' },
+      transfer_source: {
+        unit: "'auto' | 'owner' | NULL",
+        note: "Who settled a transfer pair. 'auto' pairs are re-derived every sync and the owner can undo them; 'owner' pairs are sticky.",
+      },
+      is_internal_trade: {
+        unit: FLAG,
+        note: 'Cash turned into or out of a position inside one brokerage account (a fund buy, a sale, the core sweep, a reinvestment). Never income, spending or a transfer; excluded_from_totals drops it.',
+      },
       duplicate_status: { unit: 'enum, see enums.duplicate_status' },
       review_status: { unit: 'enum, see enums.review_status' },
       source_type: { unit: 'enum, see enums.source_type' },
@@ -490,6 +498,7 @@ interface InclusionRow {
   income_side: number;
   transfer_status: string | null;
   duplicate_status: string | null;
+  is_internal_trade: number;
   category_id: string | null;
   is_investment: number | null;
   amount: number;
@@ -527,7 +536,7 @@ export function transactionReportInclusion(
          COALESCE(t.pending, 0) AS pending,
          CASE WHEN ${expenseSideSql('t', 'c')} THEN 1 ELSE 0 END AS expense_side,
          CASE WHEN ${incomeSideSql('t', 'c')} THEN 1 ELSE 0 END AS income_side,
-         t.transfer_status, t.duplicate_status, t.category_id, t.amount,
+         t.transfer_status, t.duplicate_status, t.is_internal_trade, t.category_id, t.amount,
          c.is_investment
        FROM transactions t
        LEFT JOIN categories c ON c.id = t.category_id
@@ -551,6 +560,9 @@ export function transactionReportInclusion(
   }
   if (row.duplicate_status === 'confirmed') {
     excluded.push("duplicate_status = 'confirmed': excluded_from_totals drops a copy the owner resolved.");
+  }
+  if (row.is_internal_trade === 1) {
+    excluded.push('is_internal_trade = 1: a trade inside one brokerage account moves no money in or out, so excluded_from_totals drops it.');
   }
   if (row.in_report_scope === 0) {
     excluded.push(

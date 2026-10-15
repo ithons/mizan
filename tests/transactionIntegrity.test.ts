@@ -83,8 +83,8 @@ function setupIntegrityDb(): Database.Database {
     account_id: 'savings',
     date: '2026-06-05',
     amount: 300,
-    merchant_name: 'Online Transfer',
-    original_name: 'Transfer from Checking',
+    merchant_name: 'Deposit',
+    original_name: 'DEPOSIT',
     category_id: null,
   });
 

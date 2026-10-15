@@ -1139,7 +1139,7 @@ test('HEALTHY: a chat categorization that pairs a transfer moves the month and i
   assert.equal(result.guard, undefined);
   assert.equal(listAiIncidents(fx.db).length, 0);
   assert.equal(
-    (fx.db.prepare("SELECT COUNT(*) AS n FROM transactions WHERE transfer_status = 'candidate'").get() as { n: number }).n,
+    (fx.db.prepare("SELECT COUNT(*) AS n FROM transactions WHERE transfer_pair_id IS NOT NULL").get() as { n: number }).n,
     2,
     'the pair really was made, so the silence is about a real movement'
   );
