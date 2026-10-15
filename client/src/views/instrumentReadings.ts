@@ -58,12 +58,14 @@ export type Standing =
   | { kind: 'level'; value: 0; magnitude: 0; detail: string }
   | { kind: 'unread'; detail: string };
 
-/** The four claims `computeSafeToSpend` subtracts, in the order it subtracts them. */
+/** The claims `computeSafeToSpend` subtracts, in the order it subtracts them. */
 function claims(breakdown: SafeToSpend): Array<{ label: string; amount: number }> {
   return [
     { label: 'card balances', amount: breakdown.card_balances },
     { label: `the next ${breakdown.forecast_days} days of dated bills`, amount: breakdown.upcoming_bills },
+    { label: 'scheduled transfers out', amount: breakdown.recurring_transfers },
     { label: 'budgeted allocations', amount: breakdown.allocated_budgets },
+    { label: 'unbudgeted spending at its usual pace', amount: breakdown.estimated_unbudgeted },
     { label: 'goal earmarks', amount: breakdown.allocated_goals },
   ];
 }
@@ -92,7 +94,7 @@ export function readStanding(breakdown: SafeToSpend | null | undefined): Standin
       kind: 'free',
       value: free,
       magnitude: free,
-      detail: `Left in the liquid pool after cards, the next ${days} days of dated bills, budgeted allocations and goal earmarks.`,
+      detail: `Left of checking, savings and cash over the next ${days} days, with expected income in and every claim out.`,
     };
   }
 
@@ -104,7 +106,7 @@ export function readStanding(breakdown: SafeToSpend | null | undefined): Standin
     kind: 'short',
     value: free,
     magnitude: -free,
-    detail: `Cards, the next ${days} days of dated bills, budgeted allocations and goal earmarks claim more than the liquid pool holds.`,
+    detail: `Over the next ${days} days the claims on checking, savings and cash exceed it plus expected income.`,
     largestClaim: biggest ? `The largest single claim is ${formatCurrency(biggest.amount)} of ${biggest.label}.` : null,
   };
 }

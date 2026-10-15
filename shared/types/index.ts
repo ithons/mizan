@@ -1410,8 +1410,16 @@ export interface SafeToSpend {
   liquid: number;
   card_balances: number;
   upcoming_bills: number;
+  /** Scheduled income over forecast_days. */
+  expected_inflows: number;
+  /** Scheduled transfers out of the liquid pool to other accounts, less those into it. */
+  recurring_transfers: number;
+  /** Spending in unbudgeted categories at the pace of the last unbudgeted_basis_days. */
+  estimated_unbudgeted: number;
+  unbudgeted_basis_days: number;
   allocated_budgets: number;
   allocated_goals: number;
+  /** liquid + expected_inflows - every other line. */
   free: number;
   forecast_days: number;
 }

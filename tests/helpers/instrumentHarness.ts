@@ -120,6 +120,10 @@ export const SAFE_TO_SPEND: SafeToSpend = {
   liquid: 6035.67,
   card_balances: 4278.7,
   upcoming_bills: 64.04,
+  expected_inflows: 0,
+  recurring_transfers: 0,
+  estimated_unbudgeted: 0,
+  unbudgeted_basis_days: 90,
   allocated_budgets: 500,
   allocated_goals: 1001.7,
   free: 191.23,
@@ -143,8 +147,6 @@ export const SPENDING: SpendingReport = {
   ],
 };
 
-// Gross activity per merchant: SUM(ABS(amount)). Amazon's $1,795.86 exceeds the whole month's net
-// spend of $1,112.99, which is what made the old share render as 161%.
 const MERCHANTS: TopMerchantsReport = {
   total: 1112.99,
   merchants: [

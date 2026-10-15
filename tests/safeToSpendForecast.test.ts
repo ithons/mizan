@@ -1,0 +1,97 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import type Database from 'better-sqlite3';
+import { format, subDays } from 'date-fns';
+import { _setDbForTesting } from '../server/src/db/index';
+import { computeSafeToSpend, UNBUDGETED_BASIS_DAYS } from '../server/src/services/safeToSpend';
+import { detectRecurring } from '../server/src/services/recurring';
+import { refreshTransactionIntegrity } from '../server/src/services/transactionIntegrity';
+import { insertAccount, insertTransaction, migratedTestDb } from './helpers/schema';
+
+const day = (daysAgo: number) => format(subDays(new Date(), daysAgo), 'yyyy-MM-dd');
+
+function withDb(run: (db: Database.Database, ids: Record<string, string>) => void): void {
+  const db = migratedTestDb();
+  _setDbForTesting(db);
+  try {
+    const ids = {
+      chase: insertAccount(db, { account_name: 'Chase Checking', type: 'checking', current_balance: 583948 }),
+      wealthfront: insertAccount(db, { account_name: 'Wealthfront Cash', type: 'savings', current_balance: 500370 }),
+      fidelity: insertAccount(db, { account_name: 'Fidelity Individual', type: 'brokerage', current_balance: 312883 }),
+      sapphire: insertAccount(db, { account_name: 'Chase Sapphire', type: 'credit', is_liability: 1, current_balance: 308443 }),
+    };
+    run(db, ids);
+  } finally {
+    _setDbForTesting(undefined as unknown as Database.Database);
+    db.close();
+  }
+}
+
+function seedSchedules(db: Database.Database, ids: Record<string, string>): void {
+  for (const weeksAgo of [6, 5, 4, 3, 2, 1]) {
+    insertTransaction(db, { account_id: ids.chase, date: day(7 * weeksAgo), amount: 54418, merchant_name: 'Mass Inst Payroll', original_name: 'MASS INST PAYROLL PPD ID: 9111111101', category_id: 'cat_income_paycheck' });
+    insertTransaction(db, { account_id: ids.chase, date: day(7 * weeksAgo), amount: -10000, original_name: 'FID BKG SVC LLC MONEYLINE PPD ID: XXXXXX4600', category_id: 'cat_inv_transfer', category_source: 'rule' });
+    insertTransaction(db, { account_id: ids.fidelity, date: day(7 * weeksAgo), amount: 10000, original_name: 'Electronic Funds Transfer Received (Cash)' });
+    insertTransaction(db, { account_id: ids.chase, date: day(7 * weeksAgo + 1), amount: -25000, original_name: 'Wealthfront EDI PYMNTS WEB ID: XXXXXX7207', category_id: 'cat_xfer_out', category_source: 'rule' });
+    insertTransaction(db, { account_id: ids.wealthfront, date: day(7 * weeksAgo + 1), amount: 25000, original_name: 'Chase (Account ****6391)' });
+  }
+  for (const monthsAgo of [4, 3, 2, 1]) {
+    insertTransaction(db, { account_id: ids.chase, date: day(30 * monthsAgo + 3), amount: -150000, original_name: 'CHASE CREDIT CRD AUTOPAY PPD ID: XXXXXX9224' });
+    insertTransaction(db, { account_id: ids.sapphire, date: day(30 * monthsAgo + 3), amount: 150000, original_name: 'AUTOMATIC PAYMENT - THANK' });
+  }
+  refreshTransactionIntegrity(db);
+  detectRecurring();
+}
+
+test('expected pay comes in, the weekly brokerage transfer goes out, and money between the owner\'s cash accounts does neither', () => {
+  withDb((db, ids) => {
+    seedSchedules(db, ids);
+    const sheet = computeSafeToSpend(db, { forecastDays: 30 });
+
+    const paydays = 4;
+    assert.ok(sheet.expectedInflows >= paydays * 54418, `inflows ${sheet.expectedInflows}`);
+    assert.equal(sheet.recurringTransfers % 10000, 0, 'only the $100 brokerage transfers, never Wealthfront or the card');
+    assert.ok(sheet.recurringTransfers >= 40000);
+    assert.equal(
+      sheet.free,
+      sheet.liquid + sheet.expectedInflows - sheet.cardBalances - sheet.upcomingBills - sheet.recurringTransfers
+        - sheet.allocatedBudgets - sheet.estimatedUnbudgeted - sheet.allocatedGoals
+    );
+  });
+});
+
+test('unbudgeted spending is claimed at its trailing pace; budgeted, recurring and refunded spend is not', () => {
+  withDb((db, ids) => {
+    insertTransaction(db, { account_id: ids.sapphire, date: day(10), amount: -9000, merchant_name: 'Chipotle', category_id: 'cat_food_restaurants' });
+    insertTransaction(db, { account_id: ids.sapphire, date: day(40), amount: -9000, merchant_name: 'Cava', category_id: 'cat_food_restaurants' });
+    insertTransaction(db, { account_id: ids.sapphire, date: day(20), amount: -50000, merchant_name: 'Market Basket', category_id: 'cat_food_groceries' });
+    insertTransaction(db, { account_id: ids.sapphire, date: day(UNBUDGETED_BASIS_DAYS + 5), amount: -90000, merchant_name: 'Old', category_id: 'cat_food_restaurants' });
+    const purchase = insertTransaction(db, { account_id: ids.sapphire, date: day(30), amount: -249581, merchant_name: 'Apple Store', category_id: 'cat_shop_electronics' });
+    insertTransaction(db, { account_id: ids.sapphire, date: day(27), amount: 249581, merchant_name: 'Apple Store', category_id: 'cat_shop_electronics' });
+    for (const monthsAgo of [4, 3, 2, 1]) {
+      insertTransaction(db, { account_id: ids.sapphire, date: day(30 * monthsAgo), amount: -699, merchant_name: 'Spotify', category_id: 'cat_ent_streaming' });
+    }
+    refreshTransactionIntegrity(db);
+    detectRecurring();
+    const linked = db.prepare("SELECT COUNT(*) AS n FROM transactions WHERE merchant_name = 'Spotify' AND recurring_id IS NOT NULL").get() as { n: number };
+    assert.equal(linked.n, 4, 'Spotify is a recurring bill the forecast already claims');
+    assert.ok(purchase);
+
+    const sheet = computeSafeToSpend(db, {
+      forecastDays: 30,
+      budgets: [{ category_id: 'cat_food_groceries', amount: 60000, projected_remaining: 10000, rollover_balance: 0 }],
+    });
+    assert.equal(sheet.estimatedUnbudgeted, Math.round((18000 / UNBUDGETED_BASIS_DAYS) * 30));
+    assert.equal(sheet.unbudgetedBasisDays, UNBUDGETED_BASIS_DAYS);
+  });
+});
+
+test('an empty ledger claims nothing beyond the balances', () => {
+  withDb((db) => {
+    const sheet = computeSafeToSpend(db);
+    assert.deepEqual(
+      [sheet.expectedInflows, sheet.recurringTransfers, sheet.estimatedUnbudgeted],
+      [0, 0, 0]
+    );
+  });
+});

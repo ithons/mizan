@@ -1,6 +1,8 @@
 import type Database from 'better-sqlite3';
 import { buildRecurringForecast } from './recurringForecast';
 import { calculateGoalProgress, type GoalProgressInput } from './goalProgress';
+import { excludedFromTotalsSql, expenseSideSql, reportDateSql, spendAmountSql } from './transactionFilters';
+import type { RecurringForecastOccurrence } from '../../../shared/types';
 
 /** The columns `calculateGoalProgress` needs, plus enough of the linked account to know whether
  * the liquid pool counted it. */
@@ -50,6 +52,17 @@ export interface SafeToSpendBreakdown {
   cardBalances: number;
   /** Scheduled outflows in the forecast window. */
   upcomingBills: number;
+  /** Scheduled income in the forecast window. */
+  expectedInflows: number;
+  /**
+   * Scheduled transfers out of the pool to the owner's other accounts, less any scheduled into it.
+   * Card payments are not here: the whole card balance is already a claim.
+   */
+  recurringTransfers: number;
+  /** Spending in categories no budget covers, at the trailing pace, over the forecast window. */
+  estimatedUnbudgeted: number;
+  /** Days of history the unbudgeted pace is taken from. */
+  unbudgetedBasisDays: number;
   /** Budgeted-but-unspent allocations still expected to be drawn. */
   allocatedBudgets: number;
   /** Money already earmarked against savings goals. */
@@ -62,6 +75,7 @@ export interface SafeToSpendBreakdown {
 export interface SafeToSpendInputs {
   /** Budget rows for the current month, in cents, already projected. */
   budgets?: Array<{
+    category_id?: string | null;
     projected_remaining?: number | null;
     amount?: number | null;
     rollover_balance?: number | null;
@@ -76,13 +90,15 @@ export function computeSafeToSpend(
   const forecastDays = inputs.forecastDays ?? 30;
 
   const accounts = db.prepare(`
-    SELECT type, current_balance, is_liability, is_hidden
+    SELECT id, type, current_balance, is_liability, is_hidden
     FROM accounts
     WHERE is_hidden = 0 AND type != 'closed'
-  `).all() as Array<{ type: string; current_balance: number; is_liability: number; is_hidden: number }>;
+  `).all() as Array<{ id: string; type: string; current_balance: number; is_liability: number; is_hidden: number }>;
 
   let liquid = 0;
   let cardBalances = 0;
+  const pool = new Set(accounts.filter(isInLiquidPool).map((account) => account.id));
+  const liabilities = new Set(accounts.filter((account) => account.is_liability).map((account) => account.id));
   for (const account of accounts) {
     if (account.is_liability) {
       // Signed, not absolute. A card can sit in CREDIT (a refund or statement credit larger than
@@ -97,6 +113,9 @@ export function computeSafeToSpend(
 
   const forecast = buildRecurringForecast(db, forecastDays);
   const upcomingBills = Math.abs(forecast.bills);
+  const expectedInflows = forecast.income;
+  const recurringTransfers = transfersLeavingPool(forecast.occurrences, pool, liabilities);
+  const estimatedUnbudgeted = unbudgetedPace(db, inputs.budgets ?? [], forecastDays);
 
   // Clamped to what was actually budgeted. Now that refunds net a category's spend down,
   // `projected_remaining` can legitimately EXCEED the budget: July's Shopping budget is $500 while
@@ -153,11 +172,80 @@ export function computeSafeToSpend(
     liquid,
     cardBalances,
     upcomingBills,
+    expectedInflows,
+    recurringTransfers,
+    estimatedUnbudgeted,
+    unbudgetedBasisDays: UNBUDGETED_BASIS_DAYS,
     allocatedBudgets,
     allocatedGoals,
-    free: liquid - cardBalances - upcomingBills - allocatedBudgets - allocatedGoals,
+    free: liquid + expectedInflows - cardBalances - upcomingBills - recurringTransfers
+      - allocatedBudgets - estimatedUnbudgeted - allocatedGoals,
     forecastDays,
   };
+}
+
+function transfersLeavingPool(
+  occurrences: readonly RecurringForecastOccurrence[],
+  pool: Set<string>,
+  liabilities: Set<string>
+): number {
+  return occurrences.reduce((sum, occurrence) => {
+    if (occurrence.kind !== 'transfer' || occurrence.adjustment_action === 'skip') return sum;
+    const from = occurrence.account_id ?? '';
+    const to = occurrence.counterparty_account_id ?? '';
+    if (liabilities.has(to) || pool.has(from) === pool.has(to)) return sum;
+    const size = Math.abs(occurrence.amount);
+    return pool.has(from) ? sum + size : sum - size;
+  }, 0);
+}
+
+export const UNBUDGETED_BASIS_DAYS = 90;
+
+/**
+ * What the categories without a budget have been costing, per day over the trailing window, times
+ * the forecast window. Rows a recurring bill already forecasts are left out so they are not
+ * claimed twice, and refunds net down the way they do in reports.
+ */
+function unbudgetedPace(
+  db: Database.Database,
+  budgets: ReadonlyArray<{ category_id?: string | null }>,
+  forecastDays: number
+): number {
+  const budgeted = budgets.map((budget) => budget.category_id).filter((id): id is string => Boolean(id));
+  const end = new Date();
+  end.setDate(end.getDate() - 1);
+  const start = new Date(end);
+  start.setDate(start.getDate() - (UNBUDGETED_BASIS_DAYS - 1));
+  const iso = (date: Date) =>
+    `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+
+  const row = db.prepare(`
+    WITH RECURSIVE out_of_scope(id) AS (
+      SELECT id FROM categories WHERE id IN ('cat_xfer', 'cat_inv', 'cat_crypto')
+      UNION ALL
+      SELECT c.id FROM categories c JOIN out_of_scope s ON c.parent_id = s.id
+    ),
+    budgeted(id) AS (
+      SELECT id FROM categories WHERE id IN (${budgeted.map(() => '?').join(',') || 'NULL'})
+      UNION ALL
+      SELECT c.id FROM categories c JOIN budgeted b ON c.parent_id = b.id
+    )
+    SELECT COALESCE(SUM(${spendAmountSql('t')}), 0) AS spent
+    FROM transactions t
+    LEFT JOIN categories c ON c.id = t.category_id
+    WHERE t.pending = 0
+      AND ${excludedFromTotalsSql('t')}
+      AND ${expenseSideSql('t', 'c')}
+      AND COALESCE(t.category_id, '') NOT IN (SELECT id FROM out_of_scope)
+      AND COALESCE(t.category_id, '') NOT IN (SELECT id FROM budgeted)
+      AND ${reportDateSql('t')} BETWEEN ? AND ?
+      AND NOT EXISTS (
+        SELECT 1 FROM recurring_patterns rp
+        WHERE rp.id = t.recurring_id AND rp.is_active = 1 AND rp.kind = 'flow'
+      )
+  `).get(...budgeted, iso(start), iso(end)) as { spent: number };
+
+  return Math.max(0, Math.round((row.spent / UNBUDGETED_BASIS_DAYS) * forecastDays));
 }
 
 function earmarksFromPool(goal: GoalEarmarkRow): boolean {

@@ -54,6 +54,7 @@ export function claimLines(
       delta: sheet.liquid,
       note: 'Checking, savings and cash. Not investments, not crypto.',
     },
+    { key: 'inflows', label: `Income expected in the next ${sheet.forecast_days} days`, delta: sheet.expected_inflows },
     {
       key: 'cards',
       label: cards.inCredit ? 'Cards in credit' : cards.label,
@@ -67,11 +68,18 @@ export function claimLines(
         : 'The whole balance is taken out here, not a minimum payment.',
     },
     { key: 'bills', label: `Bills due in the next ${sheet.forecast_days} days`, delta: -sheet.upcoming_bills },
+    { key: 'transfers', label: 'Scheduled transfers out', delta: -sheet.recurring_transfers },
     {
       key: 'budgets',
       label: 'Budgeted, not yet spent',
       delta: -sheet.allocated_budgets,
       note: emptyNote(budgetCount, sheet.allocated_budgets, 'No monthly budgets set, so nothing is claimed here.'),
+    },
+    {
+      key: 'unbudgeted',
+      label: 'Unbudgeted spending at its usual pace',
+      delta: -sheet.estimated_unbudgeted,
+      note: `The last ${sheet.unbudgeted_basis_days} days of spending outside any budget, scaled to ${sheet.forecast_days}.`,
     },
     {
       key: 'goals',

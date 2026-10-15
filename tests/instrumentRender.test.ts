@@ -38,7 +38,7 @@ test('the surface renders when the owner is short, and reads differently', () =>
   assert.doesNotMatch(body, /free to spend/);
   assert.match(body, /\$1,427\.96/);
   assert.doesNotMatch(body, /−\$1,427\.96/, 'the magnitude is printed; the state is a word');
-  assert.match(body, /claim more than the liquid pool holds/);
+  assert.match(body, /claims on checking, savings and cash exceed it/);
   // Being short is actionable, so the largest claim is named. Having room is not, so it is not.
   assert.match(body, /The largest single claim is \$4,278\.70 of card balances\./);
 });

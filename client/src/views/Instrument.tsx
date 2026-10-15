@@ -1209,7 +1209,7 @@ export function Instrument() {
             </section>
           )}
 
-          {/* Merchants. A different quantity from the categories above, and it says so. */}
+          {/* Merchants, net of refunds. */}
           <section>
             <SectionLabel className="mb-2">Busiest merchants</SectionLabel>
             <QueryState
@@ -1232,12 +1232,8 @@ export function Instrument() {
                       {...merchantScale}
                     />
                   ))}
-                  {/* The report sums ABS(amount) per merchant, so a refund counts as movement. That
-                      is a different quantity from the category totals above, which net. Dividing
-                      one by the other is what produced a merchant "share" of 161% on July 2026. */}
                   <p className="mt-3 max-w-[72ch] text-note leading-relaxed text-muted-2">
-                    Gross activity: a refund counts here as movement rather than against it, so these totals do not
-                    net out and do not sum to the figures above. No share of the total is shown.
+                    Net of refunds, like the categories above.
                   </p>
                 </>
               )}

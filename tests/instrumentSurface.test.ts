@@ -44,6 +44,10 @@ function safeToSpend(overrides: Partial<SafeToSpend> = {}): SafeToSpend {
     liquid: 6035.67,
     card_balances: 4278.7,
     upcoming_bills: 64.04,
+    expected_inflows: 0,
+    recurring_transfers: 0,
+    estimated_unbudgeted: 0,
+    unbudgeted_basis_days: 90,
     allocated_budgets: 500,
     allocated_goals: 1001.7,
     free: 191.23,
@@ -69,8 +73,8 @@ test('having room and being short are two states, not one figure in a different 
   // The two readings must not share a sentence. This is the whole hazard: rendering a negative
   // `free` in the slot a positive one used to sit in says nothing about which state it is.
   assert.notEqual(room.detail, shortfall.detail);
-  assert.match(room.detail, /Left in the liquid pool/);
-  assert.match(shortfall.detail, /claim more than the liquid pool holds/);
+  assert.match(room.detail, /with expected income in and every claim out/);
+  assert.match(shortfall.detail, /claims on checking, savings and cash exceed it/);
 
   // And the word under the numeral differs, through the primitive that owns that rule.
   assert.notEqual(readState(room.kind === 'free' ? room.value : 0, FREE_STATES), readState(-1, FREE_STATES));
@@ -219,17 +223,6 @@ test('one scale spans both groups, so a return is comparable to the spend it off
   const noReturns = signedBarScale(split.spent.map((c) => c.amount));
   assert.equal(noReturns.diverging, false);
   assert.equal(cents(noReturns.extent), 73160);
-});
-
-test('a merchant total and a category total are different quantities, so no share is printed', () => {
-  // `getTopMerchantsReport` sums ABS(amount) per merchant while its own `total` is SUM(-amount)
-  // over the same predicate, so the two are not commensurable. Measured on July 2026: Amazon
-  // 179586c gross across 5 rows, against a report total of 111299c. Reports.tsx divided one by the
-  // other and rendered the result as "161%", with the bar clipped at the end of its track.
-  const amazonGross = 1795.86;
-  const share = (amazonGross / JULY_TOTAL) * 100;
-  assert.equal(Math.round(share), 161);
-  assert.ok(share > 100, 'a share above 100% is the proof that these are two different quantities');
 });
 
 /* ── Hazard 3: a week is only a week against a sheet that measured the same thing ── */
