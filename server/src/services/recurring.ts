@@ -145,28 +145,78 @@ export function recentSignedAmounts(
   db: Database.Database,
   patternIds: string[]
 ): Map<string, number> {
+  return new Map(
+    Array.from(recentExpectedAmounts(db, patternIds), ([id, expected]): [string, number] => [id, expected.amount])
+  );
+}
+
+/** recentSignedAmounts, with the level shift that produced the figure when there was one. */
+export function recentExpectedAmounts(
+  db: Database.Database,
+  patternIds: string[]
+): Map<string, ExpectedAmount> {
   if (patternIds.length === 0) return new Map();
 
   const placeholders = patternIds.map(() => '?').join(',');
   const rows = db.prepare(`
-    SELECT recurring_id, amount
+    SELECT recurring_id, amount, date
     FROM transactions
     WHERE recurring_id IN (${placeholders})
       AND pending = 0
       AND COALESCE(category_id, '') NOT LIKE 'cat_xfer%'
     ORDER BY recurring_id ASC, date DESC, id DESC
-  `).all(...patternIds) as Array<{ recurring_id: string; amount: number }>;
+  `).all(...patternIds) as Array<{ recurring_id: string; amount: number; date: string }>;
 
-  const windows = new Map<string, number[]>();
+  const windows = new Map<string, Array<{ amount: number; date: string }>>();
   for (const row of rows) {
     const window = windows.get(row.recurring_id);
-    if (!window) windows.set(row.recurring_id, [row.amount]);
-    else if (window.length < RECENT_AMOUNT_WINDOW) window.push(row.amount);
+    if (!window) windows.set(row.recurring_id, [row]);
+    else if (window.length < RECENT_AMOUNT_WINDOW) window.push(row);
   }
 
-  return new Map(
-    Array.from(windows, ([id, amounts]): [string, number] => [id, Math.round(median(amounts))])
-  );
+  return new Map(Array.from(windows, ([id, recent]): [string, ExpectedAmount] => [id, expectedAmount(recent)]));
+}
+
+export interface ExpectedAmount {
+  /** Integer cents, signed as the rows are. */
+  amount: number;
+  /** The level the pattern moved off, when its last two occurrences left it together. */
+  changedFrom: number | null;
+  changedOn: string | null;
+}
+
+/** How far both of the last two occurrences must sit from the window median, in one direction. */
+export const LEVEL_SHIFT_RATIO = 0.15;
+
+function farFrom(level: number, value: number): -1 | 0 | 1 {
+  if (Math.abs(value - level) <= LEVEL_SHIFT_RATIO * Math.abs(level)) return 0;
+  return value > level ? 1 : -1;
+}
+
+/**
+ * What the next occurrence should be, from the most recent ones (newest first).
+ *
+ * The window median survives an outlier and stale history, and is also what kept forecasting
+ * $544.18 after pay dropped. Two occurrences in a row on the same side of it, both well off it, are
+ * a new level rather than noise: forecast at their mean when they agree, and at the latest when
+ * they do not. One odd occurrence, or two pulling opposite ways, leave the median in charge.
+ */
+export function expectedAmount(recent: ReadonlyArray<{ amount: number; date: string }>): ExpectedAmount {
+  const window = recent.slice(0, RECENT_AMOUNT_WINDOW);
+  const level = median(window.map((row) => row.amount));
+  const unchanged = { amount: Math.round(level), changedFrom: null, changedOn: null };
+  if (window.length < 4 || level === 0) return unchanged;
+
+  const [latest, previous] = window;
+  const direction = farFrom(level, latest.amount);
+  if (direction === 0 || farFrom(level, previous.amount) !== direction) return unchanged;
+
+  const agree = farFrom(latest.amount, previous.amount) === 0;
+  return {
+    amount: Math.round(agree ? (latest.amount + previous.amount) / 2 : latest.amount),
+    changedFrom: Math.round(level),
+    changedOn: latest.date,
+  };
 }
 
 /**
@@ -492,10 +542,8 @@ export function detectRecurring(): void {
     const nextExpected = nextExpectedAfter(
       lastTxn.date, frequency, medianGap, usualWeekday(txns.slice(-RECENT_AMOUNT_WINDOW).map((t) => t.date))
     );
-    // The stored amount is a short-window median, not the full-history one the variance gate above
-    // needs: see RECENT_AMOUNT_WINDOW. Rounded because average_amount is integer cents.
-    const expectedAmount = Math.round(
-      median(txns.slice(-RECENT_AMOUNT_WINDOW).map((t) => Math.abs(t.amount)))
+    const expected = expectedAmount(
+      txns.slice(-RECENT_AMOUNT_WINDOW).reverse().map((t) => ({ amount: Math.abs(t.amount), date: t.date }))
     );
     const observed = new Set(
       txns.map((t) => t.category_id).filter((id): id is string => Boolean(id))
@@ -545,16 +593,19 @@ export function detectRecurring(): void {
       db.prepare(`
         UPDATE recurring_patterns
         SET frequency = ?, category_id = ?, average_amount = ?, amount_variance = ?, last_seen = ?,
-            next_expected = ?, transaction_count = ?, is_active = 1, updated_at = ?
+            next_expected = ?, transaction_count = ?, is_active = 1, amount_changed_from = ?,
+            amount_changed_on = ?, updated_at = ?
         WHERE id = ?
       `).run(
         frequency,
         categoryId,
-        expectedAmount,
+        expected.amount,
         amountVariance,
         lastTxn.date,
         nextExpected,
         txns.length,
+        expected.changedFrom,
+        expected.changedOn,
         now,
         patternId
       );
@@ -563,18 +614,21 @@ export function detectRecurring(): void {
       db.prepare(`
         INSERT INTO recurring_patterns
           (id, merchant_name, category_id, frequency, average_amount, amount_variance, last_seen,
-           next_expected, is_active, is_confirmed, transaction_count, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, 0, ?, ?, ?)
+           next_expected, is_active, is_confirmed, transaction_count, amount_changed_from,
+           amount_changed_on, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, 0, ?, ?, ?, ?, ?)
       `).run(
         patternId,
         normalizedName,
         categoryId,
         frequency,
-        expectedAmount,
+        expected.amount,
         amountVariance,
         lastTxn.date,
         nextExpected,
         txns.length,
+        expected.changedFrom,
+        expected.changedOn,
         now,
         now
       );
@@ -709,8 +763,8 @@ function upsertTransferPattern(
   const categoryId = first.to_is_liability
     ? 'cat_xfer_cc'
     : majorityCategoryId(txns.map((t) => t.category_id), known);
-  const expectedAmount = Math.round(
-    median(txns.slice(-RECENT_AMOUNT_WINDOW).map((t) => Math.abs(t.amount)))
+  const expected = expectedAmount(
+    txns.slice(-RECENT_AMOUNT_WINDOW).reverse().map((t) => ({ amount: Math.abs(t.amount), date: t.date }))
   );
   const nextExpected = nextExpectedAfter(
     last.date, cadence.frequency, cadence.medianGap,
@@ -733,10 +787,11 @@ function upsertTransferPattern(
     db.prepare(`
       UPDATE recurring_patterns
       SET frequency = ?, category_id = ?, average_amount = ?, amount_variance = ?, last_seen = ?,
-          next_expected = ?, transaction_count = ?, is_active = 1, updated_at = ?
+          next_expected = ?, transaction_count = ?, is_active = 1, amount_changed_from = ?,
+          amount_changed_on = ?, updated_at = ?
       WHERE id = ?
-    `).run(cadence.frequency, categoryId, expectedAmount, cadence.amountVariance, last.date,
-      nextExpected, txns.length, now, patternId);
+    `).run(cadence.frequency, categoryId, expected.amount, cadence.amountVariance, last.date,
+      nextExpected, txns.length, expected.changedFrom, expected.changedOn, now, patternId);
   } else {
     const taken = db.prepare('SELECT 1 FROM recurring_patterns WHERE merchant_name = ?').get(label);
     patternId = uuidv4();
@@ -744,11 +799,11 @@ function upsertTransferPattern(
       INSERT INTO recurring_patterns
         (id, merchant_name, category_id, frequency, average_amount, amount_variance, last_seen,
          next_expected, is_active, is_confirmed, transaction_count, kind, account_id,
-         counterparty_account_id, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, 0, ?, 'transfer', ?, ?, ?, ?)
+         counterparty_account_id, amount_changed_from, amount_changed_on, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, 0, ?, 'transfer', ?, ?, ?, ?, ?, ?)
     `).run(patternId, taken ? `${label} (${patternId.slice(0, 8)})` : label, categoryId,
-      cadence.frequency, expectedAmount, cadence.amountVariance, last.date, nextExpected,
-      txns.length, first.from_id, first.to_id, now, now);
+      cadence.frequency, expected.amount, cadence.amountVariance, last.date, nextExpected,
+      txns.length, first.from_id, first.to_id, expected.changedFrom, expected.changedOn, now, now);
   }
 
   const ids = txns.map((t) => t.id);

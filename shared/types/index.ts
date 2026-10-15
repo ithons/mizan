@@ -322,6 +322,9 @@ export interface RecurringPattern {
   transaction_count: number;
   /** 'transfer': a schedule of money between two of the owner's accounts, not a bill. */
   kind?: 'flow' | 'transfer';
+  /** The level `average_amount` moved off, unsigned like it, when the last two occurrences left it. */
+  amount_changed_from?: number | null;
+  amount_changed_on?: string | null;
   account_id?: string | null;
   counterparty_account_id?: string | null;
   created_at: string;
@@ -358,6 +361,11 @@ export interface RecurringForecastOccurrence {
   /** True when the pattern's amount moves materially; `amount` is a median estimate, not a bill. */
   amount_varies?: boolean;
   is_income: boolean;
+  /**
+   * Set when the last two occurrences left the usual level together: `amount` follows them, and
+   * `from` is the level it left, signed like `amount`.
+   */
+  amount_change?: { from: number; since: string } | null;
   /** 'transfer': money moving between two of the owner's accounts, never income or a bill. */
   kind?: 'flow' | 'transfer';
   /** The account the money leaves (transfers only). */

@@ -7,7 +7,7 @@ import type {
   RecurringPattern,
 } from '../../../shared/types';
 import { getRecurringAdjustmentMap } from './recurringAdjustments';
-import { occurrenceDate, recentSignedAmounts } from './recurring';
+import { occurrenceDate, recentExpectedAmounts, type ExpectedAmount } from './recurring';
 
 type Frequency = RecurringPattern['frequency'];
 
@@ -29,6 +29,8 @@ interface RecurringForecastRow {
   account_name: string | null;
   counterparty_account_id: string | null;
   counterparty_account_name: string | null;
+  amount_changed_from: number | null;
+  amount_changed_on: string | null;
 }
 
 /** Matches detection's AMOUNT_VARIANCE_MAX: above it, the stored amount is a median, not a bill. */
@@ -64,7 +66,7 @@ function daysUntil(date: Date, now: Date): number {
 function buildOccurrence(
   pattern: RecurringForecastRow,
   originalDate: string,
-  baseAmount: number,
+  expected: ExpectedAmount,
   confidence: number,
   confidenceLabelValue: RecurringForecastOccurrence['confidence_label'],
   now: Date,
@@ -83,7 +85,7 @@ function buildOccurrence(
 
   const amount = adjustment?.action === 'adjust' && adjustment.adjusted_amount != null
     ? adjustment.adjusted_amount
-    : baseAmount;
+    : expected.amount;
   const effectiveDate = parseISO(expectedDate);
   const status: RecurringForecastOccurrence['status'] = expectedDate < today ? 'overdue' : 'upcoming';
   const needsReview = skipped
@@ -107,6 +109,9 @@ function buildOccurrence(
       ? false
       : (pattern.amount_variance ?? 0) >= AMOUNT_VARIES_THRESHOLD,
     is_income: pattern.kind === 'flow' && amount > 0,
+    amount_change: expected.changedFrom !== null && expected.changedOn !== null
+      ? { from: expected.changedFrom, since: expected.changedOn }
+      : null,
     kind: pattern.kind,
     account_id: pattern.account_id,
     account_name: pattern.account_name,
@@ -124,6 +129,23 @@ function buildOccurrence(
     adjusted_date: adjustment?.adjusted_date ?? null,
     adjusted_amount: adjustment?.adjusted_amount ?? null,
     adjustment_note: adjustment?.note ?? null,
+  };
+}
+
+// A transfer is always money leaving its account. Anything else is signed by its own rows, or by
+// its category when it has none (a pattern the owner typed in).
+function expectedFor(pattern: RecurringForecastRow, recent: ExpectedAmount | undefined): ExpectedAmount {
+  if (pattern.kind === 'transfer') {
+    return {
+      amount: -pattern.average_amount,
+      changedFrom: pattern.amount_changed_from === null ? null : -pattern.amount_changed_from,
+      changedOn: pattern.amount_changed_on,
+    };
+  }
+  return recent ?? {
+    amount: pattern.is_income === 1 ? pattern.average_amount : -pattern.average_amount,
+    changedFrom: null,
+    changedOn: null,
   };
 }
 
@@ -149,6 +171,8 @@ export function buildRecurringForecast(
       rp.amount_variance,
       rp.average_amount,
       rp.kind,
+      rp.amount_changed_from,
+      rp.amount_changed_on,
       rp.account_id,
       rp.counterparty_account_id,
       c.name AS category_name,
@@ -171,7 +195,7 @@ export function buildRecurringForecast(
   // One definition of the expected amount, shared with the stored column detection writes. A
   // manual pattern has no linked rows, so it falls back to what its owner typed, signed by
   // the category (an unset category is an expense, as it was before).
-  const signedAmounts = recentSignedAmounts(db, patternIds);
+  const recentAmounts = recentExpectedAmounts(db, patternIds);
   const occurrences: RecurringForecastOccurrence[] = [];
 
   for (const pattern of patterns) {
@@ -180,10 +204,7 @@ export function buildRecurringForecast(
     let expected = anchor;
     const confidence = confidenceForPattern(pattern);
     const confidence_label = confidenceLabel(confidence);
-    const amount = pattern.kind === 'transfer'
-      ? -pattern.average_amount
-      : signedAmounts.get(pattern.id)
-        ?? (pattern.is_income === 1 ? pattern.average_amount : -pattern.average_amount);
+    const amount = expectedFor(pattern, recentAmounts.get(pattern.id));
     let overdueExpectedDate: Date | null = null;
 
     while (format(expected, 'yyyy-MM-dd') < today && step < OCCURRENCE_LIMIT) {

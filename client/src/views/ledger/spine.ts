@@ -1,4 +1,5 @@
 import { format, isToday, isTomorrow, isYesterday, parseISO } from 'date-fns';
+import { formatCurrency } from '../../lib/formatters';
 import type {
   AdvisorDraftAction,
   Category,
@@ -561,7 +562,9 @@ export const SCHEDULE_STATES = {
 
 export function occurrenceMeta(o: RecurringForecastOccurrence): string {
   const freq = o.frequency.charAt(0).toUpperCase() + o.frequency.slice(1);
-  const varies = o.amount_varies ? ' · amount varies' : '';
+  const varies = o.amount_change
+    ? ` · amount changed from ${formatCurrency(Math.abs(o.amount_change.from))}`
+    : o.amount_varies ? ' · amount varies' : '';
   const from = o.kind === 'transfer' && o.account_name ? ` · from ${o.account_name}` : '';
   return `${freq} · ${o.confidence_label}${varies}${from}`;
 }

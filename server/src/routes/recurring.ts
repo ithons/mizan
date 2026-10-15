@@ -26,7 +26,7 @@ const router = Router();
 // totals/occurrence amounts, subscription amounts, and adjusted_amount are all stored/
 // computed in integer cents; dollarize each money field at this route boundary.
 // Confidence, percentages, counts, days, dates, and ids are not money.
-const PATTERN_MONEY_FIELDS = ['average_amount', 'average_signed_amount'] as const;
+const PATTERN_MONEY_FIELDS = ['average_amount', 'average_signed_amount', 'amount_changed_from'] as const;
 
 function patternToDollars(row: Record<string, unknown>): Record<string, unknown> {
   return dollarizeFields(row, PATTERN_MONEY_FIELDS);
@@ -36,6 +36,9 @@ function occurrenceToDollars(occurrence: RecurringForecastOccurrence): Recurring
   return {
     ...occurrence,
     amount: toDollars(occurrence.amount),
+    amount_change: occurrence.amount_change
+      ? { ...occurrence.amount_change, from: toDollars(occurrence.amount_change.from) }
+      : null,
     adjusted_amount: toDollarsOrNull(occurrence.adjusted_amount),
   };
 }
