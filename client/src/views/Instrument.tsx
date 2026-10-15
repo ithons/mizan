@@ -426,28 +426,30 @@ export function Instrument() {
     queryFn: () => networthApi.historyBetween(range.startDate, range.endDate),
     retry: false,
   });
+  const [basis, setBasis] = useState<'accrual' | 'cash'>('accrual');
+  const cashKey = basis === 'cash' ? ['cash'] : [];
   const summaryQ = useQuery({
-    queryKey: ['reports', 'summary', range, comparison],
-    queryFn: () => reportsApi.summary({ ...range, comparison }),
+    queryKey: ['reports', 'summary', range, comparison, ...cashKey],
+    queryFn: () => reportsApi.summary({ ...range, comparison, basis }),
   });
   const cashflowQ = useQuery({
-    queryKey: ['reports', 'cashflow', range],
-    queryFn: () => reportsApi.cashflow(range),
+    queryKey: ['reports', 'cashflow', range, ...cashKey],
+    queryFn: () => reportsApi.cashflow({ ...range, basis }),
   });
   const spendingQ = useQuery({
-    queryKey: ['reports', 'spending', range],
-    queryFn: () => reportsApi.spending(range),
+    queryKey: ['reports', 'spending', range, ...cashKey],
+    queryFn: () => reportsApi.spending({ ...range, basis }),
   });
   const merchantsQ = useQuery({
-    queryKey: ['reports', 'merchants', range],
-    queryFn: () => reportsApi.merchants({ ...range, limit: 10 }),
+    queryKey: ['reports', 'merchants', range, ...cashKey],
+    queryFn: () => reportsApi.merchants({ ...range, limit: 10, basis }),
   });
   // Per-category spend by month. No `categoryIds`: unfiltered is every category the window holds,
   // which is the set "Where it went" already ranks, and asking for a subset would mean this screen
   // deciding twice which categories matter.
   const trendsQ = useQuery({
-    queryKey: ['reports', 'trends', range],
-    queryFn: () => reportsApi.trends(range),
+    queryKey: ['reports', 'trends', range, ...cashKey],
+    queryFn: () => reportsApi.trends({ ...range, basis }),
   });
   // Null, not an error, when the window holds fewer than two snapshots: there is no movement to
   // attribute. `retry: false` because a window with one sheet in it will not grow one on a retry.
@@ -867,6 +869,16 @@ export function Instrument() {
             </div>
           </div>
           <div className="flex flex-wrap items-baseline gap-x-6 gap-y-2 whitespace-nowrap text-body">
+            <button
+              type="button"
+              onClick={() => setBasis(basis === 'cash' ? 'accrual' : 'cash')}
+              aria-pressed={basis === 'cash'}
+              title="Refunds count in the month of their purchase unless this is on"
+              className={`transition-colors ${basis === 'cash' ? 'border-b border-ink pb-0.5 text-ink' : 'text-muted hover:text-ink'}`}
+            >
+              As paid
+            </button>
+            <span aria-hidden className="text-line-3">|</span>
             {INSTRUMENT_WINDOWS.map((w) => (
               <button
                 key={w.id}
@@ -884,6 +896,11 @@ export function Instrument() {
         </div>
         <ExplainPanel disclosure={windowExplain}>
           <p>Everything below answers to this selector. The balance sheet above it is now, and has no window.</p>
+          <p>
+            A refund linked to its purchase counts in the purchase&apos;s month, so a return does not make one
+            month negative and leave another inflated. &quot;As paid&quot; shows every row in the month the money
+            moved instead.
+          </p>
         </ExplainPanel>
 
         <div className="mt-8 space-y-12">

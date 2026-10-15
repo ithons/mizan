@@ -499,6 +499,8 @@ export interface ReportParams {
   startDate?: string;
   endDate?: string;
   comparison?: ReportComparisonMode;
+  /** 'cash' keeps a refund in the month it arrived instead of netting it against its purchase. */
+  basis?: 'accrual' | 'cash';
 }
 
 export const reportsApi = {
@@ -506,12 +508,14 @@ export const reportsApi = {
     const q = new URLSearchParams();
     if (params?.startDate) q.set('startDate', params.startDate);
     if (params?.endDate) q.set('endDate', params.endDate);
+    if (params?.basis === 'cash') q.set('basis', 'cash');
     return apiFetch<CashflowReport>(`/api/reports/cashflow?${q.toString()}`);
   },
   summary: (params?: ReportParams) => {
     const q = new URLSearchParams();
     if (params?.startDate) q.set('startDate', params.startDate);
     if (params?.endDate) q.set('endDate', params.endDate);
+    if (params?.basis === 'cash') q.set('basis', 'cash');
     if (params?.comparison) q.set('comparison', params.comparison);
     return apiFetch<ReportSummary>(`/api/reports/summary?${q.toString()}`);
   },
@@ -519,12 +523,14 @@ export const reportsApi = {
     const q = new URLSearchParams();
     if (params?.startDate) q.set('startDate', params.startDate);
     if (params?.endDate) q.set('endDate', params.endDate);
+    if (params?.basis === 'cash') q.set('basis', 'cash');
     return apiFetch<SpendingReport>(`/api/reports/spending?${q.toString()}`);
   },
   trends: (params?: ReportParams & { categoryIds?: string[] }) => {
     const q = new URLSearchParams();
     if (params?.startDate) q.set('startDate', params.startDate);
     if (params?.endDate) q.set('endDate', params.endDate);
+    if (params?.basis === 'cash') q.set('basis', 'cash');
     if (params?.categoryIds?.length) q.set('categoryIds', params.categoryIds.join(','));
     return apiFetch<CategoryTrendReport>(`/api/reports/trends?${q.toString()}`);
   },
@@ -532,6 +538,7 @@ export const reportsApi = {
     const q = new URLSearchParams();
     if (params?.startDate) q.set('startDate', params.startDate);
     if (params?.endDate) q.set('endDate', params.endDate);
+    if (params?.basis === 'cash') q.set('basis', 'cash');
     if (params?.limit) q.set('limit', String(params.limit));
     return apiFetch<TopMerchantsReport>(`/api/reports/merchants?${q.toString()}`);
   },
