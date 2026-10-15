@@ -1,3 +1,4 @@
+import type { ReportBasis } from '../services/transactionFilters';
 import { Router, Request, Response, NextFunction } from 'express';
 import { getDb } from '../db/index';
 import {
@@ -165,13 +166,18 @@ function reportComparison(value: unknown): ReportComparisonMode | undefined {
   return undefined;
 }
 
-// GET /cashflow?startDate&endDate
+function reportBasis(value: unknown): ReportBasis | undefined {
+  const parsed = firstQueryValue(value);
+  return parsed === 'cash' || parsed === 'accrual' ? parsed : undefined;
+}
+
+// GET /cashflow?startDate&endDate&basis
 router.get('/cashflow', (req: Request, res: Response, next: NextFunction): void => {
   try {
     const db = getDb();
     const startDate = firstQueryValue(req.query.startDate);
     const endDate = firstQueryValue(req.query.endDate);
-    res.json({ data: cashflowToDollars(getCashflowReport(db, { startDate, endDate })) });
+    res.json({ data: cashflowToDollars(getCashflowReport(db, { startDate, endDate, basis: reportBasis(req.query.basis) })) });
   } catch (err) {
     next(err);
   }
@@ -184,7 +190,9 @@ router.get('/summary', (req: Request, res: Response, next: NextFunction): void =
     const startDate = firstQueryValue(req.query.startDate);
     const endDate = firstQueryValue(req.query.endDate);
     const comparison = reportComparison(req.query.comparison);
-    res.json({ data: summaryToDollars(getReportSummary(db, { startDate, endDate, comparison })) });
+    res.json({
+      data: summaryToDollars(getReportSummary(db, { startDate, endDate, comparison, basis: reportBasis(req.query.basis) })),
+    });
   } catch (err) {
     next(err);
   }
@@ -202,6 +210,7 @@ router.get('/spending', (req: Request, res: Response, next: NextFunction): void 
         startDate,
         endDate,
         parentOnly: parentOnly === 'true',
+        basis: reportBasis(req.query.basis),
       })),
     });
   } catch (err) {
@@ -221,7 +230,7 @@ router.get('/trends', (req: Request, res: Response, next: NextFunction): void =>
       ? rawCategoryIds.split(',').map((id) => id.trim()).filter(Boolean)
       : undefined;
 
-    const report = getSpendingTrendsReport(db, { startDate, endDate, categoryIds });
+    const report = getSpendingTrendsReport(db, { startDate, endDate, categoryIds, basis: reportBasis(req.query.basis) });
     res.json({
       data: {
         months: report.months,
@@ -243,7 +252,7 @@ router.get('/merchants', (req: Request, res: Response, next: NextFunction): void
     const parsedLimit = rawLimit ? Number.parseInt(rawLimit, 10) : undefined;
     const limit = parsedLimit !== undefined && Number.isFinite(parsedLimit) ? parsedLimit : undefined;
 
-    const report = getTopMerchantsReport(db, { startDate, endDate, limit });
+    const report = getTopMerchantsReport(db, { startDate, endDate, limit, basis: reportBasis(req.query.basis) });
     res.json({
       data: {
         merchants: report.merchants.map((m) => ({ ...m, total: toDollars(m.total) })),

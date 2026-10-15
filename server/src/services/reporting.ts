@@ -3,7 +3,9 @@ import {
   excludedFromTotalsSql,
   expenseSideSql,
   incomeSideSql,
+  reportDateSql,
   spendAmountSql,
+  type ReportBasis,
 } from './transactionFilters';
 import {
   addDays,
@@ -42,6 +44,7 @@ interface ReportDateRange {
   startDate?: string;
   endDate?: string;
   comparison?: ReportComparisonMode;
+  basis?: ReportBasis;
 }
 
 interface SpendingReportOptions extends ReportDateRange {
@@ -122,13 +125,14 @@ function expenseCategoryCondition(): string {
 function dateConditions(range: ReportDateRange): { conditions: string[]; params: unknown[] } {
   const conditions = ['t.pending = 0'];
   const params: unknown[] = [];
+  const date = reportDateSql('t', range.basis);
 
   if (range.startDate) {
-    conditions.push('t.date >= ?');
+    conditions.push(`${date} >= ?`);
     params.push(range.startDate);
   }
   if (range.endDate) {
-    conditions.push('t.date <= ?');
+    conditions.push(`${date} <= ?`);
     params.push(range.endDate);
   }
 
@@ -331,7 +335,7 @@ export function getCashflowReport(
   const rows = db.prepare(`
     ${excludedCategoriesCte()}
     SELECT
-      strftime('%Y-%m', t.date) AS month,
+      strftime('%Y-%m', ${reportDateSql('t', range.basis)}) AS month,
       SUM(CASE WHEN ${incomeCategoryCondition()} THEN t.amount ELSE 0 END) AS income,
       SUM(CASE WHEN ${expenseCategoryCondition()} THEN ${spendAmountSql('t')} ELSE 0 END) AS expenses
     FROM transactions t
@@ -677,7 +681,7 @@ export function getSpendingTrendsReport(
   const rows = db.prepare(`
     ${excludedCategoriesCte()}
     SELECT
-      strftime('%Y-%m', t.date) AS month,
+      strftime('%Y-%m', ${reportDateSql('t', range.basis)}) AS month,
       c.id AS category_id,
       c.name AS category_name,
       c.color,
@@ -1006,7 +1010,7 @@ export function getReportSummary(
   range: ReportDateRange
 ): ReportSummary {
   const comparison = range.comparison ?? 'prior_period';
-  const previous = comparisonRange(range, comparison);
+  const previous = { ...comparisonRange(range, comparison), basis: range.basis };
   // An empty range means all time to every query below, so an underivable comparison window
   // compared the ledger with itself (or a bounded window with the whole ledger) and labelled the
   // zero delta "Prior period". Refuse instead of reporting a comparison that was never made.
@@ -1074,7 +1078,7 @@ export function getTopMerchantsReport(
     SELECT
       r.merchant AS merchant,
       COUNT(*) AS transaction_count,
-      SUM(ABS(r.amount)) AS total,
+      SUM(-r.amount) AS total,
       MAX(r.date) AS last_date,
       -- A merchant can span categories; show the one it lands in most often in this window.
       (

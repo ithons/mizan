@@ -77,13 +77,14 @@ export const TABLE_MEANINGS: Record<string, TableMeaning> = {
       },
       pending: { unit: FLAG, note: 'A pending row can still change amount, date or merchant, and reconciliation ignores it.' },
       transfer_status: { unit: 'enum, see enums.transfer_status' },
-      transfer_source: {
-        unit: "'auto' | 'owner' | NULL",
-        note: "Who settled a transfer pair. 'auto' pairs are re-derived every sync and the owner can undo them; 'owner' pairs are sticky.",
+      transfer_source: { unit: "'auto' | 'owner' | NULL", note: "'auto' pairs are re-derived each sync; 'owner' pairs stick." },
+      refund_of_id: {
+        unit: 'transactions.id, nullable',
+        note: "The purchase this credit reverses. Reports and budgets date a linked refund by its purchase: COALESCE((SELECT p.date FROM transactions p WHERE p.id = t.refund_of_id), t.date).",
       },
       is_internal_trade: {
         unit: FLAG,
-        note: 'Cash turned into or out of a position inside one brokerage account (a fund buy, a sale, the core sweep, a reinvestment). Never income, spending or a transfer; excluded_from_totals drops it.',
+        note: 'A buy, sale, core sweep or reinvestment inside one brokerage account. excluded_from_totals drops it.',
       },
       duplicate_status: { unit: 'enum, see enums.duplicate_status' },
       review_status: { unit: 'enum, see enums.review_status' },

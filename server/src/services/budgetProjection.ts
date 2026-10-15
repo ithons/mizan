@@ -1,5 +1,5 @@
 import type Database from 'better-sqlite3';
-import { excludedFromTotalsSql } from './transactionFilters';
+import { excludedFromTotalsSql, reportDateSql } from './transactionFilters';
 import { addMonths, format, isBefore, parseISO, subMonths  } from 'date-fns';
 import { occurrenceDate, recentSignedAmounts } from './recurring';
 import { getRecurringAdjustmentMap } from './recurringAdjustments';
@@ -98,14 +98,14 @@ function spendingByMonth(
   // consumed. Under the old form a $955.19 Amazon purchase refunded four days later still ate
   // the Shopping budget for the month, with no way to give it back.
   const rows = db.prepare(`
-    SELECT substr(date, 1, 7) AS month, COALESCE(SUM(-amount), 0) AS spent
+    SELECT substr(${reportDateSql()}, 1, 7) AS month, COALESCE(SUM(-amount), 0) AS spent
     FROM transactions
     WHERE category_id IN (${placeholders})
-      AND date >= ?
-      AND date < ?
+      AND ${reportDateSql()} >= ?
+      AND ${reportDateSql()} < ?
       AND pending = 0
       AND ${excludedFromTotalsSql()}
-    GROUP BY substr(date, 1, 7)
+    GROUP BY 1
   `).all(
     ...ids,
     `${startMonth}-01`,
@@ -259,7 +259,7 @@ export function getMonthlyBudgetsWithProjection(
     LEFT JOIN budget_categories bc ON bc.root_id = b.category_id
     LEFT JOIN transactions t
       ON t.category_id = bc.category_id
-     AND t.date BETWEEN ? AND ?
+     AND ${reportDateSql('t')} BETWEEN ? AND ?
      AND t.pending = 0
      AND ${excludedFromTotalsSql('t')}
     WHERE b.period = 'monthly' OR b.period = ?

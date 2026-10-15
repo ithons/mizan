@@ -78,3 +78,20 @@ export function expenseSideSql(t = 't', c = 'c'): string {
 export function spendAmountSql(t = 't'): string {
   return `(-${t}.amount)`;
 }
+
+/** 'accrual' files a linked refund in its purchase's period; 'cash' files every row on its own date. */
+export type ReportBasis = 'accrual' | 'cash';
+
+/**
+ * The date a row counts on. A refund linked to its purchase nets against that purchase where the
+ * purchase was spent, so a return in October does not make October's spending negative and leave
+ * September's inflated. The cash basis keeps every row on the day the money moved.
+ *
+ * Unaliased, the outer table is named in full: inside the subquery a bare `refund_of_id` would
+ * resolve to the inner alias.
+ */
+export function reportDateSql(alias?: string, basis: ReportBasis = 'accrual'): string {
+  const prefix = alias ? `${alias}.` : 'transactions.';
+  if (basis === 'cash') return `${prefix}date`;
+  return `COALESCE((SELECT purchase.date FROM transactions purchase WHERE purchase.id = ${prefix}refund_of_id), ${prefix}date)`;
+}

@@ -118,6 +118,13 @@ export interface Transaction {
   duplicate_status: 'none' | 'candidate' | 'dismissed';
   transfer_pair_id?: string | null;
   transfer_status: 'none' | 'candidate' | 'confirmed' | 'dismissed';
+  /** Who settled the pair: 'auto' is re-derived each sync and can be undone; 'owner' is sticky. */
+  transfer_source?: 'auto' | 'owner' | null;
+  /** Cash turned into a position inside one brokerage account. Never spending or a transfer. */
+  is_internal_trade?: boolean;
+  /** The purchase this credit reverses; it counts in that purchase's period. */
+  refund_of_id?: string | null;
+  refund_link_source?: 'auto' | 'owner' | 'rejected' | null;
   review_status: 'open' | 'reviewed' | 'dismissed';
   /**
    * Who decided this row's category (migration 041). NULL means the category was set before

@@ -1,7 +1,9 @@
 import type Database from 'better-sqlite3';
 import { format, subDays } from 'date-fns';
 import { toDollars } from './money';
-import { excludedFromTotalsSql, expenseSideSql, incomeSideSql } from './transactionFilters';
+import { excludedFromTotalsSql, expenseSideSql, incomeSideSql, reportDateSql } from './transactionFilters';
+
+const REPORT_DATE = reportDateSql('t');
 import type { Insight } from '../../../shared/types';
 
 export interface RankedInsight extends Insight {
@@ -133,7 +135,7 @@ export function getAnomalyInsights(db: Database.Database, now = new Date()): Ran
   const oldestStart = windowBounds[windowBounds.length - 1].start;
 
   const windowSums = windowBounds
-    .map((_, i) => `SUM(CASE WHEN t.date BETWEEN ? AND ? THEN -t.amount ELSE 0 END) AS w${i}`)
+    .map((_, i) => `SUM(CASE WHEN ${REPORT_DATE} BETWEEN ? AND ? THEN -t.amount ELSE 0 END) AS w${i}`)
     .join(',\n      ');
   const windowParams = windowBounds.flatMap((w) => [w.start, w.end]);
 
@@ -152,7 +154,7 @@ export function getAnomalyInsights(db: Database.Database, now = new Date()): Ran
     LEFT JOIN categories c ON c.id = t.category_id
     LEFT JOIN categories parent ON parent.id = c.parent_id
     WHERE t.pending = 0
-      AND t.date BETWEEN ? AND ?
+      AND ${REPORT_DATE} BETWEEN ? AND ?
       AND (t.category_id IS NULL OR t.category_id NOT IN (SELECT id FROM excluded_report_categories))
       AND ${excludedFromTotalsSql('t')}
       AND ${expenseSideSql('t', 'c')}
@@ -175,12 +177,12 @@ export function getAnomalyInsights(db: Database.Database, now = new Date()): Ran
       JOIN excluded_report_categories excluded ON c.parent_id = excluded.id
     )
     SELECT
-      COALESCE(SUM(CASE WHEN t.date BETWEEN ? AND ? THEN t.amount ELSE 0 END), 0) AS current_income,
-      COALESCE(SUM(CASE WHEN t.date BETWEEN ? AND ? THEN t.amount ELSE 0 END), 0) AS previous_income
+      COALESCE(SUM(CASE WHEN ${REPORT_DATE} BETWEEN ? AND ? THEN t.amount ELSE 0 END), 0) AS current_income,
+      COALESCE(SUM(CASE WHEN ${REPORT_DATE} BETWEEN ? AND ? THEN t.amount ELSE 0 END), 0) AS previous_income
     FROM transactions t
     LEFT JOIN categories c ON c.id = t.category_id
     WHERE t.pending = 0
-      AND t.date BETWEEN ? AND ?
+      AND ${REPORT_DATE} BETWEEN ? AND ?
       AND (t.category_id IS NULL OR t.category_id NOT IN (SELECT id FROM excluded_report_categories))
       AND ${excludedFromTotalsSql('t')}
       AND ${incomeSideSql('t', 'c')}

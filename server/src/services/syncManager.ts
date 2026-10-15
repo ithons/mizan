@@ -447,6 +447,7 @@ export function runPostSyncStages(
   let integrity: TransactionIntegrityResult = {
     duplicates: { groupCount: 0, transactionCount: 0, newGroupCount: 0, newTransactionCount: 0 },
     transfers: { pairCount: 0, transactionCount: 0, newPairCount: 0, autoPairCount: 0, newAutoPairCount: 0 },
+    refunds: { linked: 0, newlyLinked: 0 },
   };
   try {
     integrity = stages.refreshTransactionIntegrity(db);
@@ -488,6 +489,14 @@ export function runPostSyncStages(
         entity_id: null,
         change_type: 'updated',
         description: `${integrity.transfers.newAutoPairCount} transfer(s) paired across your accounts`,
+      });
+    }
+    if (integrity.refunds.newlyLinked > 0) {
+      recordSyncChange(db, integrityItem.id, {
+        entity_type: 'integrity',
+        entity_id: null,
+        change_type: 'updated',
+        description: `${integrity.refunds.newlyLinked} refund(s) matched to the purchase they reverse`,
       });
     }
   } catch (err) {

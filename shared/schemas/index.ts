@@ -45,6 +45,11 @@ export const BulkCategorySchema = z.object({
   categoryId: z.string().min(1),
 });
 
+/** null: the owner says this credit reverses no purchase. */
+export const RefundLinkSchema = z.object({
+  purchase_id: z.string().min(1).nullable(),
+});
+
 export const TransactionReviewStatusSchema = z.object({
   status: z.enum(['open', 'reviewed', 'dismissed']),
 });

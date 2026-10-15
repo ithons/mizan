@@ -9,6 +9,7 @@ import {
   revertRevisions,
   writeTransactionCategory,
 } from './categoryWrites';
+import { refreshRefundLinks, type RefundLinkResult } from './refundLinks';
 
 interface DuplicateRow {
   id: string;
@@ -101,6 +102,7 @@ export interface TransferDetectionResult {
 export interface TransactionIntegrityResult {
   duplicates: DuplicateDetectionResult;
   transfers: TransferDetectionResult;
+  refunds: RefundLinkResult;
 }
 
 function shortHash(input: string): string {
@@ -692,7 +694,9 @@ export function refreshTransactionIntegrity(db: Database.Database): TransactionI
   const refresh = db.transaction(() => {
     const duplicates = refreshDuplicateCandidates(db);
     const transfers = refreshTransferCandidates(db);
-    return { duplicates, transfers };
+    // After pairing, so a leg that just became a transfer is never taken for a refund.
+    const refunds = refreshRefundLinks(db);
+    return { duplicates, transfers, refunds };
   });
 
   return refresh();

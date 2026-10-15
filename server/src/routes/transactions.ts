@@ -2,6 +2,7 @@ import { Router, Request, Response, NextFunction } from 'express';
 import { getDb } from '../db/index';
 import { validate } from '../middleware/validate';
 import { takeSnapshot } from '../services/snapshot';
+import { setRefundLink } from '../services/refundLinks';
 import { detectRecurring } from '../services/recurring';
 import { getTransactionReviewSummary } from '../services/transactionReview';
 import {
@@ -27,6 +28,7 @@ import {
   UpdateTransactionSchema,
   BulkCategorySchema,
   TransactionReviewStatusSchema,
+  RefundLinkSchema,
 } from '../../../shared/schemas';
 import { dollarizeFields } from '../services/money';
 
@@ -347,6 +349,28 @@ router.patch(
     }
   }
 );
+
+// PUT /:id/refund-of - link a credit to the purchase it reverses, or (null) say it reverses none
+router.put('/:id/refund-of', validate(RefundLinkSchema), (req: Request, res: Response, next: NextFunction): void => {
+  try {
+    const result = setRefundLink(getDb(), routeId(req.params.id), req.body.purchase_id);
+    if (!result.ok) {
+      const status = result.reason === 'not_found' ? 404 : 409;
+      res.status(status).json({ error: REFUND_LINK_ERRORS[result.reason] });
+      return;
+    }
+    res.json({ data: { ok: true } });
+  } catch (err) {
+    next(err);
+  }
+});
+
+const REFUND_LINK_ERRORS = {
+  not_found: 'Transaction not found',
+  not_a_refund: 'Only money coming back can be a refund',
+  not_a_purchase: 'A refund can only reverse a purchase',
+  exceeds_purchase: 'More would come back than the purchase cost',
+} as const;
 
 // POST /:id/amount/release - hand a corrected amount back to the institution
 //
