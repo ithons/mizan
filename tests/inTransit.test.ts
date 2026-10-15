@@ -1,0 +1,91 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import type Database from 'better-sqlite3';
+import { transfersInTransit } from '../server/src/services/inTransit';
+import { getNetWorthAttribution } from '../server/src/services/reporting';
+import { insertAccount, insertTransaction, migratedTestDb } from './helpers/schema';
+
+function snapshot(db: Database.Database, date: string, createdAt: string, breakdown: Record<string, number>): void {
+  const netWorth = Object.values(breakdown).reduce((sum, value) => sum + value, 0);
+  db.prepare(`
+    INSERT INTO net_worth_snapshots (id, date, total_assets, total_liabilities, net_worth, breakdown, is_estimated, created_at)
+    VALUES (?, ?, ?, 0, ?, ?, 0, ?)
+  `).run(`snap_${date}`, date, netWorth, netWorth, JSON.stringify(breakdown), createdAt);
+}
+
+function leg(db: Database.Database, accountId: string, date: string, amount: number, createdAt: string, pairId: string): void {
+  const id = insertTransaction(db, { account_id: accountId, date, amount, original_name: amount < 0 ? 'Wealthfront EDI PYMNTS' : 'Chase (Account ****6391)' });
+  db.prepare("UPDATE transactions SET created_at = ?, transfer_pair_id = ?, transfer_status = 'confirmed' WHERE id = ?")
+    .run(createdAt, pairId, id);
+}
+
+/** The real case: $5,000 left Chase on 09-30, and Wealthfront did not show it until 10-15. */
+function chaseToWealthfront(db: Database.Database) {
+  const chase = insertAccount(db, { id: 'chase', account_name: 'Chase Checking', type: 'checking' });
+  const wealthfront = insertAccount(db, { id: 'wf', account_name: 'Wealthfront Cash', type: 'savings' });
+  snapshot(db, '2026-09-30', '2026-10-01T02:51:10.116Z', { chase: 1104728, wf: 321 });
+  snapshot(db, '2026-10-01', '2026-10-01T18:55:11.836Z', { chase: 650016, wf: 321 });
+  snapshot(db, '2026-10-15', '2026-10-15T17:50:55.727Z', { chase: 583948, wf: 500370 });
+  leg(db, chase, '2026-09-30', -500000, '2026-10-01T18:55:04.759Z', 'xfer_wf');
+  leg(db, wealthfront, '2026-09-30', 500000, '2026-10-15T17:50:47.307Z', 'xfer_wf');
+  return { chase, wealthfront };
+}
+
+test('a transfer one bank had sent and the other had not shown is money in flight, not a loss', () => {
+  const db = migratedTestDb();
+  chaseToWealthfront(db);
+  const attribution = getNetWorthAttribution(db, { startDate: '2026-09-30', endDate: '2026-10-01' });
+  assert.ok(attribution);
+  assert.equal(attribution.end_in_transit, 500000);
+  assert.equal(attribution.delta, (650016 + 321 + 500000) - (1104728 + 321));
+});
+
+test('and its arrival two weeks later is not growth', () => {
+  const db = migratedTestDb();
+  chaseToWealthfront(db);
+  const attribution = getNetWorthAttribution(db, { startDate: '2026-10-01', endDate: '2026-10-15' });
+  assert.ok(attribution);
+  assert.deepEqual([attribution.start_in_transit, attribution.end_in_transit], [500000, 0]);
+  const wealthfront = attribution.accounts.find((a) => a.account_id === 'wf');
+  assert.equal(wealthfront?.delta ?? 0, 49, 'only its interest moved it');
+});
+
+test('a transfer both banks had shown, or neither, is not in flight', () => {
+  const db = migratedTestDb();
+  chaseToWealthfront(db);
+  const breakdown = { chase: 0, wf: 0 };
+  assert.equal(transfersInTransit(db, { date: '2026-10-15', taken_at: '2026-10-15T18:00:00Z', created_at: '', breakdown }).total, 0);
+  assert.equal(transfersInTransit(db, { date: '2026-09-30', taken_at: '2026-10-01T02:51:10Z', created_at: '', breakdown }).total, 0);
+});
+
+test('a transfer imported long after it settled is not taken for one in flight', () => {
+  const db = migratedTestDb();
+  const chase = insertAccount(db, { id: 'chase', type: 'checking' });
+  const fid = insertAccount(db, { id: 'fid', type: 'brokerage' });
+  leg(db, chase, '2026-04-13', -10000, '2026-07-01T00:00:00Z', 'xfer_old');
+  leg(db, fid, '2026-04-13', 10000, '2026-07-24T03:33:30Z', 'xfer_old');
+  const transit = transfersInTransit(db, { date: '2026-07-10', taken_at: '2026-07-10T12:00:00Z', created_at: '', breakdown: { chase: 0, fid: 0 } });
+  assert.equal(transit.total, 0);
+});
+
+test('a card payment the card had not yet shown counts against what the card owes', () => {
+  const db = migratedTestDb();
+  const checking = insertAccount(db, { id: 'chase', type: 'checking' });
+  const card = insertAccount(db, { id: 'disc', type: 'credit', is_liability: 1 });
+  leg(db, checking, '2026-10-14', -33143, '2026-10-14T20:00:00Z', 'xfer_card');
+  leg(db, card, '2026-10-12', 33143, '2026-10-16T09:00:00Z', 'xfer_card');
+  const transit = transfersInTransit(db, { date: '2026-10-15', taken_at: '2026-10-15T09:00:00Z', created_at: '', breakdown: { chase: 0, disc: 0 } });
+  assert.equal(transit.total, 33143);
+  assert.equal(transit.byAccount.get('disc'), -33143);
+});
+
+test('money that arrived before its sending bank showed it leaving is counted once, not twice', () => {
+  const db = migratedTestDb();
+  const chase = insertAccount(db, { id: 'chase', type: 'checking' });
+  const wf = insertAccount(db, { id: 'wf', type: 'savings' });
+  leg(db, wf, '2026-08-19', -200322, '2026-08-21T10:00:00Z', 'xfer_back');
+  leg(db, chase, '2026-08-19', 200322, '2026-08-19T20:00:00Z', 'xfer_back');
+  const transit = transfersInTransit(db, { date: '2026-08-20', taken_at: '2026-08-20T09:00:00Z', created_at: '', breakdown: { chase: 0, wf: 0 } });
+  assert.equal(transit.total, -200322);
+  assert.equal(transit.byAccount.get('wf'), -200322);
+});

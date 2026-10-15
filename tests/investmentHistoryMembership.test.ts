@@ -8,7 +8,7 @@ import express from 'express';
 import Database from 'better-sqlite3';
 import { addDays, format, startOfMonth, subMonths } from 'date-fns';
 import { migratedTestDb, insertAccount, insertTransaction, TEST_NOW } from './helpers/schema';
-import { _setDbForTesting } from '../server/src/db/index';
+import { _setDbForTesting, runMigrationsOn } from '../server/src/db/index';
 import reportsRouter from '../server/src/routes/reports';
 import { backfillSnapshots, takeSnapshot } from '../server/src/services/snapshot';
 import { remapAccountIdInSnapshots } from '../server/src/services/accounts';
@@ -200,6 +200,17 @@ function apply056(db: Database.Database): void {
   db.exec(fs.readFileSync(path.join(MIGRATIONS_DIR, '056_snapshot_portfolio_membership.sql'), 'utf-8'));
 }
 
+/** Bring a database built by hand up to 056 the rest of the way, so today's writers can run on it. */
+function catchUpFrom056(db: Database.Database): void {
+  db.exec('CREATE TABLE IF NOT EXISTS schema_migrations (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT UNIQUE NOT NULL, applied_at TEXT NOT NULL)');
+  const record = db.prepare('INSERT OR IGNORE INTO schema_migrations (name, applied_at) VALUES (?, ?)');
+  for (const file of fs.readdirSync(MIGRATIONS_DIR).filter((f) => f.endsWith('.sql')).sort()) {
+    if (file.slice(0, 3) > '056') break;
+    record.run(file, TEST_NOW);
+  }
+  runMigrationsOn(db);
+}
+
 test('migration 056 marks what it worked out as worked out, not as recorded', async () => {
   const db = dbBefore056();
   try {
@@ -233,6 +244,7 @@ test('migration 056 marks what it worked out as worked out, not as recorded', as
 
     // And the endpoint carries the distinction rather than keeping it in the table. A point taken
     // after 056 sits in the same series saying something different about itself.
+    catchUpFrom056(db);
     _setDbForTesting(db);
     takeSnapshot();
     const report = await getReport(db);

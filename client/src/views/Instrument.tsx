@@ -55,6 +55,7 @@ import {
   readComparison,
   readStanding,
   readWeekChange,
+  settledNetWorth,
   splitSpending,
   windowRange,
   type SheetPoint,
@@ -542,7 +543,7 @@ export function Instrument() {
             date: snapshot.date,
             assets: snapshot.total_assets,
             liabilities: snapshot.total_liabilities,
-            netWorth: snapshot.net_worth,
+            netWorth: settledNetWorth(snapshot),
             isEstimated: Boolean(snapshot.is_estimated),
             coveredAccounts: snapshot.covered_accounts ?? null,
             totalAccounts: snapshot.total_accounts ?? null,
@@ -558,7 +559,7 @@ export function Instrument() {
           date: s.date,
           assets: s.total_assets,
           liabilities: s.total_liabilities,
-          netWorth: s.net_worth,
+          netWorth: settledNetWorth(s),
           isEstimated: Boolean(s.is_estimated),
           coveredAccounts: s.covered_accounts ?? null,
           totalAccounts: s.total_accounts ?? null,
@@ -1051,6 +1052,12 @@ export function Instrument() {
                 subtraction. Each figure is the account's effect on net worth, so a card whose
                 balance grew reads negative. Accounts that did not move are not listed.
               </p>
+              {(attribution.start_in_transit !== 0 || attribution.end_in_transit !== 0) && (
+                <p className="mt-1.5 max-w-[72ch] text-note leading-relaxed text-muted-2">
+                  {formatCurrency(Math.max(Math.abs(attribution.start_in_transit), Math.abs(attribution.end_in_transit)))}{' '}
+                  moving between your own accounts had left one and not yet reached the other, and is counted as landed.
+                </p>
+              )}
             </section>
           )}
 

@@ -2,6 +2,8 @@ import { format, subMonths } from 'date-fns';
 import { Router, Request, Response, NextFunction } from 'express';
 import { getDb } from '../db/index';
 import { dollarizeFields, toDollars } from '../services/money';
+import type Database from 'better-sqlite3';
+import { parseBreakdown, transfersInTransit } from '../services/inTransit';
 import {
   readReconstructionFrontier,
   reconcileReconstructedHistory,
@@ -17,6 +19,7 @@ const SNAPSHOT_MONEY_FIELDS = [
   'liquid_assets',
   'investment_assets',
   'crypto_assets',
+  'in_transit',
 ] as const;
 
 // net_worth_snapshots stores totals and the per-account `breakdown` JSON in cents.
@@ -34,6 +37,18 @@ function dollarizeBreakdownString(value: string): string {
   } catch {
     return value;
   }
+}
+
+/** A measured sheet carries what was in flight between the owner's accounts when it was read. */
+function withInTransit(db: Database.Database, row: Record<string, unknown>): Record<string, unknown> {
+  if (row.is_estimated) return { ...row, in_transit: 0 };
+  const transit = transfersInTransit(db, {
+    date: String(row.date),
+    taken_at: (row.taken_at as string | null) ?? null,
+    created_at: String(row.created_at),
+    breakdown: parseBreakdown(typeof row.breakdown === 'string' ? row.breakdown : null),
+  });
+  return { ...row, in_transit: transit.total };
 }
 
 function dollarizeSnapshotRow(row: unknown): unknown {
@@ -61,7 +76,9 @@ router.get('/snapshot', (_req: Request, res: Response, next: NextFunction): void
       'SELECT * FROM net_worth_snapshots ORDER BY date DESC LIMIT 1'
     ).get();
 
-    res.json({ data: snapshot ? dollarizeSnapshotRow(snapshot) : null });
+    res.json({
+      data: snapshot ? dollarizeSnapshotRow(withInTransit(db, snapshot as Record<string, unknown>)) : null,
+    });
   } catch (err) {
     next(err);
   }
@@ -117,7 +134,9 @@ router.get('/history', (req: Request, res: Response, next: NextFunction): void =
       ORDER BY date ASC
     `).all(...params);
 
-    res.json({ data: snapshots.map(dollarizeSnapshotRow) });
+    res.json({
+      data: snapshots.map((row) => dollarizeSnapshotRow(withInTransit(db, row as Record<string, unknown>))),
+    });
   } catch (err) {
     next(err);
   }

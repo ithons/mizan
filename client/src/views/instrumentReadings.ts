@@ -240,6 +240,11 @@ export interface SheetPoint extends BeamHistoryPoint {
  */
 export const WEEK_MIN_DAYS = 7;
 
+/** A sheet's net worth with any transfer in flight between the owner's accounts counted as landed. */
+export function settledNetWorth(sheet: Pick<NetWorthSnapshot, 'net_worth' | 'in_transit'>): number {
+  return (cents(sheet.net_worth) + cents(sheet.in_transit ?? 0)) / 100;
+}
+
 export type WeekChange =
   | { kind: 'change'; delta: number; since: string; covered: number; total: number; refused: number }
   | { kind: 'incomparable'; covered: number; total: number; refused: number }

@@ -228,6 +228,8 @@ export const ATTRIBUTION: NetWorthAttribution = {
   end_date: '2026-07-31',
   start_net_worth: 1079.39,
   end_net_worth: 4193.18,
+  start_in_transit: 0,
+  end_in_transit: 0,
   delta: 3113.79,
   accounts: [
     {

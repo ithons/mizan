@@ -223,21 +223,21 @@ export function takeSnapshot(): void {
       SET total_assets = ?, total_liabilities = ?, net_worth = ?, breakdown = ?,
           liquid_assets = ?, investment_assets = ?, crypto_assets = ?,
           covered_accounts = ?, total_accounts = ?,
-          portfolio_accounts = ?, portfolio_accounts_source = 'recorded'
+          portfolio_accounts = ?, portfolio_accounts_source = 'recorded', taken_at = ?
       WHERE id = ?
     `).run(total_assets, total_liabilities, net_worth, JSON.stringify(breakdown),
            liquid_assets, investment_assets, crypto_assets,
-           coveredAccounts, coveredAccounts, portfolioAccounts, existing.id);
+           coveredAccounts, coveredAccounts, portfolioAccounts, now, existing.id);
   } else {
     db.prepare(`
       INSERT INTO net_worth_snapshots
         (id, date, total_assets, total_liabilities, net_worth, breakdown, is_estimated,
          liquid_assets, investment_assets, crypto_assets, covered_accounts, total_accounts,
-         created_at, portfolio_accounts, portfolio_accounts_source)
-      VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, 'recorded')
+         created_at, portfolio_accounts, portfolio_accounts_source, taken_at)
+      VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, 'recorded', ?)
     `).run(uuidv4(), today, total_assets, total_liabilities, net_worth, JSON.stringify(breakdown),
            liquid_assets, investment_assets, crypto_assets, coveredAccounts, coveredAccounts, now,
-           portfolioAccounts);
+           portfolioAccounts, now);
   }
 
   takeHoldingsSnapshot(db, today, now);

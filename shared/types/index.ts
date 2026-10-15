@@ -574,6 +574,11 @@ export interface NetWorthSnapshot {
    */
   covered_accounts?: number | null;
   total_accounts?: number | null;
+  /**
+   * Money between the owner's own accounts that one institution had sent and the other had not yet
+   * shown when this sheet was read. net_worth + in_transit is the settled figure.
+   */
+  in_transit?: number;
 }
 
 export interface SyncEvent {
@@ -1306,8 +1311,12 @@ export interface NetWorthAttributionAccount {
 export interface NetWorthAttribution {
   start_date: string;
   end_date: string;
+  /** Settled: a transfer in flight when the sheet was read is counted as landed. */
   start_net_worth: number;
   end_net_worth: number;
+  /** What was in flight between the owner's accounts when each end was read. */
+  start_in_transit: number;
+  end_in_transit: number;
   delta: number;
   /** Non-zero movers only, largest absolute move first. */
   accounts: NetWorthAttributionAccount[];

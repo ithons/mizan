@@ -1,4 +1,5 @@
 import type Database from 'better-sqlite3';
+import { parseBreakdown, transfersInTransit } from './inTransit';
 import {
   excludedFromTotalsSql,
   expenseSideSql,
@@ -1154,28 +1155,29 @@ export function getNetWorthAttribution(
   if (bounds.count < 2 || !bounds.first_date || !bounds.last_date) return null;
 
   const snapshotAt = (date: string) => db.prepare(`
-    SELECT date, net_worth, breakdown FROM net_worth_snapshots
+    SELECT date, net_worth, breakdown, taken_at, created_at FROM net_worth_snapshots
     WHERE date = ? AND is_estimated = 0 ORDER BY date LIMIT 1
-  `).get(date) as { date: string; net_worth: number; breakdown: string | null } | undefined;
+  `).get(date) as
+    | { date: string; net_worth: number; breakdown: string | null; taken_at: string | null; created_at: string }
+    | undefined;
 
   const start = snapshotAt(bounds.first_date);
   const end = snapshotAt(bounds.last_date);
   if (!start || !end) return null;
 
-  const parse = (raw: string | null): Record<string, number> => {
-    if (!raw) return {};
-    try {
-      const parsed = JSON.parse(raw) as Record<string, unknown>;
-      return Object.fromEntries(
-        Object.entries(parsed).filter((entry): entry is [string, number] => typeof entry[1] === 'number')
-      );
-    } catch {
-      return {}; // A malformed breakdown degrades to "no attribution", never a 500.
-    }
+  // Both ends are read as settled: a transfer one institution had sent and the other had not yet
+  // shown is counted as landed, so money in flight is neither a loss at one end nor growth later.
+  const settle = (snapshot: NonNullable<ReturnType<typeof snapshotAt>>) => {
+    const recorded = parseBreakdown(snapshot.breakdown);
+    const transit = transfersInTransit(db, { ...snapshot, breakdown: recorded });
+    const balances = { ...recorded };
+    for (const [accountId, adjustment] of transit.byAccount) balances[accountId] += adjustment;
+    return { balances, inTransit: transit.total, netWorth: snapshot.net_worth + transit.total };
   };
-
-  const startBalances = parse(start.breakdown);
-  const endBalances = parse(end.breakdown);
+  const settledStart = settle(start);
+  const settledEnd = settle(end);
+  const startBalances = settledStart.balances;
+  const endBalances = settledEnd.balances;
 
   const accountRows = db.prepare(
     'SELECT id, account_name, institution_name, type, is_liability FROM accounts'
@@ -1221,9 +1223,11 @@ export function getNetWorthAttribution(
   return {
     start_date: start.date,
     end_date: end.date,
-    start_net_worth: start.net_worth,
-    end_net_worth: end.net_worth,
-    delta: end.net_worth - start.net_worth,
+    start_net_worth: settledStart.netWorth,
+    end_net_worth: settledEnd.netWorth,
+    start_in_transit: settledStart.inTransit,
+    end_in_transit: settledEnd.inTransit,
+    delta: settledEnd.netWorth - settledStart.netWorth,
     accounts,
   };
 }
