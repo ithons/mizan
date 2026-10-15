@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { trendCaptions, trendGeometry, type TrendPoint } from '../client/src/components/balance/TrendChart';
+import { trendCaptions,
+  trendKeyboardHint, trendGeometry, type TrendPoint } from '../client/src/components/balance/TrendChart';
 
 /**
  * The only chart in this app, against the series it actually draws today.
@@ -363,8 +364,12 @@ test('the captions cite figures the geometry measured, and say nothing otherwise
       'The two ends of such a stretch are not the same quantity.',
     '1 stretch is set apart because only one end records how many accounts were counted, so whether that ' +
       'number changed across it is not known.',
-    'Points sit as close as 0.5% of the width apart here, so the arrow keys step through them one at a time.',
   ]);
+  assert.equal(
+    trendKeyboardHint(trendGeometry(storedSeries(), [])),
+    'Points sit as close as 0.5% of the width apart here, so the arrow keys step through them one at a time.',
+    'keyboard guidance is read to a screen reader rather than printed under the chart'
+  );
 
   // 11, 14 and 0.5% are all in the series; none is a threshold dressed up as an observation.
   const counts = new Set(STORED_NET_WORTH.map(([, , , coverage]) => coverage).filter((c) => c !== null));
@@ -383,7 +388,7 @@ test('a clean measured series gets no captions at all', () => {
 
 test('the crowding line appears only where the mouse cannot separate two points', () => {
   const crowded = (history: TrendPoint[]): boolean =>
-    trendCaptions(trendGeometry(history, [])).some((line) => line.startsWith('Points sit as close as'));
+    trendKeyboardHint(trendGeometry(history, [])) !== null;
 
   // Fifteen of the stored twenty points land in the final 16.4% of the width, as close as 0.5%
   // apart, which is about 4px on the 798px plot Reports gives the chart.

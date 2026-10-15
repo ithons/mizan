@@ -599,7 +599,7 @@ const CROWDED_STEP_PCT = 1;
 /** Every sentence here is generated from what the geometry found, so none of it can overstate. */
 export function trendCaptions(geometry: TrendGeometry): string[] {
   const lines: string[] = [];
-  const { breaks, coverageSpans, maxDrawnGapDays, xs } = geometry;
+  const { breaks, coverageSpans, maxDrawnGapDays } = geometry;
   const elsewhere =
     maxDrawnGapDays === null ? '' : ` Every step this line does draw is at most ${maxDrawnGapDays} days wide.`;
   if (breaks.length === 1) {
@@ -636,16 +636,18 @@ export function trendCaptions(geometry: TrendGeometry): string[] {
     );
   }
 
+  return lines;
+}
+
+/** Keyboard guidance for a crowded series. Read to a screen reader, never printed. */
+export function trendKeyboardHint(geometry: TrendGeometry): string | null {
+  const { xs } = geometry;
   const steps: number[] = [];
   for (let i = 1; i < xs.length; i++) steps.push(((xs[i] - xs[i - 1]) / VIEW_W) * 100);
   const tightest = steps.length > 0 ? Math.min(...steps) : null;
-  if (tightest !== null && tightest < CROWDED_STEP_PCT) {
-    lines.push(
-      `Points sit as close as ${tightest.toFixed(1)}% of the width apart here, so the arrow keys step ` +
-        `through them one at a time.`
-    );
-  }
-  return lines;
+  if (tightest === null || tightest >= CROWDED_STEP_PCT) return null;
+  return `Points sit as close as ${tightest.toFixed(1)}% of the width apart here, so the arrow keys step ` +
+    `through them one at a time.`;
 }
 
 /**
@@ -664,6 +666,8 @@ export function TrendChart({ history, marks = NO_MARKS, height = 120, className 
   const clipId = useId().replace(/[^\w-]/g, '');
   const markByDate = useMemo(() => new Map(geometry.marks.map((m) => [m.date, m])), [geometry]);
   const notes = useMemo(() => trendCaptions(geometry), [geometry]);
+  const keyboardHint = useMemo(() => trendKeyboardHint(geometry), [geometry]);
+  const hintId = useId();
   const kindsPresent = useMemo(() => [...new Set(segments.map((s) => s.kind))], [segments]);
 
   const plotRef = useRef<HTMLDivElement>(null);
@@ -736,6 +740,7 @@ export function TrendChart({ history, marks = NO_MARKS, height = 120, className 
           style={{ height }}
           role="img"
           aria-label={summary}
+          aria-describedby={keyboardHint ? hintId : undefined}
           tabIndex={0}
           onMouseMove={onMove}
           onMouseLeave={() => setHoverIdx(null)}
@@ -899,6 +904,7 @@ export function TrendChart({ history, marks = NO_MARKS, height = 120, className 
         </div>
       </div>
 
+      {keyboardHint && <p id={hintId} className="sr-only">{keyboardHint}</p>}
       {(kindsPresent.length > 1 || notes.length > 0) && (
         <div className="mt-1.5 space-y-1" style={{ paddingLeft: GUTTER_PX }}>
           <StrokeKey kinds={kindsPresent} />
