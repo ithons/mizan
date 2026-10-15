@@ -217,7 +217,7 @@ export function Ledger() {
 
   const pagesQ = useInfiniteQuery({
     queryKey: ['transactions', filters],
-    queryFn: ({ pageParam }) => transactionsApi.list({ ...filters, page: pageParam }),
+    queryFn: ({ pageParam }) => transactionsApi.list({ ...filters, foldTransfers: true, page: pageParam }),
     initialPageParam: 1,
     getNextPageParam: (last) => (last.page * last.limit < last.total ? last.page + 1 : undefined),
   });
@@ -509,10 +509,16 @@ export function Ledger() {
       <ScreenHeader
         title="Ledger"
         sub={
-          <>
-            <span className="tabular-nums">{totalCount.toLocaleString()}</span> entr{totalCount === 1 ? 'y' : 'ies'} ·{' '}
-            {activeChip && filter !== 'all' ? activeChip.label.toLowerCase() : rangeLabel}
-          </>
+          view === 'scheduled' ? (
+            <>
+              <span className="tabular-nums">{occurrences.length}</span> scheduled in the next 30 days
+            </>
+          ) : (
+            <>
+              <span className="tabular-nums">{totalCount.toLocaleString()}</span> entr{totalCount === 1 ? 'y' : 'ies'} ·{' '}
+              {activeChip && filter !== 'all' ? activeChip.label.toLowerCase() : rangeLabel}
+            </>
+          )
         }
         actions={
           <>

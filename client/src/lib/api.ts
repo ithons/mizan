@@ -153,6 +153,7 @@ export const transactionsApi = {
     if (params.type) q.set('type', params.type);
     if (params.duplicateStatus) q.set('duplicateStatus', params.duplicateStatus);
     if (params.transferStatus) q.set('transferStatus', params.transferStatus);
+    if (params.foldTransfers) q.set('foldTransfers', 'true');
     params.accountId?.forEach((id) => q.append('accountId', id));
     params.categoryId?.forEach((id) => q.append('categoryId', id));
     params.categorySource?.forEach((s) => q.append('categorySource', s));

@@ -246,6 +246,8 @@ router.get('/', (req: Request, res: Response, next: NextFunction): void => {
       filters.transferStatus = status;
     }
 
+    if (query.foldTransfers === 'true') filters.foldTransfers = true;
+
     const { rows, total } = listTransactions(db, filters);
 
     res.json({

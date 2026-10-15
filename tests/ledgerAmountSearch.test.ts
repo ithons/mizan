@@ -25,3 +25,19 @@ test('only a money figure is read as one', () => {
   assert.equal(searchedAmountCents('1.234'), null);
   assert.equal(searchedAmountCents('10078 CAVA'), null);
 });
+
+test('a transfer is listed once, as the leg that left, unless only the arriving account is shown', () => {
+  const db = migratedTestDb();
+  const chase = insertAccount(db, { account_name: 'Chase Checking' });
+  const fid = insertAccount(db, { account_name: 'Fidelity Individual', type: 'brokerage' });
+  const out = insertTransaction(db, { account_id: chase, date: '2026-07-03', amount: -10000, merchant_name: 'Fidelity Brokerage Services' });
+  const into = insertTransaction(db, { account_id: fid, date: '2026-07-06', amount: 10000, merchant_name: 'Electronic Funds Transfer Received' });
+  db.prepare("UPDATE transactions SET transfer_pair_id = 'xfer_1', transfer_status = 'confirmed' WHERE id IN (?, ?)").run(out, into);
+
+  const list = (accountIds: string[]) => listTransactions(db, {
+    limit: 50, page: 1, sortBy: 'date', sortDir: 'desc', accountIds, categoryIds: [], foldTransfers: true,
+  });
+  assert.deepEqual(list([]).rows.map((row) => row.id), [out]);
+  assert.equal(list([]).total, 1, 'the count is of what is shown');
+  assert.deepEqual(list([fid]).rows.map((row) => row.id), [into], 'the arriving leg stands in for the transfer on its own account');
+});

@@ -45,6 +45,8 @@ export interface TransactionListFilters {
   categorySources?: string[];
   duplicateStatus?: string;
   transferStatus?: string;
+  /** Show a transfer once: leave out the arriving leg when its leaving leg is in the same list. */
+  foldTransfers?: boolean;
 }
 
 export interface TransactionListResult {
@@ -250,6 +252,17 @@ export function listTransactions(db: Database.Database, filters: TransactionList
   if (filters.duplicateStatus !== undefined) {
     conditions.push('t.duplicate_status = ?');
     params.push(filters.duplicateStatus);
+  }
+  if (filters.foldTransfers) {
+    const partnerAccounts = filters.accountIds.length > 0
+      ? `AND partner.account_id IN (${filters.accountIds.map(() => '?').join(',')})`
+      : '';
+    conditions.push(`NOT (t.amount > 0 AND t.transfer_pair_id IS NOT NULL AND EXISTS (
+      SELECT 1 FROM transactions partner
+      WHERE partner.transfer_pair_id = t.transfer_pair_id AND partner.id <> t.id AND partner.amount < 0
+      ${partnerAccounts}
+    ))`);
+    params.push(...filters.accountIds);
   }
   if (filters.transferStatus !== undefined) {
     conditions.push('t.transfer_status = ?');

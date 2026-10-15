@@ -1134,6 +1134,8 @@ export interface PaginatedResponse<T> {
 }
 
 export interface TransactionFilters {
+  /** Show each transfer once, as the leg that left. */
+  foldTransfers?: boolean;
   page?: number;
   limit?: number;
   accountId?: string[];
