@@ -1,7 +1,9 @@
 import type Database from 'better-sqlite3';
 
-/** A transfer whose first leg posted more than this before a snapshot had settled by then. */
-export const IN_TRANSIT_LOOKBACK_DAYS = 7;
+/** A leg a live sync took in arrives within days of its posted date; a backfill arrives months later. */
+export const PROMPT_INGEST_DAYS = 7;
+/** How late a slow institution can show its side of a transfer and still be the same transfer. */
+export const SLOW_LEG_DAYS = 45;
 
 export interface SnapshotMoment {
   date: string;
@@ -27,11 +29,17 @@ interface PairRow {
   in_liability: number;
 }
 
+function ingestLag(alias: string): string {
+  return `(julianday(${alias}.created_at) - julianday(${alias}.date))`;
+}
+
 /**
  * Transfers caught between the two balance reads of one snapshot: one institution had moved the
  * money and the other had not. The leg that was in the balance is the one this ledger had already
  * received when the snapshot was taken, since balances and rows arrive in the same payload; the
- * posted date cannot say, because a leg is dated when it posts, not when it is reported.
+ * posted date cannot say, because a leg is dated when it posts, not when it is reported. That
+ * reasoning only holds for rows a live sync took in, so a leg imported from a file, or received
+ * long after its own date, says nothing about what a past balance held.
  */
 export function transfersInTransit(db: Database.Database, snapshot: SnapshotMoment): InTransit {
   const takenAt = snapshot.taken_at ?? snapshot.created_at;
@@ -46,8 +54,13 @@ export function transfersInTransit(db: Database.Database, snapshot: SnapshotMome
     WHERE o.amount < 0
       AND i.amount > 0
       AND o.transfer_status IN ('candidate', 'confirmed')
-      AND MIN(o.date, i.date) BETWEEN date(@date, '-${IN_TRANSIT_LOOKBACK_DAYS} days') AND @date
+      AND o.source_type IN ('simplefin', 'coinbase')
+      AND i.source_type IN ('simplefin', 'coinbase')
       AND (o.created_at <= @takenAt) <> (i.created_at <= @takenAt)
+      AND CASE WHEN o.created_at <= @takenAt
+        THEN o.date <= @date AND ${ingestLag('o')} <= ${PROMPT_INGEST_DAYS} AND ${ingestLag('i')} <= ${SLOW_LEG_DAYS}
+        ELSE i.date <= @date AND ${ingestLag('i')} <= ${PROMPT_INGEST_DAYS} AND ${ingestLag('o')} <= ${SLOW_LEG_DAYS}
+      END
   `).all({ takenAt, date: snapshot.date }) as PairRow[];
 
   const byAccount = new Map<string, number>();

@@ -15,7 +15,7 @@ function snapshot(db: Database.Database, date: string, createdAt: string, breakd
 
 function leg(db: Database.Database, accountId: string, date: string, amount: number, createdAt: string, pairId: string): void {
   const id = insertTransaction(db, { account_id: accountId, date, amount, original_name: amount < 0 ? 'Wealthfront EDI PYMNTS' : 'Chase (Account ****6391)' });
-  db.prepare("UPDATE transactions SET created_at = ?, transfer_pair_id = ?, transfer_status = 'confirmed' WHERE id = ?")
+  db.prepare("UPDATE transactions SET created_at = ?, transfer_pair_id = ?, transfer_status = 'confirmed', source_type = 'simplefin' WHERE id = ?")
     .run(createdAt, pairId, id);
 }
 
@@ -38,6 +38,16 @@ test('a transfer one bank had sent and the other had not shown is money in fligh
   assert.ok(attribution);
   assert.equal(attribution.end_in_transit, 500000);
   assert.equal(attribution.delta, (650016 + 321 + 500000) - (1104728 + 321));
+});
+
+test('the money stays in flight for every sheet read before it arrived, however long that took', () => {
+  const db = migratedTestDb();
+  chaseToWealthfront(db);
+  snapshot(db, '2026-10-10', '2026-10-10T15:00:00.000Z', { chase: 650016, wf: 321 });
+  const attribution = getNetWorthAttribution(db, { startDate: '2026-10-01', endDate: '2026-10-10' });
+  assert.ok(attribution);
+  assert.deepEqual([attribution.start_in_transit, attribution.end_in_transit], [500000, 500000]);
+  assert.equal(attribution.delta, 0);
 });
 
 test('and its arrival two weeks later is not growth', () => {
@@ -65,6 +75,17 @@ test('a transfer imported long after it settled is not taken for one in flight',
   leg(db, chase, '2026-04-13', -10000, '2026-07-01T00:00:00Z', 'xfer_old');
   leg(db, fid, '2026-04-13', 10000, '2026-07-24T03:33:30Z', 'xfer_old');
   const transit = transfersInTransit(db, { date: '2026-07-10', taken_at: '2026-07-10T12:00:00Z', created_at: '', breakdown: { chase: 0, fid: 0 } });
+  assert.equal(transit.total, 0);
+});
+
+test('a leg synced live against its partner backfilled from a file months later is not in flight', () => {
+  const db = migratedTestDb();
+  const chase = insertAccount(db, { id: 'chase', type: 'checking' });
+  const fid = insertAccount(db, { id: 'fid', type: 'brokerage' });
+  leg(db, chase, '2026-04-13', -10000, '2026-04-14T09:00:00Z', 'xfer_csv');
+  leg(db, fid, '2026-04-13', 10000, '2026-07-24T03:33:30Z', 'xfer_csv');
+  db.prepare("UPDATE transactions SET source_type = 'import' WHERE account_id = 'fid'").run();
+  const transit = transfersInTransit(db, { date: '2026-05-01', taken_at: '2026-05-01T12:00:00Z', created_at: '', breakdown: { chase: 0, fid: 0 } });
   assert.equal(transit.total, 0);
 });
 
