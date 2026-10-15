@@ -117,6 +117,13 @@ export function expandCategoryIds(db: Database.Database, categoryIds: string[]):
  * to TEXT. The text form is not stable across the boundary: better-sqlite3 binds a JS number as a
  * float, so `CAST(? AS TEXT)` on 10000 is '10000.0' and would silently match nothing.
  */
+/** "100", "$1,234.56" or "-25.5" read as a money figure, in cents either sign; anything else is text. */
+export function searchedAmountCents(search: string): number | null {
+  const match = /^[-+]?\s*\$?\s*(\d{1,3}(?:,\d{3})+|\d+)(\.\d{1,2})?$/.exec(search.trim());
+  if (!match) return null;
+  return Math.round(Number(`${match[1].replace(/,/g, '')}${match[2] ?? ''}`) * 100);
+}
+
 // The other side of a paired transfer, and the purchase a refund reverses, as the row reads them.
 const LINKED_ROW_SQL = `
   (SELECT pa.account_name FROM transactions pt JOIN accounts pa ON pa.id = pt.account_id
@@ -180,9 +187,15 @@ export function listTransactions(db: Database.Database, filters: TransactionList
     params.push(filters.endDate);
   }
   if (filters.search) {
-    conditions.push('(t.merchant_name LIKE ? OR t.original_name LIKE ? OR t.notes LIKE ?)');
     const like = `%${filters.search}%`;
-    params.push(like, like, like);
+    const cents = searchedAmountCents(filters.search);
+    if (cents === null) {
+      conditions.push('(t.merchant_name LIKE ? OR t.original_name LIKE ? OR t.notes LIKE ?)');
+      params.push(like, like, like);
+    } else {
+      conditions.push('(t.merchant_name LIKE ? OR t.original_name LIKE ? OR t.notes LIKE ? OR ABS(t.amount) = ?)');
+      params.push(like, like, like, cents);
+    }
   }
   if (filters.minAmount !== undefined) {
     conditions.push('t.amount >= ?');
