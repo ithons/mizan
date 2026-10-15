@@ -60,7 +60,7 @@ test('runPostSyncStages: all stages succeed, no deferred error', (t) => {
     takeSnapshot: () => { calls.push('takeSnapshot'); },
   });
 
-  assert.deepEqual(calls, ['correctLiabilitySigns', 'detectRecurring', 'refreshTransactionIntegrity', 'autoCategorizeTransactions', 'takeSnapshot']);
+  assert.deepEqual(calls, ['correctLiabilitySigns', 'refreshTransactionIntegrity', 'detectRecurring', 'autoCategorizeTransactions', 'takeSnapshot']);
   assert.equal(result.deferredError, null);
   assert.deepEqual(result.integrity, emptyIntegrity);
 
@@ -86,7 +86,7 @@ test('runPostSyncStages: a stage failure does not skip the later stages', (t) =>
     takeSnapshot: () => { calls.push('takeSnapshot'); },
   });
 
-  assert.deepEqual(calls, ['correctLiabilitySigns', 'detectRecurring', 'refreshTransactionIntegrity', 'autoCategorizeTransactions', 'takeSnapshot']);
+  assert.deepEqual(calls, ['correctLiabilitySigns', 'refreshTransactionIntegrity', 'detectRecurring', 'autoCategorizeTransactions', 'takeSnapshot']);
   assert.equal(result.deferredError?.message, 'recurring blew up');
   assert.deepEqual(result.integrity, emptyIntegrity);
 
@@ -127,7 +127,7 @@ test('runPostSyncStages: integrity failure still lets snapshot run and reports i
     takeSnapshot: () => { calls.push('takeSnapshot'); },
   });
 
-  assert.deepEqual(calls, ['correctLiabilitySigns', 'detectRecurring', 'refreshTransactionIntegrity', 'autoCategorizeTransactions', 'takeSnapshot']);
+  assert.deepEqual(calls, ['correctLiabilitySigns', 'refreshTransactionIntegrity', 'detectRecurring', 'autoCategorizeTransactions', 'takeSnapshot']);
   assert.equal(result.deferredError?.message, 'integrity blew up');
   assert.deepEqual(result.integrity, emptyIntegrity);
 

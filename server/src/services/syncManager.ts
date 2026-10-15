@@ -428,22 +428,6 @@ export function runPostSyncStages(
     }
   }
 
-  emitSyncEvent({ type: 'sync_progress', message: 'Detecting recurring transactions...', progress: 75 });
-  try {
-    stages.detectRecurring();
-  } catch (err) {
-    const message = (err as Error).message || 'Recurring detection failed';
-    recordSyncRunItem(db, runId, {
-      provider: 'system',
-      connection_id: 'recurring-detection',
-      institution_name: 'Recurring detection',
-      status: 'failed',
-      error_message: message,
-      recovery_action: 'Retry sync. Recurring pattern detection will run again next sync.',
-    });
-    nextDeferredError = nextDeferredError ?? new Error(message);
-  }
-
   let integrity: TransactionIntegrityResult = {
     duplicates: { groupCount: 0, transactionCount: 0, newGroupCount: 0, newTransactionCount: 0 },
     transfers: { pairCount: 0, transactionCount: 0, newPairCount: 0, autoPairCount: 0, newAutoPairCount: 0 },
@@ -508,6 +492,24 @@ export function runPostSyncStages(
       status: 'failed',
       error_message: message,
       recovery_action: 'Retry sync. Duplicate/transfer detection will run again next sync.',
+    });
+    nextDeferredError = nextDeferredError ?? new Error(message);
+  }
+
+  // After pairing: transfer schedules are read off this run's pairs, and a leg paired this run must
+  // not be taken for a bill.
+  emitSyncEvent({ type: 'sync_progress', message: 'Detecting recurring transactions...', progress: 80 });
+  try {
+    stages.detectRecurring();
+  } catch (err) {
+    const message = (err as Error).message || 'Recurring detection failed';
+    recordSyncRunItem(db, runId, {
+      provider: 'system',
+      connection_id: 'recurring-detection',
+      institution_name: 'Recurring detection',
+      status: 'failed',
+      error_message: message,
+      recovery_action: 'Retry sync. Recurring pattern detection will run again next sync.',
     });
     nextDeferredError = nextDeferredError ?? new Error(message);
   }
