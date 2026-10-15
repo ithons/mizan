@@ -661,6 +661,11 @@ export function Settings() {
   const { addToast } = useAppStore();
   const [searchParams] = useSearchParams();
   const [openPanel, setOpenPanel] = useState<PanelId>(null);
+  const [advisorOpen, setAdvisorOpen] = useState(false);
+  // A deep link to a row inside the advisor group opens the group too.
+  useEffect(() => {
+    if (openPanel && (openPanel.startsWith('advisor_') || openPanel.startsWith('ai_'))) setAdvisorOpen(true);
+  }, [openPanel]);
 
   useEffect(() => {
     const section = searchParams.get('section');
@@ -813,78 +818,93 @@ export function Settings() {
         <div className="mb-7">
           <SectionLabel className="mb-1.5">Advisor</SectionLabel>
           <SettingsRow
-            title="Anthropic API key"
+            title="Advisor"
             sub={
               aiContext?.configured
-                ? `Conversational chat enabled · ${CREDENTIAL_SOURCE_LABEL[aiContext.credential_source ?? 'none']}`
-                : 'Add a provider key under Model & effort, set ANTHROPIC_API_KEY, or sign in with `ant auth login` · optional'
+                ? `Key ${CREDENTIAL_SOURCE_LABEL[aiContext.credential_source ?? 'none']} · model, memory, context and what it has done`
+                : 'No provider key yet · answers stay local until one is added'
             }
-            trailing={
-              aiContext?.configured ? <span className="text-sage-deep">Set</span> : <span className="text-muted-2">Not set</span>
-            }
+            trailing={<span className="text-muted">{advisorOpen ? 'Hide' : 'Open'}</span>}
+            onClick={() => setAdvisorOpen((open) => !open)}
+            last={!advisorOpen}
           />
-          {aiContext?.configured && (
-            <AdvisorModelPanel open={openPanel === 'advisor_model'} onToggle={() => toggle('advisor_model')} />
+          {advisorOpen && (
+            <div className="ml-3 border-l border-line pl-3">
+            <SettingsRow
+              title="Anthropic API key"
+              sub={
+                aiContext?.configured
+                  ? `Conversational chat enabled · ${CREDENTIAL_SOURCE_LABEL[aiContext.credential_source ?? 'none']}`
+                  : 'Add a provider key under Model & effort, set ANTHROPIC_API_KEY, or sign in with `ant auth login` · optional'
+              }
+              trailing={
+                aiContext?.configured ? <span className="text-sage-deep">Set</span> : <span className="text-muted-2">Not set</span>
+              }
+            />
+            {aiContext?.configured && (
+              <AdvisorModelPanel open={openPanel === 'advisor_model'} onToggle={() => toggle('advisor_model')} />
+            )}
+            {aiContext?.configured && (
+              <AiActionsPanel open={openPanel === 'ai_actions'} onToggle={() => toggle('ai_actions')} />
+            )}
+            {/* Ungated on purpose, unlike the panel above it: a decline keeps standing after a key is
+                removed, and it is the only remedy for the delete blocker a declined proposal puts on
+                a category. */}
+            <DeclinedProposalsPanel
+              open={openPanel === 'ai_declined'}
+              onToggle={() => toggle('ai_declined')}
+            />
+            <AdvisorContextEditor
+              open={openPanel === 'advisor_profile'}
+              onToggle={() => toggle('advisor_profile')}
+            />
+            {/* Statements, not settings: each one carries the observation behind it and is replaced
+                rather than edited, so the sub-line states what the store is and the count follows it
+                only once there is one. */}
+            <SettingsRow
+              title="What the advisor takes as given"
+              sub={
+                memoryCount > 0
+                  ? `Durable statements about how you run your money · ${memoryCount} recorded`
+                  : 'Durable statements about how you run your money, kept beside the ledger rather than in it'
+              }
+              trailing={<span className="text-muted">{openPanel === 'advisor_memory' ? 'Hide' : 'Open'}</span>}
+              onClick={() => toggle('advisor_memory')}
+            />
+            {openPanel === 'advisor_memory' && (
+              <ExpandedPanel>
+                <AdvisorMemorySection />
+              </ExpandedPanel>
+            )}
+            {/* What actually leaves the machine on an advisor call. `GET /api/ai/context` returned
+                the full financial context for "the UI preview panel", and no such panel existed:
+                two client consumers read `.configured` and `.actions` and nothing read `.context`.
+                The owner could ask the advisor anything and could not see what it had been told.
+                This is the boundary made visible: the text, and its size, exactly as built. */}
+            <SettingsRow
+              title="What the advisor is told"
+              sub="The financial context every advisor call and background pass starts from, exactly as it is sent"
+              trailing={<span className="text-muted">{openPanel === 'advisor_context' ? 'Hide' : 'Open'}</span>}
+              onClick={() => toggle('advisor_context')}
+            />
+            {openPanel === 'advisor_context' && (
+              <ExpandedPanel>
+                <AdvisorContextPanel />
+              </ExpandedPanel>
+            )}
+            {/* What the AI applies unattended is a fixed domain boundary, not a dial, so this is
+                stated rather than configured. The statement is generated from the server's autonomy
+                table, so it cannot fall behind the boundary it describes. Every state of that fetch
+                is spelled out: a row that claims a boundary it has not read would be worse than one
+                that admits it has not read it. */}
+            <SettingsRow
+              title="What the AI can do on its own"
+              sub={autonomySentence ?? autonomyStatus.sub}
+              trailing={<span className="text-muted-2">{autonomySentence ? 'Always on' : autonomyStatus.trailing}</span>}
+              last
+            />
+            </div>
           )}
-          {aiContext?.configured && (
-            <AiActionsPanel open={openPanel === 'ai_actions'} onToggle={() => toggle('ai_actions')} />
-          )}
-          {/* Ungated on purpose, unlike the panel above it: a decline keeps standing after a key is
-              removed, and it is the only remedy for the delete blocker a declined proposal puts on
-              a category. */}
-          <DeclinedProposalsPanel
-            open={openPanel === 'ai_declined'}
-            onToggle={() => toggle('ai_declined')}
-          />
-          <AdvisorContextEditor
-            open={openPanel === 'advisor_profile'}
-            onToggle={() => toggle('advisor_profile')}
-          />
-          {/* Statements, not settings: each one carries the observation behind it and is replaced
-              rather than edited, so the sub-line states what the store is and the count follows it
-              only once there is one. */}
-          <SettingsRow
-            title="What the advisor takes as given"
-            sub={
-              memoryCount > 0
-                ? `Durable statements about how you run your money · ${memoryCount} recorded`
-                : 'Durable statements about how you run your money, kept beside the ledger rather than in it'
-            }
-            trailing={<span className="text-muted">{openPanel === 'advisor_memory' ? 'Hide' : 'Open'}</span>}
-            onClick={() => toggle('advisor_memory')}
-          />
-          {openPanel === 'advisor_memory' && (
-            <ExpandedPanel>
-              <AdvisorMemorySection />
-            </ExpandedPanel>
-          )}
-          {/* What actually leaves the machine on an advisor call. `GET /api/ai/context` returned
-              the full financial context for "the UI preview panel", and no such panel existed:
-              two client consumers read `.configured` and `.actions` and nothing read `.context`.
-              The owner could ask the advisor anything and could not see what it had been told.
-              This is the boundary made visible: the text, and its size, exactly as built. */}
-          <SettingsRow
-            title="What the advisor is told"
-            sub="The financial context every advisor call and background pass starts from, exactly as it is sent"
-            trailing={<span className="text-muted">{openPanel === 'advisor_context' ? 'Hide' : 'Open'}</span>}
-            onClick={() => toggle('advisor_context')}
-          />
-          {openPanel === 'advisor_context' && (
-            <ExpandedPanel>
-              <AdvisorContextPanel />
-            </ExpandedPanel>
-          )}
-          {/* What the AI applies unattended is a fixed domain boundary, not a dial, so this is
-              stated rather than configured. The statement is generated from the server's autonomy
-              table, so it cannot fall behind the boundary it describes. Every state of that fetch
-              is spelled out: a row that claims a boundary it has not read would be worse than one
-              that admits it has not read it. */}
-          <SettingsRow
-            title="What the AI can do on its own"
-            sub={autonomySentence ?? autonomyStatus.sub}
-            trailing={<span className="text-muted-2">{autonomySentence ? 'Always on' : autonomyStatus.trailing}</span>}
-            last
-          />
         </div>
 
         {/* Preferences */}
