@@ -272,8 +272,13 @@ function hasIndependentEvidence(row: TransferRow): boolean {
   return row.is_transfer_category === 1 && row.category_source !== 'heuristic';
 }
 
+// The shape alone would also take a card refund that posts the same hour as an equal checking debit,
+// before categorization has seen the refund. Every real payment leg names itself.
 function isCardPayment(outflow: TransferRow, inflow: TransferRow): boolean {
-  return inflow.is_liability === 1 && outflow.is_liability === 0 && FUNDING_TYPES.has(outflow.account_type);
+  return inflow.is_liability === 1
+    && outflow.is_liability === 0
+    && FUNDING_TYPES.has(outflow.account_type)
+    && (looksLikeTransfer(outflow) || looksLikeTransfer(inflow));
 }
 
 /** Weekdays after the earlier date, up to and including the later one. */

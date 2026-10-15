@@ -154,3 +154,13 @@ test('an unchanged ledger writes nothing on the next pass', () => {
   assert.deepEqual(db.prepare('SELECT * FROM transactions ORDER BY id').all(), snapshot);
   assert.deepEqual(db.prepare('SELECT COUNT(*) AS n FROM transaction_category_revisions').get(), revisions);
 });
+
+test('a fresh card refund equal to a checking debit is not a card payment', () => {
+  const db = migratedTestDb();
+  const checking = insertAccount(db, { account_name: 'Chase Checking', type: 'checking' });
+  const sapphire = insertAccount(db, { account_name: 'Chase Sapphire', type: 'credit', is_liability: 1 });
+  const debit = insertTransaction(db, { account_id: checking, date: '2026-09-29', amount: -249581, original_name: 'REMOTE ONLINE DEPOSIT RETURN' });
+  const refund = insertTransaction(db, { account_id: sapphire, date: '2026-10-01', amount: 249581, original_name: 'APPLE STORE  #R149' });
+  refreshTransferCandidates(db);
+  for (const id of [debit, refund]) assert.equal(leg(db, id).transfer_status === 'confirmed', false);
+});
