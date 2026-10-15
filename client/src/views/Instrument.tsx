@@ -784,6 +784,12 @@ export function Instrument() {
       )}
 
       <Details summary="Balance sheet details" className="mt-10 border-t border-line-2 pt-6">
+        {snapshot?.in_transit ? (
+          <p className="mb-4 max-w-[66ch] text-note leading-relaxed text-muted-2">
+            These are the balances each institution reported. {formatCurrency(Math.abs(snapshot.in_transit))} was
+            moving between your own accounts at the time, which the net worth above counts as landed.
+          </p>
+        ) : null}
       {sheetLoading ? (
         <div className="mt-8 space-y-4" aria-hidden>
           <div className="h-[28px] w-1/3 rounded bg-line" />
