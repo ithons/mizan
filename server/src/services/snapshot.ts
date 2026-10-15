@@ -513,6 +513,8 @@ export function reconcileReconstructedHistory(options: { force?: boolean } = {})
   return { ran: true, trigger, ...reconstructionCounts(db) };
 }
 
+const PAIRED_TRANSFER = new Set(['candidate', 'confirmed']);
+
 export function backfillSnapshots(): void {
   const db = getDb();
   const now = new Date();
@@ -520,7 +522,7 @@ export function backfillSnapshots(): void {
   // Load the full posted-transaction history: the backfill extends as far back as the
   // data goes (post one-time import this can be years), not a fixed window.
   const transactions = db.prepare(`
-    SELECT id, account_id, date, amount, category_id
+    SELECT id, account_id, date, amount, category_id, transfer_status, is_internal_trade
     FROM transactions
     WHERE pending = 0
     ORDER BY date ASC
@@ -530,6 +532,8 @@ export function backfillSnapshots(): void {
     date: string;
     amount: number;
     category_id: string | null;
+    transfer_status: string;
+    is_internal_trade: number;
   }>;
 
   // Reach back to the month of the oldest transaction (clamped), so imported history
@@ -671,7 +675,8 @@ export function backfillSnapshots(): void {
           // Fiat deposits/withdrawals into the wallet are left flat, so a buy funded by a separate
           // deposit isn't double-counted.)
           approxBalances[txn.account_id] += Math.abs(txn.amount);
-        } else if (cat === 'cat_inv_transfer') {
+        } else if (txn.is_internal_trade === 0
+          && (cat === 'cat_inv_transfer' || PAIRED_TRANSFER.has(txn.transfer_status))) {
           // Sign-aware external flow: a contribution (+) means value was lower before; a
           // withdrawal/correction (−) means it was higher. Undo by subtracting the amount.
           approxBalances[txn.account_id] -= txn.amount;

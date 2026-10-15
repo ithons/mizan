@@ -961,7 +961,7 @@ function getExcludedFlowSummary(
       SUM(t.amount) AS net
     FROM transactions t
     JOIN excluded_report_categories excluded ON excluded.id = t.category_id
-    ${where}
+    ${where} AND t.is_internal_trade = 0
     GROUP BY excluded.root_id
   `).all(...excludedCategoryParams(), ...params) as Array<{
     root_id: string;

@@ -89,6 +89,7 @@ const PAIR_SQL = `
     FROM transactions t
     JOIN accounts a ON a.id = t.account_id
     WHERE t.pending = 0
+      AND t.is_internal_trade = 0
       AND a.is_hidden = 0
       AND t.amount < 0
       AND ABS(t.amount) >= @minCents
@@ -96,6 +97,7 @@ const PAIR_SQL = `
       AND NOT EXISTS (
         SELECT 1 FROM transactions counterpart
         WHERE counterpart.account_id <> t.account_id
+          AND counterpart.is_internal_trade = 0
           AND counterpart.amount = -t.amount
           AND ABS(julianday(counterpart.date) - julianday(t.date)) <= @maxGap
       )

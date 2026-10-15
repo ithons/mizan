@@ -6,6 +6,7 @@ import type { CsvImportPreview, CsvImportPreviewIssue, CsvImportPreviewRow } fro
 import type { CsvImportMappingSchema } from '../../../shared/schemas';
 import { adjustManualAccountBalance } from './manualAccountBalance';
 import { toCents } from './money';
+import { isInternalTrade } from './investmentTrades';
 
 export type CsvImportMapping = z.infer<typeof CsvImportMappingSchema>;
 
@@ -285,8 +286,8 @@ export function commitCsvImport(
           INSERT INTO transactions
             (id, account_id, date, amount, merchant_name, original_name,
              category_id, review_status,
-             pending, notes, is_manual, source_type, created_at, updated_at)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, 1, 'import', ?, ?)
+             pending, notes, is_manual, source_type, is_internal_trade, created_at, updated_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, 1, 'import', ?, ?, ?)
         `).run(
           uuidv4(),
           accountId,
@@ -297,6 +298,7 @@ export function commitCsvImport(
           row.category_id,
           row.category_id ? 'reviewed' : 'open',
           row.notes,
+          isInternalTrade(originalName) ? 1 : 0,
           now,
           now
         );

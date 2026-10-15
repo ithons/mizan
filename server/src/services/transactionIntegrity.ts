@@ -288,6 +288,7 @@ function transferCandidateRows(db: Database.Database): TransferRow[] {
     -- choice, and the pair was not already settled. Both resolutions stay sticky for the same reason
     -- duplicates do.
     WHERE t.pending = 0
+      AND t.is_internal_trade = 0
       AND t.manually_categorized = 0
       AND COALESCE(t.category_source, '') <> 'human'
       AND COALESCE(t.transfer_status, 'none') NOT IN ('dismissed', 'confirmed')

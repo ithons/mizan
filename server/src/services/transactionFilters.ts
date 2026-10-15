@@ -6,6 +6,7 @@
  *    confirmed would make totals jump around as detection runs.)
  *  - `duplicate_status` confirmed: a redundant copy the user resolved. Provider rows can't be
  *    deleted (the next sync re-inserts them), so they're flagged and excluded instead.
+ *  - `is_internal_trade`: cash turned into a position inside one brokerage account.
  *
  * EVERY query that sums transactions as spend or income must apply this. It lived inline in
  * reporting.ts only, so budgets, insights, and the AI context silently counted transfers and
@@ -17,7 +18,8 @@
 export function excludedFromTotalsSql(alias?: string): string {
   const prefix = alias ? `${alias}.` : '';
   return `COALESCE(${prefix}transfer_status, 'none') NOT IN ('candidate','confirmed')
-    AND COALESCE(${prefix}duplicate_status, 'none') <> 'confirmed'`;
+    AND COALESCE(${prefix}duplicate_status, 'none') <> 'confirmed'
+    AND ${prefix}is_internal_trade = 0`;
 }
 
 /**

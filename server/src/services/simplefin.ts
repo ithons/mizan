@@ -13,6 +13,7 @@ import { isBelowBackfillFloor } from './backfillFloor';
 import { toCents, toCentsOrNull, toDollars } from './money';
 import { recordFieldRevision } from './categoryWrites';
 import { cleanProviderMerchant } from './merchantNames';
+import { isInternalTrade } from './investmentTrades';
 import {
   guardSimplefinRelink,
   toProviderSnapshot,
@@ -632,9 +633,9 @@ export function upsertSimplefinTransaction(
     db.prepare(`
       INSERT INTO transactions
         (id, simplefin_transaction_id, account_id, date, amount, merchant_name,
-         original_name, pending, is_manual, source_type,
+         original_name, pending, is_manual, source_type, is_internal_trade,
          date_source, amount_source, merchant_name_source, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, 'simplefin', 'provider', 'provider', 'provider', ?, ?)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, 'simplefin', ?, 'provider', 'provider', 'provider', ?, ?)
     `).run(
       uuidv4(),
       values.providerId,
@@ -644,6 +645,7 @@ export function upsertSimplefinTransaction(
       values.merchantName,
       values.originalName,
       values.pending,
+      isInternalTrade(values.originalName) ? 1 : 0,
       now,
       now
     );
@@ -763,7 +765,7 @@ export function upsertSimplefinTransaction(
   db.prepare(`
     UPDATE transactions
     SET date = ?, amount = ?, merchant_name = ?, original_name = ?, pending = ?,
-        date_source = 'provider', amount_source = ?,
+        is_internal_trade = ?, date_source = 'provider', amount_source = ?,
         merchant_name_source = ?, updated_at = ?
     WHERE simplefin_transaction_id = ?
   `).run(
@@ -772,6 +774,7 @@ export function upsertSimplefinTransaction(
     merchantName,
     values.originalName,
     values.pending,
+    isInternalTrade(values.originalName) ? 1 : 0,
     ownerOwnsAmount ? 'human' : 'provider',
     ownerOwnsMerchant ? existing.merchant_name_source : 'provider',
     now,
