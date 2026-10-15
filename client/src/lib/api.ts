@@ -222,6 +222,11 @@ export const transactionsApi = {
     apiFetch<{ updated: number }>(`/api/transactions/transfers/${encodeURIComponent(pairId)}/confirm`, {
       method: 'POST',
     }),
+  setRefundOf: (id: string, purchaseId: string | null) =>
+    apiFetch<{ ok: boolean }>(`/api/transactions/${id}/refund-of`, {
+      method: 'PUT',
+      body: JSON.stringify({ purchase_id: purchaseId }),
+    }),
   dismissTransferPair: (pairId: string) =>
     apiFetch<{ updated: number }>(`/api/transactions/transfers/${encodeURIComponent(pairId)}/dismiss`, {
       method: 'POST',

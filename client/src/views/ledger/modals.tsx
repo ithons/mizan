@@ -189,6 +189,26 @@ export function EditEntryModal({ transaction, onClose }: { transaction: Transact
     onError: (err: Error) => addToast({ type: 'error', message: err.message }),
   });
 
+  const unpair = useMutation({
+    mutationFn: () => transactionsApi.dismissTransferPair(transaction!.transfer_pair_id as string),
+    onSuccess: () => {
+      invalidateFinancialData(qc);
+      addToast({ type: 'success', message: 'No longer treated as a transfer' });
+      onClose();
+    },
+    onError: (err: Error) => addToast({ type: 'error', message: err.message }),
+  });
+
+  const unlinkRefund = useMutation({
+    mutationFn: () => transactionsApi.setRefundOf(transaction!.id, null),
+    onSuccess: () => {
+      invalidateFinancialData(qc);
+      addToast({ type: 'success', message: 'No longer netted against a purchase' });
+      onClose();
+    },
+    onError: (err: Error) => addToast({ type: 'error', message: err.message }),
+  });
+
   const remove = useMutation({
     mutationFn: () => transactionsApi.delete(transaction!.id),
     onSuccess: () => {
@@ -238,12 +258,7 @@ export function EditEntryModal({ transaction, onClose }: { transaction: Transact
             adding to income.
           </p>
         )}
-        {/* The amount, and who owns it.
-            An institution can be wrong about a sign and stay wrong: Fidelity reports "Electronic
-            Funds Transfer Received" negative, so money arriving reads as money leaving. Correcting
-            it here sets the row's author to the owner, and the next sync keeps the corrected figure
-            instead of overwriting it. Everything that sums money reads the same column, so the
-            correction lands on the ledger, the reports and the reconciliation at once. */}
+        {/* Correcting the amount makes the owner its author, so the next sync keeps it. */}
         <div>
           <label htmlFor="modals-scheduled-amount" className="mz-label">Amount</label>
           <div className="flex items-center gap-3">
@@ -291,6 +306,35 @@ export function EditEntryModal({ transaction, onClose }: { transaction: Transact
             </TextButton>
           )}
         </div>
+        {(transaction.transfer_counterparty_name || transaction.refund_of_date) && (
+          <div className="space-y-1.5 rounded-lg bg-well px-3 py-2.5 text-note text-muted">
+            {transaction.transfer_counterparty_name && (
+              <div className="flex items-center justify-between gap-4">
+                <span>
+                  Transfer {transaction.amount < 0 ? 'to' : 'from'} {transaction.transfer_counterparty_name}
+                  {transaction.transfer_source === 'auto' ? ', paired automatically' : ''}
+                  {transaction.transfer_source === 'owner' ? ', confirmed by you' : ''}
+                </span>
+                {transaction.transfer_status !== 'confirmed' || transaction.transfer_source === 'auto' ? (
+                  <TextButton onClick={() => unpair.mutate()} disabled={unpair.isPending} className="!text-note">
+                    Not a transfer
+                  </TextButton>
+                ) : null}
+              </div>
+            )}
+            {transaction.refund_of_date && (
+              <div className="flex items-center justify-between gap-4">
+                <span>
+                  Refund of a purchase on {format(parseISO(transaction.refund_of_date), 'MMM d, yyyy')}, counted in that
+                  month
+                </span>
+                <TextButton onClick={() => unlinkRefund.mutate()} disabled={unlinkRefund.isPending} className="!text-note">
+                  Not a refund
+                </TextButton>
+              </div>
+            )}
+          </div>
+        )}
         <div>
           <label htmlFor="modals-category-2" className="mz-label">Category</label>
           <CategoryPicker id="modals-category-2"
