@@ -21,12 +21,15 @@ import { QueryErrorBanner } from '../components/QueryErrorBanner';
 import { SkeletonRows } from '../components/SkeletonLoader';
 import {
   CategoryPicker,
+  ExplainPanel,
+  ExplainToggle,
   Figure,
   Screen,
   ScreenHeader,
   SectionLabel,
   Select,
   TextButton,
+  useDisclosure,
 } from '../components/balance';
 import { AddEntryModal, AddScheduledModal, EditEntryModal } from './ledger/modals';
 import { LedgerColumnHeader, LedgerRow, ScheduledRow } from './ledger/rows';
@@ -81,6 +84,7 @@ const RANGES = [
   { id: 'this-year', label: 'This year' },
   { id: 'all', label: 'All time' },
 ] as const;
+type LedgerView = 'entries' | 'scheduled';
 type RangeId = (typeof RANGES)[number]['id'];
 
 function rangeDates(id: RangeId): { startDate?: string; endDate?: string } {
@@ -110,7 +114,14 @@ const PAGE_SIZE = 100;
 export function Ledger() {
   const qc = useQueryClient();
   const { addToast } = useAppStore();
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const view: LedgerView = searchParams.get('view') === 'scheduled' ? 'scheduled' : 'entries';
+  const setView = (next: LedgerView) => {
+    const params = new URLSearchParams(searchParams);
+    if (next === 'entries') params.delete('view');
+    else params.set('view', next);
+    setSearchParams(params, { replace: true });
+  };
 
   const [search, setSearch] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
@@ -227,8 +238,9 @@ export function Ledger() {
   const today = format(new Date(), 'yyyy-MM-dd');
   // The scheduled half belongs to the whole ledger, not to a worklist: with a chip on, this
   // screen is a queue and a forecast in it is noise.
-  const occurrences = filter === 'all' ? forecastQ.data?.occurrences ?? [] : [];
+  const occurrences = view === 'scheduled' ? forecastQ.data?.occurrences ?? [] : [];
   const [showTrades, setShowTrades] = useState(false);
+  const filterExplain = useDisclosure();
   const folded = useMemo(() => foldLedgerRows(transactions, showTrades), [transactions, showTrades]);
   const spine = useMemo(() => buildSpine(folded.rows, occurrences, today), [folded.rows, occurrences, today]);
   const schedule = useMemo(
@@ -511,6 +523,24 @@ export function Ledger() {
       />
       <QueryErrorBanner items={failableQueries} className="mb-5" />
 
+      <div role="tablist" aria-label="Ledger view" className="mb-4 flex gap-6 border-b border-line text-body">
+        {(['entries', 'scheduled'] as const).map((id) => (
+          <button
+            key={id}
+            type="button"
+            role="tab"
+            aria-selected={view === id}
+            onClick={() => setView(id)}
+            className={`-mb-px border-b pb-2 transition-colors ${
+              view === id ? 'border-ink text-ink' : 'border-transparent text-muted hover:text-ink'
+            }`}
+          >
+            {id === 'entries' ? 'Entries' : 'Scheduled'}
+          </button>
+        ))}
+      </div>
+
+      {view === 'entries' && (
       <div className="mb-3 flex flex-shrink-0 flex-wrap items-center gap-x-5 gap-y-3">
         <div className="flex max-w-[380px] flex-1 items-center gap-2.5 border-b border-line-3 px-0.5 py-2">
           <Search size={15} className="flex-shrink-0 text-muted-2" aria-hidden />
@@ -541,41 +571,22 @@ export function Ledger() {
           clearable={false}
           options={RANGES.map((r) => ({ value: r.id, label: r.label }))}
         />
+        <Select
+          value={filter}
+          onChange={(v) => selectChip(v as LedgerFilter)}
+          placeholder="Everything"
+          clearable={false}
+          options={chips.map((chip) => ({
+            value: chip.id,
+            label: chip.count !== null ? `${chip.label} · ${chip.count}` : chip.label,
+          }))}
+        />
+        <ExplainToggle disclosure={filterExplain} label="the ledger's marks" />
       </div>
+      )}
 
-      <div className="mb-2 flex flex-wrap items-center gap-2">
-        {chips.map((chip) => (
-          <button
-            key={chip.id}
-            type="button"
-            onClick={() => selectChip(chip.id)}
-            aria-pressed={filter === chip.id}
-            /* `review-bg`, not `review-active`: `review-text` on `review-active` measures 4.29:1
-               light and 5.30:1 dark, so it is under AA in BOTH themes now, where the figure this
-               note used to carry recorded only a light failure. On `review-bg` it is 4.69:1 light
-               and 6.26:1 dark and clears in both. The failing pair renders nowhere and is not a
-               standing exception, but establishing that takes two commands rather than one, because
-               `tailwind.config.js:73` exposes `review-active` as a utility and a grep of
-               `client/src` structurally cannot see whether it is used. On 2026-08-01:
-                 `grep -rn review-active client/src`  -> 7 lines in 2 files, being the four token
-                    declarations in `index.css` and this comment's own three lines
-                 `grep -rn 'bg-review-active\|text-review-active' client/src`  -> nothing
-               So it is a declared ground with no call site, which is why the sub-AA pair is not
-               listed as an exception: nothing renders it. */
-            className={`rounded-md px-2.5 py-1 text-body transition-colors ${
-              filter === chip.id ? 'bg-review-bg text-review-text' : 'text-muted hover:text-ink'
-            }`}
-          >
-            {chip.label}
-            {chip.count !== null && <span className="tabular-nums"> · {chip.count}</span>}
-          </button>
-        ))}
-      </div>
-
-      {/* Said once, in words, with no figure in it: the share of rows with no recorded author is a
-          moving number and a hardcoded one could only ever go stale. */}
-      <p className="mb-5 text-note text-muted-2">
-        Each entry carries a mark for who chose its category. No mark means it was set before mizān recorded
+      <ExplainPanel disclosure={filterExplain}>
+        <p>Each entry carries a mark for who chose its category. No mark means it was set before mizān recorded
         who set it.
         {/* The letters are read out of the shortcut table, so a rebinding cannot leave this
             sentence teaching a key the keyboard no longer sends here. */}
@@ -586,8 +597,9 @@ export function Ledger() {
         {filter === 'uncategorized' &&
           ' An entry that will never have a category can be set aside, which stops the count above' +
             ' from carrying it and stops the advisor proposing about it. It stays on this list,' +
-            ' marked, so setting one aside is never a way of losing it.'}
-      </p>
+            ' marked, so setting one aside is never a way of losing it.'}</p>
+      </ExplainPanel>
+
 
       {selectedAccount && (
         <p className="mb-5 text-body text-muted">
@@ -681,7 +693,7 @@ export function Ledger() {
       )}
 
       {/* ── Ahead of the rule ──────────────────────────────────────────────── */}
-      {filter === 'all' && (
+      {view === 'scheduled' && (
         <>
           <SectionLabel
             summary={
@@ -690,6 +702,19 @@ export function Ledger() {
                 : undefined
             }
             className="mb-3"
+            explain={            <p>
+              <span className="tabular-nums text-muted">{formatCurrency(schedule.incoming)}</span> in and{' '}
+              <span className="tabular-nums text-muted">{formatCurrency(schedule.outgoing)}</span> out, from{' '}
+              {schedule.patternCount} recurring item{schedule.patternCount === 1 ? '' : 's'} mizān has detected.
+              {schedule.transfers > 0 && (
+                <>
+                  {' '}
+                  <span className="tabular-nums text-muted">{formatCurrency(schedule.transfers)}</span> more is
+                  scheduled to move to your other accounts.
+                </>
+              )}{' '}
+              Anything it has not detected as recurring is not in this figure.
+            </p>}
           >
             Scheduled · next 30 days
           </SectionLabel>
@@ -703,19 +728,6 @@ export function Ledger() {
             >
               {formatCurrency(Math.abs(schedule.net))}
             </Figure>
-            <p className="max-w-[420px] text-note text-muted-2">
-              <span className="tabular-nums text-muted">{formatCurrency(schedule.incoming)}</span> in and{' '}
-              <span className="tabular-nums text-muted">{formatCurrency(schedule.outgoing)}</span> out, from{' '}
-              {schedule.patternCount} recurring item{schedule.patternCount === 1 ? '' : 's'} mizān has detected.
-              {schedule.transfers > 0 && (
-                <>
-                  {' '}
-                  <span className="tabular-nums text-muted">{formatCurrency(schedule.transfers)}</span> more is
-                  scheduled to move to your other accounts.
-                </>
-              )}{' '}
-              Anything it has not detected as recurring is not in this figure.
-            </p>
           </div>
 
           {/* Once per half, because the rule separates them by a screenful. Not over an empty
@@ -739,7 +751,7 @@ export function Ledger() {
             </>
           )}
 
-          {spine.scheduled.map((day) => (
+          {[...spine.scheduled].reverse().map((day) => (
             <div key={day.date}>
               <div className="px-1 pb-1 pt-4 text-micro uppercase tracking-[0.18em] text-muted-2">{day.label}</div>
               {day.entries.map((o) => (
@@ -806,6 +818,7 @@ export function Ledger() {
       )}
 
       {/* ── Behind the rule ────────────────────────────────────────────────── */}
+      {view === 'entries' && (
       <div className="mt-2 flex min-h-0 flex-1 flex-col">
         {(isLoading || spine.settled.length > 0) && <LedgerColumnHeader />}
 
@@ -863,6 +876,7 @@ export function Ledger() {
           </div>
         )}
       </div>
+      )}
 
       <AddEntryModal open={showAddEntry} onClose={() => setShowAddEntry(false)} />
       <AddScheduledModal open={showAddScheduled} onClose={() => setShowAddScheduled(false)} categories={categories} />

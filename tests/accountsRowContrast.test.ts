@@ -235,7 +235,8 @@ test('the review pair means an open question, which is what the badge note says 
   const SPINE = readFileSync(join(ROOT, 'client/src/views/ledger/spine.ts'), 'utf8');
 
   assert.match(ROWS, /flag === 'set_aside'\s*\n?\s*\? 'border border-line-3 text-muted'\s*\n?\s*: 'border border-review-border bg-review-bg text-review-text'/);
-  assert.match(LEDGER, /filter === chip\.id \? 'bg-review-bg text-review-text'/);
+  // The chips folded into one select on the filter row; the review tint now only marks rows.
+  assert.match(LEDGER, /onChange=\{\(v\) => selectChip\(v as LedgerFilter\)\}/);
   // The flags that DO land on the pair, read off the label map rather than typed in here.
   const labels = SPINE.slice(SPINE.indexOf('export const FLAG_LABEL'), SPINE.indexOf('};', SPINE.indexOf('export const FLAG_LABEL')));
   for (const flag of ['duplicate', 'transfer', 'pending']) {
