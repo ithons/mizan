@@ -1,6 +1,7 @@
 import Database from 'better-sqlite3';
 import fs from 'fs';
 import path from 'path';
+import { registerMigrationFunctions } from './migrationFunctions';
 
 // Store data in the project directory. process.cwd() is always the project
 // root because npm scripts run from there, in both dev and production.
@@ -127,6 +128,7 @@ export function runMigrationsOn(db: Database.Database): void {
   // a transaction, so we disable it around the loop and rely on foreign_key_check
   // to catch violations before each COMMIT. Any in-file `PRAGMA foreign_keys`
   // statement is a harmless no-op inside the transaction.
+  registerMigrationFunctions(db);
   db.pragma('foreign_keys = OFF');
   try {
     for (const file of files) {

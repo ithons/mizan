@@ -12,6 +12,7 @@ import { guessAccountTypeAndLiability } from './accountClassification';
 import { isBelowBackfillFloor } from './backfillFloor';
 import { toCents, toCentsOrNull, toDollars } from './money';
 import { recordFieldRevision } from './categoryWrites';
+import { cleanProviderMerchant } from './merchantNames';
 import {
   guardSimplefinRelink,
   toProviderSnapshot,
@@ -986,7 +987,7 @@ export function applySimplefinResponse(
         providerId: txn.id,
         date,
         amount,
-        merchantName: txn.payee || null,
+        merchantName: cleanProviderMerchant(txn.payee || null, txn.description || ''),
         originalName: txn.description || '',
         // Not every institution reports this via SimpleFIN Bridge - defaults to posted (0)
         // when the field is absent from the payload, matching the column's schema default.

@@ -260,7 +260,11 @@ export function revertAction(
 /** The transaction fields migration 048 tracks an author for. */
 export type TransactionField = 'date' | 'amount' | 'merchant_name';
 
-export type FieldRevisionOrigin = 'owner_edit' | 'provider_revision' | 'provider_rejected';
+export type FieldRevisionOrigin =
+  | 'owner_edit'
+  | 'provider_revision'
+  | 'provider_rejected'
+  | 'import_rule';
 
 export interface FieldRevision {
   transactionId: string;
