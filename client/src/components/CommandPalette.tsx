@@ -50,11 +50,9 @@ const ALLOWED_PALETTE_DRAFTS: ReadonlySet<AdvisorDraftActionKind> = new Set<Advi
  * `ask`     the conversation, which is now the only one there is
  * `digest`  what the AI changed, row by row, with one gesture to put it back
  *
- * All three are anchored to the bottom edge and grow upward, so the input is always the last line
- * and everything the app says appears above it. That is the arrangement a composer already has,
- * and giving the launcher the same one means the screen you asked from stays visible above the
- * sheet instead of behind it. The answer arrives beside the data it is about; that is the whole
- * argument for a sheet over a sidebar, and it only holds if the data is still on screen.
+ * All three are anchored to the bottom edge and grow upward, so the input is always the last line.
+ * The scrim behind them is heavy on purpose: the owner found the screen reading through the sheet,
+ * and the full conversation now has its own page at /advisor.
  */
 type PaletteMode = 'search' | 'ask' | 'digest';
 

@@ -88,18 +88,12 @@ test('at most two textures in the whole client, and none on a ground', () => {
   }
 });
 
-test('the datum rule is one per screen, and the Ledger has it', () => {
-  // `ink-soft` as a full-width hairline is the datum: the Ledger's today rule, "the only thing
-  // separating what is expected from what happened". A second one on a screen means neither is it.
-  const ledger = read('client/src/views/Ledger.tsx');
-  const halves = (ledger.match(/h-px flex-1 bg-ink-soft/g) ?? []).length;
-  // Rendered as two halves around a dated label, which is one rule.
-  assert.equal(halves, 2, 'the today rule is no longer two halves around its label');
-  assert.match(ledger, /Today ·/, 'the datum rule lost the date that says what it separates');
-
-  for (const view of VIEWS.filter((v) => !v.endsWith('Ledger.tsx'))) {
+test('no screen draws a datum rule now that the forecast has its own tab', () => {
+  // The Ledger's today rule separated forecast from posted rows on one spine. The owner moved the
+  // forecast to its own tab (2026-10-15), so tabs make that separation and the rule went with it.
+  for (const view of VIEWS) {
     const n = (read(view).match(/h-px[^"']*bg-ink-soft/g) ?? []).length;
-    assert.equal(n, 0, `${view} draws a datum rule; the Ledger's today rule is the app's only one`);
+    assert.equal(n, 0, `${view} draws a full-width ink datum rule`);
   }
 });
 

@@ -40,6 +40,7 @@ import {
   PROVENANCE_FILTER_OPTIONS,
   buildSpine,
   foldLedgerRows,
+  cursorRows,
   createLedgerRowActions,
   readBatchControl,
   readBatchOutcomes,
@@ -269,8 +270,8 @@ export function Ledger() {
 
   // Rows on screen that carry a proposal, in render order. The keyboard cursor walks exactly this.
   const suggestedOnScreen = useMemo(
-    () => folded.rows.filter((t) => drafts.byTransaction.has(t.id)).map((t) => t.id),
-    [folded.rows, drafts.byTransaction]
+    () => cursorRows(view, folded.rows, drafts.byTransaction),
+    [view, folded.rows, drafts.byTransaction]
   );
   useEffect(() => setCursor(0), [suggestedOnScreen.length]);
 
@@ -601,7 +602,7 @@ export function Ledger() {
       </ExplainPanel>
 
 
-      {selectedAccount && (
+      {view === 'entries' && selectedAccount && (
         <p className="mb-5 text-body text-muted">
           {selectedAccount.account_name} ·{' '}
           {isInCredit(selectedAccount) ? (
@@ -620,7 +621,7 @@ export function Ledger() {
         </p>
       )}
 
-      {selectedIds.size > 0 && (
+      {view === 'entries' && selectedIds.size > 0 && (
         <div className="mz-rise-fast mb-3 flex flex-wrap items-center gap-4 rounded-lg bg-rail px-3 py-2">
           <span className="text-body text-ink">{selectedIds.size} selected</span>
           <CategoryPicker
@@ -645,7 +646,7 @@ export function Ledger() {
       )}
 
       {/* Whether this is offered at all, and over which drafts, is `readBatchControl`. */}
-      {batch && (
+      {view === 'entries' && batch && (
         <div className="mz-rise-fast mb-4 flex flex-wrap items-center gap-x-5 gap-y-2 rounded-lg bg-rail px-3 py-2">
           <span className="text-body text-ink">
             <span className="tabular-nums">{batch.ids.length}</span> proposals on this list
@@ -674,7 +675,7 @@ export function Ledger() {
         </div>
       )}
 
-      {drafts.otherDrafts.length > 0 && filter === 'suggested' && (
+      {view === 'entries' && drafts.otherDrafts.length > 0 && filter === 'suggested' && (
         <div className="mb-5 border-b border-line pb-4">
           <SectionLabel className="mb-2">Suggestions that are not about an entry</SectionLabel>
           {drafts.otherDrafts.map((d) => (
@@ -685,7 +686,7 @@ export function Ledger() {
         </div>
       )}
 
-      {suggestedTruncated && (
+      {view === 'entries' && suggestedTruncated && (
         <p className="mb-3 text-note text-review-text">
           Showing the first {MAX_SUGGESTED_IDS} of {drafts.transactionIds.length} suggestions. Accept or drop some to
           see the rest.
@@ -804,16 +805,6 @@ export function Ledger() {
             </div>
           )}
 
-          {/* THE RULE. The only full-width ink line on the sheet, and the only thing separating
-              what is expected from what happened. Everything above it is drawn in estimate ink
-              because none of it has occurred; everything below it is a posted row. */}
-          <div className="mt-7 flex items-center gap-4">
-            <div className="h-px flex-1 bg-ink-soft" />
-            <span className="text-micro font-semibold uppercase tracking-[0.18em] text-ink-soft">
-              Today · {format(new Date(), 'EEEE, MMMM d')}
-            </span>
-            <div className="h-px flex-1 bg-ink-soft" />
-          </div>
         </>
       )}
 

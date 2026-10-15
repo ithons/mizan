@@ -194,18 +194,11 @@ function groupDays<T>(items: T[], dateOf: (item: T) => string): Array<SpineDay<T
 }
 
 /**
- * One list, one date spine, with today's rule in it.
- *
- * A bill is a transaction that has not happened yet. Giving future money its own screen was the
- * mechanism by which a forecast got read as a fact, so the forecast sits above the rule on the
- * same spine, in the same row shape, in estimate ink. Reading downward is reading backward in
- * time, which puts the nearest scheduled item immediately above the rule and today's postings
- * immediately below it.
+ * The scheduled half and the posted half, built separately. The Ledger shows them on separate tabs;
+ * a forecast and a posted row are different kinds of fact and never share one array.
  *
  * `today` is passed in rather than read from the clock so the boundary is testable, and because
  * the app's month boundaries are local while SQLite's `date('now')` is UTC (`schemaDoc.ts`).
- *
- * One pass over each input. On the live ledger the settled input is 2,588 rows at its widest.
  */
 export function buildSpine(
   transactions: Transaction[],
@@ -250,6 +243,20 @@ export function foldLedgerRows(transactions: Transaction[], showTrades: boolean)
     return !(t.transfer_pair_id && t.amount > 0 && leaving.has(t.transfer_pair_id));
   });
   return { rows, hiddenTrades };
+}
+
+/**
+ * The rows the suggestion keys walk. None on the Scheduled tab: the entries are not on screen there,
+ * and a key that accepts a draft on a row the owner cannot see is the defect the keyboard table
+ * exists to prevent.
+ */
+export function cursorRows(
+  view: 'entries' | 'scheduled',
+  rows: readonly Transaction[],
+  draftsByTransaction: ReadonlyMap<string, unknown>
+): string[] {
+  if (view !== 'entries') return [];
+  return rows.filter((t) => draftsByTransaction.has(t.id)).map((t) => t.id);
 }
 
 /** "Chase Checking → Fidelity Individual" for a paired leg, the bare account otherwise. */

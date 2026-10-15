@@ -13,6 +13,7 @@ import {
   MAX_SUGGESTED_IDS,
   SCHEDULE_STATES,
   accountLine,
+  cursorRows,
   foldLedgerRows,
   buildSpine,
   createLedgerRowActions,
@@ -472,4 +473,11 @@ test('a transfer with both legs on screen is one row, read from the leg that lef
   assert.deepEqual(foldLedgerRows([into], false).rows.map((t) => t.id), ['in'], 'a lone leg still shows');
   assert.equal(accountLine(into), 'Chase Checking → Fidelity Individual');
   assert.deepEqual(foldLedgerRows([out, into, trade], true).rows.map((t) => t.id), ['out', 'trade']);
+});
+
+test('the suggestion keys walk nothing while the Scheduled tab hides the entries', () => {
+  const rows = [{ id: 'a' }, { id: 'b' }] as unknown as Transaction[];
+  const drafts = new Map([['a', {}]]);
+  assert.deepEqual(cursorRows('entries', rows, drafts), ['a']);
+  assert.deepEqual(cursorRows('scheduled', rows, drafts), []);
 });

@@ -95,12 +95,14 @@ function RailItem({ to, label, icon: Icon }: { to: string; label: string; icon: 
               isActive ? 'bg-sage' : 'bg-transparent group-hover:bg-line-3'
             }`}
           />
-          <Icon
+          <span
             aria-hidden
-            size={18}
-            strokeWidth={1.6}
-            className={`hidden max-[999px]:block ${isActive ? 'text-ink' : 'text-muted group-hover:text-ink'}`}
-          />
+            className={`hidden rounded-md p-1.5 max-[999px]:block ${
+              isActive ? 'bg-well text-ink ring-1 ring-line-3' : 'text-muted group-hover:text-ink'
+            }`}
+          >
+            <Icon size={18} strokeWidth={1.6} />
+          </span>
           <span
             className={`text-right text-sub transition-colors max-[999px]:sr-only ${
               isActive ? 'font-medium text-ink' : 'text-muted group-hover:text-ink'
