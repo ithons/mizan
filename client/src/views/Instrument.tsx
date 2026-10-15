@@ -33,6 +33,10 @@ import {
   Figure,
   Screen,
   SectionLabel,
+  Details,
+  ExplainPanel,
+  ExplainToggle,
+  useDisclosure,
   Select,
   SignedBar,
   TextButton,
@@ -56,6 +60,7 @@ import {
   readStanding,
   readWeekChange,
   settledNetWorth,
+  standingLine,
   splitSpending,
   windowRange,
   type SheetPoint,
@@ -577,6 +582,9 @@ export function Instrument() {
   );
   const weekChange = useMemo(() => readWeekChange(earlierSheets, currentSheet), [earlierSheets, currentSheet]);
   const weekCaption = describeWeekChange(weekChange);
+  const freeExplain = useDisclosure();
+  const weekExplain = useDisclosure();
+  const windowExplain = useDisclosure();
 
   const buckets = snapshot ? bucketsOf(snapshot) : null;
   const payoff = buckets ? payoffState(buckets) : null;
@@ -638,7 +646,8 @@ export function Instrument() {
   const merchantScale = signedBarScale(merchants.map((m) => m.total));
   const trendGrid = readTrendGrid(trendsQ.data);
   const attribution = attributionQ.data ?? null;
-  const movers = attribution?.accounts ?? [];
+  // A mover that rounds to $0 at the whole-dollar figures this list prints is noise, not a mover.
+  const movers = (attribution?.accounts ?? []).filter((a) => Math.abs(a.delta) >= 0.5);
   const moverScale = signedBarScale(movers.map((a) => a.delta));
 
   const trendPoints = (historyQ.data ?? []).map((s) => ({
@@ -673,116 +682,42 @@ export function Instrument() {
           prints the magnitude and puts the direction in a word, because "short" and "free" are two
           states rather than one figure wearing a different colour, and a sign is the one thing the
           eye skips. */}
-      <div className="mt-8 flex flex-col gap-x-14 gap-y-3 sm:flex-row sm:items-baseline">
-        {standing.kind === 'unread' ? (
-          <p className="text-body-lg text-muted">{standing.detail}</p>
-        ) : (
-          <>
-            <Figure scale="subject" value={standing.value} states={FREE_STATES}>
-              {formatCurrency(standing.magnitude)}
-            </Figure>
-            <div className="max-w-[52ch]">
-              <p className="text-body leading-relaxed text-muted">{standing.detail}</p>
-              {standing.kind === 'short' && standing.largestClaim && (
-                <p className="mt-1.5 text-body leading-relaxed text-clay">{standing.largestClaim}</p>
-              )}
-            </div>
-          </>
-        )}
-      </div>
-
-      {/* The whole sheet, across the whole measure. The beam gets the full content width because
-          the reading is a position on it, and on this instrument width is resolution.
-
-          `Screen size="wide"` is max-w-[1240px] with lg:px-9 / xl:px-12, beside NavRail's w-14 /
-          xl:w-[148px], and xl starts at 1280: 1024 - 56 - 72 = 896px of beam at 1024,
-          1280 - 148 - 96 = 1036px at 1280, 1440 - 148 - 96 = 1196px at 1440. The 1240 cap only
-          binds above about a 1484px window, which is the width this screen is least often at. */}
-      {sheetLoading ? (
-        <div className="mt-8 space-y-4" aria-hidden>
-          <div className="h-[28px] w-1/3 rounded bg-line" />
-          <div className="h-[26px] w-full rounded bg-line" />
-        </div>
-      ) : (
-        <BalanceScale
-          className="mt-9"
-          assets={snapshot?.total_assets ?? 0}
-          liabilities={snapshot?.total_liabilities ?? 0}
-          calibration={calibration}
-          history={beamHistory}
-          owedNote={
-            cardCredit.inCredit > 0 ? (
-              <Link to="/accounts" className="transition-colors hover:text-ink">
-                {cardCredit.inCredit} of {cardCredit.cards} cards in credit, {formatCurrency(cardCredit.total)}
-              </Link>
-            ) : null
-          }
-        />
-      )}
-
-      <div className="mt-11 flex flex-col gap-11 lg:flex-row lg:items-start lg:gap-14">
-        <div className="w-full flex-shrink-0 lg:w-[340px]">
-          <Figure scale="lead" label="Net worth">
-            {formatCurrency(snapshot?.net_worth ?? 0)}
-          </Figure>
-          {/* The nearest COMPARABLE sheet at least seven days back, not a sheet exactly seven days
-              back and not merely the nearest one: snapshots are written by sync, so there is rarely
-              one on the day itself, and the nearest one may have reached a different set of
-              accounts. See `readWeekChange`; the rule is the beam's own. */}
-          <div className={`mt-2 max-w-[46ch] text-note leading-relaxed tabular-nums ${weekChangeTone(weekChange)}`}>
-            {weekCaption.reading}
-          </div>
-          {weekCaption.note && (
-            <div className="mt-1 max-w-[46ch] text-note leading-relaxed tabular-nums text-muted-2">
-              {weekCaption.note}
-            </div>
-          )}
-        </div>
-
-        <div className="min-w-0 flex-1">
-          <SectionLabel className="mb-2" summary={buckets ? formatCurrency(assetTotal) : undefined}>
-            Where it sits
-          </SectionLabel>
-          {buckets ? (
-            <>
-              {assetRows.map((row) => (
-                <BarRow key={row.label} label={row.label} amount={row.amount} {...assetScale} />
-              ))}
-              {/* The payoff reading, which is the only thing on this surface that says what the
-                  debt would COST rather than what it is. The beam above states its size. */}
-              <p className="mt-4 max-w-[62ch] text-body leading-relaxed text-muted">
-                {payoff?.kind === 'payable' && (
-                  <>
-                    Paying off {formatPayoffFigure(payoff.payable)} from cash would leave{' '}
-                    <span className="text-ink">{formatPayoffFigure(afterPayoff(buckets).liquid)}</span> in cash and
-                    net worth unchanged at <span className="text-ink">{formatWholeCurrency(buckets.netWorth)}</span>:
-                    it reshuffles, it does not grow.
-                    {payoff.remaining > 0 && (
-                      <> {formatPayoffFigure(payoff.remaining)} would still be owed, with no cash left to reach it.</>
-                    )}
-                  </>
-                )}
-                {payoff?.kind === 'no_cash' && (
-                  <>
-                    {formatPayoffFigure(payoff.owed)} is owed and there is no cash to pay it from. This is the balance
-                    sheet as it stands.
-                  </>
-                )}
-                {payoff?.kind === 'no_debt' && <>Nothing is owed. This is the balance sheet as it stands.</>}
-                {payoff?.kind === 'in_credit' && (
-                  <>
-                    Nothing to pay off: the liabilities hold{' '}
-                    <span className="text-sage-deep">{formatPayoffFigure(payoff.credit)}</span> in credit rather than
-                    debt. This is the balance sheet as it stands.
-                  </>
-                )}
-              </p>
-            </>
-          ) : sheetLoading ? (
-            <SkeletonRows rows={4} />
+      <div className="mt-8 grid gap-x-14 gap-y-8 lg:grid-cols-[minmax(0,1fr)_minmax(0,340px)]">
+        <div>
+          {standing.kind === 'unread' ? (
+            <p className="text-body-lg text-muted">{standing.detail}</p>
           ) : (
-            <p className="text-body text-muted-2">No balance sheet has been recorded yet.</p>
+            <>
+              <Figure scale="subject" value={standing.value} states={FREE_STATES}>
+                {formatCurrency(standing.magnitude)}
+              </Figure>
+              <div className="mt-2 flex items-center gap-2 text-body text-muted">
+                <span className={standing.kind === 'short' ? 'text-clay' : undefined}>{standingLine(standing)}</span>
+                <ExplainToggle disclosure={freeExplain} label="free to spend" />
+              </div>
+              <ExplainPanel disclosure={freeExplain}>
+                <p>{standing.detail}</p>
+                {standing.kind === 'short' && standing.largestClaim && <p>{standing.largestClaim}</p>}
+              </ExplainPanel>
+            </>
           )}
+        </div>
+
+        <div>
+          <Figure scale="lead" label="Net worth">
+            {formatCurrency(snapshot ? settledNetWorth(snapshot) : 0)}
+          </Figure>
+          <div className={`mt-2 flex items-center gap-2 text-note tabular-nums ${weekChangeTone(weekChange)}`}>
+            <span>{weekCaption.short}</span>
+            <ExplainToggle disclosure={weekExplain} label="the week's change" />
+          </div>
+          <ExplainPanel disclosure={weekExplain}>
+            <p>{weekCaption.reading}</p>
+            {weekCaption.note && <p>{weekCaption.note}</p>}
+            {snapshot?.in_transit ? (
+              <p>Counts {formatCurrency(snapshot.in_transit)} moving between your own accounts as landed.</p>
+            ) : null}
+          </ExplainPanel>
         </div>
       </div>
 
@@ -846,6 +781,78 @@ export function Instrument() {
         </div>
       )}
 
+      <Details summary="Balance sheet details" className="mt-10 border-t border-line-2 pt-6">
+      {sheetLoading ? (
+        <div className="mt-8 space-y-4" aria-hidden>
+          <div className="h-[28px] w-1/3 rounded bg-line" />
+          <div className="h-[26px] w-full rounded bg-line" />
+        </div>
+      ) : (
+        <BalanceScale
+          className="mt-2"
+          assets={snapshot?.total_assets ?? 0}
+          liabilities={snapshot?.total_liabilities ?? 0}
+          calibration={calibration}
+          history={beamHistory}
+          owedNote={
+            cardCredit.inCredit > 0 ? (
+              <Link to="/accounts" className="transition-colors hover:text-ink">
+                {cardCredit.inCredit} of {cardCredit.cards} cards in credit, {formatCurrency(cardCredit.total)}
+              </Link>
+            ) : null
+          }
+        />
+      )}
+
+        <div className="mt-10">
+        <div className="min-w-0 flex-1">
+          <SectionLabel className="mb-2" summary={buckets ? formatCurrency(assetTotal) : undefined}>
+            Where it sits
+          </SectionLabel>
+          {buckets ? (
+            <>
+              {assetRows.map((row) => (
+                <BarRow key={row.label} label={row.label} amount={row.amount} {...assetScale} />
+              ))}
+              {/* The payoff reading, which is the only thing on this surface that says what the
+                  debt would COST rather than what it is. The beam above states its size. */}
+              <p className="mt-4 max-w-[62ch] text-body leading-relaxed text-muted">
+                {payoff?.kind === 'payable' && (
+                  <>
+                    Paying off {formatPayoffFigure(payoff.payable)} from cash would leave{' '}
+                    <span className="text-ink">{formatPayoffFigure(afterPayoff(buckets).liquid)}</span> in cash and
+                    net worth unchanged at <span className="text-ink">{formatWholeCurrency(buckets.netWorth)}</span>:
+                    it reshuffles, it does not grow.
+                    {payoff.remaining > 0 && (
+                      <> {formatPayoffFigure(payoff.remaining)} would still be owed, with no cash left to reach it.</>
+                    )}
+                  </>
+                )}
+                {payoff?.kind === 'no_cash' && (
+                  <>
+                    {formatPayoffFigure(payoff.owed)} is owed and there is no cash to pay it from. This is the balance
+                    sheet as it stands.
+                  </>
+                )}
+                {payoff?.kind === 'no_debt' && <>Nothing is owed. This is the balance sheet as it stands.</>}
+                {payoff?.kind === 'in_credit' && (
+                  <>
+                    Nothing to pay off: the liabilities hold{' '}
+                    <span className="text-sage-deep">{formatPayoffFigure(payoff.credit)}</span> in credit rather than
+                    debt. This is the balance sheet as it stands.
+                  </>
+                )}
+              </p>
+            </>
+          ) : sheetLoading ? (
+            <SkeletonRows rows={4} />
+          ) : (
+            <p className="text-body text-muted-2">No balance sheet has been recorded yet.</p>
+          )}
+        </div>
+        </div>
+      </Details>
+
       {/* ── THE WINDOW ───────────────────────────────────────────────────────────
           The doubled rule is structural rather than decorative: it marks where the selector starts
           applying. Everything above it is a state and takes no window; everything below it is a
@@ -854,7 +861,10 @@ export function Instrument() {
         <div className="flex flex-wrap items-baseline justify-between gap-x-8 gap-y-2">
           <div>
             <h2 className="font-serif text-title font-normal leading-tight text-ink">Over this window</h2>
-            <div className="mt-1 text-body text-muted">{windowCaption}</div>
+            <div className="mt-1 flex items-center gap-2 text-body text-muted">
+              {windowCaption}
+              <ExplainToggle disclosure={windowExplain} label="the window" />
+            </div>
           </div>
           <div className="flex flex-wrap items-baseline gap-x-6 gap-y-2 whitespace-nowrap text-body">
             {INSTRUMENT_WINDOWS.map((w) => (
@@ -872,9 +882,9 @@ export function Instrument() {
             ))}
           </div>
         </div>
-        <p className="mt-2.5 max-w-[72ch] text-note leading-relaxed text-muted-2">
-          Everything below answers to this selector. The balance sheet above it is now, and has no window.
-        </p>
+        <ExplainPanel disclosure={windowExplain}>
+          <p>Everything below answers to this selector. The balance sheet above it is now, and has no window.</p>
+        </ExplainPanel>
 
         <div className="mt-8 space-y-12">
           {/* What the window did to the money */}
@@ -1030,6 +1040,24 @@ export function Instrument() {
               <SectionLabel
                 className="mb-2"
                 summary={`${formatWholeCurrency(attribution.delta, { showSign: true })} over the window`}
+                explain={
+                  <>
+              <p>
+                Two recorded balance sheets differenced account by account,{' '}
+                {format(parseISO(attribution.start_date), 'MMM d')} to{' '}
+                {format(parseISO(attribution.end_date), 'MMM d')}, not the window's own edges: only
+                measured sheets are used as endpoints, so a reconstruction is never one end of this
+                subtraction. Each figure is the account's effect on net worth, so a card whose
+                balance grew reads negative. Accounts that did not move are not listed.
+              </p>
+              {(attribution.start_in_transit !== 0 || attribution.end_in_transit !== 0) && (
+                <p>
+                  {formatCurrency(Math.max(Math.abs(attribution.start_in_transit), Math.abs(attribution.end_in_transit)))}{' '}
+                  moving between your own accounts had left one and not yet reached the other, and is counted as landed.
+                </p>
+              )}
+                  </>
+                }
               >
                 What moved it
               </SectionLabel>
@@ -1044,20 +1072,6 @@ export function Instrument() {
                   {...moverScale}
                 />
               ))}
-              <p className="mt-2.5 max-w-[72ch] text-note leading-relaxed text-muted-2">
-                Two recorded balance sheets differenced account by account,{' '}
-                {format(parseISO(attribution.start_date), 'MMM d')} to{' '}
-                {format(parseISO(attribution.end_date), 'MMM d')}, not the window's own edges: only
-                measured sheets are used as endpoints, so a reconstruction is never one end of this
-                subtraction. Each figure is the account's effect on net worth, so a card whose
-                balance grew reads negative. Accounts that did not move are not listed.
-              </p>
-              {(attribution.start_in_transit !== 0 || attribution.end_in_transit !== 0) && (
-                <p className="mt-1.5 max-w-[72ch] text-note leading-relaxed text-muted-2">
-                  {formatCurrency(Math.max(Math.abs(attribution.start_in_transit), Math.abs(attribution.end_in_transit)))}{' '}
-                  moving between your own accounts had left one and not yet reached the other, and is counted as landed.
-                </p>
-              )}
             </section>
           )}
 
@@ -1100,7 +1114,11 @@ export function Instrument() {
 
           {/* Where it went. Hazard 1 lives here; see splitSpending. */}
           <section>
-            <SectionLabel className="mb-2" summary={spendingQ.data ? `net ${formatCurrency(spendingQ.data.total)}` : undefined}>
+            <SectionLabel explain={                  <p>
+                    Bars run against the largest figure here, {formatCurrency(spendingScale.extent)}. No share of the
+                    total is shown. A category total is signed, so the total a share would divide into is a net of
+                    spend and returns rather than a whole.
+                  </p>} className="mb-2" summary={spendingQ.data ? `net ${formatCurrency(spendingQ.data.total)}` : undefined}>
               Where it went
             </SectionLabel>
             <QueryState
@@ -1132,10 +1150,6 @@ export function Instrument() {
                           {...spendingScale}
                         />
                       ))}
-                      <p className="mt-1.5 max-w-[72ch] text-note leading-relaxed text-muted">
-                        Refunds and credits filed here outweighed the purchases, so the category is net positive for
-                        this window and its bar runs left of the zero rule.
-                      </p>
                     </div>
                   )}
 
@@ -1161,14 +1175,6 @@ export function Instrument() {
                       {showAllSpending ? `Show the top ${SPEND_ROWS}` : `Show all ${split.spent.length}`}
                     </button>
                   )}
-                  {/* No percentage of the total appears anywhere in this section, on purpose: the
-                      total is signed, so a share of it is not a share of anything. Bars are what
-                      makes these comparable, so what they are drawn against is stated. */}
-                  <p className="mt-3 max-w-[72ch] text-note leading-relaxed text-muted-2">
-                    Bars run against the largest figure here, {formatCurrency(spendingScale.extent)}. No share of the
-                    total is shown. A category total is signed, so the total a share would divide into is a net of
-                    spend and returns rather than a whole.
-                  </p>
                 </>
               )}
             </QueryState>
@@ -1180,7 +1186,18 @@ export function Instrument() {
               window holds at least two months, because one column is not a trend. */}
           {trendGrid && (
             <section>
-              <SectionLabel className="mb-2" summary={`${trendGrid.months.length} months`}>
+              <SectionLabel explain={              <p>
+                One column for each month this window has entries in,{' '}
+                {format(parseISO(`${trendGrid.months[0]}-01`), 'MMM yyyy')} to{' '}
+                {format(parseISO(`${trendGrid.months[trendGrid.months.length - 1]}-01`), 'MMM yyyy')}, left
+                to right. Every column in this grid is drawn against the same figure, the largest single
+                month here at {formatWholeCurrency(trendGrid.extent)}, so a taller column is more money
+                and not merely more for that row. The figure on the right is the window's total for the
+                category. A month drawn in the return colour is one whose refunds outweighed its
+                purchases.
+                {trendGrid.hidden > 0 &&
+                  ` ${trendGrid.hidden} smaller categor${trendGrid.hidden === 1 ? 'y is' : 'ies are'} not shown.`}
+              </p>} className="mb-2" summary={`${trendGrid.months.length} months`}>
                 Each category, month by month
               </SectionLabel>
               <div className="min-w-0">
@@ -1201,24 +1218,14 @@ export function Instrument() {
                   </div>
                 ))}
               </div>
-              <p className="mt-2.5 max-w-[72ch] text-note leading-relaxed text-muted-2">
-                One column for each month this window has entries in,{' '}
-                {format(parseISO(`${trendGrid.months[0]}-01`), 'MMM yyyy')} to{' '}
-                {format(parseISO(`${trendGrid.months[trendGrid.months.length - 1]}-01`), 'MMM yyyy')}, left
-                to right. Every column in this grid is drawn against the same figure, the largest single
-                month here at {formatWholeCurrency(trendGrid.extent)}, so a taller column is more money
-                and not merely more for that row. The figure on the right is the window's total for the
-                category. A month drawn in the return colour is one whose refunds outweighed its
-                purchases.
-                {trendGrid.hidden > 0 &&
-                  ` ${trendGrid.hidden} smaller categor${trendGrid.hidden === 1 ? 'y is' : 'ies are'} not shown.`}
-              </p>
             </section>
           )}
 
           {/* Merchants, net of refunds. */}
           <section>
-            <SectionLabel className="mb-2">Busiest merchants</SectionLabel>
+            <SectionLabel explain={                  <p>
+                    Net of refunds, like the categories above.
+                  </p>} className="mb-2">Busiest merchants</SectionLabel>
             <QueryState
               isLoading={merchantsQ.isPending}
               isError={merchantsQ.isError}
@@ -1239,9 +1246,6 @@ export function Instrument() {
                       {...merchantScale}
                     />
                   ))}
-                  <p className="mt-3 max-w-[72ch] text-note leading-relaxed text-muted-2">
-                    Net of refunds, like the categories above.
-                  </p>
                 </>
               )}
             </QueryState>

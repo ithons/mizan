@@ -438,3 +438,8 @@ export function text(html: string): string {
 }
 
 
+
+/** The markup with every closed explanation panel removed: what the owner sees before pressing "?". */
+export function visible(html: string): string {
+  return html.replace(/<div[^>]*\shidden=""[^>]*>[\s\S]*?<\/div>/g, '');
+}

@@ -53,9 +53,9 @@ export const FREE_STATES: FigureStates = {
 };
 
 export type Standing =
-  | { kind: 'free'; value: number; magnitude: number; detail: string }
-  | { kind: 'short'; value: number; magnitude: number; detail: string; largestClaim: string | null }
-  | { kind: 'level'; value: 0; magnitude: 0; detail: string }
+  | { kind: 'free'; value: number; magnitude: number; detail: string; days: number }
+  | { kind: 'short'; value: number; magnitude: number; detail: string; largestClaim: string | null; days: number }
+  | { kind: 'level'; value: 0; magnitude: 0; detail: string; days: number }
   | { kind: 'unread'; detail: string };
 
 /** The claims `computeSafeToSpend` subtracts, in the order it subtracts them. */
@@ -86,7 +86,7 @@ export function readStanding(breakdown: SafeToSpend | null | undefined): Standin
   const days = breakdown.forecast_days;
 
   if (free === 0) {
-    return { kind: 'level', value: 0, magnitude: 0, detail: 'Every dollar in the liquid pool is already claimed.' };
+    return { kind: 'level', value: 0, magnitude: 0, detail: 'Every dollar in the liquid pool is already claimed.', days };
   }
 
   if (free > 0) {
@@ -94,6 +94,7 @@ export function readStanding(breakdown: SafeToSpend | null | undefined): Standin
       kind: 'free',
       value: free,
       magnitude: free,
+      days,
       detail: `Left of checking, savings and cash over the next ${days} days, with expected income in and every claim out.`,
     };
   }
@@ -106,9 +107,16 @@ export function readStanding(breakdown: SafeToSpend | null | undefined): Standin
     kind: 'short',
     value: free,
     magnitude: -free,
+    days,
     detail: `Over the next ${days} days the claims on checking, savings and cash exceed it plus expected income.`,
     largestClaim: biggest ? `The largest single claim is ${formatCurrency(biggest.amount)} of ${biggest.label}.` : null,
   };
+}
+
+/** The one short line under the figure. */
+export function standingLine(standing: Exclude<Standing, { kind: 'unread' }>): string {
+  if (standing.kind === 'level') return 'Every dollar is already claimed';
+  return `over the next ${standing.days} days`;
 }
 
 /* ── Where the money sits, and what a payoff would do to it ─────────────────── */
@@ -282,6 +290,8 @@ export function readWeekChange(earlier: SheetPoint[], current: SheetPoint | null
 }
 
 export interface WeekChangeCaption {
+  /** The measurement in a few words, for the surface. */
+  short: string;
   /** The measurement, or the statement that there is none. */
   reading: string;
   /** What the measurement leaves out. Never a qualification of a figure that was not printed. */
@@ -300,6 +310,7 @@ export function describeWeekChange(change: WeekChange): WeekChangeCaption {
     case 'change': {
       const figure = `${change.delta < 0 ? '−' : '+'}${formatWholeCurrency(Math.abs(change.delta))}`;
       return {
+        short: `${figure} since ${format(parseISO(change.since), 'd MMMM')}`,
         reading:
           `${figure} since ${format(parseISO(change.since), 'd MMMM')}, the nearest sheet at least seven days ` +
           `back that reached the same ${change.covered} of ${change.total} accounts.`,
@@ -308,6 +319,7 @@ export function describeWeekChange(change: WeekChange): WeekChangeCaption {
     }
     case 'incomparable':
       return {
+        short: 'No comparable week yet',
         reading:
           `No sheet at least seven days back reached the same ${change.covered} of ${change.total} accounts, ` +
           'so there is no week to compare.',
@@ -315,11 +327,12 @@ export function describeWeekChange(change: WeekChange): WeekChangeCaption {
       };
     case 'uncounted':
       return {
+        short: 'No week to compare',
         reading: 'This sheet does not record how many accounts it reached, so no earlier sheet can be matched to it.',
         note: null,
       };
     case 'none':
-      return { reading: 'No earlier sheet recorded to compare against.', note: null };
+      return { short: 'No earlier sheet yet', reading: 'No earlier sheet recorded to compare against.', note: null };
   }
 }
 

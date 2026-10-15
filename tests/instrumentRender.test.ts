@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { RECENT_SHEETS, SAFE_TO_SPEND, SHEET_0731, SPENDING, render, text } from './helpers/instrumentHarness';
+import { RECENT_SHEETS, SAFE_TO_SPEND, SHEET_0731, SPENDING, render, text, visible } from './helpers/instrumentHarness';
 
 /**
  * The surface itself, rendered.
@@ -38,9 +38,12 @@ test('the surface renders when the owner is short, and reads differently', () =>
   assert.doesNotMatch(body, /free to spend/);
   assert.match(body, /\$1,427\.96/);
   assert.doesNotMatch(body, /−\$1,427\.96/, 'the magnitude is printed; the state is a word');
-  assert.match(body, /claims on checking, savings and cash exceed it/);
-  // Being short is actionable, so the largest claim is named. Having room is not, so it is not.
+  assert.match(body, /over the next 30 days/);
+  // The methodology and the largest claim sit behind the figure's "?", not on the surface.
+  const surface = text(visible(render('this-month', { safeToSpend: { ...SAFE_TO_SPEND, free: -1427.96 } })));
+  assert.doesNotMatch(surface, /claims on checking, savings and cash exceed it/);
   assert.match(body, /The largest single claim is \$4,278\.70 of card balances\./);
+  assert.match((render('this-month', { safeToSpend: { ...SAFE_TO_SPEND, free: -1427.96 } })), /aria-label="Explain free to spend"/);
 });
 
 test('a category that came back leads the section and never becomes a percentage', () => {
@@ -93,15 +96,21 @@ test('the screen never prints a week that crossed a coverage step', () => {
 
   assert.doesNotMatch(body, /\$1,107/, 'three accounts arriving in mizān is not a week of net worth');
   assert.doesNotMatch(body, /since the nearest sheet at least seven days back/, 'the uncaveated copy is gone');
-  assert.match(body, /No sheet at least seven days back reached the same 14 of 14 accounts/);
+  assert.match(body, /No comparable week yet/);
+  assert.doesNotMatch(text(visible(render('this-month'))), /earlier sheets reached a different set of accounts/, 'the comparability rule is behind the "?"');
   assert.match(body, /5 earlier sheets reached a different set of accounts and are not comparable to this one\./);
 });
 
 test('the week that is comparable renders as one, and names the sheet it is against', () => {
   const body = text(render('this-month', { snapshot: SHEET_0731, recent: [...RECENT_SHEETS, SHEET_0731] }));
 
-  assert.match(body, /\+\$1,444 since 24 July, the nearest sheet at least seven days back that reached the same 14 of 14 accounts\./);
-  assert.match(body, /5 earlier sheets reached a different set of accounts/);
+  assert.match(body, /\+\$1,444 since 24 July/);
+  assert.doesNotMatch(
+    text(visible(render('this-month', { snapshot: SHEET_0731, recent: [...RECENT_SHEETS, SHEET_0731] }))),
+    /the nearest sheet at least seven days back/,
+    'how the baseline was chosen is behind the "?"'
+  );
+  assert.match(body, /the nearest sheet at least seven days back that reached the same 14 of 14 accounts\./);
 });
 
 test('all four summary metrics show the change they arrived with', () => {
@@ -119,7 +128,9 @@ test('all four summary metrics show the change they arrived with', () => {
 
 test('the register rule is stated once, so the reader learns which half the selector governs', () => {
   const body = text(render('six-months'));
-  assert.match(body, /Everything below answers to this selector\. The balance sheet above it is now, and has no window\./);
+  assert.doesNotMatch(text(visible(render('six-months'))), /Everything below answers to this selector/, 'the register rule is behind the "?"');
+  assert.match(body, /Everything below answers to this selector/);
+  assert.match((render('six-months')), /aria-label="Explain the window"/);
   assert.match(body, /Over this window/);
   // The four windows are all offered, and the chosen one is marked for assistive tech too.
   assert.match(render('six-months'), /aria-pressed="true"/);
@@ -156,9 +167,7 @@ test('each category is drawn over the window months, on one stated scale', () =>
   assert.match(body, /Household & Everyday/);
   assert.doesNotMatch(body, /Software & AI Tools/);
   assert.match(body, /2 smaller categories are not shown/);
-  // The stated scale is a column that is actually on screen: $2,160.83 is Amazon's June, and
-  // Amazon is the fifth of the six drawn rows.
-  assert.ok(body.indexOf('Amazon') < body.indexOf('largest single month here'));
+  assert.doesNotMatch(text(visible(render('six-months'))), /largest single month here/, 'the grid\'s scale is behind its "?"');
 });
 
 test('a window holding one month draws no grid at all, rather than one column', () => {

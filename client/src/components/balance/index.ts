@@ -19,3 +19,4 @@ export { Select, type SelectOption } from './Select';
 export { CategoryPicker } from './CategoryPicker';
 export { Tooltip } from './Tooltip';
 export { TrendChart } from './TrendChart';
+export { Details, Explain, ExplainPanel, ExplainToggle, useDisclosure, type DisclosureState } from './Disclosure';
