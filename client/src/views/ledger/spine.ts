@@ -550,6 +550,8 @@ export interface ScheduledReading {
   net: number;
   /** How many recurring items produced this, so the total is never read as "everything ahead". */
   patternCount: number;
+  /** Scheduled moves to the owner's other accounts: in neither figure above. */
+  transfers: number;
   monthlyBillTotal: number;
 }
 
@@ -574,7 +576,10 @@ export function readSchedule(
     incoming: forecast?.income ?? 0,
     outgoing: forecast?.bills ?? 0,
     net: forecast?.net ?? 0,
-    patternCount: new Set((forecast?.occurrences ?? []).map((o) => o.pattern_id)).size,
+    patternCount: new Set(
+      (forecast?.occurrences ?? []).filter((o) => o.kind !== 'transfer').map((o) => o.pattern_id)
+    ).size,
+    transfers: forecast?.transfers ?? 0,
     monthlyBillTotal: bills.reduce((sum, p) => sum + monthlyAmount(p), 0),
   };
 }

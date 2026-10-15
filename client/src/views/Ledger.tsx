@@ -707,6 +707,13 @@ export function Ledger() {
               <span className="tabular-nums text-muted">{formatCurrency(schedule.incoming)}</span> in and{' '}
               <span className="tabular-nums text-muted">{formatCurrency(schedule.outgoing)}</span> out, from{' '}
               {schedule.patternCount} recurring item{schedule.patternCount === 1 ? '' : 's'} mizān has detected.
+              {schedule.transfers > 0 && (
+                <>
+                  {' '}
+                  <span className="tabular-nums text-muted">{formatCurrency(schedule.transfers)}</span> more is
+                  scheduled to move to your other accounts.
+                </>
+              )}{' '}
               Anything it has not detected as recurring is not in this figure.
             </p>
           </div>
