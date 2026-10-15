@@ -502,10 +502,10 @@ export function monthlyAmount(p: RecurringPattern): number {
   return Math.abs(p.average_amount) * FREQUENCY_PER_MONTH[p.frequency];
 }
 
-/** An active pattern whose money goes out. Income patterns are not bills. */
+/** An active pattern whose money goes out. Income patterns and transfer schedules are not bills. */
 export function isBillPattern(p: RecurringPattern): boolean {
   const signed = p.average_signed_amount ?? -Math.abs(p.average_amount);
-  return p.is_active && signed < 0;
+  return p.is_active && p.kind !== 'transfer' && signed < 0;
 }
 
 export interface ScheduledReading {
@@ -562,7 +562,8 @@ export const SCHEDULE_STATES = {
 export function occurrenceMeta(o: RecurringForecastOccurrence): string {
   const freq = o.frequency.charAt(0).toUpperCase() + o.frequency.slice(1);
   const varies = o.amount_varies ? ' · amount varies' : '';
-  return `${freq} · ${o.confidence_label}${varies}`;
+  const from = o.kind === 'transfer' && o.account_name ? ` · from ${o.account_name}` : '';
+  return `${freq} · ${o.confidence_label}${varies}${from}`;
 }
 
 // ─── What a row is handed ─────────────────────────────────────────────────────

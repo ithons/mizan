@@ -136,6 +136,7 @@ export function buildSubscriptionInsights(
     FROM recurring_patterns rp
     LEFT JOIN categories c ON c.id = rp.category_id
     WHERE rp.is_active = 1
+      AND rp.kind = 'flow'
       AND (rp.is_confirmed = 1 OR rp.transaction_count >= 3)
     ORDER BY rp.next_expected ASC
   `).all() as SubscriptionPatternRow[];

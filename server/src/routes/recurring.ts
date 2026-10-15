@@ -46,6 +46,7 @@ function forecastToDollars(forecast: RecurringForecast): RecurringForecast {
     income: toDollars(forecast.income),
     bills: toDollars(forecast.bills),
     net: toDollars(forecast.net),
+    transfers: toDollars(forecast.transfers),
     confirmed_income: toDollars(forecast.confirmed_income),
     confirmed_bills: toDollars(forecast.confirmed_bills),
     likely_income: toDollars(forecast.likely_income),

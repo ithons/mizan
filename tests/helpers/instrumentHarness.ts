@@ -178,6 +178,7 @@ const FORECAST: RecurringForecast = {
   income: 0,
   bills: 64.04,
   net: -64.04,
+  transfers: 0,
   confirmed_income: 0,
   confirmed_bills: 64.04,
   likely_income: 0,

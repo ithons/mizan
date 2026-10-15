@@ -203,13 +203,29 @@ export function occurrenceDate(anchor: Date, frequency: RecurringFrequency, step
 function nextExpectedAfter(
   lastDate: string,
   frequency: RecurringFrequency,
-  medianGap: number
+  medianGap: number,
+  usualWeekday: number | null = null
 ): string {
   const last = parseISO(lastDate);
-  const next = frequency === 'weekly' || frequency === 'biweekly'
-    ? addDays(last, Math.round(medianGap))
-    : occurrenceDate(last, frequency, 1);
-  return format(next, 'yyyy-MM-dd');
+  if (frequency !== 'weekly' && frequency !== 'biweekly') {
+    return format(occurrenceDate(last, frequency, 1), 'yyyy-MM-dd');
+  }
+  const next = addDays(last, Math.round(medianGap));
+  if (usualWeekday === null) return format(next, 'yyyy-MM-dd');
+  // A holiday pushes one occurrence a day late; the next lands back on the usual weekday.
+  const shift = ((usualWeekday - next.getDay() + 10) % 7) - 3;
+  return format(addDays(next, shift), 'yyyy-MM-dd');
+}
+
+/** The weekday a strict majority of the dates fall on, or null. */
+export function usualWeekday(dates: readonly string[]): number | null {
+  const counts = new Map<number, number>();
+  for (const date of dates) {
+    const day = parseISO(date).getDay();
+    counts.set(day, (counts.get(day) ?? 0) + 1);
+  }
+  for (const [day, count] of counts) if (count * 2 > dates.length) return day;
+  return null;
 }
 
 // Writing a category_id that no longer resolves raises "FOREIGN KEY constraint failed" and takes
@@ -328,6 +344,41 @@ function isStale(lastSeen: string, frequency: string, today: string): boolean {
   return format(addDays(parseISO(lastSeen), 2 * approxGap), 'yyyy-MM-dd') < today;
 }
 
+interface Cadence {
+  frequency: RecurringFrequency;
+  medianGap: number;
+  amountVariance: number;
+}
+
+/**
+ * The cadence a date-sorted series repeats on, or null when it does not repeat regularly enough to
+ * forecast. An irregular cadence is disqualifying however steady the amounts (that separates a
+ * subscription from a merchant visited often); a moving amount is allowed when the cadence is tight
+ * (a weekly paycheck, a card payment). A single gap that is a near multiple of the median is folded
+ * back, so one skipped week does not reject a weekly item.
+ */
+function cadenceOf(txns: ReadonlyArray<{ date: string; amount: number }>): Cadence | null {
+  const gaps: number[] = [];
+  for (let i = 1; i < txns.length; i++) {
+    gaps.push(differenceInDays(parseISO(txns[i].date), parseISO(txns[i - 1].date)));
+  }
+
+  const medianGap = median(gaps);
+  const frequency = classifyFrequency(medianGap);
+  if (!frequency) return null;
+
+  const amounts = txns.map((t) => Math.abs(t.amount));
+  const perOccurrenceGaps = medianGap > 0
+    ? gaps.map((g) => g / Math.max(1, Math.round(g / medianGap)))
+    : gaps;
+  const gapVariance = variance(perOccurrenceGaps, medianGap);
+  const amountVariance = variance(amounts, median(amounts));
+
+  if (gapVariance >= GAP_VARIANCE_MAX) return null;
+  if (amountVariance >= AMOUNT_VARIANCE_MAX && gapVariance >= STRICT_GAP_VARIANCE_MAX) return null;
+  return { frequency, medianGap, amountVariance };
+}
+
 export function detectRecurring(): void {
   const db = getDb();
   const cutoff = format(subMonths(new Date(), 13), 'yyyy-MM-dd');
@@ -433,43 +484,14 @@ export function detectRecurring(): void {
     // recomputed one disagree again for two rows sharing a date.
     txns.sort((a, b) => a.date.localeCompare(b.date) || a.id.localeCompare(b.id));
 
-    // Compute day-gaps between consecutive dates
-    const gaps: number[] = [];
-    for (let i = 1; i < txns.length; i++) {
-      const gap = differenceInDays(parseISO(txns[i].date), parseISO(txns[i - 1].date));
-      gaps.push(gap);
-    }
-
-    const medianGap = median(gaps);
-    const frequency = classifyFrequency(medianGap);
-    if (!frequency) continue;
-
-    const amounts = txns.map(t => Math.abs(t.amount));
-    const medianAmount = median(amounts);
-
-    // Tolerate occasional missed occurrences. A forgotten logging (or a skipped week) shows
-    // up as a single gap that is a near-integer multiple of the base period; fold each gap
-    // back to a per-occurrence gap before measuring regularity, so one skipped week doesn't
-    // spike the variance and reject a genuinely weekly item. The median gap (robust to a few
-    // skips) is the base; classification still uses it unchanged.
-    const perOccurrenceGaps = medianGap > 0
-      ? gaps.map((g) => g / Math.max(1, Math.round(g / medianGap)))
-      : gaps;
-    const gapVariance = variance(perOccurrenceGaps, medianGap);
-    const amountVariance = variance(amounts, medianAmount);
-
-    // An irregular cadence is disqualifying no matter how steady the amounts look: that is what
-    // separates a subscription from a merchant you simply visit often (Chipotle, MBTA, DoorDash all
-    // land here on real data).
-    if (gapVariance >= GAP_VARIANCE_MAX) continue;
-
-    // A moving amount is NOT disqualifying when the cadence is tight. Requiring both gates rejected
-    // every variable-amount commitment: a weekly paycheck (gap CV 0.11, amount CV 0.43), a monthly
-    // interest credit, a utility bill. The stricter cadence bar is the price of relaxing the amount.
-    if (amountVariance >= AMOUNT_VARIANCE_MAX && gapVariance >= STRICT_GAP_VARIANCE_MAX) continue;
+    const cadence = cadenceOf(txns);
+    if (!cadence) continue;
+    const { frequency, medianGap, amountVariance } = cadence;
 
     const lastTxn = txns[txns.length - 1];
-    const nextExpected = nextExpectedAfter(lastTxn.date, frequency, medianGap);
+    const nextExpected = nextExpectedAfter(
+      lastTxn.date, frequency, medianGap, usualWeekday(txns.slice(-RECENT_AMOUNT_WINDOW).map((t) => t.date))
+    );
     // The stored amount is a short-window median, not the full-history one the variance gate above
     // needs: see RECENT_AMOUNT_WINDOW. Rounded because average_amount is integer cents.
     const expectedAmount = Math.round(
@@ -483,7 +505,7 @@ export function detectRecurring(): void {
 
     // Upsert recurring_pattern matching on merchant_name
     const existing = db.prepare(
-      'SELECT id, is_active, is_confirmed, dismissed_at, category_id FROM recurring_patterns WHERE merchant_name = ?'
+      "SELECT id, is_active, is_confirmed, dismissed_at, category_id FROM recurring_patterns WHERE merchant_name = ? AND kind = 'flow'"
     ).get(normalizedName) as
       | {
           id: string;
@@ -566,6 +588,8 @@ export function detectRecurring(): void {
     ).run(patternId, ...ids);
   }
 
+  detectRecurringTransfers(db, cutoff, today, known);
+
   // 6. Deactivate stale patterns
   const allPatterns = db.prepare(`
     SELECT id, last_seen, frequency, average_amount
@@ -614,4 +638,120 @@ export function detectRecurring(): void {
   if (stranded.changes > 0) {
     console.log(`[recurring] Removed ${stranded.changes} stranded pattern(s) with no linked transactions.`);
   }
+}
+
+const TRANSFER_CADENCE_WINDOW = 8;
+
+interface TransferLegRow {
+  id: string;
+  date: string;
+  amount: number;
+  category_id: string | null;
+  from_id: string;
+  from_name: string;
+  to_id: string;
+  to_name: string;
+  to_is_liability: number;
+}
+
+/**
+ * Money the owner moves between their own accounts on a schedule: the weekly brokerage
+ * contribution, a card autopay. Built from paired transfer legs, keyed by the two accounts, and
+ * forecast as an outflow from the account the money leaves.
+ */
+function detectRecurringTransfers(
+  db: Database.Database,
+  cutoff: string,
+  today: string,
+  known: Set<string>
+): void {
+  const legs = db.prepare(`
+    SELECT o.id, o.date, o.amount, o.category_id,
+           o.account_id AS from_id, fa.account_name AS from_name,
+           i.account_id AS to_id, ta.account_name AS to_name, ta.is_liability AS to_is_liability
+    FROM transactions o
+    JOIN transactions i ON i.transfer_pair_id = o.transfer_pair_id AND i.id <> o.id
+    JOIN accounts fa ON fa.id = o.account_id
+    JOIN accounts ta ON ta.id = i.account_id
+    WHERE o.amount < 0
+      AND o.pending = 0
+      AND o.date >= ?
+      AND o.transfer_status IN ('candidate', 'confirmed')
+    ORDER BY o.date ASC, o.id ASC
+  `).all(cutoff) as TransferLegRow[];
+
+  const groups = new Map<string, TransferLegRow[]>();
+  for (const leg of legs) {
+    const key = `${leg.from_id}|${leg.to_id}`;
+    groups.set(key, [...(groups.get(key) ?? []), leg]);
+  }
+
+  for (const txns of groups.values()) {
+    if (txns.length < 3) continue;
+    // A schedule is judged on what it does now: the weekly contribution doubled in July, and the
+    // whole-history amount spread would reject it for having changed once.
+    const cadence = cadenceOf(txns.slice(-TRANSFER_CADENCE_WINDOW));
+    if (!cadence) continue;
+    upsertTransferPattern(db, txns, cadence, today, known);
+  }
+}
+
+function upsertTransferPattern(
+  db: Database.Database,
+  txns: TransferLegRow[],
+  cadence: Cadence,
+  today: string,
+  known: Set<string>
+): void {
+  const first = txns[0];
+  const last = txns[txns.length - 1];
+  const label = `${first.from_name} to ${first.to_name}`;
+  const categoryId = first.to_is_liability
+    ? 'cat_xfer_cc'
+    : majorityCategoryId(txns.map((t) => t.category_id), known);
+  const expectedAmount = Math.round(
+    median(txns.slice(-RECENT_AMOUNT_WINDOW).map((t) => Math.abs(t.amount)))
+  );
+  const nextExpected = nextExpectedAfter(
+    last.date, cadence.frequency, cadence.medianGap,
+    usualWeekday(txns.slice(-TRANSFER_CADENCE_WINDOW).map((t) => t.date))
+  );
+  const now = new Date().toISOString();
+
+  const existing = db.prepare(`
+    SELECT id, is_active, is_confirmed, dismissed_at FROM recurring_patterns
+    WHERE kind = 'transfer' AND account_id = ? AND counterparty_account_id = ?
+  `).get(first.from_id, first.to_id) as
+    | { id: string; is_active: number; is_confirmed: number; dismissed_at: string | null }
+    | undefined;
+
+  let patternId: string;
+  if (existing) {
+    if (existing.dismissed_at) return;
+    if (!existing.is_active && !existing.is_confirmed && isStale(last.date, cadence.frequency, today)) return;
+    patternId = existing.id;
+    db.prepare(`
+      UPDATE recurring_patterns
+      SET frequency = ?, category_id = ?, average_amount = ?, amount_variance = ?, last_seen = ?,
+          next_expected = ?, transaction_count = ?, is_active = 1, updated_at = ?
+      WHERE id = ?
+    `).run(cadence.frequency, categoryId, expectedAmount, cadence.amountVariance, last.date,
+      nextExpected, txns.length, now, patternId);
+  } else {
+    const taken = db.prepare('SELECT 1 FROM recurring_patterns WHERE merchant_name = ?').get(label);
+    patternId = uuidv4();
+    db.prepare(`
+      INSERT INTO recurring_patterns
+        (id, merchant_name, category_id, frequency, average_amount, amount_variance, last_seen,
+         next_expected, is_active, is_confirmed, transaction_count, kind, account_id,
+         counterparty_account_id, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, 0, ?, 'transfer', ?, ?, ?, ?)
+    `).run(patternId, taken ? `${label} (${patternId.slice(0, 8)})` : label, categoryId,
+      cadence.frequency, expectedAmount, cadence.amountVariance, last.date, nextExpected,
+      txns.length, first.from_id, first.to_id, now, now);
+  }
+
+  const ids = txns.map((t) => t.id);
+  db.prepare(`UPDATE transactions SET recurring_id = ? WHERE id IN (${ids.map(() => '?').join(',')})`)
+    .run(patternId, ...ids);
 }

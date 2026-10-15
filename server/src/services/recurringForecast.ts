@@ -24,6 +24,11 @@ interface RecurringForecastRow {
   average_amount: number;
   is_income: number | null;
   amount_variance: number | null;
+  kind: 'flow' | 'transfer';
+  account_id: string | null;
+  account_name: string | null;
+  counterparty_account_id: string | null;
+  counterparty_account_name: string | null;
 }
 
 /** Matches detection's AMOUNT_VARIANCE_MAX: above it, the stored amount is a median, not a bill. */
@@ -101,7 +106,12 @@ function buildOccurrence(
     amount_varies: adjustment?.action === 'adjust' && adjustment.adjusted_amount != null
       ? false
       : (pattern.amount_variance ?? 0) >= AMOUNT_VARIES_THRESHOLD,
-    is_income: amount > 0,
+    is_income: pattern.kind === 'flow' && amount > 0,
+    kind: pattern.kind,
+    account_id: pattern.account_id,
+    account_name: pattern.account_name,
+    counterparty_account_id: pattern.counterparty_account_id,
+    counterparty_account_name: pattern.counterparty_account_name,
     is_confirmed: Boolean(pattern.is_confirmed),
     confidence,
     confidence_label: confidenceLabelValue,
@@ -138,11 +148,18 @@ export function buildRecurringForecast(
       rp.transaction_count,
       rp.amount_variance,
       rp.average_amount,
+      rp.kind,
+      rp.account_id,
+      rp.counterparty_account_id,
       c.name AS category_name,
       c.color AS category_color,
-      c.is_income
+      c.is_income,
+      fa.account_name AS account_name,
+      ta.account_name AS counterparty_account_name
     FROM recurring_patterns rp
     LEFT JOIN categories c ON c.id = rp.category_id
+    LEFT JOIN accounts fa ON fa.id = rp.account_id
+    LEFT JOIN accounts ta ON ta.id = rp.counterparty_account_id
     WHERE rp.is_active = 1
       AND rp.next_expected <= ?
       AND (rp.is_confirmed = 1 OR rp.transaction_count >= 3)
@@ -163,8 +180,10 @@ export function buildRecurringForecast(
     let expected = anchor;
     const confidence = confidenceForPattern(pattern);
     const confidence_label = confidenceLabel(confidence);
-    const amount = signedAmounts.get(pattern.id)
-      ?? (pattern.is_income === 1 ? pattern.average_amount : -pattern.average_amount);
+    const amount = pattern.kind === 'transfer'
+      ? -pattern.average_amount
+      : signedAmounts.get(pattern.id)
+        ?? (pattern.is_income === 1 ? pattern.average_amount : -pattern.average_amount);
     let overdueExpectedDate: Date | null = null;
 
     while (format(expected, 'yyyy-MM-dd') < today && step < OCCURRENCE_LIMIT) {
@@ -211,7 +230,10 @@ export function buildRecurringForecast(
 
   occurrences.sort((a, b) => a.expected_date.localeCompare(b.expected_date));
 
-  const counted = occurrences.filter((occurrence) => occurrence.adjustment_action !== 'skip');
+  const kept = occurrences.filter((occurrence) => occurrence.adjustment_action !== 'skip');
+  const counted = kept.filter((occurrence) => occurrence.kind !== 'transfer');
+  const transfers = kept.reduce((sum, occurrence) =>
+    occurrence.kind === 'transfer' ? sum + Math.abs(occurrence.amount) : sum, 0);
   const income = counted.reduce((sum, occurrence) =>
     occurrence.amount > 0 ? sum + occurrence.amount : sum, 0);
   const bills = counted.reduce((sum, occurrence) =>
@@ -237,9 +259,10 @@ export function buildRecurringForecast(
     income,
     bills,
     net: income - bills,
+    transfers,
     ...bucketedTotals,
-    overdue_count: counted.filter((occurrence) => occurrence.status === 'overdue').length,
-    review_count: counted.filter((occurrence) => occurrence.needs_review).length,
+    overdue_count: kept.filter((occurrence) => occurrence.status === 'overdue').length,
+    review_count: kept.filter((occurrence) => occurrence.needs_review).length,
     occurrences,
   };
 }

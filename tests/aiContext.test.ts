@@ -115,6 +115,7 @@ function baseForecast(overrides: Partial<RecurringForecast> = {}): RecurringFore
     income: 0,
     bills: 0,
     net: 0,
+    transfers: 0,
     confirmed_income: 0,
     confirmed_bills: 0,
     likely_income: 0,

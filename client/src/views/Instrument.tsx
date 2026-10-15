@@ -590,7 +590,9 @@ export function Instrument() {
   const assetScale = signedBarScale(assetRows.map((row) => row.amount));
   const assetTotal = assetRows.reduce((sum, row) => sum + row.amount, 0);
 
-  const bills = (forecastQ.data?.occurrences ?? []).filter((o) => !o.is_income && o.adjustment_action !== 'skip');
+  const bills = (forecastQ.data?.occurrences ?? []).filter(
+    (o) => !o.is_income && o.kind !== 'transfer' && o.adjustment_action !== 'skip'
+  );
   const oldestOverdue = bills.find((o) => o.status === 'overdue') ?? null;
   // Split from the overdue one, so a bill that was due last week is not labelled as still ahead.
   const nextBill = bills.find((o) => o.status !== 'overdue') ?? null;

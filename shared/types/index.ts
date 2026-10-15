@@ -313,6 +313,10 @@ export interface RecurringPattern {
   is_active: boolean;
   is_confirmed: boolean;
   transaction_count: number;
+  /** 'transfer': a schedule of money between two of the owner's accounts, not a bill. */
+  kind?: 'flow' | 'transfer';
+  account_id?: string | null;
+  counterparty_account_id?: string | null;
   created_at: string;
   updated_at: string;
   // joined
@@ -347,6 +351,13 @@ export interface RecurringForecastOccurrence {
   /** True when the pattern's amount moves materially; `amount` is a median estimate, not a bill. */
   amount_varies?: boolean;
   is_income: boolean;
+  /** 'transfer': money moving between two of the owner's accounts, never income or a bill. */
+  kind?: 'flow' | 'transfer';
+  /** The account the money leaves (transfers only). */
+  account_id?: string | null;
+  account_name?: string | null;
+  counterparty_account_id?: string | null;
+  counterparty_account_name?: string | null;
   is_confirmed: boolean;
   confidence: number;
   confidence_label: 'confirmed' | 'likely' | 'uncertain';
@@ -365,7 +376,10 @@ export interface RecurringForecast {
   days: number;
   income: number;
   bills: number;
+  /** Income minus bills. Transfers between the owner's accounts are not in it. */
   net: number;
+  /** Scheduled money moving out to the owner's other accounts. */
+  transfers: number;
   confirmed_income: number;
   confirmed_bills: number;
   likely_income: number;

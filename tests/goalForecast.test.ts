@@ -33,6 +33,7 @@ function forecast(overrides: Partial<RecurringForecast> = {}): RecurringForecast
     income: overrides.income ?? 3000,
     bills: overrides.bills ?? 2400,
     net: overrides.net ?? 600,
+    transfers: 0,
     confirmed_income: overrides.confirmed_income ?? 3000,
     confirmed_bills: overrides.confirmed_bills ?? 2400,
     likely_income: overrides.likely_income ?? 0,
