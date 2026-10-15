@@ -5,6 +5,7 @@ import { aiApi } from '../lib/api';
 import { useAppStore } from '../store';
 import { useAdvisorChat } from '../hooks/advisorChat';
 import { AskPanel } from '../components/AskPanel';
+import { ConfirmRemoveModal } from '../components/ConfirmRemoveModal';
 import { AiActionsList } from '../components/AiActions';
 import { SectionLabel, TextButton } from '../components/balance';
 
@@ -41,6 +42,7 @@ function ConversationRow({
   const { addToast } = useAppStore();
   const chat = useAdvisorChat();
   const [editing, setEditing] = useState(false);
+  const [confirming, setConfirming] = useState(false);
   const [title, setTitle] = useState(conversation.title);
   const refresh = () => qc.invalidateQueries({ queryKey: ['ai-conversations'] });
 
@@ -88,12 +90,21 @@ function ConversationRow({
         </button>
         <button
           type="button"
-          onClick={() => { if (window.confirm('Delete this conversation?')) remove.mutate(); }}
+          onClick={() => setConfirming(true)}
           className="hover:text-clay"
         >
           Delete
         </button>
       </div>
+      <ConfirmRemoveModal
+        open={confirming}
+        onClose={() => setConfirming(false)}
+        title="Delete conversation"
+        description={`"${conversation.title || 'Untitled chat'}" and its messages are removed. What the advisor changed stays in the change log.`}
+        confirmLabel="Delete"
+        isPending={remove.isPending}
+        onConfirm={() => remove.mutate(undefined, { onSettled: () => setConfirming(false) })}
+      />
     </div>
   );
 }
