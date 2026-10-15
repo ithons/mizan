@@ -488,11 +488,15 @@ export function detectRecurring(): void {
     SELECT t.id, t.date, t.amount, t.merchant_name, t.original_name, t.category_id, t.recurring_id,
            c.is_income
     FROM transactions t
+    JOIN accounts a ON a.id = t.account_id
     LEFT JOIN categories c ON c.id = t.category_id
     WHERE t.pending = 0
       AND t.date >= ?
       AND ${excludedFromTotalsSql('t')}
       AND COALESCE(t.category_id, '') NOT LIKE 'cat_xfer%'
+      -- What happens inside a brokerage or wallet (a dividend, a reinvestment) never reaches the
+      -- cash the forecast is about.
+      AND a.type NOT IN ('brokerage', 'ira_traditional', 'ira_roth', 'crypto_wallet')
     ORDER BY t.date ASC
   `).all(cutoff) as TxnRow[];
 

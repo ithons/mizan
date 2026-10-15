@@ -114,3 +114,14 @@ test('the usual weekday needs a strict majority', () => {
   assert.equal(usualWeekday(['2026-09-21', '2026-09-28', '2026-10-05', '2026-10-13']), 1);
   assert.equal(usualWeekday(['2026-09-21', '2026-09-29']), null);
 });
+
+test('a monthly dividend paid into a brokerage is not cash the forecast expects', () => {
+  withDb((db) => {
+    const fid = insertAccount(db, { account_name: 'Fidelity Individual', type: 'brokerage' });
+    for (const monthsAgo of [4, 3, 2, 1]) {
+      insertTransaction(db, { account_id: fid, date: day(subDays(new Date(), 30 * monthsAgo)), amount: 5, merchant_name: 'Dividend', original_name: 'DIVIDEND RECEIVED FIDELITY GOVERNMENT MONEY MARKET (SPAXX) (Cash)', category_id: 'cat_inv_dividend' });
+    }
+    detectRecurring();
+    assert.equal((db.prepare('SELECT COUNT(*) AS n FROM recurring_patterns').get() as { n: number }).n, 0);
+  });
+});
