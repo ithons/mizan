@@ -80,11 +80,11 @@ export const TABLE_MEANINGS: Record<string, TableMeaning> = {
       transfer_source: { unit: "'auto' | 'owner' | NULL", note: "'auto' pairs are re-derived each sync; 'owner' pairs stick." },
       refund_of_id: {
         unit: 'transactions.id, nullable',
-        note: "The purchase this credit reverses. Reports and budgets date a linked refund by its purchase: COALESCE((SELECT p.date FROM transactions p WHERE p.id = t.refund_of_id), t.date).",
+        note: 'Purchase this credit reverses. Reports and budgets date it by that purchase.',
       },
       is_internal_trade: {
         unit: FLAG,
-        note: 'A buy, sale, core sweep or reinvestment inside one brokerage account. excluded_from_totals drops it.',
+        note: 'A trade inside one brokerage account; excluded_from_totals drops it.',
       },
       duplicate_status: { unit: 'enum, see enums.duplicate_status' },
       review_status: { unit: 'enum, see enums.review_status' },

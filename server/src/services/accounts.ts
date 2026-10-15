@@ -119,6 +119,8 @@ export interface UpdateAccountInput {
   is_hidden?: boolean;
   sort_order?: number;
   current_balance?: number; // dollars
+  statement_balance?: number | null; // dollars
+  statement_due_date?: string | null;
 }
 
 export type UpdateAccountResult =
@@ -199,6 +201,14 @@ export function updateAccount(db: Database.Database, id: string, input: UpdateAc
   if (input.current_balance !== undefined) {
     updates.push('current_balance = ?');
     values.push(toCents(input.current_balance));
+  }
+  if (input.statement_balance !== undefined) {
+    updates.push('statement_balance = ?');
+    values.push(input.statement_balance === null ? null : toCents(input.statement_balance));
+  }
+  if (input.statement_due_date !== undefined) {
+    updates.push('statement_due_date = ?');
+    values.push(input.statement_due_date);
   }
 
   if (updates.length === 0) {

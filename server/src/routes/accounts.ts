@@ -27,7 +27,7 @@ const router = Router();
 // current_balance/available_balance/credit_limit are stored as integer cents; the
 // API contract is dollars, so account rows are dollarized on the way out.
 // native_balance (crypto quantity) is NOT money and is left untouched.
-const ACCOUNT_MONEY_FIELDS = ['current_balance', 'available_balance', 'credit_limit'] as const;
+const ACCOUNT_MONEY_FIELDS = ['current_balance', 'available_balance', 'credit_limit', 'statement_balance'] as const;
 
 function accountToDollars<T extends Record<string, unknown>>(row: T): T {
   return dollarizeFields(row, ACCOUNT_MONEY_FIELDS);

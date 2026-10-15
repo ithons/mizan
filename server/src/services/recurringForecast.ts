@@ -31,6 +31,9 @@ interface RecurringForecastRow {
   counterparty_account_name: string | null;
   amount_changed_from: number | null;
   amount_changed_on: string | null;
+  counterparty_is_liability: number | null;
+  statement_balance: number | null;
+  statement_due_date: string | null;
 }
 
 /** Matches detection's AMOUNT_VARIANCE_MAX: above it, the stored amount is a median, not a bill. */
@@ -72,7 +75,8 @@ function buildOccurrence(
   now: Date,
   today: string,
   endDate: string,
-  adjustment?: RecurringOccurrenceAdjustment
+  adjustment?: RecurringOccurrenceAdjustment,
+  basis?: 'statement' | 'history'
 ): RecurringForecastOccurrence | null {
   // Skipped occurrences stay in the payload (dimmed + undoable in the UI) but
   // are excluded from every total and review count by the aggregation below.
@@ -113,6 +117,7 @@ function buildOccurrence(
       ? { from: expected.changedFrom, since: expected.changedOn }
       : null,
     kind: pattern.kind,
+    ...(basis ? { amount_basis: basis } : {}),
     account_id: pattern.account_id,
     account_name: pattern.account_name,
     counterparty_account_id: pattern.counterparty_account_id,
@@ -130,6 +135,32 @@ function buildOccurrence(
     adjusted_amount: adjustment?.adjusted_amount ?? null,
     adjustment_note: adjustment?.note ?? null,
   };
+}
+
+/** The cadence occurrence a statement due date stands in for, rather than a second payment. */
+const STATEMENT_MATCH_DAYS = 12;
+/** A payment this long before the due date pays that statement. */
+const STATEMENT_PAYMENT_DAYS = 25;
+
+/**
+ * The owner's statement for the card this pattern pays, while it is still owed: due today or
+ * later, and no payment into the card since the statement could have closed.
+ */
+function openStatement(
+  db: Database.Database,
+  pattern: RecurringForecastRow,
+  today: string
+): { balance: number; dueDate: string } | null {
+  if (pattern.statement_balance === null || pattern.statement_due_date === null) return null;
+  if (pattern.statement_due_date < today || pattern.statement_balance <= 0) return null;
+  const since = format(addDays(parseISO(pattern.statement_due_date), -STATEMENT_PAYMENT_DAYS), 'yyyy-MM-dd');
+  const paid = db.prepare(`
+    SELECT 1 FROM transactions
+    WHERE account_id = ? AND amount > 0 AND pending = 0
+      AND transfer_status IN ('candidate', 'confirmed') AND date >= ?
+    LIMIT 1
+  `).get(pattern.counterparty_account_id, since);
+  return paid ? null : { balance: pattern.statement_balance, dueDate: pattern.statement_due_date };
 }
 
 // A transfer is always money leaving its account. Anything else is signed by its own rows, or by
@@ -179,7 +210,10 @@ export function buildRecurringForecast(
       c.color AS category_color,
       c.is_income,
       fa.account_name AS account_name,
-      ta.account_name AS counterparty_account_name
+      ta.account_name AS counterparty_account_name,
+      ta.is_liability AS counterparty_is_liability,
+      ta.statement_balance,
+      ta.statement_due_date
     FROM recurring_patterns rp
     LEFT JOIN categories c ON c.id = rp.category_id
     LEFT JOIN accounts fa ON fa.id = rp.account_id
@@ -213,6 +247,28 @@ export function buildRecurringForecast(
       expected = occurrenceDate(anchor, pattern.frequency, step);
     }
 
+    const cardPayment = pattern.kind === 'transfer' && pattern.counterparty_is_liability === 1;
+    const basis = cardPayment ? 'history' as const : undefined;
+    const statement = cardPayment ? openStatement(db, pattern, today) : null;
+    const replacedByStatement = (date: string): boolean =>
+      statement !== null && Math.abs(differenceInCalendarDays(parseISO(date), parseISO(statement.dueDate))) <= STATEMENT_MATCH_DAYS;
+    if (statement) {
+      const occurrence = buildOccurrence(
+        pattern,
+        statement.dueDate,
+        { amount: -statement.balance, changedFrom: null, changedOn: null },
+        confidence,
+        confidence_label,
+        now,
+        today,
+        endDate,
+        adjustmentMap.get(`${pattern.id}:${statement.dueDate}`),
+        'statement'
+      );
+      if (occurrence) occurrences.push(occurrence);
+      overdueExpectedDate = null;
+    }
+
     if (overdueExpectedDate) {
       const expectedDate = format(overdueExpectedDate, 'yyyy-MM-dd');
       const occurrence = buildOccurrence(
@@ -224,14 +280,15 @@ export function buildRecurringForecast(
         now,
         today,
         endDate,
-        adjustmentMap.get(`${pattern.id}:${expectedDate}`)
+        adjustmentMap.get(`${pattern.id}:${expectedDate}`),
+        basis
       );
       if (occurrence) occurrences.push(occurrence);
     }
 
     while (format(expected, 'yyyy-MM-dd') <= endDate && step < OCCURRENCE_LIMIT) {
       const expectedDate = format(expected, 'yyyy-MM-dd');
-      const occurrence = buildOccurrence(
+      const occurrence = replacedByStatement(expectedDate) ? null : buildOccurrence(
         pattern,
         expectedDate,
         amount,
@@ -240,7 +297,8 @@ export function buildRecurringForecast(
         now,
         today,
         endDate,
-        adjustmentMap.get(`${pattern.id}:${expectedDate}`)
+        adjustmentMap.get(`${pattern.id}:${expectedDate}`),
+        basis
       );
       if (occurrence) occurrences.push(occurrence);
 

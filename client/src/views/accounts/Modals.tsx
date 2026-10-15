@@ -202,6 +202,46 @@ export function MergeAccountModal({ open, source, accounts, onClose, onMerged }:
   );
 }
 
+interface StatementForm {
+  balance: string;
+  dueDate: string;
+}
+
+function StatementFields({ form, setForm }: { form: StatementForm; setForm: (f: StatementForm) => void }) {
+  return (
+    <div className="flex gap-4">
+      <div className="flex-1">
+        <label htmlFor="modals-statement-balance" className="mz-label">Statement balance</label>
+        <input id="modals-statement-balance"
+          type="number"
+          className="mz-field tabular-nums"
+          value={form.balance}
+          onChange={(e) => setForm({ ...form, balance: e.target.value })}
+          placeholder="0.00"
+        />
+      </div>
+      <div className="flex-1">
+        <label htmlFor="modals-statement-due" className="mz-label">Due date</label>
+        <input id="modals-statement-due"
+          type="date"
+          className="mz-field tabular-nums"
+          value={form.dueDate}
+          onChange={(e) => setForm({ ...form, dueDate: e.target.value })}
+        />
+      </div>
+    </div>
+  );
+}
+
+/** An empty statement field clears it; anything else must parse. */
+function statementBody(form: StatementForm): { statement_balance: number | null; statement_due_date: string | null } {
+  const balance = form.balance.trim() === '' ? null : parseDecimalInput(form.balance);
+  if (form.balance.trim() !== '' && (balance === null || balance < 0)) {
+    throw new Error('Enter a valid statement balance');
+  }
+  return { statement_balance: balance, statement_due_date: form.dueDate || null };
+}
+
 export function EditAccountModal({ open, account, onClose }: {
   open: boolean;
   account: Account | null;
@@ -216,6 +256,7 @@ export function EditAccountModal({ open, account, onClose }: {
     current_balance: '',
     is_liability: false,
   });
+  const [statement, setStatement] = useState<StatementForm>({ balance: '', dueDate: '' });
 
   useEffect(() => {
     if (account) {
@@ -225,6 +266,10 @@ export function EditAccountModal({ open, account, onClose }: {
         type: account.type,
         current_balance: String(account.current_balance),
         is_liability: Boolean(account.is_liability),
+      });
+      setStatement({
+        balance: account.statement_balance == null ? '' : String(account.statement_balance),
+        dueDate: account.statement_due_date ?? '',
       });
     }
   }, [account]);
@@ -244,6 +289,7 @@ export function EditAccountModal({ open, account, onClose }: {
         type: form.type as AccountType,
         is_liability: form.is_liability,
         current_balance: account?.is_manual ? currentBalance : undefined,
+        ...(form.is_liability ? statementBody(statement) : {}),
       });
     },
     onSuccess: () => {
@@ -260,6 +306,7 @@ export function EditAccountModal({ open, account, onClose }: {
     <Modal open={open} onClose={onClose} title="Edit account">
       <div className="space-y-4">
         <AccountFields form={form} setForm={setForm} showBalance={Boolean(account.is_manual)} />
+        {form.is_liability && <StatementFields form={statement} setForm={setStatement} />}
         <div className="flex items-center gap-5 pt-1">
           <InkButton onClick={() => mutation.mutate()} disabled={mutation.isPending}>
             {mutation.isPending ? 'Saving…' : 'Save changes'}

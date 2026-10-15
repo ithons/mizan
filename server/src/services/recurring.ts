@@ -862,9 +862,11 @@ function upsertTransferPattern(
   const categoryId = first.to_is_liability
     ? 'cat_xfer_cc'
     : majorityCategoryId(txns.map((t) => t.category_id), known);
-  const expected = expectedAmount(
-    txns.slice(-RECENT_AMOUNT_WINDOW).reverse().map((t) => ({ amount: Math.abs(t.amount), date: t.date }))
-  );
+  const recent = txns.slice(-RECENT_AMOUNT_WINDOW).reverse().map((t) => ({ amount: Math.abs(t.amount), date: t.date }));
+  // A card payment follows each month's spending; two large months are not a new level.
+  const expected = first.to_is_liability
+    ? { amount: Math.round(median(recent.map((t) => t.amount))), changedFrom: null, changedOn: null }
+    : expectedAmount(recent);
   const nextExpected = nextExpectedAfter(
     last.date, cadence.frequency, cadence.medianGap,
     usualWeekday(txns.slice(-TRANSFER_CADENCE_WINDOW).map((t) => t.date))

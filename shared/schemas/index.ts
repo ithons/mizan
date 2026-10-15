@@ -20,6 +20,9 @@ export const UpdateAccountSchema = z.object({
   is_hidden: z.boolean().optional(),
   sort_order: z.number().int().optional(),
   current_balance: z.number().optional(),
+  /** A card's last statement, in dollars owed. null clears it. */
+  statement_balance: z.number().nonnegative().nullable().optional(),
+  statement_due_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(),
 });
 
 export const CreateManualTransactionSchema = z.object({

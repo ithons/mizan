@@ -566,7 +566,10 @@ export function occurrenceMeta(o: RecurringForecastOccurrence): string {
     ? ` · amount changed from ${formatCurrency(Math.abs(o.amount_change.from))}`
     : o.amount_varies ? ' · amount varies' : '';
   const from = o.kind === 'transfer' && o.account_name ? ` · from ${o.account_name}` : '';
-  return `${freq} · ${o.confidence_label}${varies}${from}`;
+  const basis = o.amount_basis === 'statement'
+    ? ' · statement balance'
+    : o.amount_basis === 'history' ? ' · estimated from past payments' : '';
+  return `${freq} · ${o.confidence_label}${varies}${basis}${from}`;
 }
 
 // ─── What a row is handed ─────────────────────────────────────────────────────

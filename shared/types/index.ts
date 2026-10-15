@@ -26,6 +26,9 @@ export interface Account {
   current_balance: number;
   available_balance?: number | null;
   credit_limit?: number | null;
+  /** A card's last statement balance and due date, entered by the owner. */
+  statement_balance?: number | null;
+  statement_due_date?: string | null;
   currency: string;
   native_currency?: string | null;
   native_balance?: number | null;
@@ -368,6 +371,8 @@ export interface RecurringForecastOccurrence {
   amount_change?: { from: number; since: string } | null;
   /** 'transfer': money moving between two of the owner's accounts, never income or a bill. */
   kind?: 'flow' | 'transfer';
+  /** For a card payment: 'statement' when the owner's statement sets it, else 'history'. */
+  amount_basis?: 'statement' | 'history';
   /** The account the money leaves (transfers only). */
   account_id?: string | null;
   account_name?: string | null;
