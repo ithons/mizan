@@ -87,6 +87,38 @@ const STRIP_PUNCTUATION = /[^\w\s]/g;
 // merchant's variants ("STARBUCKS #1234 WA", "STARBUCKS #5678 OR") group into one recurring
 // pattern. This is intentionally stronger than transactionIntegrity.normalizeMerchant, which must
 // stay minimal to avoid merging distinct charges into false duplicates. Keep them separate.
+const PAYROLL_WORDS = /payroll|echeckpay|dir dep|direct dep|salary/i;
+const ACH_IDS = /\b(?:ppd|ccd|web|tel|arc)\s*id\s*:?\s*\S+/gi;
+const PAYER_NOISE = new Set([
+  'payroll', 'echeckpay', 'dir', 'dep', 'direct', 'deposit', 'salary', 'ach', 'credit', 'edi',
+  'pymnt', 'pymnts', 'payment', 'inc', 'llc', 'co', 'corp',
+]);
+
+/** Income that names an employer rather than a merchant. */
+function isPayrollLike(txn: { amount: number; original_name: string; is_income: number | null }): boolean {
+  return txn.amount > 0 && (txn.is_income === 1 || PAYROLL_WORDS.test(txn.original_name));
+}
+
+/**
+ * The payer behind an ACH credit, with the clearing-house noise gone: "MASS INST PAYROLL PPD ID:
+ * 9111111101" and "MASS. INST. OF T ECHECKPAY 00000000 CCD ID: 1042103594" both name MIT.
+ */
+export function payerKey(description: string): string {
+  return description
+    .toLowerCase()
+    .replace(ACH_IDS, ' ')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .split(' ')
+    .filter((token) => token && !PAYER_NOISE.has(token) && !/^\d+$/.test(token))
+    .join(' ');
+}
+
+/** One payer key extends the other ("mass inst" and "mass inst of t"), sharing at least two words. */
+export function samePayer(a: string, b: string): boolean {
+  const [short, long] = a.length <= b.length ? [a.split(' '), b.split(' ')] : [b.split(' '), a.split(' ')];
+  return short.length >= 2 && short.every((token, i) => long[i] === token);
+}
+
 function normalizeMerchant(name: string): string {
   let n = name.toLowerCase().trim();
   n = n.replace(STRIP_PUNCTUATION, ' ');
@@ -441,6 +473,8 @@ export function detectRecurring(): void {
     merchant_name: string | null;
     original_name: string;
     category_id: string | null;
+    is_income: number | null;
+    recurring_id: string | null;
   }
 
   // 1. Load all non-pending transactions from last 13 months.
@@ -451,20 +485,25 @@ export function detectRecurring(): void {
   // amount, so they would otherwise be admitted as recurring bills and double-count against the
   // spending they are paying off.
   const transactions = db.prepare(`
-    SELECT id, date, amount, merchant_name, original_name, category_id
-    FROM transactions
-    WHERE pending = 0
-      AND date >= ?
-      AND ${excludedFromTotalsSql()}
-      AND COALESCE(category_id, '') NOT LIKE 'cat_xfer%'
-    ORDER BY date ASC
+    SELECT t.id, t.date, t.amount, t.merchant_name, t.original_name, t.category_id, t.recurring_id,
+           c.is_income
+    FROM transactions t
+    LEFT JOIN categories c ON c.id = t.category_id
+    WHERE t.pending = 0
+      AND t.date >= ?
+      AND ${excludedFromTotalsSql('t')}
+      AND COALESCE(t.category_id, '') NOT LIKE 'cat_xfer%'
+    ORDER BY t.date ASC
   `).all(cutoff) as TxnRow[];
 
   // 2. Group by normalized merchant name
   const groups = new Map<
     string,
-    Array<{ id: string; date: string; amount: number; category_id: string | null }>
+    Array<{ id: string; date: string; amount: number; category_id: string | null; recurring_id: string | null }>
   >();
+  const payers: string[] = [];
+  // A payer group is keyed by its payer but named the way its rows read.
+  const labels = new Map<string, string>();
   const groupNames: string[] = [];
   const groupBigramLengths: number[] = [];
 
@@ -472,8 +511,10 @@ export function detectRecurring(): void {
   for (const txn of transactions) {
     const raw = txn.merchant_name || txn.original_name;
     if (!raw) continue;
-    let normalized = normalizeMerchant(raw);
+    const payer = isPayrollLike(txn) ? payerKey(txn.original_name || raw) : '';
+    let normalized = payer ? payerGroup(payer, payers, groups, labels) : normalizeMerchant(raw);
     if (!normalized) continue;
+    if (payer && !labels.has(normalized)) labels.set(normalized, normalizeMerchant(raw) || normalized);
     // Fuzzy matching: check if normalized name is very similar to an existing group.
     //
     // The exact-hit short circuit is semantics-preserving and is most of the speed. The scan
@@ -485,7 +526,7 @@ export function detectRecurring(): void {
     // 995.6 / 922.7 / 913.8 ms against a copy of the live database before this line, and the
     // figure after it is stated in the test that pins it.
     let matchedGroup = normalized;
-    if (!groups.has(normalized)) {
+    if (!payer && !groups.has(normalized)) {
       let highestScore = 0;
       const ownLength = bigramLength(normalized);
       for (let g = 0; g < groupNames.length; g++) {
@@ -511,8 +552,10 @@ export function detectRecurring(): void {
 
 
     if (!groups.has(normalized)) {
-      groupNames.push(normalized);
-      groupBigramLengths.push(bigramLength(normalized));
+      if (!payer) {
+        groupNames.push(normalized);
+        groupBigramLengths.push(bigramLength(normalized));
+      }
       groups.set(normalized, []);
     }
     groups.get(normalized)!.push({
@@ -520,13 +563,16 @@ export function detectRecurring(): void {
       date: txn.date,
       amount: txn.amount,
       category_id: txn.category_id,
+      recurring_id: txn.recurring_id,
     });
   }
 
   const known = knownCategoryIds(db);
+  const claimed = new Set<string>();
 
   // 3. For each group with >= 3 transactions
-  for (const [normalizedName, txns] of groups) {
+  for (const [groupKey, txns] of groups) {
+    const normalizedName = labels.get(groupKey) ?? groupKey;
     if (txns.length < 3) continue;
 
     // Sort by date ascending. The id tie-break is not cosmetic: the recent-amount window below has
@@ -551,10 +597,12 @@ export function detectRecurring(): void {
     const majority = majorityCategoryId(txns.map((t) => t.category_id), known);
     const now = new Date().toISOString();
 
-    // Upsert recurring_pattern matching on merchant_name
+    // The pattern these rows already belong to keeps its identity when grouping changes (a merged
+    // payer, a renamed merchant); otherwise the name decides.
+    const linked = patternLinkedBy(db, txns, claimed);
     const existing = db.prepare(
-      "SELECT id, is_active, is_confirmed, dismissed_at, category_id FROM recurring_patterns WHERE merchant_name = ? AND kind = 'flow'"
-    ).get(normalizedName) as
+      "SELECT id, is_active, is_confirmed, dismissed_at, category_id FROM recurring_patterns WHERE kind = 'flow' AND (id = ? OR (? IS NULL AND merchant_name = ?))"
+    ).get(linked, linked, normalizedName) as
       | {
           id: string;
           is_active: number;
@@ -634,6 +682,8 @@ export function detectRecurring(): void {
       );
     }
 
+    claimed.add(patternId);
+
     // 5. Link matched transactions
     const ids = txns.map(t => t.id);
     const placeholders = ids.map(() => '?').join(',');
@@ -692,6 +742,55 @@ export function detectRecurring(): void {
   if (stranded.changes > 0) {
     console.log(`[recurring] Removed ${stranded.changes} stranded pattern(s) with no linked transactions.`);
   }
+}
+
+/** Payer keys merge into the shortest one already seen that they extend, or the other way round. */
+function payerGroup(
+  payer: string,
+  payers: string[],
+  groups: Map<string, unknown[]>,
+  labels: Map<string, string>
+): string {
+  const match = payers.find((existing) => samePayer(existing, payer));
+  if (!match) {
+    payers.push(payer);
+    return payer;
+  }
+  if (payer.length < match.length) {
+    const rows = groups.get(match);
+    if (rows) {
+      groups.delete(match);
+      groups.set(payer, rows);
+    }
+    const label = labels.get(match);
+    if (label) {
+      labels.delete(match);
+      labels.set(payer, label);
+    }
+    payers[payers.indexOf(match)] = payer;
+    return payer;
+  }
+  return match;
+}
+
+/** The flow pattern most of these rows already link to, unless another group took it this run. */
+function patternLinkedBy(
+  db: Database.Database,
+  txns: ReadonlyArray<{ recurring_id: string | null }>,
+  claimed: Set<string>
+): string | null {
+  const counts = new Map<string, number>();
+  for (const txn of txns) {
+    if (txn.recurring_id && !claimed.has(txn.recurring_id)) {
+      counts.set(txn.recurring_id, (counts.get(txn.recurring_id) ?? 0) + 1);
+    }
+  }
+  const ranked = [...counts].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+  for (const [id] of ranked) {
+    const flow = db.prepare("SELECT 1 FROM recurring_patterns WHERE id = ? AND kind = 'flow'").get(id);
+    if (flow) return id;
+  }
+  return null;
 }
 
 const TRANSFER_CADENCE_WINDOW = 8;
