@@ -1,4 +1,5 @@
 import { useCallback, useId, useMemo, useRef, useState } from 'react';
+import { ExplainPanel, ExplainToggle, useDisclosure } from './Disclosure';
 import {
   eachDayOfInterval,
   eachMonthOfInterval,
@@ -668,6 +669,7 @@ export function TrendChart({ history, marks = NO_MARKS, height = 120, className 
   const notes = useMemo(() => trendCaptions(geometry), [geometry]);
   const keyboardHint = useMemo(() => trendKeyboardHint(geometry), [geometry]);
   const hintId = useId();
+  const notesDisclosure = useDisclosure();
   const kindsPresent = useMemo(() => [...new Set(segments.map((s) => s.kind))], [segments]);
 
   const plotRef = useRef<HTMLDivElement>(null);
@@ -906,13 +908,16 @@ export function TrendChart({ history, marks = NO_MARKS, height = 120, className 
 
       {keyboardHint && <p id={hintId} className="sr-only">{keyboardHint}</p>}
       {(kindsPresent.length > 1 || notes.length > 0) && (
-        <div className="mt-1.5 space-y-1" style={{ paddingLeft: GUTTER_PX }}>
-          <StrokeKey kinds={kindsPresent} />
-          {notes.map((note) => (
-            <p key={note} className="text-rule leading-normal text-muted-2">
-              {note}
-            </p>
-          ))}
+        <div className="mt-1.5" style={{ paddingLeft: GUTTER_PX }}>
+          <div className="flex items-center gap-3">
+            <StrokeKey kinds={kindsPresent} />
+            {notes.length > 0 && <ExplainToggle disclosure={notesDisclosure} label={label} />}
+          </div>
+          <ExplainPanel disclosure={notesDisclosure}>
+            {notes.map((note) => (
+              <p key={note}>{note}</p>
+            ))}
+          </ExplainPanel>
         </div>
       )}
     </div>

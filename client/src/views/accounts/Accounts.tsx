@@ -8,7 +8,7 @@ import { creditNote, isInCredit, signedAccountBalance } from '../../lib/accountB
 import { ACCOUNT_TYPE_LABELS } from '../../lib/constants';
 import { invalidateFinancialData } from '../../lib/queryInvalidation';
 import { useAppStore } from '../../store';
-import { Screen, ScreenHeader, SectionLabel, Card, Figure, Row, TextButton, TrendChart } from '../../components/balance';
+import { Screen, ScreenHeader, SectionLabel, Figure, Row, TextButton, TrendChart } from '../../components/balance';
 import { ConfirmRemoveModal } from '../../components/ConfirmRemoveModal';
 import { QueryErrorBanner } from '../../components/QueryErrorBanner';
 import { LedgerIntegrityPanel } from '../../components/LedgerIntegrityPanel';
@@ -314,12 +314,7 @@ export function Accounts() {
     <Screen>
       <ScreenHeader
         title="Accounts"
-        sub={
-          <>
-            {visible.length} account{visible.length === 1 ? '' : 's'} · net worth{' '}
-            <span className="tabular-nums">{formatWholeCurrency(netWorth)}</span>
-          </>
-        }
+        sub={`${visible.length} account${visible.length === 1 ? '' : 's'}`}
         actions={
           <>
             <TextButton onClick={() => syncAll.mutate()} disabled={syncAll.isPending}>
@@ -339,48 +334,22 @@ export function Accounts() {
 
       <QueryErrorBanner items={[{ query: accountsQ, label: 'your accounts' }]} className="mb-5" />
 
-      {/* Net worth is the subject; assets and liabilities are the two terms it is made of.
-          Withheld entirely when the accounts query failed. `assets`, `owed` and `netWorth` are
-          reductions over `accounts ?? []`, so a dead server made all three exactly 0 and this
-          block rendered "$0" as the 44px subject numeral, "$0" assets, and a liabilities Figure
-          whose label and state sentence are COMPUTED from the value, so `owed === 0` selected
-          "Liabilities / nothing outstanding". Three false money claims and a reassuring sentence,
-          on a screen that had simply failed to load. That is the exact defect QueryErrorBanner
-          was written for; this screen was one of the two that never adopted it. */}
+      {/* Withheld when the accounts query failed: every figure here is a reduction over the list,
+          so a dead server would print three false zeros. */}
       {!accountsQ.isError && (
-      <div className="mb-8 flex-shrink-0 space-y-3 lg:space-y-4">
-        <Card padding="lg" elevation={2}>
+        <div className="mb-8 flex-shrink-0">
           <Figure scale="subject" label="Net worth">{formatWholeCurrency(netWorth)}</Figure>
-        </Card>
-        <div className="grid gap-3 sm:grid-cols-2 lg:gap-4">
-          <Card padding="lg">
-            <Figure scale="lead" label="Assets">{formatWholeCurrency(assets)}</Figure>
-          </Card>
-          <Card padding="lg">
-            {/* `owed` is a NET over liabilities, so it can land either side of zero and the word
-                above it cannot be hardcoded. Individual cards in credit are not enough to flip it:
-                on this ledger three of the five cards are in credit and the net is still owed,
-                because one card outweighs all three.
-
-                  sqlite3 .mizan/mizan.db "select account_name, current_balance from accounts
-                    where is_liability=1 and is_hidden=0 and type!='closed';"
-                  -> Chase Freedom Flex -27612 · Chase Sapphire 511502 · BofA Cash Rewards -582
-                     Capital One Savor 888 · Discover -56326        sum = 427870 cents
-
-                So today this renders "Liabilities $4,278.70 / you owe the banks". The label and the
-                state sentence are computed rather than written because the sign is the one thing
-                the eye skips, and the case where it flips is real. */}
-            <Figure
-              scale="lead"
-              label={owed < 0 ? 'Card credit' : 'Liabilities'}
-              value={-owed}
-              states={{ positive: 'the banks owe you', negative: 'you owe the banks', zero: 'nothing outstanding' }}
-            >
-              {formatWholeCurrency(Math.abs(owed))}
-            </Figure>
-          </Card>
+          <p className="mt-2 text-body tabular-nums text-muted">
+            {formatWholeCurrency(assets)} held ·{' '}
+            {owed < 0 ? (
+              <span className="text-sage-deep">{formatWholeCurrency(Math.abs(owed))} card credit</span>
+            ) : owed === 0 ? (
+              'nothing owed'
+            ) : (
+              <span className="text-clay">{formatWholeCurrency(owed)} owed</span>
+            )}
+          </p>
         </div>
-      </div>
       )}
 
       {/* Whether the ledger explains these balances. Silent unless it does not, so on an ordinary
