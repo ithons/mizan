@@ -17,7 +17,7 @@ import {
 import { useAppStore } from '../store';
 import { Modal } from '../components/Modal';
 import { QueryErrorBanner } from '../components/QueryErrorBanner';
-import { Screen, SectionLabel, InkButton, TextButton, TrendChart } from '../components/balance';
+import { ExplainPanel, ExplainToggle, InkButton, Screen, SectionLabel, TextButton, TrendChart, useDisclosure } from '../components/balance';
 
 const RANGES = [
   { id: '1M', months: 1 },
@@ -252,6 +252,7 @@ export function Investments() {
   const stats = useMemo(() => getCostBasisStats(portfolioHoldings), [portfolioHoldings]);
 
   const history = report?.history ?? [];
+  const headerExplain = useDisclosure();
   const delta = getPortfolioDelta(
     marketValue,
     history,
@@ -279,8 +280,13 @@ export function Investments() {
       <QueryErrorBanner items={failableQueries} className="mb-5" />
       <div className="mb-3 flex flex-shrink-0 items-end justify-between">
         <div>
-          <h1 className="font-serif text-title font-normal leading-tight text-ink">Investments</h1>
-          <div className="mt-1 text-body text-muted">
+          <h1 className="flex items-center gap-2 font-serif text-title font-normal leading-tight text-ink">
+            Investments
+            <ExplainToggle disclosure={headerExplain} label="the portfolio figures" />
+          </h1>
+          <ExplainPanel disclosure={headerExplain}>
+          {notes.crypto && <p>{notes.crypto}</p>}
+          <p className="tabular-nums">
             {stats.unrealized != null ? (
               <>
                 Cost basis <span className="tabular-nums">{formatWholeCurrency(stats.knownCostBasis)}</span> ·{' '}
@@ -293,7 +299,8 @@ export function Investments() {
             ) : (
               `${portfolioHoldings.length} holding${portfolioHoldings.length === 1 ? '' : 's'}`
             )}
-          </div>
+          </p>
+          </ExplainPanel>
         </div>
         <div className="text-right">
           {marketValue != null && (
@@ -347,7 +354,7 @@ export function Investments() {
               not recorded when it was taken.
             </div>
           )}
-          {notes.crypto && <div className="mt-1 text-note tabular-nums text-muted-2">{notes.crypto}</div>}
+
         </div>
       </div>
 
@@ -392,13 +399,17 @@ export function Investments() {
       <div className="flex min-h-0 flex-1 flex-col gap-10 lg:flex-row lg:gap-12">
         {/* Holdings */}
         <div className="min-w-0 flex-1">
-          <SectionLabel className="mb-2">Holdings</SectionLabel>
-          {notes.uninvested && (
-            <div className="mb-2 text-note leading-relaxed tabular-nums text-muted-2">{notes.uninvested}</div>
-          )}
-          {notes.reconciliation && (
-            <div className="mb-2 text-note leading-relaxed tabular-nums text-muted-2">{notes.reconciliation}</div>
-          )}
+          <SectionLabel
+            className="mb-2"
+            explain={notes.uninvested || notes.reconciliation ? (
+              <>
+                {notes.uninvested && <p>{notes.uninvested}</p>}
+                {notes.reconciliation && <p>{notes.reconciliation}</p>}
+              </>
+            ) : undefined}
+          >
+            Holdings
+          </SectionLabel>
           {portfolioHoldings
             .filter(isLivePosition)
             .sort((a, b) => b.institution_value - a.institution_value)

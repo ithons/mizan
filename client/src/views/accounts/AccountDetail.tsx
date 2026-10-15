@@ -176,12 +176,20 @@ export function AccountDetail() {
 
       {history && (
         <div className="mb-8">
-          <SectionLabel className="mb-2">Balance over time</SectionLabel>
+          <SectionLabel
+            className="mb-2"
+            explain={origin || measurements ? (
+              <>
+                {origin && <p>{origin}</p>}
+                {measurements && <p>{measurements}</p>}
+              </>
+            ) : undefined}
+          >
+            Balance over time
+          </SectionLabel>
           {chart.length >= 2 && (
             <TrendChart history={chart} marks={marks} height={110} label={account.account_name} />
           )}
-          {origin && <div className="mt-2 text-note text-muted-2">{origin}</div>}
-          {measurements && <div className="mt-1 text-note text-muted-2">{measurements}</div>}
         </div>
       )}
 
