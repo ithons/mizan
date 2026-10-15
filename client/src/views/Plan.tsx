@@ -85,39 +85,45 @@ export function ClaimSheet({
         {formatCurrency(Math.abs(sheet.free))}
       </Figure>
 
-      <SectionLabel className="mb-2.5">What claims it</SectionLabel>
+      <SectionLabel
+        className="mb-2.5"
+        explain={
+          <>
+            {lines.filter((line) => line.note).map((line) => (
+              <p key={line.key}>
+                {line.label}: {line.note}
+              </p>
+            ))}
+            {headroom > 0 && (
+              <p>
+                {formatCurrency(headroom)} of headroom is left out. Refunds have netted a category below
+                zero, which raises what is left of its budget without raising what you set aside, and only what
+                you set aside is a claim.
+              </p>
+            )}
+          </>
+        }
+      >
+        What claims it
+      </SectionLabel>
 
-      {/* The running column is the signature of this screen and the reason the two horizons sit
-          on one surface: each line takes its bite in front of you and the last line is the figure
-          above. Set in the serif so the remainder reads in the same voice as the subject, while
-          the amount taken stays in the sans, which is the operation rather than the money. */}
-      <dl className="text-body-lg">
-        {lines.map((line, index) => {
-          running += line.delta;
-          const opening = index === 0;
-          return (
-            <div key={line.key} className="border-b border-line py-2.5 last:border-b-0">
-              <div className="flex items-baseline justify-between gap-4">
-                <dt className="min-w-0 text-ink">{line.label}</dt>
-                <dd className="flex flex-shrink-0 items-baseline gap-5 tabular-nums">
-                  <span className="text-muted">
-                    {opening ? formatCurrency(line.delta) : formatCurrency(line.delta, { showSign: true })}
-                  </span>
-                  <span className="w-[7.5rem] text-right font-serif text-ink">{formatCurrency(running)}</span>
-                </dd>
-              </div>
-              {line.note && <p className="mt-1 max-w-[46ch] text-note text-muted-2">{line.note}</p>}
-              {line.key === 'budgets' && headroom > 0 && (
-                <p className="mt-1 max-w-[46ch] text-note text-muted-2">
-                  {formatCurrency(headroom)} of headroom is left out. Refunds have netted a category
-                  below zero, which raises what is left of its budget without raising what you set
-                  aside, and only what you set aside is a claim.
-                </p>
-              )}
-            </div>
-          );
-        })}
-      </dl>
+      <table className="w-full text-body">
+        <tbody>
+          {lines.map((line, index) => {
+            running += line.delta;
+            const opening = index === 0;
+            return (
+              <tr key={line.key} className="border-b border-line last:border-b-0">
+                <th scope="row" className="py-1.5 pr-4 text-left font-normal text-ink">{line.label}</th>
+                <td className="py-1.5 pr-5 text-right tabular-nums text-muted">
+                  {opening ? formatCurrency(line.delta) : formatCurrency(line.delta, { showSign: true })}
+                </td>
+                <td className="w-[7.5rem] py-1.5 text-right font-serif tabular-nums text-ink">{formatCurrency(running)}</td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
 
       {/* Single rule above the result, double rule under it: the sheet says where it ends the way
           a statement does, so nothing below can be mistaken for another term of the sum. */}
