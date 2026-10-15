@@ -36,3 +36,15 @@ test('the change since a snapshot is what the market did, with deposits named ap
   assert.equal(delta.change, 3, '$203 of change was $200 the owner put in');
   assert.equal(getPortfolioDelta(3716, history, 3)?.change, 203, 'with no flows known, nothing is subtracted');
 });
+
+test('a crypto wallet counts its buys and sells as the money in and out, and holds deposits flat', () => {
+  const db = migratedTestDb();
+  const coinbase = insertAccount(db, { type: 'crypto_wallet' });
+  insertTransaction(db, { account_id: coinbase, date: '2026-09-02', amount: 5000, original_name: 'Coinbase deposit', category_id: 'cat_xfer_in' });
+  insertTransaction(db, { account_id: coinbase, date: '2026-09-02', amount: -5000, original_name: 'Buy BTC', category_id: 'cat_crypto_buy' });
+  insertTransaction(db, { account_id: coinbase, date: '2026-09-20', amount: 1200, original_name: 'Sell ETH', category_id: 'cat_crypto_sell' });
+  assert.deepEqual(portfolioExternalFlows(db, [coinbase]), [
+    { date: '2026-09-02', amount: 5000 },
+    { date: '2026-09-20', amount: -1200 },
+  ]);
+});

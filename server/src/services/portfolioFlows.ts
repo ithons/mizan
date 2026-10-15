@@ -7,8 +7,10 @@ export interface PortfolioFlow {
 }
 
 /**
- * Money the owner moved into or out of the portfolio accounts, by day. A trade inside an account
- * moves nothing; a transfer between two portfolio accounts nets to zero across the day.
+ * Money the owner moved into or out of the portfolio accounts, by day, by the same convention the
+ * snapshot backfill reverses history with: on a brokerage or IRA it is the transfers (a trade inside
+ * the account moves nothing); on a crypto wallet it is the buys and sells, with fiat deposits held
+ * flat, because a buy is how money enters a wallet that was never sent a deposit.
  */
 export function portfolioExternalFlows(db: Database.Database, accountIds: readonly string[]): PortfolioFlow[] {
   if (accountIds.length === 0) return [];
@@ -18,18 +20,33 @@ export function portfolioExternalFlows(db: Database.Database, accountIds: readon
       UNION ALL
       SELECT c.id FROM categories c JOIN transfer_categories t ON c.parent_id = t.id
     )
-    SELECT t.date, SUM(t.amount) AS amount
+    SELECT t.date,
+           SUM(CASE
+             WHEN a.type = 'crypto_wallet' AND t.category_id = 'cat_crypto_buy' THEN ABS(t.amount)
+             WHEN a.type = 'crypto_wallet' AND t.category_id = 'cat_crypto_sell' THEN -ABS(t.amount)
+             WHEN a.type = 'crypto_wallet' THEN 0
+             ELSE t.amount
+           END) AS amount
     FROM transactions t
+    JOIN accounts a ON a.id = t.account_id
     WHERE t.account_id IN (${accountIds.map(() => '?').join(',')})
       AND t.pending = 0
       AND t.is_internal_trade = 0
       AND COALESCE(t.duplicate_status, 'none') <> 'confirmed'
       AND (
-        t.transfer_status IN ('candidate', 'confirmed')
-        OR COALESCE(t.category_id, '') IN (SELECT id FROM transfer_categories)
+        (a.type = 'crypto_wallet' AND t.category_id IN ('cat_crypto_buy', 'cat_crypto_sell'))
+        OR (a.type <> 'crypto_wallet' AND (
+          t.transfer_status IN ('candidate', 'confirmed')
+          OR COALESCE(t.category_id, '') IN (SELECT id FROM transfer_categories)
+        ))
       )
     GROUP BY t.date
-    HAVING SUM(t.amount) <> 0
+    HAVING SUM(CASE
+             WHEN a.type = 'crypto_wallet' AND t.category_id = 'cat_crypto_buy' THEN ABS(t.amount)
+             WHEN a.type = 'crypto_wallet' AND t.category_id = 'cat_crypto_sell' THEN -ABS(t.amount)
+             WHEN a.type = 'crypto_wallet' THEN 0
+             ELSE t.amount
+           END) <> 0
     ORDER BY t.date ASC
   `).all(...accountIds) as PortfolioFlow[];
 }
