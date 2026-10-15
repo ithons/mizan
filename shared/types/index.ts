@@ -128,6 +128,10 @@ export interface Transaction {
   /** The purchase this credit reverses; it counts in that purchase's period. */
   refund_of_id?: string | null;
   refund_link_source?: 'auto' | 'owner' | 'rejected' | null;
+  /** Joined: the account on the other side of a paired transfer. */
+  transfer_counterparty_name?: string | null;
+  /** Joined: the date of the purchase this refund reverses. */
+  refund_of_date?: string | null;
   review_status: 'open' | 'reviewed' | 'dismissed';
   /**
    * Who decided this row's category (migration 041). NULL means the category was set before

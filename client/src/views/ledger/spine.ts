@@ -227,6 +227,38 @@ export function buildSpine(
   };
 }
 
+export interface FoldedLedger {
+  rows: Transaction[];
+  /** Brokerage trades left off the list, which move no money in or out. */
+  hiddenTrades: number;
+}
+
+/**
+ * The list as the owner reads it: a transfer whose two legs are both on screen is one row (the
+ * leg that left), and trades inside a brokerage are left off unless asked for.
+ */
+export function foldLedgerRows(transactions: Transaction[], showTrades: boolean): FoldedLedger {
+  const leaving = new Set(
+    transactions.filter((t) => t.transfer_pair_id && t.amount < 0).map((t) => t.transfer_pair_id as string)
+  );
+  let hiddenTrades = 0;
+  const rows = transactions.filter((t) => {
+    if (t.is_internal_trade && !showTrades) {
+      hiddenTrades++;
+      return false;
+    }
+    return !(t.transfer_pair_id && t.amount > 0 && leaving.has(t.transfer_pair_id));
+  });
+  return { rows, hiddenTrades };
+}
+
+/** "Chase Checking → Fidelity Individual" for a paired leg, the bare account otherwise. */
+export function accountLine(t: Pick<Transaction, 'account_name' | 'amount' | 'transfer_counterparty_name'>): string {
+  const own = t.account_name ?? '';
+  if (!t.transfer_counterparty_name) return own;
+  return t.amount < 0 ? `${own} → ${t.transfer_counterparty_name}` : `${t.transfer_counterparty_name} → ${own}`;
+}
+
 // ─── Drafts on the rows they are about ────────────────────────────────────────
 
 /**

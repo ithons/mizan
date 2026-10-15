@@ -36,6 +36,7 @@ import {
   SCHEDULE_STATES,
   PROVENANCE_FILTER_OPTIONS,
   buildSpine,
+  foldLedgerRows,
   createLedgerRowActions,
   readBatchControl,
   readBatchOutcomes,
@@ -227,7 +228,9 @@ export function Ledger() {
   // The scheduled half belongs to the whole ledger, not to a worklist: with a chip on, this
   // screen is a queue and a forecast in it is noise.
   const occurrences = filter === 'all' ? forecastQ.data?.occurrences ?? [] : [];
-  const spine = useMemo(() => buildSpine(transactions, occurrences, today), [transactions, occurrences, today]);
+  const [showTrades, setShowTrades] = useState(false);
+  const folded = useMemo(() => foldLedgerRows(transactions, showTrades), [transactions, showTrades]);
+  const spine = useMemo(() => buildSpine(folded.rows, occurrences, today), [folded.rows, occurrences, today]);
   const schedule = useMemo(
     () => readSchedule(forecastQ.data, patternsQ.data ?? []),
     [forecastQ.data, patternsQ.data]
@@ -254,8 +257,8 @@ export function Ledger() {
 
   // Rows on screen that carry a proposal, in render order. The keyboard cursor walks exactly this.
   const suggestedOnScreen = useMemo(
-    () => transactions.filter((t) => drafts.byTransaction.has(t.id)).map((t) => t.id),
-    [transactions, drafts.byTransaction]
+    () => folded.rows.filter((t) => drafts.byTransaction.has(t.id)).map((t) => t.id),
+    [folded.rows, drafts.byTransaction]
   );
   useEffect(() => setCursor(0), [suggestedOnScreen.length]);
 
@@ -832,6 +835,16 @@ export function Ledger() {
             })}
           </div>
         ))}
+
+        {(folded.hiddenTrades > 0 || showTrades) && (
+          <div className="flex justify-center pt-4">
+            <TextButton onClick={() => setShowTrades((shown) => !shown)}>
+              {showTrades
+                ? 'Hide brokerage trades'
+                : `${folded.hiddenTrades} brokerage ${folded.hiddenTrades === 1 ? 'trade' : 'trades'} hidden · show`}
+            </TextButton>
+          </div>
+        )}
 
         {hasNextPage && (
           <div className="flex justify-center py-6">

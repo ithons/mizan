@@ -117,6 +117,14 @@ export function expandCategoryIds(db: Database.Database, categoryIds: string[]):
  * to TEXT. The text form is not stable across the boundary: better-sqlite3 binds a JS number as a
  * float, so `CAST(? AS TEXT)` on 10000 is '10000.0' and would silently match nothing.
  */
+// The other side of a paired transfer, and the purchase a refund reverses, as the row reads them.
+const LINKED_ROW_SQL = `
+  (SELECT pa.account_name FROM transactions pt JOIN accounts pa ON pa.id = pt.account_id
+    WHERE t.transfer_pair_id IS NOT NULL AND pt.transfer_pair_id = t.transfer_pair_id AND pt.id <> t.id
+    LIMIT 1) AS transfer_counterparty_name,
+  (SELECT p.date FROM transactions p WHERE p.id = t.refund_of_id) AS refund_of_date,
+`;
+
 const PROVIDER_AMOUNT_SQL = `
       CASE WHEN t.amount_source = 'human' THEN (
         SELECT CAST(r.to_value AS INTEGER)
@@ -255,6 +263,7 @@ export function listTransactions(db: Database.Database, filters: TransactionList
       c.is_income AS category_is_income,
       a.account_name,
       a.institution_name,
+      ${LINKED_ROW_SQL}
       ${PROVIDER_AMOUNT_SQL}
     FROM transactions t
     LEFT JOIN categories c ON c.id = t.category_id
@@ -279,6 +288,7 @@ export function getTransactionById(db: Database.Database, id: string): Record<st
       c.is_income AS category_is_income,
       a.account_name,
       a.institution_name,
+      ${LINKED_ROW_SQL}
       ${PROVIDER_AMOUNT_SQL}
     FROM transactions t
     LEFT JOIN categories c ON c.id = t.category_id

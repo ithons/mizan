@@ -2,9 +2,11 @@ import { memo } from 'react';
 import type { RecurringForecastOccurrence } from '@shared/types';
 import { formatCurrency } from '../../lib/formatters';
 import { CategoryPicker, CategoryPill } from '../../components/balance';
+import { format, parseISO } from 'date-fns';
 import {
   FLAG_LABEL,
   PROVENANCE_LABEL,
+  accountLine,
   isSetAside,
   occurrenceAmount,
   occurrenceMeta,
@@ -176,7 +178,10 @@ export function LedgerRowInner({
             {/* The account sits here, not in a column, because the scheduled half has no account
                 to put beside it: a recurring pattern is a merchant and a cadence, and which
                 account it lands in is not known until it posts. */}
-            <span className="truncate text-note text-muted-2">{transaction.account_name}</span>
+            <span className="truncate text-note text-muted-2">{accountLine(transaction)}</span>
+            {transaction.refund_of_date && (
+              <Mark>{`refund of ${format(parseISO(transaction.refund_of_date), 'MMM d')}`}</Mark>
+            )}
             {mark && <Mark>{PROVENANCE_LABEL[mark]}</Mark>}
             {direction === 'credit' && <Mark>credit</Mark>}
             {/* Said on the row because the figure beside it is not the one the institution sent,

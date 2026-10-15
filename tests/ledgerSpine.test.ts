@@ -12,6 +12,8 @@ import { readState } from '../client/src/components/balance/Figure';
 import {
   MAX_SUGGESTED_IDS,
   SCHEDULE_STATES,
+  accountLine,
+  foldLedgerRows,
   buildSpine,
   createLedgerRowActions,
   filterChips,
@@ -451,4 +453,23 @@ test('the id filter has a stated ceiling rather than a silent one', () => {
   // The server refuses more than this many ids. The view slices to it and says that it did, so a
   // long queue is never shown as a short one.
   assert.equal(MAX_SUGGESTED_IDS, 200);
+});
+
+test('a transfer with both legs on screen is one row, read from the leg that left', () => {
+  const leg = (id: string, amount: number, account: string, counterparty: string) => ({
+    id, amount, account_name: account, transfer_counterparty_name: counterparty, transfer_pair_id: 'xfer_1',
+    date: '2026-10-05', is_internal_trade: false,
+  }) as unknown as Transaction;
+  const out = leg('out', -10000, 'Chase Checking', 'Fidelity Individual');
+  const into = leg('in', 10000, 'Fidelity Individual', 'Chase Checking');
+  const trade = { ...leg('trade', -10000, 'Fidelity Individual', ''), transfer_pair_id: null, transfer_counterparty_name: null, is_internal_trade: true } as unknown as Transaction;
+
+  const folded = foldLedgerRows([out, into, trade], false);
+  assert.deepEqual(folded.rows.map((t) => t.id), ['out']);
+  assert.equal(folded.hiddenTrades, 1);
+  assert.equal(accountLine(out), 'Chase Checking → Fidelity Individual');
+
+  assert.deepEqual(foldLedgerRows([into], false).rows.map((t) => t.id), ['in'], 'a lone leg still shows');
+  assert.equal(accountLine(into), 'Chase Checking → Fidelity Individual');
+  assert.deepEqual(foldLedgerRows([out, into, trade], true).rows.map((t) => t.id), ['out', 'trade']);
 });
