@@ -24,7 +24,6 @@
  *                           an always-logged-in single-owner app has no moment where a welcome is
  *                           the thing to show. What it read is a status, not a welcome, and a
  *                           status is asked more than once: a connection can lapse in month six.
- *   /advisor                deleted, not moved. See `AdvisorRedirect`.
  */
 export interface LegacyTarget {
   from: string;

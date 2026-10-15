@@ -7,12 +7,13 @@ import { AI_PROVIDER_IDS, type AiProviderId, type ChatStreamEvent } from '../ser
 import { buildAdvisorContextSnapshot, ADVISOR_SYSTEM_PROMPT, ADVISOR_PROFILE_PREFERENCE_KEY } from '../services/aiContext';
 import { getPreference, setPreference } from '../services/preferences';
 import {
+  appendMessages,
   buildChatTurns,
   createConversation,
-  listConversations,
-  getConversation,
-  appendMessages,
   deleteConversation,
+  getConversation,
+  listConversations,
+  renameConversation,
   type ConversationMessage,
 } from '../services/conversations';
 import {
@@ -146,6 +147,25 @@ router.post('/conversations/:id/messages', (req: Request, res: Response, next: N
     }
     const result = appendMessages(getDb(), id, msgs);
     if (!result.ok) {
+      res.status(404).json({ error: 'Conversation not found' });
+      return;
+    }
+    res.json({ data: { success: true } });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// PATCH /api/ai/conversations/:id - rename
+router.patch('/conversations/:id', (req: Request, res: Response, next: NextFunction): void => {
+  try {
+    const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+    const title = typeof req.body?.title === 'string' ? req.body.title.trim() : '';
+    if (!title) {
+      res.status(400).json({ error: 'A title is required' });
+      return;
+    }
+    if (renameConversation(getDb(), id, title).changed === 0) {
       res.status(404).json({ error: 'Conversation not found' });
       return;
     }

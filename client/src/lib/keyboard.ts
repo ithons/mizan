@@ -92,6 +92,7 @@ export const SHORTCUTS = [
   { id: 'nav.accounts', chord: 'g a', layer: 'app', focus: 'not-typing', describes: 'Go to Accounts' },
   { id: 'nav.investments', chord: 'g i', layer: 'app', focus: 'not-typing', describes: 'Go to Investments' },
   { id: 'nav.plan', chord: 'g p', layer: 'app', focus: 'not-typing', describes: 'Go to Plan' },
+  { id: 'nav.advisor', chord: 'g v', layer: 'app', focus: 'not-typing', describes: 'Go to Advisor' },
   { id: 'nav.settings', chord: 'g s', layer: 'app', focus: 'not-typing', describes: 'Go to Settings' },
   {
     id: 'ledger.nextSuggestion',

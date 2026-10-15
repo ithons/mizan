@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, type ReactNode } from 'react';
+import { lazy, Suspense, type ReactNode } from 'react';
 import { Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { Layout } from './components/Layout';
 import { ToastContainer } from './components/Toast';
@@ -11,6 +11,7 @@ const Accounts = lazy(() => import('./views/accounts/Accounts').then((module) =>
 const AccountDetail = lazy(() => import('./views/accounts/AccountDetail').then((module) => ({ default: module.AccountDetail })));
 const Investments = lazy(() => import('./views/Investments').then((module) => ({ default: module.Investments })));
 const Plan = lazy(() => import('./views/Plan').then((module) => ({ default: module.Plan })));
+const Advisor = lazy(() => import('./views/Advisor'));
 const Settings = lazy(() => import('./views/settings/Settings').then((module) => ({ default: module.Settings })));
 const NotFound = lazy(() => import('./views/NotFound').then((module) => ({ default: module.NotFound })));
 
@@ -46,19 +47,6 @@ function LegacyRedirect({ target }: { target: LegacyTarget }) {
   return <Navigate to={legacyDestination(target, search)} replace />;
 }
 
-/**
- * `/advisor` is deleted, and this is where its bookmark goes.
- *
- * The conversation moved into ⌘K, which is a sheet over the current screen rather than a screen of
- * its own, so there is no path to send this to. It goes to `/` and opens the sheet, which is both
- * the honest destination and the one arrival that teaches where the advisor now lives.
- */
-function AdvisorRedirect() {
-  useEffect(() => {
-    window.dispatchEvent(new Event('mizan:open-palette'));
-  }, []);
-  return <Navigate to="/" replace />;
-}
 
 function AppRoutes() {
   useSyncStatus();
@@ -78,7 +66,7 @@ function AppRoutes() {
           {LEGACY_TARGETS.map((legacy) => (
             <Route key={legacy.from} path={legacy.from} element={<LegacyRedirect target={legacy} />} />
           ))}
-          <Route path="/advisor" element={<AdvisorRedirect />} />
+          <Route path="/advisor" element={lazyView(<Advisor />)} />
 
           <Route path="*" element={lazyView(<NotFound />)} />
         </Route>

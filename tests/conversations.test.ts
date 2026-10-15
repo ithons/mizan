@@ -14,6 +14,7 @@ import {
   getConversation,
   appendMessages,
   deleteConversation,
+  renameConversation,
 } from '../server/src/services/conversations';
 
 const setup = migratedTestDb;
@@ -339,4 +340,12 @@ test('deleting a conversation cascades its messages', (t) => {
   assert.equal(getConversation(db, id), null);
   const remaining = db.prepare('SELECT COUNT(*) AS n FROM messages').get() as { n: number };
   assert.equal(remaining.n, 0);
+});
+
+test('a conversation can be renamed, and only a real one', () => {
+  const db = migratedTestDb();
+  const { id } = createConversation(db, 'why is october negative?');
+  assert.deepEqual(renameConversation(db, id, '  October   check  '), { changed: 1 });
+  assert.equal(getConversation(db, id)?.title, 'October check');
+  assert.deepEqual(renameConversation(db, 'missing', 'x'), { changed: 0 });
 });

@@ -92,11 +92,11 @@ describe('the grounds a money numeral lands on in the sheet', () => {
    *   card-alt   the conversation history menu
    *   rail       the owner's own message, and a code span inside the model's answer
    *   ink        the two filled buttons, which carry `text-paper` and no figure
-   *   ink/10     the scrim, which carries nothing and is light enough to read the screen through
+   *   ink/45     the scrim, which carries nothing and is heavy enough that the screen recedes
    *   sage       the 7px caret and composer mark, which carry no text at all
    */
   const GROUNDS = new Set([
-    'card', 'card-alt', 'well', 'well/60', 'rail', 'ink', 'ink/10', 'sage', 'transparent',
+    'card', 'card-alt', 'well', 'well/60', 'rail', 'ink', 'ink/45', 'sage', 'transparent',
   ]);
 
   test('the sheet paints no fill that has not been measured', () => {
@@ -179,9 +179,9 @@ describe('the sheet is a sheet', () => {
     assert.equal((CSS.match(/--mz-rail-w:/g) ?? []).length, 1);
   });
 
-  test('the screen behind stays readable, which is the whole argument for a sheet', () => {
-    assert.match(palette, /bg-ink\/10/);
-    assert.ok(!palette.includes('backdrop-blur'), 'the sheet blurs the data it claims to sit beside');
+  // The owner reported the page reading through the sheet: the scrim now takes the screen back.
+  test('the screen behind recedes while the sheet is open', () => {
+    assert.match(palette, /bg-ink\/45 backdrop-blur-sm/);
   });
 
   /**

@@ -51,6 +51,7 @@ export const NAV_ITEMS: readonly NavItem[] = [
   { to: '/accounts', label: 'Accounts', shortcut: 'nav.accounts' },
   { to: '/investments', label: 'Investments', shortcut: 'nav.investments' },
   { to: '/plan', label: 'Plan', shortcut: 'nav.plan' },
+  { to: '/advisor', label: 'Advisor', shortcut: 'nav.advisor' },
 ];
 
 export const SETTINGS_ITEM: NavItem = { to: '/settings', label: 'Settings', shortcut: 'nav.settings' };

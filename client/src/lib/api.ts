@@ -952,6 +952,11 @@ export const aiApi = {
       method: 'POST',
       body: JSON.stringify({ messages }),
     }),
+  renameConversation: (id: string, title: string) =>
+    apiFetch<{ success: boolean }>(`/api/ai/conversations/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ title }),
+    }),
   deleteConversation: (id: string) =>
     apiFetch<{ success: boolean }>(`/api/ai/conversations/${id}`, { method: 'DELETE' }),
   analyze: (question: string, signal?: AbortSignal) =>

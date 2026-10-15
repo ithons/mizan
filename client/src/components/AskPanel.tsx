@@ -159,11 +159,17 @@ export function AskPanel({
   chat,
   draft,
   onDraftChange,
+  showHistory = true,
+  onExpand,
 }: {
   chat: AiChat;
   /** The composer's text, held by the sheet so a question typed into search survives the handoff. */
   draft: string;
   onDraftChange: (text: string) => void;
+  /** The Advisor page lists conversations itself. */
+  showHistory?: boolean;
+  /** Offered from ⌘K: the same conversation, on its own page. */
+  onExpand?: () => void;
 }) {
   const qc = useQueryClient();
   const { addToast } = useAppStore();
@@ -259,7 +265,10 @@ export function AskPanel({
           onChange={(e) => onDraftChange(e.target.value)}
         />
         <div className="flex flex-shrink-0 items-center gap-4">
-          {messages.length > 0 && <ConversationHistory activeId={conversationId} onSelect={loadConversation} />}
+          {onExpand && <TextButton onClick={onExpand}>Open in Advisor</TextButton>}
+          {showHistory && messages.length > 0 && (
+            <ConversationHistory activeId={conversationId} onSelect={loadConversation} />
+          )}
           {messages.length > 0 && !isStreaming && <TextButton onClick={clearChat}>New</TextButton>}
           {isStreaming ? (
             <TextButton onClick={stopStreaming}>Stop</TextButton>

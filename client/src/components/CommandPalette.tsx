@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Loader2, Sparkles, ArrowRight, CornerDownLeft, ChevronLeft } from 'lucide-react';
 import { aiApi, settingsApi, syncApi } from '../lib/api';
 import { formatCurrency, formatDateShort, formatRelativeTime } from '../lib/formatters';
-import { useAiChat } from '../hooks/useAiChat';
+import { useAdvisorChat } from '../hooks/advisorChat';
 import { ASK_EVENT, isAdvisorAsk } from '../lib/askAdvisor';
 import { chordOf, useOverlay, useShortcuts } from '../lib/keyboard';
 import { useAppStore } from '../store';
@@ -346,6 +346,7 @@ export function CommandPalette() {
   const inputRef = useRef<HTMLInputElement>(null);
   const sheetRef = useRef<HTMLDivElement>(null);
   const navigate = useNavigate();
+  const { pathname } = useLocation();
   const { addToast } = useAppStore();
   const qc = useQueryClient();
 
@@ -357,7 +358,7 @@ export function CommandPalette() {
    * the exact gesture the sheet exists to support. At this level it survives, and the cost is one
    * conversation fetch on load when `localStorage` holds an active thread.
    */
-  const chat = useAiChat();
+  const chat = useAdvisorChat();
 
   useEffect(() => {
     const handler = setTimeout(() => setDebouncedQuery(query), 400);
@@ -669,7 +670,7 @@ export function CommandPalette() {
     <>
       {/* No blur and a light scrim. The sheet's whole claim is that the answer arrives beside the
           data it is about, and a screen you cannot read behind it is a screen you have left. */}
-      <div className="fixed inset-0 z-50 bg-ink/10 transition-opacity" onClick={() => setOpen(false)} />
+      <div className="fixed inset-0 z-50 bg-ink/45 backdrop-blur-sm transition-opacity" onClick={() => setOpen(false)} />
       <div className="pointer-events-none fixed inset-x-0 bottom-0 z-50 flex justify-center pb-5 pl-6 pr-[calc(var(--mz-rail-w)+24px)]">
         <div
           ref={sheetRef}
@@ -683,7 +684,14 @@ export function CommandPalette() {
           style={{ maxHeight: mode === 'search' ? '52vh' : '74vh' }}
         >
           {mode === 'search' && search}
-          {mode === 'ask' && <AskPanel chat={chat} draft={query} onDraftChange={setQuery} />}
+          {mode === 'ask' && (
+            <AskPanel
+              chat={chat}
+              draft={query}
+              onDraftChange={setQuery}
+              onExpand={pathname === '/advisor' ? undefined : () => { setOpen(false); navigate('/advisor'); }}
+            />
+          )}
           {mode === 'digest' && <AiDigestPanel onBack={() => setMode('search')} />}
         </div>
       </div>

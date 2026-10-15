@@ -136,6 +136,12 @@ export function buildChatTurns(db: Database.Database, request: ChatTurnRequest):
   return { ok: true, messages, history_source: 'request' };
 }
 
+export function renameConversation(db: Database.Database, id: string, title: string): { changed: number } {
+  const result = db.prepare('UPDATE conversations SET title = ? WHERE id = ?')
+    .run(title.replace(/\s+/g, ' ').trim().slice(0, 200), id);
+  return { changed: result.changes };
+}
+
 export function deleteConversation(db: Database.Database, id: string): { changed: number } {
   const result = db.prepare('DELETE FROM conversations WHERE id = ?').run(id);
   return { changed: result.changes };

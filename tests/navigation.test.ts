@@ -44,11 +44,11 @@ function railMarkup(path: string): string {
   );
 }
 
-test('there are six destinations and they are six single words', () => {
-  assert.equal(ALL_NAV_ITEMS.length, 6);
+test('there are seven destinations and they are seven single words', () => {
+  assert.equal(ALL_NAV_ITEMS.length, 7);
   assert.deepEqual(
     ALL_NAV_ITEMS.map((i) => i.label),
-    ['Balance', 'Ledger', 'Accounts', 'Investments', 'Plan', 'Settings']
+    ['Balance', 'Ledger', 'Accounts', 'Investments', 'Plan', 'Advisor', 'Settings']
   );
   for (const item of ALL_NAV_ITEMS) {
     assert.ok(!item.label.includes(' '), `${item.label} is not one word`);
@@ -217,12 +217,12 @@ test('the rail holds no keyboard listener of its own', () => {
   assert.match(RAIL_SOURCE, /useShortcuts\('nav-rail'/);
 });
 
-test('every chord letter is distinct and is the first letter of its destination', () => {
+test('every chord letter is distinct and is a letter of its destination', () => {
   const chords = ALL_NAV_ITEMS.map((i) => chordOf(i.shortcut));
   assert.equal(new Set(chords).size, chords.length, 'two destinations share a chord letter');
   for (const item of ALL_NAV_ITEMS) {
     const letter = chordOf(item.shortcut).slice(2);
-    assert.equal(letter, item.label[0].toLowerCase(), `${item.label} does not start with ${letter}`);
+    assert.ok(item.label.toLowerCase().includes(letter), `${item.label} has no ${letter} in it`);
   }
 });
 

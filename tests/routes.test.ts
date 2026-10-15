@@ -26,25 +26,25 @@ const OLD_PATHS = [
   '/reports', '/advisor', '/settings',
 ];
 
-test('the router mounts exactly six screens plus the account detail beneath one of them', () => {
+test('the router mounts exactly seven screens plus the account detail beneath one of them', () => {
   const screens = [...MOUNTED].filter(
-    (p) => !LEGACY_TARGETS.some((l) => l.from === p) && p !== '/advisor' && p !== '/accounts/:id'
+    (p) => !LEGACY_TARGETS.some((l) => l.from === p) && p !== '/accounts/:id'
   );
   assert.deepEqual(
     screens.sort(),
-    ['/', '/accounts', '/investments', '/ledger', '/plan', '/settings']
+    ['/', '/accounts', '/advisor', '/investments', '/ledger', '/plan', '/settings']
   );
   assert.deepEqual(
     ALL_NAV_ITEMS.map((i) => i.to).sort(),
     screens.sort(),
-    'the nav and the router disagree about what the six screens are'
+    'the nav and the router disagree about what the screens are'
   );
 });
 
 test('every path that used to exist still resolves', () => {
   for (const old of OLD_PATHS) {
     const stillMounted = MOUNTED.has(old);
-    const redirected = LEGACY_TARGETS.some((l) => l.from === old) || old === '/advisor';
+    const redirected = LEGACY_TARGETS.some((l) => l.from === old);
     assert.ok(stillMounted || redirected, `${old} resolves to nothing`);
   }
 });
@@ -103,13 +103,6 @@ test('there is a catch-all, so a typo is not a blank page', () => {
   assert.match(APP, /path="\*"/);
 });
 
-/**
- * The advisor tab is deleted rather than moved, so its bookmark has no path to go to: the
- * conversation is a sheet over whatever screen you are on. It lands on `/` and opens the sheet.
- */
-test('/advisor opens the sheet instead of resolving to a screen', () => {
-  assert.ok(!MOUNTED.has('/ledger?uncategorized=1'));
-  assert.match(APP, /path="\/advisor" element=\{<AdvisorRedirect \/>\}/);
-  assert.match(APP, /mizan:open-palette/);
-  assert.ok(!/const Advisor = lazy/.test(APP), 'the advisor view is still imported');
+test('/advisor is the advisor\'s own screen', () => {
+  assert.match(APP, /path="\/advisor" element=\{lazyView\(<Advisor \/>\)\}/);
 });
