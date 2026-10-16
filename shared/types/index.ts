@@ -1464,6 +1464,8 @@ export interface SafeToSpend {
   recurring_transfers: number;
   /** Scheduled payments to a card from accounts outside the pool, up to what each card owes. */
   card_relief: number;
+  /** Budgets of the months after this one that the window reaches, prorated by day. */
+  budgets_ahead: number;
   /** Spending in unbudgeted categories at the pace of the last unbudgeted_basis_days. */
   estimated_unbudgeted: number;
   unbudgeted_basis_days: number;

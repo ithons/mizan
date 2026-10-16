@@ -64,7 +64,7 @@ test('a budget allocation is capped at what was actually budgeted', () => {
     budgets: [{ amount: 50000, rollover_balance: 0, projected_remaining: 170363 }],
   });
   assert.equal(result.allocatedBudgets, 50000);
-  assert.equal(result.free, 100000 - 50000);
+  assert.equal(result.free, 100000 - 50000 - result.budgetsAhead);
   db.close();
 });
 

@@ -72,6 +72,8 @@ export interface SafeToSpendBreakdown {
   /** Money already earmarked against savings goals. */
   allocatedGoals: number;
   /** Signed. Negative means the claims exceed the pool. */
+  /** Budgets of the months after this one that fall inside the window, prorated by day. */
+  budgetsAhead: number;
   free: number;
   forecastDays: number;
   /** Every dated scheduled item behind inflows, bills, transfers and card relief, as its effect on free, in cents. */
@@ -81,7 +83,7 @@ export interface SafeToSpendBreakdown {
 export interface ScheduledEffect {
   date: string;
   cents: number;
-  kind: 'income' | 'bill' | 'transfer' | 'card_relief';
+  kind: 'income' | 'bill' | 'transfer' | 'card_relief' | 'budget';
   label: string;
   patternId: string;
 }
@@ -133,6 +135,8 @@ export function computeSafeToSpend(
   const cards = new Set((db.prepare('SELECT id FROM accounts WHERE is_liability = 1').all() as Array<{ id: string }>).map((row) => row.id));
   const { transfers: recurringTransfers, cardRelief, effects: transferEffects } = transfersAcrossPool(forecast.occurrences, pool, cards, owed);
   const estimatedUnbudgeted = unbudgetedPace(db, inputs.budgets ?? [], forecastDays);
+  const budgetAheadEffects = budgetsAfterThisMonth(inputs.budgets ?? [], forecastDays);
+  const budgetsAhead = budgetAheadEffects.reduce((sum, item) => sum - item.cents, 0);
 
   // Clamped to what was actually budgeted. Now that refunds net a category's spend down,
   // `projected_remaining` can legitimately EXCEED the budget: July's Shopping budget is $500 while
@@ -196,10 +200,11 @@ export function computeSafeToSpend(
     unbudgetedBasisDays: UNBUDGETED_BASIS_DAYS,
     allocatedBudgets,
     allocatedGoals,
+    budgetsAhead,
     free: liquid + expectedInflows + cardRelief - cardBalances - upcomingBills - recurringTransfers
-      - allocatedBudgets - estimatedUnbudgeted - allocatedGoals,
+      - allocatedBudgets - budgetsAhead - estimatedUnbudgeted - allocatedGoals,
     forecastDays,
-    scheduled: [...incomeEffects, ...billEffects(forecast.occurrences), ...transferEffects]
+    scheduled: [...incomeEffects, ...billEffects(forecast.occurrences), ...transferEffects, ...budgetAheadEffects]
       .sort((a, b) => a.date.localeCompare(b.date) || a.label.localeCompare(b.label)),
   };
 }
@@ -286,6 +291,33 @@ function transfersAcrossPool(
   return { transfers, cardRelief: [...relieved.values()].reduce((sum, value) => sum + value, 0), effects };
 }
 
+/**
+ * Each later month's budgets, for the days of that month the window reaches, spread evenly over
+ * those days. Budgeted categories are left out of the unbudgeted pace, so without this their
+ * spending after this month ends would be claimed nowhere.
+ */
+function budgetsAfterThisMonth(
+  budgets: ReadonlyArray<{ amount?: number | null }>,
+  forecastDays: number,
+  today = new Date()
+): ScheduledEffect[] {
+  const monthly = budgets.reduce((sum, budget) => sum + Math.max(0, budget.amount ?? 0), 0);
+  if (monthly <= 0) return [];
+  const effects: ScheduledEffect[] = [];
+  const cursor = new Date(today.getFullYear(), today.getMonth() + 1, 1);
+  const end = new Date(today.getFullYear(), today.getMonth(), today.getDate() + forecastDays);
+  let carried = 0;
+  for (; cursor <= end; cursor.setDate(cursor.getDate() + 1)) {
+    const daysInMonth = new Date(cursor.getFullYear(), cursor.getMonth() + 1, 0).getDate();
+    const exact = monthly / daysInMonth + carried;
+    const cents = Math.round(exact);
+    carried = exact - cents;
+    const date = `${cursor.getFullYear()}-${String(cursor.getMonth() + 1).padStart(2, '0')}-${String(cursor.getDate()).padStart(2, '0')}`;
+    effects.push({ date, cents: -cents, kind: 'budget', label: 'Budgets', patternId: 'budgets' });
+  }
+  return effects;
+}
+
 export const UNBUDGETED_BASIS_DAYS = 90;
 
 /**
@@ -359,6 +391,7 @@ export function readSafeToSpend(db: Database.Database, forecastDays?: number) {
     unbudgeted_basis_days: breakdown.unbudgetedBasisDays,
     allocated_budgets: toDollars(breakdown.allocatedBudgets),
     allocated_goals: toDollars(breakdown.allocatedGoals),
+    budgets_ahead: toDollars(breakdown.budgetsAhead),
     free: toDollars(breakdown.free),
     forecast_days: breakdown.forecastDays,
   };

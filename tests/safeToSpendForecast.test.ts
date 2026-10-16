@@ -55,7 +55,7 @@ test('expected pay comes in, the weekly brokerage transfer goes out, and money b
     assert.equal(
       sheet.free,
       sheet.liquid + sheet.expectedInflows - sheet.cardBalances - sheet.upcomingBills - sheet.recurringTransfers
-        - sheet.allocatedBudgets - sheet.estimatedUnbudgeted - sheet.allocatedGoals
+        - sheet.allocatedBudgets - sheet.budgetsAhead - sheet.estimatedUnbudgeted - sheet.allocatedGoals
     );
   });
 });

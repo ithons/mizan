@@ -42,7 +42,7 @@ test('the dated schedule adds up to exactly what free to spend adds and subtract
     const sheet = computeSafeToSpend(db, { forecastDays: 30 });
     assert.ok(sheet.scheduled.length > 0);
     const total = sheet.scheduled.reduce((sum, item) => sum + item.cents, 0);
-    assert.equal(total, sheet.expectedInflows + sheet.cardRelief - sheet.upcomingBills - sheet.recurringTransfers);
+    assert.equal(total, sheet.expectedInflows + sheet.cardRelief - sheet.upcomingBills - sheet.recurringTransfers - sheet.budgetsAhead);
   });
 });
 
@@ -116,4 +116,17 @@ test('runway is measured net of what the cards owe, and states its assumptions',
     assert.ok('cards_owed' in runway && runway.cards_owed === 400);
     assert.ok('assumptions' in runway && runway.assumptions!.length >= 2);
   });
+});
+
+test('a window reaching into next month claims that month\'s budgets for the days it covers', () => {
+  const db = migratedTestDb();
+  const today = new Date();
+  const daysLeft = new Date(today.getFullYear(), today.getMonth() + 1, 0).getDate() - today.getDate();
+  const next = new Date(today.getFullYear(), today.getMonth() + 1, 1);
+  const daysInNext = new Date(next.getFullYear(), next.getMonth() + 1, 0).getDate();
+  const into = 15;
+  const sheet = computeSafeToSpend(db, { budgets: [{ category_id: 'cat_food', amount: 30000, projected_remaining: 0 }], forecastDays: daysLeft + into });
+  assert.equal(sheet.budgetsAhead, Math.round((30000 * into) / daysInNext));
+  const none = computeSafeToSpend(db, { budgets: [{ category_id: 'cat_food', amount: 30000, projected_remaining: 0 }], forecastDays: daysLeft });
+  assert.equal(none.budgetsAhead, 0, 'a window ending this month claims nothing ahead');
 });

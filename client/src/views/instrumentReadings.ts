@@ -65,6 +65,7 @@ function claims(breakdown: SafeToSpend): Array<{ label: string; amount: number }
     { label: `the next ${breakdown.forecast_days} days of dated bills`, amount: breakdown.upcoming_bills },
     { label: 'scheduled transfers out', amount: breakdown.recurring_transfers },
     { label: 'budgeted allocations', amount: breakdown.allocated_budgets },
+    { label: 'next month\'s budgets', amount: breakdown.budgets_ahead },
     { label: 'unbudgeted spending at its usual pace', amount: breakdown.estimated_unbudgeted },
     { label: 'goal earmarks', amount: breakdown.allocated_goals },
   ];

@@ -37,7 +37,7 @@ export type MaybeCount = number | null;
  * The lines of the subtraction, in the order `computeSafeToSpend` performs it.
  *
  * `free = liquid + expected_inflows + card_relief - card_balances - upcoming_bills - recurring_transfers
- * - allocated_budgets - estimated_unbudgeted - allocated_goals`, so every delta after the opening is
+ * - allocated_budgets - budgets_ahead - estimated_unbudgeted - allocated_goals`, so every delta after the opening is
  * its field with the sign it has in that sum, and the running total is a partial sum of the
  * server's own numbers rather than a second derivation of them.
  */
@@ -96,6 +96,12 @@ export function claimLines(
       delta: -sheet.allocated_budgets,
       note: emptyNote(budgetCount, sheet.allocated_budgets, 'No monthly budgets set, so nothing is claimed here.'),
     },
+    ...optional({
+      key: 'budgets-ahead',
+      label: 'Budgets for next month, inside the window',
+      delta: -sheet.budgets_ahead,
+      note: 'Each budget of a month after this one, for the days of that month the window reaches.',
+    }),
     ...optional({
       key: 'unbudgeted',
       label: 'Unbudgeted spending at its usual pace',
