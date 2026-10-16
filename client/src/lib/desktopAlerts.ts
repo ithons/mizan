@@ -60,19 +60,18 @@ export function useDesktopAlertsPreference(): {
   };
 }
 
-/** Alerts only for ids that arrive after the first load, so opening the app never alerts. */
+/**
+ * Alerts only for notifications created after this page loaded, once each, so opening the app
+ * never alerts and an older unread one scrolling into the capped list is not mistaken for new.
+ */
 export function useDesktopAlerts(unread: readonly AppNotification[] | undefined, enabled: boolean): void {
-  const seen = useRef<Set<string> | null>(null);
+  const loadedAt = useRef(new Date().toISOString());
+  const alerted = useRef(new Set<string>());
   useEffect(() => {
-    if (!unread) return;
-    if (seen.current === null) {
-      seen.current = new Set(unread.map((n) => n.id));
-      return;
-    }
-    const fresh = unread.filter((n) => !seen.current?.has(n.id));
-    for (const n of unread) seen.current.add(n.id);
-    if (!enabled || !readDesktopAlertsEnabled()) return;
-    for (const n of fresh) {
+    if (!unread || !enabled || !readDesktopAlertsEnabled()) return;
+    for (const n of unread) {
+      if (n.created_at <= loadedAt.current || alerted.current.has(n.id)) continue;
+      alerted.current.add(n.id);
       try {
         new Notification(n.title, { body: n.body, tag: n.id });
       } catch (err) {
