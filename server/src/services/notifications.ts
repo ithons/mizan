@@ -565,7 +565,7 @@ const unusualSpending: Evaluator<'unusual_spending'> = (ctx, params) => {
     candidates.push({
       dedupe_key: `unusual_spending:${categoryId}:${ctx.month}`,
       title: `${name} is at ${(amount / baseline).toFixed(1)}x its usual pace`,
-      body: `${money(amount)} so far this month, against an average of ${money(baseline)} by day ${day + TIMING_TOLERANCE_DAYS} over the last ${BASELINE_MONTHS} months, leaving out recurring bills.`,
+      body: `${money(amount)} so far this month, against an average of ${money(baseline)} by this point in each of the last ${BASELINE_MONTHS} months, allowing a few days of timing and leaving out recurring bills.`,
       severity: 'info',
       payload: { category_id: categoryId, month: ctx.month, month_to_date: amount, baseline },
       route: `/ledger?categoryId=${encodeURIComponent(categoryId)}&range=this-month`,

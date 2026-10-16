@@ -60,18 +60,27 @@ export function useDesktopAlertsPreference(): {
   };
 }
 
+/** How far before page load a notification may be stamped and still count as new: a sync that began just before. */
+const LOAD_GRACE_MS = 10 * 60_000;
+
 /**
- * Alerts only for notifications created after this page loaded, once each, so opening the app
- * never alerts and an older unread one scrolling into the capped list is not mistaken for new.
+ * Alerts once for each notification this page did not see on its first load and that is no older
+ * than shortly before the load, so opening the app never alerts and an older unread one scrolling
+ * into the capped list is not mistaken for new.
  */
 export function useDesktopAlerts(unread: readonly AppNotification[] | undefined, enabled: boolean): void {
-  const loadedAt = useRef(new Date().toISOString());
-  const alerted = useRef(new Set<string>());
+  const cutoff = useRef(new Date(Date.now() - LOAD_GRACE_MS).toISOString());
+  const known = useRef<Set<string> | null>(null);
   useEffect(() => {
-    if (!unread || !enabled || !readDesktopAlertsEnabled()) return;
-    for (const n of unread) {
-      if (n.created_at <= loadedAt.current || alerted.current.has(n.id)) continue;
-      alerted.current.add(n.id);
+    if (!unread) return;
+    if (known.current === null) {
+      known.current = new Set(unread.map((n) => n.id));
+      return;
+    }
+    const fresh = unread.filter((n) => !known.current?.has(n.id) && n.created_at > cutoff.current);
+    for (const n of unread) known.current.add(n.id);
+    if (!enabled || !readDesktopAlertsEnabled()) return;
+    for (const n of fresh) {
       try {
         new Notification(n.title, { body: n.body, tag: n.id });
       } catch (err) {
