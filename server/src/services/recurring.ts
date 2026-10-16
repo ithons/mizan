@@ -212,12 +212,13 @@ export function recentExpectedAmounts(
 export interface ExpectedAmount {
   /** Integer cents, signed as the rows are. */
   amount: number;
-  /** The level the pattern moved off, when its last two occurrences left it together. */
+  /** An amount actually paid at the level the newest run moved off; every payment since sits more than LEVEL_SHIFT_RATIO from it. */
   changedFrom: number | null;
+  /** The first payment at the new amount. */
   changedOn: string | null;
 }
 
-/** How far both of the last two occurrences must sit from the window median, in one direction. */
+/** How far, as a share of a level, an amount must sit from it to be off that level. */
 export const LEVEL_SHIFT_RATIO = 0.15;
 
 function farFrom(level: number, value: number): -1 | 0 | 1 {
@@ -225,7 +226,7 @@ function farFrom(level: number, value: number): -1 | 0 | 1 {
   return value > level ? 1 : -1;
 }
 
-/** How long a new level is reported as new. */
+/** How many occurrences a new level is reported as new for. */
 const SHIFT_REPORTED_FOR = 3;
 
 const PRIOR_LEVEL_SPAN = 3;
