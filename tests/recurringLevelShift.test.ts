@@ -209,3 +209,9 @@ test('the level named is re-checked against the forecast and every payment since
     }
   }
 });
+
+test('a level with ordinary noise is still a level the bill can leave', () => {
+  assert.deepEqual(expectedAmount(series([-6500, -6500, -4500, -5200, -4700, -5000])).amount, -6500);
+  assert.notEqual(expectedAmount(series([-6500, -6500, -4500, -5200, -4700, -5000])).changedFrom, null);
+  assert.equal(expectedAmount(series([15000, 15000, 10000, 11000, 9000, 10000])).amount, 15000);
+});

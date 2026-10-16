@@ -272,7 +272,9 @@ export function expectedAmount(recent: ReadonlyArray<{ amount: number; date: str
     const amount = k === 2
       ? (farFrom(latest, previous) === 0 ? (latest + previous) / 2 : latest)
       : usualPaid(fresh);
-    if ((Math.max(...agreeing) - Math.min(...agreeing)) * 3 >= Math.abs(amount - level)) continue;
+    const towards = Math.sign(amount - level);
+    const climbing = prior.every((value, i) => i === 0 || Math.sign(prior[i - 1] - value) === towards);
+    if (climbing && (Math.max(...agreeing) - Math.min(...agreeing)) * 3 >= Math.abs(amount - level)) continue;
     let run = k;
     while (run < amounts.length && farFrom(amount, amounts[run]) === 0 && farFrom(level, amounts[run]) !== 0) run++;
     const before = amounts.slice(run);
@@ -283,6 +285,10 @@ export function expectedAmount(recent: ReadonlyArray<{ amount: number; date: str
     }
     const named = usualPaid(left);
     if (![amount, ...amounts.slice(0, run)].every((value) => farFrom(named, value) !== 0)) continue;
+    const boundary = amounts[run];
+    if (boundary !== undefined && farFrom(amount, boundary) === 0 && farFrom(named, boundary) !== 0) {
+      return { amount: Math.round(amount), changedFrom: null, changedOn: null };
+    }
     let first = run - 1;
     while (first > 0 && farFrom(amount, amounts[first]) !== 0) first--;
     return { amount: Math.round(amount), changedFrom: Math.round(named), changedOn: window[first].date };
