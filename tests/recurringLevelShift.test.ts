@@ -23,7 +23,7 @@ test('the week before, a bonus then a short check pulled opposite ways and the m
 
 test('one short check is an outlier, not a new level', () => {
   const paid = series([6120, 60228, 66038, 36158, 36158, 36158]);
-  assert.equal(expectedAmount(paid).changedFrom, null);
+  assert.deepEqual(expectedAmount(paid), { amount: 63133, changedFrom: 36158, changedOn: '2026-10-05' });
 });
 
 test('two occurrences that agree set the new level at their mean, in either direction', () => {
@@ -108,4 +108,38 @@ test('a change is dated from the first charge at the new amount, not the latest 
     ['2026-09-17', '2026-08-17', '2026-07-17', '2026-06-17', '2026-05-17', '2026-04-17']
   );
   assert.deepEqual(expectedAmount(backblaze), { amount: -1037, changedFrom: -1834, changedOn: '2026-07-17' });
+});
+
+test('a bill that ran high and came back has not changed level', () => {
+  for (const amounts of [
+    [30000, 30000, 54418, 54500, 30000, 30000],
+    [1000, 1000, 1500, 1000, 1510, 1000],
+    [1000, 700, 1500, 1510, 1000, 1000],
+  ]) {
+    assert.equal(expectedAmount(series(amounts)).changedFrom, null, String(amounts));
+  }
+});
+
+test('the level named is the one moved off, even when it was never paid twice exactly', () => {
+  assert.equal(expectedAmount(series([30000, 30000, 54418, 55000, 80000, 80000])).changedFrom, 54418);
+});
+
+test('a bonus on a raise only two checks old is still not the forecast', () => {
+  assert.deepEqual(expectedAmount(series([112542, 54418, 54418, 30000, 30000, 30000])), {
+    amount: 54418, changedFrom: 30000, changedOn: '2026-10-05',
+  });
+});
+
+test('a named old level is never the amount being forecast', () => {
+  const values = [700, 1000, 1500, 1510];
+  const walk = (prefix: number[]): void => {
+    if (prefix.length >= 4) {
+      const result = expectedAmount(series(prefix));
+      if (result.changedFrom !== null) {
+        assert.notEqual(Math.abs(result.changedFrom - result.amount) <= result.amount * 0.15, true, String(prefix));
+      }
+    }
+    if (prefix.length < 6) for (const value of values) walk([...prefix, value]);
+  };
+  walk([]);
 });

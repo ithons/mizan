@@ -244,6 +244,9 @@ export function expectedAmount(recent: ReadonlyArray<{ amount: number; date: str
   const window = recent.slice(0, RECENT_AMOUNT_WINDOW);
   const amounts = window.map((row) => row.amount);
   const unchanged = { amount: Math.round(median(amounts)), changedFrom: null, changedOn: null };
+  if (amounts.length >= 4 && farFrom(amounts[1], amounts[0]) !== 0 && farFrom(amounts[1], amounts[2]) === 0) {
+    return expectedAmount(recent.slice(1));
+  }
 
   for (let k = 2; k <= window.length - 2; k++) {
     const fresh = amounts.slice(0, k);
@@ -259,14 +262,15 @@ export function expectedAmount(recent: ReadonlyArray<{ amount: number; date: str
       : usualPaid(fresh);
     let run = k;
     while (run < amounts.length && farFrom(amount, amounts[run]) === 0) run++;
-    const recentChange = run <= SHIFT_REPORTED_FOR;
+    const before = amounts.slice(run);
+    const left = before.filter((value) => farFrom(level, value) === 0);
+    const returned = before.some((value) => farFrom(amount, value) === 0);
+    if (run > SHIFT_REPORTED_FOR || returned || left.length === 0) {
+      return { amount: Math.round(amount), changedFrom: null, changedOn: null };
+    }
     let first = run - 1;
     while (first > 0 && farFrom(amount, amounts[first]) !== 0) first--;
-    return {
-      amount: Math.round(amount),
-      changedFrom: recentChange ? Math.round(usualPaid(amounts.slice(run))) : null,
-      changedOn: recentChange ? window[first].date : null,
-    };
+    return { amount: Math.round(amount), changedFrom: Math.round(usualPaid(left)), changedOn: window[first].date };
   }
   return unchanged;
 }
