@@ -292,7 +292,7 @@ test('two identical moves on one day still pair inside a long weekly history', (
   }
 });
 
-test('any number of identical moves on one day pair, however large their group', () => {
+test('any number of identical moves on one day are paired, and past the searched size only offered for review', () => {
   for (const count of [4, 5]) {
     const db = migratedTestDb();
     const checking = insertAccount(db, { type: 'checking', account_name: 'Checking' });
@@ -304,5 +304,36 @@ test('any number of identical moves on one day pair, however large their group',
     }
     refreshTransferCandidates(db);
     for (const n of ids) assert.notEqual(leg(db, `o${n}`).transfer_pair_id, null, `${count}: o${n}`);
+    for (const n of ids) assert.equal(leg(db, `o${n}`).transfer_status, 'candidate', `${count}: o${n}`);
   }
+});
+
+test('a group too large to search never auto-confirms the pairs it guesses', () => {
+  const db = migratedTestDb();
+  const a = insertAccount(db, { type: 'checking', account_name: 'A' });
+  const b = insertAccount(db, { type: 'checking', account_name: 'B' });
+  const c = insertAccount(db, { type: 'savings', account_name: 'C' });
+  const rows: Array<[string, string, string, number]> = [
+    ['r0', b, '2026-10-08', 1], ['r1', a, '2026-10-06', 1], ['r2', b, '2026-10-07', -1], ['r3', b, '2026-10-06', -1],
+    ['r4', c, '2026-10-05', -1], ['r5', a, '2026-10-09', 1], ['r6', b, '2026-10-05', -1], ['r7', b, '2026-10-07', 1],
+    ['r8', a, '2026-10-08', 1], ['r9', c, '2026-10-06', -1],
+  ];
+  for (const [id, account, date, sign] of rows) {
+    insertTransaction(db, { id, account_id: account, date, amount: sign * 20000, original_name: sign < 0 ? 'ONLINE TRANSFER TO ACCOUNT' : 'ONLINE TRANSFER FROM ACCOUNT' });
+  }
+  refreshTransferCandidates(db);
+  const confirmed = db.prepare("SELECT id FROM transactions WHERE transfer_status = 'confirmed' ORDER BY id").all();
+  assert.deepEqual(confirmed, []);
+});
+
+test('identical moves split across two destination accounts still pair past the searched size', () => {
+  const db = migratedTestDb();
+  const checking = insertAccount(db, { type: 'checking', account_name: 'Checking' });
+  const savings = insertAccount(db, { type: 'savings', account_name: 'Savings' });
+  const joint = insertAccount(db, { type: 'checking', account_name: 'Joint' });
+  for (let n = 0; n < 4; n++) insertTransaction(db, { id: `o${n}`, account_id: checking, date: '2026-10-05', amount: -20000, original_name: 'ONLINE TRANSFER' });
+  for (let n = 0; n < 3; n++) insertTransaction(db, { id: `i${n}`, account_id: savings, date: '2026-10-05', amount: 20000, original_name: 'ONLINE TRANSFER' });
+  insertTransaction(db, { id: 'iJ', account_id: joint, date: '2026-10-05', amount: 20000, original_name: 'ONLINE TRANSFER' });
+  refreshTransferCandidates(db);
+  for (const id of ['o0', 'o1', 'o2', 'o3', 'i0', 'i1', 'i2', 'iJ']) assert.notEqual(leg(db, id).transfer_pair_id, null, id);
 });

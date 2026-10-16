@@ -455,31 +455,15 @@ function assignExactly(edges: PairEdge[]): PairEdge[] {
   return best[0].filter((edge) => best.every((matching) => matching.includes(edge)));
 }
 
-/** Two legs nothing can tell apart: any edge one has, the other has at the same distance. */
-function sameLeg(a: TransferRow, b: TransferRow): boolean {
-  return a.account_id === b.account_id && a.date === b.date && a.original_name === b.original_name;
-}
-
-/** Nearest legs first; a tie leaves every row in it alone unless its rivals differ only by indistinguishable legs. */
-function assignGreedily(edges: PairEdge[]): PairEdge[] {
+/** Nearest legs first, ties taken in row order: a guess, so its pairs are offered for review only. */
+function assignNearestFirst(edges: PairEdge[]): PairEdge[] {
   const settled = new Set<string>();
   const chosen: PairEdge[] = [];
   for (const edge of edges) {
     if (settled.has(edge.outflow.id) || settled.has(edge.inflow.id)) continue;
-    const rivals = edges.filter((other) =>
-      other !== edge
-      && edgeGap(other) === edgeGap(edge)
-      && (other.outflow.id === edge.outflow.id || other.inflow.id === edge.inflow.id)
-      && !settled.has(other.outflow.id)
-      && !settled.has(other.inflow.id)
-    );
-    const interchangeable = rivals.every((other) =>
-      sameLeg(other.outflow, edge.outflow) && sameLeg(other.inflow, edge.inflow));
-    for (const tied of interchangeable ? [edge] : [edge, ...rivals]) {
-      settled.add(tied.outflow.id);
-      settled.add(tied.inflow.id);
-    }
-    if (interchangeable) chosen.push(edge);
+    settled.add(edge.outflow.id);
+    settled.add(edge.inflow.id);
+    chosen.push(edge);
   }
   return chosen;
 }
@@ -513,12 +497,18 @@ function settleMutualNearest(edges: PairEdge[]): { fixed: PairEdge[]; rest: Pair
   }
 }
 
-function assignPairs(edges: PairEdge[]): PairEdge[] {
+interface AssignedPair extends PairEdge {
+  /** Chosen without a search that proves it, so it is never confirmed without the owner. */
+  reviewOnly: boolean;
+}
+
+function assignPairs(edges: PairEdge[]): AssignedPair[] {
   const { fixed, rest } = settleMutualNearest(edges);
-  return [
-    ...fixed,
-    ...groupsOf(rest).flatMap((group) => (group.length <= EXACT_GROUP_EDGES ? assignExactly(group) : assignGreedily(group))),
-  ].sort(edgeOrder);
+  const searched = groupsOf(rest).flatMap((group) =>
+    group.length <= EXACT_GROUP_EDGES
+      ? assignExactly(group).map((edge) => ({ ...edge, reviewOnly: false }))
+      : assignNearestFirst(group).map((edge) => ({ ...edge, reviewOnly: true })));
+  return [...fixed.map((edge) => ({ ...edge, reviewOnly: false })), ...searched].sort(edgeOrder);
 }
 
 interface TransferLeg {
@@ -578,14 +568,14 @@ function ownerConfirmedAccountPairs(db: Database.Database): Set<string> {
   return new Set(rows.map((row) => accountPairKey(row.a, row.b)));
 }
 
-function desiredLegs(pairs: PairEdge[], confirmedBefore: Set<string>): Map<string, TransferLeg> {
+function desiredLegs(pairs: AssignedPair[], confirmedBefore: Set<string>): Map<string, TransferLeg> {
   const desired = new Map<string, TransferLeg>();
-  for (const { outflow, inflow } of pairs) {
+  for (const { outflow, inflow, reviewOnly } of pairs) {
     const cardPayment = isCardPayment(outflow, inflow);
-    const auto = cardPayment
+    const auto = !reviewOnly && (cardPayment
       || (hasIndependentEvidence(outflow) && hasIndependentEvidence(inflow))
       || ((hasIndependentEvidence(outflow) || hasIndependentEvidence(inflow))
-        && confirmedBefore.has(accountPairKey(outflow.account_id, inflow.account_id)));
+        && confirmedBefore.has(accountPairKey(outflow.account_id, inflow.account_id))));
     const pairId = `xfer_${shortHash([outflow.id, inflow.id].sort().join('|'))}`;
     const shared = {
       pairId,
