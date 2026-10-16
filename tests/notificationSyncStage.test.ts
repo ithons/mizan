@@ -24,6 +24,17 @@ test('a throwing evaluation is recorded on the run and leaves its outcome alone'
   assert.equal((db.prepare('SELECT status FROM sync_runs WHERE id = ?').get(runId) as { status: string }).status, 'succeeded');
 });
 
+test('a rule that could not run is named on the run, and the run keeps its outcome', () => {
+  const { db, runId } = finishedRun('succeeded');
+  runNotificationStage(db, runId, () => ({
+    rules_evaluated: 1,
+    created: [],
+    errors: [{ rule_id: 'r', kind: 'low_balance', message: 'Account a1 no longer exists; edit or delete this rule' }],
+  }));
+  assert.deepEqual(stageItems(db, runId), [{ status: 'failed', error_message: 'low_balance: Account a1 no longer exists; edit or delete this rule' }]);
+  assert.equal((db.prepare('SELECT status FROM sync_runs WHERE id = ?').get(runId) as { status: string }).status, 'succeeded');
+});
+
 test('HEALTHY: a quiet evaluation records nothing on the run', () => {
   const { db, runId } = finishedRun('succeeded');
   const result = runNotificationStage(db, runId);
