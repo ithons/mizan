@@ -32,6 +32,8 @@ import { describeBalanceChange, type AccountBalanceChange } from './balanceChang
 import { toCents, toDollars } from './money';
 import { triggerAfterSyncAiJobs } from './aiScheduler';
 import { withRetry } from './retry';
+import { evaluateNotifications } from './notifications';
+import type { NotificationEvaluationSummary } from '../../../shared/types';
 
 // SSE clients registry
 const sseClients = new Set<Response>();
@@ -556,6 +558,41 @@ export function runPostSyncStages(
   return { integrity, deferredError: nextDeferredError };
 }
 
+/**
+ * Runs after the run's status is final, so `sync_failed` can see this run. Never throws and never
+ * touches the run's outcome; only a failure is recorded, because a quiet pass has nothing to say.
+ */
+export function runNotificationStage(
+  db: Database.Database,
+  runId: string,
+  evaluate: (db: Database.Database) => NotificationEvaluationSummary = evaluateNotifications
+): NotificationEvaluationSummary | null {
+  const recordFailure = (message: string) => {
+    try {
+      recordSyncRunItem(db, runId, {
+        provider: 'system',
+        connection_id: 'notifications',
+        institution_name: 'Notifications',
+        status: 'failed',
+        error_message: message,
+        recovery_action: 'Check the notification rules in Settings. They run again next sync.',
+      });
+    } catch (err) {
+      console.error('[sync] Could not record the notification stage failure:', err);
+    }
+  };
+  try {
+    const summary = evaluate(db);
+    if (summary.errors.length > 0) {
+      recordFailure(summary.errors.map((e) => `${e.kind}: ${e.message}`).join('; '));
+    }
+    return summary;
+  } catch (err) {
+    recordFailure((err as Error).message || 'Notification evaluation failed');
+    return null;
+  }
+}
+
 // Callers that need to mutate connection state right before triggering a sync (e.g. a
 // forced resync nulling last_synced_at) must check this first: runFullSync() silently
 // reuses the in-flight promise when a sync is already running, so a mutation made after
@@ -824,6 +861,7 @@ async function _runFullSyncInternal(): Promise<void> {
       transfer_candidates: integrity.transfers.pairCount,
     });
     finished = true;
+    runNotificationStage(db, run.id);
 
     finalizeSyncRun(run.id, deferredError);
   } catch (err) {
@@ -838,6 +876,7 @@ async function _runFullSyncInternal(): Promise<void> {
         error_message: message,
         recovery_action: 'Retry sync. If it continues failing, check provider settings.',
       });
+      runNotificationStage(db, run.id);
       emitSyncEvent({ type: 'sync_error', message });
     }
     throw err;
