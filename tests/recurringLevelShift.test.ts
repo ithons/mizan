@@ -151,6 +151,10 @@ test('every series of these amounts names only a real level it left, dated on it
           assert.ok(paidThen !== undefined && !nearOld(result.changedFrom, paidThen), label);
           const since = rows.findIndex((row) => row.date === result.changedOn);
           for (const value of prefix.slice(0, since + 1)) assert.ok(!nearOld(result.changedFrom, value), label);
+          const nearNew = (value: number) => Math.abs(value - result.amount) <= Math.abs(result.amount) * 0.15;
+          assert.ok(nearNew(prefix[since]), label);
+          const older = prefix[since + 1];
+          assert.ok(older === undefined || !nearNew(older) || nearOld(result.changedFrom, older), label);
         }
         if (prefix.every((value) => nearOld(prefix[0], value) && nearOld(value, prefix[0]))) assert.equal(result.changedFrom, null, label);
       }
