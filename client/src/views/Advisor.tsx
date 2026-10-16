@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useLocation } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { format, isToday, isYesterday, parseISO } from 'date-fns';
 import { aiApi } from '../lib/api';
 import { useAppStore } from '../store';
@@ -158,6 +158,11 @@ export default function Advisor() {
     return typeof handed === 'string' ? handed : '';
   });
   const [pane, setPane] = useState<NarrowPane>('chat');
+  const navigate = useNavigate();
+  // A question handed over from Cmd+K is taken once; a reload must not hand it over again.
+  useEffect(() => {
+    if (location.state) navigate(location.pathname, { replace: true, state: null });
+  }, [location.pathname, location.state, navigate]);
   const { data: conversations = [] } = useQuery({
     queryKey: ['ai-conversations'],
     queryFn: () => aiApi.listConversations(),
