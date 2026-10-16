@@ -1,5 +1,5 @@
 import type Database from 'better-sqlite3';
-import { addDays, differenceInCalendarDays, format, parseISO } from 'date-fns';
+import { addDays, differenceInCalendarDays, format, isValid, parseISO } from 'date-fns';
 import type {
   RecurringForecast,
   RecurringForecastOccurrence,
@@ -153,6 +153,7 @@ function openStatement(
 ): { balance: number; dueDate: string } | null {
   if (pattern.statement_balance === null || pattern.statement_due_date === null) return null;
   if (pattern.statement_due_date < today || pattern.statement_balance <= 0) return null;
+  if (!isValid(parseISO(pattern.statement_due_date))) return null;
   const since = format(addDays(parseISO(pattern.statement_due_date), -STATEMENT_PAYMENT_DAYS), 'yyyy-MM-dd');
   const paid = db.prepare(`
     SELECT 1 FROM transactions

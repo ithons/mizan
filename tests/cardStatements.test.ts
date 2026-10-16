@@ -8,6 +8,7 @@ import { buildRecurringForecast } from '../server/src/services/recurringForecast
 import { updateAccount } from '../server/src/services/accounts';
 import { refreshTransferCandidates } from '../server/src/services/transactionIntegrity';
 import { insertAccount, insertTransaction, migratedTestDb } from './helpers/schema';
+import { UpdateAccountSchema } from '../shared/schemas';
 
 const day = (date: Date) => format(date, 'yyyy-MM-dd');
 
@@ -95,4 +96,14 @@ test('statement fields are stored in cents and can be cleared', () => {
     db.prepare('SELECT statement_balance, statement_due_date FROM accounts WHERE id = ?').get(card),
     { statement_balance: null, statement_due_date: null }
   );
+});
+
+test('a statement due date that is not a calendar day is refused, and one already stored cannot break the forecast', () => {
+  assert.equal(UpdateAccountSchema.safeParse({ statement_due_date: '2026-13-45' }).success, false);
+  assert.equal(UpdateAccountSchema.safeParse({ statement_due_date: '2026-02-30' }).success, false);
+  assert.equal(UpdateAccountSchema.safeParse({ statement_due_date: '2026-02-28' }).success, true);
+  withAutopay((db, card) => {
+    db.prepare("UPDATE accounts SET statement_balance = 10000, statement_due_date = '2099-13-45' WHERE id = ?").run(card);
+    assert.doesNotThrow(() => buildRecurringForecast(db, 30));
+  });
 });

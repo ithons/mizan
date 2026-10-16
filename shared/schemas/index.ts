@@ -10,6 +10,12 @@ export const CreateManualAccountSchema = z.object({
   color: z.string().optional(),
 });
 
+/** A real calendar day in YYYY-MM-DD, so 2026-13-45 is refused rather than stored. */
+const calendarDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/).refine((value) => {
+  const parsed = new Date(`${value}T00:00:00Z`);
+  return !Number.isNaN(parsed.getTime()) && parsed.toISOString().slice(0, 10) === value;
+}, 'Not a calendar date');
+
 export const UpdateAccountSchema = z.object({
   account_name: z.string().min(1).optional(),
   institution_name: z.string().nullable().optional(),
@@ -22,7 +28,7 @@ export const UpdateAccountSchema = z.object({
   current_balance: z.number().optional(),
   /** A card's last statement, in dollars owed. null clears it. */
   statement_balance: z.number().nonnegative().nullable().optional(),
-  statement_due_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(),
+  statement_due_date: calendarDate.nullable().optional(),
 });
 
 export const CreateManualTransactionSchema = z.object({
