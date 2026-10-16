@@ -402,3 +402,12 @@ test('HEALTHY: income_late is silent for pay within its usual wobble, and for a 
   }
   assert.deepEqual(fires(db), []);
 });
+
+test('HEALTHY: income_late respects pay the owner snoozed or skipped', () => {
+  for (const [action, adjusted] of [['snooze', localDaysFromToday(4)], ['skip', null]] as const) {
+    const { db, pattern } = payFixture([7, 7, 7, 7, 7], 5);
+    db.prepare(`INSERT INTO recurring_occurrence_adjustments (id, recurring_id, original_date, action, adjusted_date, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?)`).run(`adj_${action}`, pattern, localDaysFromToday(-5), action, adjusted, TEST_NOW, TEST_NOW);
+    assert.deepEqual(fires(db), [], action);
+  }
+});

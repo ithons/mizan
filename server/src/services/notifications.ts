@@ -613,22 +613,28 @@ const incomeLate: Evaluator<'income_late'> = (ctx, params) => {
       AND (c.is_income = 1 OR (SELECT AVG(t.amount) FROM transactions t WHERE t.recurring_id = rp.id) > 0)
   `).all(today) as Array<{ id: string; merchant_name: string; next_expected: string; average_amount: number }>;
   const datesOf = ctx.db.prepare('SELECT date FROM transactions WHERE recurring_id = ? AND pending = 0 ORDER BY date');
+  const adjustmentOf = ctx.db.prepare('SELECT action, adjusted_date FROM recurring_occurrence_adjustments WHERE recurring_id = ? AND original_date = ?');
   return patterns.flatMap((pattern) => {
+    const adjustment = adjustmentOf.get(pattern.id, pattern.next_expected) as { action: string; adjusted_date: string | null } | undefined;
+    if (adjustment?.action === 'skip') return [];
+    const expectedOn = adjustment?.adjusted_date ?? pattern.next_expected;
+    if (expectedOn >= today) return [];
     const dates = (datesOf.all(pattern.id) as Array<{ date: string }>).map((row) => parseISO(row.date).getTime());
     if (dates.length < 3) return [];
     const gaps = dates.slice(1).map((time, i) => Math.round((time - dates[i]) / 86_400_000));
     const sortedGaps = [...gaps].sort((a, b) => a - b);
     const medianGap = sortedGaps[Math.floor(sortedGaps.length / 2)];
     const strays = gaps.map((gap) => Math.abs(gap - medianGap)).sort((a, b) => a - b);
-    const tolerance = Math.max(params.min_days_late, strays[Math.min(strays.length - 1, Math.floor(strays.length * 0.95))]);
-    const daysLate = Math.round((parseISO(today).getTime() - parseISO(pattern.next_expected).getTime()) / 86_400_000);
+    const usualStray = strays[Math.min(strays.length - 1, Math.floor(strays.length * 0.95))];
+    const tolerance = Math.max(params.min_days_late, usualStray);
+    const daysLate = Math.round((parseISO(today).getTime() - parseISO(expectedOn).getTime()) / 86_400_000);
     if (daysLate <= tolerance) return [];
     return [{
-      dedupe_key: `income_late:${pattern.id}:${pattern.next_expected}`,
+      dedupe_key: `income_late:${pattern.id}:${expectedOn}`,
       title: `${pattern.merchant_name} is ${daysLate} days late`,
-      body: `It was expected on ${shortDate(pattern.next_expected)} and usually arrives within ${tolerance} days of that. Nothing has posted yet.`,
+      body: `It was expected on ${shortDate(expectedOn)}${usualStray > 0 ? `, and its timing usually varies by up to ${usualStray} day${usualStray === 1 ? '' : 's'}` : ''}. Nothing has posted yet.`,
       severity: 'warning' as const,
-      payload: { pattern_id: pattern.id, expected_on: pattern.next_expected, days_late: daysLate, amount: Math.abs(pattern.average_amount) },
+      payload: { pattern_id: pattern.id, expected_on: expectedOn, days_late: daysLate, amount: Math.abs(pattern.average_amount) },
       route: SCHEDULED_ROUTE,
     }];
   });
