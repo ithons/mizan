@@ -175,6 +175,32 @@ export const DRAFT_KIND_AUTONOMY: Readonly<Record<AdvisorDraftActionKind, DraftA
       + 'the conservation guard treats as invariant, which is the figure the owner plans against.',
   },
 
+  delete_budget: {
+    autonomy: 'proposal_only',
+    ownerCarveOut: true,
+    fails: ['observation', 'exact_inverse', 'not_owner_number'],
+    argument: 'A budget is the owner\'s number; removing one is the owner\'s call, and nothing records it to restore.',
+  },
+
+  create_goal: {
+    autonomy: 'proposal_only',
+    fails: ['observation'],
+    argument: 'A goal is an intention, not a fact about stored data.',
+  },
+
+  dismiss_recurring: {
+    autonomy: 'proposal_only',
+    fails: ['exact_inverse'],
+    argument: 'Dismissal unlinks the pattern\'s rows and nothing records which rows to relink.',
+  },
+
+  update_account: {
+    autonomy: 'proposal_only',
+    ownerCarveOut: true,
+    fails: ['observation', 'exact_inverse', 'not_owner_number'],
+    argument: 'Names, visibility and hand-entered balances are the owner\'s own settings.',
+  },
+
 };
 
 /**

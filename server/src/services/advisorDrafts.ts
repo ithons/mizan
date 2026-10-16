@@ -44,6 +44,10 @@ import { toCents, toDollars, toDollarsOrNull } from './money';
 import { AdvisorDraftPayloadSchema } from '../../../shared/schemas';
 import { safeJsonParse } from './jsonSafe';
 import { SCHEDULED_ROUTE } from '../../../shared/routes';
+import { budgetIdForCategory, deleteBudget } from './budgets';
+import { createGoal } from './goals';
+import { dismissRecurringPattern } from './recurring';
+import { updateAccount } from './accounts';
 
 interface CategoryRow {
   id: string;
@@ -908,6 +912,50 @@ function confirmBudget(db: Database.Database, payload: Extract<AdvisorDraftPaylo
   recordBudgetRolloverLedger(db, { budgetId: id });
 
   return { changed: 1, result: { budget_id: id } };
+}
+
+function confirmDeleteBudget(db: Database.Database, payload: Extract<AdvisorDraftPayload, { kind: 'delete_budget' }>): {
+  changed: number;
+  result: unknown;
+} {
+  const budgetId = budgetIdForCategory(db, payload.category_id);
+  if (!budgetId) throw new Error('No budget for that category');
+  return { changed: deleteBudget(db, budgetId).ok ? 1 : 0, result: { budget_id: budgetId } };
+}
+
+function confirmCreateGoal(db: Database.Database, payload: Extract<AdvisorDraftPayload, { kind: 'create_goal' }>): {
+  changed: number;
+  result: unknown;
+} {
+  const created = createGoal(db, {
+    name: payload.name,
+    type: payload.type,
+    target_amount: payload.target_amount,
+    target_date: payload.target_date ?? null,
+    account_id: payload.account_id ?? null,
+  });
+  if (!created.ok) throw new Error('Account not found');
+  return { changed: 1, result: { goal_id: created.id } };
+}
+
+function confirmDismissRecurring(db: Database.Database, payload: Extract<AdvisorDraftPayload, { kind: 'dismiss_recurring' }>): {
+  changed: number;
+  result: unknown;
+} {
+  if (!dismissRecurringPattern(db, payload.recurring_id).ok) throw new Error('Recurring pattern not found');
+  return { changed: 1, result: { recurring_id: payload.recurring_id } };
+}
+
+function confirmUpdateAccount(db: Database.Database, payload: Extract<AdvisorDraftPayload, { kind: 'update_account' }>): {
+  changed: number;
+  result: unknown;
+} {
+  const { kind: _kind, account_id: accountId, ...fields } = payload;
+  const updated = updateAccount(db, accountId, fields);
+  if (!updated.ok) {
+    throw new Error(updated.reason === 'not_found' ? 'Account not found' : 'Only a manual account\'s balance can be set by hand');
+  }
+  return { changed: updated.balanceChanged || Object.keys(fields).length > 0 ? 1 : 0, result: { account_id: accountId } };
 }
 
 function confirmGoalTarget(db: Database.Database, payload: Extract<AdvisorDraftPayload, { kind: 'update_goal_target' }>): {
@@ -1829,6 +1877,14 @@ export function confirmAdvisorDraft(
         result = confirmManualCostBasis(db, draftAction.payload); break;
       case 'set_sector_metadata':
         result = confirmSectorMetadata(db, draftAction.payload); break;
+      case 'delete_budget':
+        result = confirmDeleteBudget(db, draftAction.payload); break;
+      case 'create_goal':
+        result = confirmCreateGoal(db, draftAction.payload); break;
+      case 'dismiss_recurring':
+        result = confirmDismissRecurring(db, draftAction.payload); break;
+      case 'update_account':
+        result = confirmUpdateAccount(db, draftAction.payload); break;
       default:
         throw new Error(`Unhandled draft kind: ${(draftAction.payload as { kind: string }).kind}`);
     }

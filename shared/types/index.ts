@@ -746,10 +746,11 @@ export interface ChatMessage {
 }
 
 export interface AiStreamEvent {
-  type: 'chunk' | 'thinking_start' | 'thinking' | 'thinking_end' | 'tool_use' | 'done' | 'error';
+  type: 'chunk' | 'thinking_start' | 'thinking' | 'thinking_end' | 'tool_use' | 'proposals' | 'wrote' | 'done' | 'error';
   text?: string;
   message?: string;
   name?: string;
+  drafts?: AdvisorDraftAction[];
 }
 
 export type InsightSeverity = 'critical' | 'warning' | 'positive' | 'info';
@@ -846,7 +847,11 @@ export type AdvisorDraftActionKind =
   | 'confirm_recurring'
   | 'create_recurring_adjustment'
   | 'set_manual_cost_basis'
-  | 'set_sector_metadata';
+  | 'set_sector_metadata'
+  | 'delete_budget'
+  | 'create_goal'
+  | 'dismiss_recurring'
+  | 'update_account';
 
 export interface AdvisorDraftChange {
   field: string;
@@ -910,6 +915,32 @@ export type AdvisorDraftPayload =
       security_id: string;
       sector: string | null;
       sector_source?: string | null;
+    }
+  | {
+      kind: 'delete_budget';
+      category_id: string;
+    }
+  | {
+      kind: 'create_goal';
+      name: string;
+      type: GoalType;
+      target_amount: number;
+      target_date?: string | null;
+      account_id?: string | null;
+    }
+  | {
+      kind: 'dismiss_recurring';
+      recurring_id: string;
+    }
+  | {
+      /** Amounts in dollars. A balance can only be set on a manual account. */
+      kind: 'update_account';
+      account_id: string;
+      account_name?: string;
+      is_hidden?: boolean;
+      current_balance?: number;
+      statement_balance?: number | null;
+      statement_due_date?: string | null;
     };
 
 export type AdvisorAutonomy = 'autonomous' | 'proposal_only';

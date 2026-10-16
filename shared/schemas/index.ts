@@ -254,6 +254,25 @@ export const AdvisorDraftPayloadSchema = z.discriminatedUnion('kind', [
   }),
   z.object({ kind: z.literal('set_manual_cost_basis'), holding_id: id, manual_cost_basis: money.nullable(), note: z.string().nullable().optional() }),
   z.object({ kind: z.literal('set_sector_metadata'), security_id: id, sector: z.string().nullable(), sector_source: z.string().nullable().optional() }),
+  z.object({ kind: z.literal('delete_budget'), category_id: id }),
+  z.object({
+    kind: z.literal('create_goal'),
+    name: z.string().trim().min(1).max(80),
+    type: z.enum(['savings', 'debt']),
+    target_amount: z.number().positive(),
+    target_date: calendarDate.nullable().optional(),
+    account_id: z.string().nullable().optional(),
+  }),
+  z.object({ kind: z.literal('dismiss_recurring'), recurring_id: id }),
+  z.object({
+    kind: z.literal('update_account'),
+    account_id: id,
+    account_name: z.string().trim().min(1).max(80).optional(),
+    is_hidden: z.boolean().optional(),
+    current_balance: z.number().optional(),
+    statement_balance: z.number().nonnegative().nullable().optional(),
+    statement_due_date: calendarDate.nullable().optional(),
+  }),
 ]);
 
 // Top-level draft object as emitted by the worker LLM. label/summary/route/changes/

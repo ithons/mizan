@@ -132,6 +132,10 @@ const AUTONOMY_PHRASE: Record<AdvisorDraftActionKind, string> = {
   confirm_recurring: 'confirming a bill',
   set_sector_metadata: 'setting a security sector',
   create_recurring_adjustment: 'skipping or repricing a bill',
+  delete_budget: 'removing a budget',
+  create_goal: 'creating a goal',
+  dismiss_recurring: 'dismissing a recurring item',
+  update_account: 'renaming, hiding or setting the balance of an account',
 };
 
 /**

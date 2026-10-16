@@ -171,6 +171,10 @@ const DRAFT_KIND_MOVES_REPORTS: Readonly<Record<AdvisorDraftActionKind, boolean>
   create_recurring_adjustment: false,
   set_manual_cost_basis: false,
   set_sector_metadata: false,
+  delete_budget: false,
+  create_goal: false,
+  dismiss_recurring: false,
+  update_account: false,
 };
 
 function reviewQueueCounts(reviewSummary: TransactionReviewSummary): { reports: Counted[]; other: Counted[] } {
