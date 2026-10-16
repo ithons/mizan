@@ -697,6 +697,12 @@ export function Instrument() {
                 <span className={standing.kind === 'short' ? 'text-clay' : undefined}>{standingLine(standing)}</span>
                 <ExplainToggle disclosure={freeExplain} label="free to spend" />
               </div>
+              {standing.kind === 'free' && safeToSpendQ.data?.per_day_until_next_income != null && safeToSpendQ.data.next_income_date && (
+                <div className="mt-1 text-note text-muted tabular-nums">
+                  About {formatWholeCurrency(safeToSpendQ.data.per_day_until_next_income)} a day until your next pay on{' '}
+                  {format(parseISO(safeToSpendQ.data.next_income_date), 'd MMMM')}
+                </div>
+              )}
               <ExplainPanel disclosure={freeExplain}>
                 <p>{standing.detail}</p>
                 {standing.kind === 'short' && standing.largestClaim && <p>{standing.largestClaim}</p>}
