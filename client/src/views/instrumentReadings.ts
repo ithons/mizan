@@ -61,7 +61,7 @@ export type Standing =
 /** The claims `computeSafeToSpend` subtracts, in the order it subtracts them. */
 function claims(breakdown: SafeToSpend): Array<{ label: string; amount: number }> {
   return [
-    { label: 'card balances', amount: breakdown.card_balances },
+    { label: 'card balances', amount: breakdown.card_balances - breakdown.card_relief },
     { label: `the next ${breakdown.forecast_days} days of dated bills`, amount: breakdown.upcoming_bills },
     { label: 'scheduled transfers out', amount: breakdown.recurring_transfers },
     { label: 'budgeted allocations', amount: breakdown.allocated_budgets },

@@ -537,3 +537,9 @@ test('the parts exceeding the whole is clamped, not rendered as negative', () =>
   }));
   assert.equal(b.other, 0);
 });
+
+test('a card balance paid in full from outside the pool is not named as the largest claim', () => {
+  const shortfall = readStanding(safeToSpend({ free: -1427.96, card_relief: 4278.70 }));
+  assert.equal(shortfall.kind, 'short');
+  assert.equal(shortfall.kind === 'short' && shortfall.largestClaim, 'The largest single claim is $1,001.70 of goal earmarks.');
+});

@@ -36,7 +36,8 @@ export type MaybeCount = number | null;
 /**
  * The lines of the subtraction, in the order `computeSafeToSpend` performs it.
  *
- * `free = liquid - card_balances - upcoming_bills - allocated_budgets - allocated_goals`, so every
+ * `free = liquid + expected_inflows + card_relief - card_balances - upcoming_bills - recurring_transfers
+ * - allocated_budgets - estimated_unbudgeted - allocated_goals`, so every
  * delta after the opening is the negation of the field, and the running total is a partial sum of
  * the server's own numbers rather than a second derivation of them.
  */
@@ -81,7 +82,7 @@ export function claimLines(
       key: 'card-relief',
       label: 'Card payments from outside these accounts',
       delta: sheet.card_relief,
-      note: 'Scheduled payments to a card from an account other than checking, savings or cash, up to what the card owes.',
+      note: 'Scheduled payments to a card from an account outside these, other than a card, up to what the card owes.',
     }),
     { key: 'bills', label: `Bills due in the next ${sheet.forecast_days} days`, delta: -sheet.upcoming_bills },
     ...optional({
