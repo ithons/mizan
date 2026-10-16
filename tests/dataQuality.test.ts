@@ -173,7 +173,7 @@ test('critical issues sort ahead of warnings and notes', () => {
   assert.deepEqual(summary.issues.map((issue) => issue.route), [
     '/investments',
     '/ledger',
-    '/ledger',
+    '/ledger?view=scheduled',
   ]);
   assert.ok(!summary.issues.some((issue) => 'weight' in issue), 'weight must not be serialized');
 });

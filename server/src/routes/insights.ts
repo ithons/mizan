@@ -13,6 +13,7 @@ import { getMonthlyBudgetsWithProjection } from '../services/budgetProjection';
 import { getSyncHealth } from '../services/syncHealth';
 import { toDollars } from '../services/money';
 import type { Insight, InsightSeverity, SyncHealthConnection } from '../../../shared/types';
+import { SCHEDULED_ROUTE } from '../../../shared/routes';
 
 const router = Router();
 
@@ -313,7 +314,7 @@ router.get('/', (_req: Request, res: Response, next: NextFunction): void => {
         message: `${reviewQueue.detected_recurring} detected pattern${reviewQueue.detected_recurring === 1 ? '' : 's'} should be confirmed or dismissed so forecasts stay honest.`,
         metric: `${reviewQueue.detected_recurring} pending`,
         action_label: 'Confirm',
-        action_route: '/ledger',
+        action_route: SCHEDULED_ROUTE,
       });
     }
 
@@ -405,7 +406,7 @@ router.get('/', (_req: Request, res: Response, next: NextFunction): void => {
         message: `Scheduled recurring activity would take liquid cash below zero over the next 30 days.`,
         metric: money(liquidAssets + forecastNet),
         action_label: 'Open bills',
-        action_route: '/ledger',
+        action_route: SCHEDULED_ROUTE,
       });
     } else if (forecast.occurrences.length > 0 && forecastNet < 0) {
       addInsight(insights, {
@@ -416,7 +417,7 @@ router.get('/', (_req: Request, res: Response, next: NextFunction): void => {
         message: `Known recurring bills exceed recurring income by ${money(Math.abs(forecastNet))} over the next 30 days.`,
         metric: money(forecastNet),
         action_label: 'Open bills',
-        action_route: '/ledger',
+        action_route: SCHEDULED_ROUTE,
       });
     }
 

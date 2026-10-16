@@ -23,6 +23,7 @@ import { estimateNote, readSnapshotBefore, readSnapshots } from './netWorthHisto
 import { reconcileAccounts } from './reconciliation';
 import { listMemories } from './aiMemory';
 import { MAX_PAIR_DAY_GAP, findFlowConservationViolations } from './flowConservation';
+import { SCHEDULED_ROUTE } from '../../../shared/routes';
 
 export const ADVISOR_PROFILE_PREFERENCE_KEY = 'advisor_user_profile';
 
@@ -146,7 +147,7 @@ export function buildAdvisorActions({
     actions.push(action(
       'review-cash-flow',
       'Review cash flow',
-      '/ledger',
+      SCHEDULED_ROUTE,
       'Explain my recurring cash flow items that need review and how they affect the next 60 days.',
       `${forecast.review_count} recurring items need review, including ${forecast.overdue_count} overdue.`,
       forecast.overdue_count > 0 ? 'warning' : 'info'

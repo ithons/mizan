@@ -33,7 +33,7 @@ test('HEALTHY: a route that already names a screen passes through untouched', ()
 });
 
 test('a retired route becomes exactly what its redirect would give', () => {
-  assert.equal(canonicalRoute('/bills'), '/ledger');
+  assert.equal(canonicalRoute('/bills'), '/ledger?view=scheduled');
   assert.equal(canonicalRoute('/review'), '/ledger?uncategorized=1');
   // The redirect for /review does not carry its search, so neither does this.
   assert.equal(canonicalRoute('/review?queue=rule_suggestions'), '/ledger?uncategorized=1');
@@ -64,4 +64,19 @@ test('an issue keeps its citation kind when its link moves', () => {
   assert.equal(citationKindForIssue('stale-pending-transactions'), 'transaction');
   assert.equal(citationKindForIssue('sync-stale'), 'sync');
   assert.equal(citationKindForIssue('an-issue-nobody-mapped'), 'data_quality');
+});
+
+test('every link about bills, overdue items or recurring patterns opens the Scheduled tab', () => {
+  const offenders: string[] = [];
+  for (const file of [...sourceFiles(SERVER_SRC), ...sourceFiles(join(SERVER_SRC, '../../client/src'))]) {
+    const lines = readFileSync(file, 'utf8').split('\n');
+    lines.forEach((line, i) => {
+      if (!/'\/ledger'|"\/ledger"/.test(line)) return;
+      const context = lines.slice(Math.max(0, i - 8), i + 1).join('\n');
+      if (/kind: 'recurring'|recurring_candidates|Open bills|'Confirm'|overdue|'Bills and recurring'|confirm_recurring|create_recurring_adjustment/.test(context)) {
+        offenders.push(`${file}:${i + 1}`);
+      }
+    });
+  }
+  assert.deepEqual(offenders, []);
 });

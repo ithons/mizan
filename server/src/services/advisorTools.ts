@@ -27,6 +27,7 @@ import { getAnomalyInsights } from './anomalyInsights';
 import { getDataQualitySummary } from './dataQuality';
 import { listDataImportRuns } from './importRuns';
 import { listHoldingsWithMetadata } from './investmentMetadata';
+import { SCHEDULED_ROUTE } from '../../../shared/routes';
 
 interface CountRow {
   count: number;
@@ -153,8 +154,8 @@ export function buildAdvisorReadTools(
     tool('budgets', 'Budgets', budgets.length > 0 ? 'available' : 'empty', budgets.length, '/plan'),
     tool('rollover_ledger', 'Rollover ledger', rolloverLedger.length > 0 ? 'available' : 'empty', rolloverLedger.length, '/plan'),
     tool('goals', 'Goals', goalCount > 0 ? 'available' : 'empty', goalCount, '/plan'),
-    tool('recurring', 'Bills and recurring', forecast.occurrences.length > 0 ? 'available' : 'empty', forecast.occurrences.length, '/ledger'),
-    tool('recurring_adjustments', 'Recurring adjustments', recurringAdjustmentCount > 0 ? 'available' : 'empty', recurringAdjustmentCount, '/ledger'),
+    tool('recurring', 'Bills and recurring', forecast.occurrences.length > 0 ? 'available' : 'empty', forecast.occurrences.length, SCHEDULED_ROUTE),
+    tool('recurring_adjustments', 'Recurring adjustments', recurringAdjustmentCount > 0 ? 'available' : 'empty', recurringAdjustmentCount, SCHEDULED_ROUTE),
     tool('review', 'Review inbox', reviewSummary.total_open > 0 ? 'attention' : 'available', reviewSummary.total_open, '/ledger?uncategorized=1'),
     tool('investment_quality', 'Investment quality', holdingCount === 0 ? 'empty' : investmentQualityIssues > 0 ? 'attention' : 'available', investmentQualityIssues, '/investments'),
     tool('sector_allocation', 'Sector allocation', holdingCount === 0 ? 'empty' : sectorKnownCount === 0 ? 'attention' : 'available', sectorKnownCount, '/investments'),
@@ -365,7 +366,7 @@ function analyzeRecurring(db: Database.Database): Pick<AdvisorAnalysis, 'answer'
         detail: item.adjustment_action
           ? `${item.frequency}, ${item.confidence_label}, ${adjustmentLabel(item.adjustment_action)}`
           : `${item.frequency}, ${item.confidence_label}`,
-        route: '/ledger',
+        route: SCHEDULED_ROUTE,
         record_id: item.pattern_id,
         amount: toDollars(item.amount),
         date: item.expected_date,
@@ -393,7 +394,7 @@ function analyzeSubscriptions(db: Database.Database): Pick<AdvisorAnalysis, 'ans
           kind: 'recurring',
           label: 'Subscription summary',
           detail: '0 detected',
-          route: '/ledger',
+          route: SCHEDULED_ROUTE,
         }),
       ],
     };
@@ -433,7 +434,7 @@ function analyzeSubscriptions(db: Database.Database): Pick<AdvisorAnalysis, 'ans
         kind: 'recurring',
         label: 'Subscription summary',
         detail: `${insights.subscription_count} detected`,
-        route: '/ledger',
+        route: SCHEDULED_ROUTE,
         amount: toDollars(insights.total_monthly_amount),
       }),
       ...Array.from(citedSubscriptions.values()).map((item) =>
@@ -442,7 +443,7 @@ function analyzeSubscriptions(db: Database.Database): Pick<AdvisorAnalysis, 'ans
           kind: 'recurring' as const,
           label: item.merchant_name,
           detail: `${item.frequency}, ${item.confidence_label}`,
-          route: '/ledger',
+          route: SCHEDULED_ROUTE,
           record_id: item.pattern_id,
           amount: toDollars(item.monthly_amount),
           date: item.next_expected,

@@ -67,6 +67,7 @@ import {
   type WeekChange,
   type WindowId,
 } from './instrumentReadings';
+import { SCHEDULED_ROUTE } from '../../../shared/routes';
 
 /**
  * `/`, the instrument.
@@ -141,9 +142,8 @@ const QUEUE_DESTINATIONS: Record<TransactionReviewQueueId, string | null> = {
   // `RulesSection`, inside Settings' "Categories & rules" panel. There is no deep link to that
   // panel, so this lands on the screen that holds it rather than on the list itself.
   rule_suggestions: '/settings',
-  // Patterns still awaiting a verdict: the ones with an occurrence in the window sit above today's
-  // rule, and `unscheduledCandidates` puts the rest in the schedule block beside it.
-  recurring_candidates: '/ledger',
+  // Patterns awaiting a verdict are worked on the Scheduled tab.
+  recurring_candidates: SCHEDULED_ROUTE,
   duplicate_candidates: '/ledger',
   transfer_candidates: '/ledger',
   // Not offered, for the same reason `getTransactionReviewSummary` leaves it out of `total_open`:
@@ -733,7 +733,7 @@ export function Instrument() {
             <div className="grid content-start gap-[11px]">
               {oldestOverdue && (
                 <RailRow
-                  to="/ledger"
+                  to={SCHEDULED_ROUTE}
                   label={`${oldestOverdue.merchant_name} overdue`}
                   value={formatWholeCurrency(Math.abs(oldestOverdue.adjusted_amount ?? oldestOverdue.amount))}
                   tone="text-clay"
@@ -741,7 +741,7 @@ export function Instrument() {
               )}
               {nextBill && (
                 <RailRow
-                  to="/ledger"
+                  to={SCHEDULED_ROUTE}
                   label={`Next ${nextBill.merchant_name}`}
                   value={`${formatWholeCurrency(Math.abs(nextBill.adjusted_amount ?? nextBill.amount))} ${
                     nextBill.days_until <= 0 ? 'today' : `in ${nextBill.days_until}d`

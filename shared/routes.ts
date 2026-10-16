@@ -25,6 +25,9 @@
  *                           the thing to show. What it read is a status, not a welcome, and a
  *                           status is asked more than once: a connection can lapse in month six.
  */
+/** Where the forecast, overdue items and recurring patterns are worked on. */
+export const SCHEDULED_ROUTE = '/ledger?view=scheduled';
+
 export interface LegacyTarget {
   from: string;
   to: string;
@@ -37,7 +40,7 @@ export const LEGACY_TARGETS: readonly LegacyTarget[] = [
   { from: '/cashflow', to: '/?window=six-months' },
   { from: '/reports', to: '/?window=this-month' },
   { from: '/transactions', to: '/ledger', carrySearch: true },
-  { from: '/bills', to: '/ledger' },
+  { from: '/bills', to: SCHEDULED_ROUTE },
   { from: '/review', to: '/ledger?uncategorized=1' },
   { from: '/budget', to: '/plan' },
   { from: '/goals', to: '/plan' },

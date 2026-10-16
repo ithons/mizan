@@ -43,6 +43,7 @@ import { setManualCostBasis, setSecurityMetadata } from './investmentMetadata';
 import { toCents, toDollars, toDollarsOrNull } from './money';
 import { AdvisorDraftPayloadSchema } from '../../../shared/schemas';
 import { safeJsonParse } from './jsonSafe';
+import { SCHEDULED_ROUTE } from '../../../shared/routes';
 
 interface CategoryRow {
   id: string;
@@ -458,7 +459,7 @@ function draftConfirmRecurring(db: Database.Database, question: string): Advisor
     kind: 'confirm_recurring',
     label: `Confirm ${recurring.merchant_name}`,
     summary: `Mark ${recurring.merchant_name} as a confirmed recurring ${recurring.frequency} pattern.`,
-    route: '/ledger',
+    route: SCHEDULED_ROUTE,
     payload,
     changes: [
       { field: 'confirmed', before: false, after: true },
@@ -469,7 +470,7 @@ function draftConfirmRecurring(db: Database.Database, question: string): Advisor
         kind: 'recurring',
         label: recurring.merchant_name,
         detail: `${recurring.frequency}, ${recurring.transaction_count} transactions`,
-        route: '/ledger',
+        route: SCHEDULED_ROUTE,
         record_id: recurring.id,
         amount: toDollars(recurring.average_amount),
         date: recurring.next_expected,
@@ -519,7 +520,7 @@ function draftRecurringAdjustment(db: Database.Database, question: string): Advi
     kind: 'create_recurring_adjustment',
     label: `${action === 'adjust' ? 'Adjust' : action === 'snooze' ? 'Snooze' : 'Skip'} ${recurring.merchant_name}`,
     summary: `Create a one-time ${action} adjustment for ${recurring.merchant_name} on ${originalDate}.`,
-    route: '/ledger',
+    route: SCHEDULED_ROUTE,
     payload,
     changes: [
       { field: 'occurrence', before: originalDate, after },
@@ -530,7 +531,7 @@ function draftRecurringAdjustment(db: Database.Database, question: string): Advi
         kind: 'recurring',
         label: recurring.merchant_name,
         detail: `${recurring.frequency}, next expected ${recurring.next_expected}`,
-        route: '/ledger',
+        route: SCHEDULED_ROUTE,
         record_id: recurring.id,
         amount: toDollars(recurring.average_amount),
         date: originalDate,
