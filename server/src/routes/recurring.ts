@@ -19,6 +19,7 @@ import type {
   SubscriptionInsights,
 } from '../../../shared/types';
 import { format, addDays } from 'date-fns';
+import { dismissRecurringPattern } from '../services/recurring';
 
 const router = Router();
 
@@ -295,26 +296,10 @@ router.post('/:id/dismiss', (req: Request, res: Response, next: NextFunction): v
     const db = getDb();
     const { id } = req.params;
 
-    const pattern = db.prepare('SELECT id FROM recurring_patterns WHERE id = ?').get(id);
-    if (!pattern) {
+    if (!dismissRecurringPattern(db, String(id)).ok) {
       res.status(404).json({ error: 'Recurring pattern not found' });
       return;
     }
-
-    const now = new Date().toISOString();
-    const dismissPattern = db.transaction(() => {
-      // `dismissed_at` is what makes this decision durable. Without it the row was deleted by
-      // the next detection pass (see migration 057) and the bill came back two syncs later.
-      db.prepare(
-        'UPDATE recurring_patterns SET is_active = 0, is_confirmed = 0, dismissed_at = ?, updated_at = ? WHERE id = ?'
-      ).run(now, now, id);
-
-      db.prepare(
-        'UPDATE transactions SET recurring_id = NULL, updated_at = ? WHERE recurring_id = ?'
-      ).run(now, id);
-    });
-
-    dismissPattern();
 
     res.json({ data: { success: true } });
   } catch (err) {

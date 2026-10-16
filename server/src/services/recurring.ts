@@ -966,3 +966,16 @@ function upsertTransferPattern(
   db.prepare(`UPDATE transactions SET recurring_id = ? WHERE id IN (${ids.map(() => '?').join(',')})`)
     .run(patternId, ...ids);
 }
+
+/** Durable: `dismissed_at` keeps the next detection pass from bringing the pattern back. */
+export function dismissRecurringPattern(db: Database.Database, id: string): { ok: boolean } {
+  if (!db.prepare('SELECT 1 FROM recurring_patterns WHERE id = ?').get(id)) return { ok: false };
+  const now = new Date().toISOString();
+  db.transaction(() => {
+    db.prepare(
+      'UPDATE recurring_patterns SET is_active = 0, is_confirmed = 0, dismissed_at = ?, updated_at = ? WHERE id = ?'
+    ).run(now, now, id);
+    db.prepare('UPDATE transactions SET recurring_id = NULL, updated_at = ? WHERE recurring_id = ?').run(now, id);
+  })();
+  return { ok: true };
+}

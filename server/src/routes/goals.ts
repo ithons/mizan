@@ -1,10 +1,10 @@
 import { Router, Request, Response, NextFunction } from 'express';
-import { v4 as uuidv4 } from 'uuid';
 import type Database from 'better-sqlite3';
 import { getDb } from '../db/index';
 import { validate } from '../middleware/validate';
 import { CreateGoalSchema, UpdateGoalSchema } from '../../../shared/schemas';
 import { calculateGoalProgress } from '../services/goalProgress';
+import { createGoal, type CreateGoalInput } from '../services/goals';
 import { toCents, toCentsOrNull, toDollars, toDollarsOrNull } from '../services/money';
 import type { Goal, GoalType } from '../../../shared/types';
 
@@ -113,54 +113,12 @@ router.post(
   (req: Request, res: Response, next: NextFunction): void => {
     try {
       const db = getDb();
-      const body = req.body as {
-        name: string;
-        type: GoalType;
-        target_amount: number;
-        current_amount?: number;
-        starting_amount?: number | null;
-        account_id?: string | null;
-        target_date?: string | null;
-        color?: string | null;
-      };
-      const accountId = normalizeAccountId(body.account_id);
-
-      if (accountId && !accountExists(db, accountId)) {
+      const result = createGoal(db, req.body as CreateGoalInput);
+      if (!result.ok) {
         res.status(404).json({ error: 'Account not found' });
         return;
       }
-
-      const now = new Date().toISOString();
-      const id = uuidv4();
-      // User-supplied starting_amount is dollars -> cents; the account-seeded value
-      // reads current_balance which is already cents.
-      let startingAmount = toCentsOrNull(body.starting_amount ?? null);
-
-      if (body.type === 'debt' && accountId && startingAmount === null) {
-        const account = db.prepare(
-          'SELECT current_balance FROM accounts WHERE id = ?'
-        ).get(accountId) as { current_balance: number };
-        startingAmount = Math.max(account.current_balance, 0);
-      }
-
-      db.prepare(`
-        INSERT INTO goals
-          (id, name, type, target_amount, current_amount, starting_amount,
-           account_id, target_date, color, is_archived, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)
-      `).run(
-        id,
-        body.name,
-        body.type,
-        toCents(body.target_amount),
-        toCents(body.current_amount ?? 0),
-        startingAmount,
-        accountId,
-        body.target_date ?? null,
-        body.color ?? null,
-        now,
-        now
-      );
+      const id = result.id;
 
       res.status(201).json({ data: getGoal(db, id) });
     } catch (err) {

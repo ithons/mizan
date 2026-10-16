@@ -10,6 +10,7 @@ import {
 } from '../services/budgetProjection';
 import { toCents, dollarizeFields } from '../services/money';
 import type { Budget, BudgetRolloverLedgerEntry } from '../../../shared/types';
+import { deleteBudget } from '../services/budgets';
 
 const router = Router();
 
@@ -202,13 +203,10 @@ router.delete('/:id', (req: Request, res: Response, next: NextFunction): void =>
     const db = getDb();
     const { id } = req.params;
 
-    const budget = db.prepare('SELECT id FROM budgets WHERE id = ?').get(id);
-    if (!budget) {
+    if (!deleteBudget(db, String(id)).ok) {
       res.status(404).json({ error: 'Budget not found' });
       return;
     }
-
-    db.prepare('DELETE FROM budgets WHERE id = ?').run(id);
     res.json({ data: { success: true } });
   } catch (err) {
     next(err);
