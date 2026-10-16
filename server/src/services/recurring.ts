@@ -244,7 +244,11 @@ export function expectedAmount(recent: ReadonlyArray<{ amount: number; date: str
   const window = recent.slice(0, RECENT_AMOUNT_WINDOW);
   const amounts = window.map((row) => row.amount);
   const unchanged = { amount: Math.round(median(amounts)), changedFrom: null, changedOn: null };
-  if (amounts.length >= 4 && farFrom(amounts[1], amounts[0]) !== 0 && farFrom(amounts[1], amounts[2]) === 0) {
+  const loneSpike = amounts.length >= 4
+    && farFrom(amounts[1], amounts[0]) !== 0
+    && farFrom(amounts[1], amounts[2]) === 0
+    && amounts.slice(3).every((amount) => farFrom(amount, amounts[0]) !== 0);
+  if (loneSpike) {
     return expectedAmount(recent.slice(1));
   }
 

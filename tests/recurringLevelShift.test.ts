@@ -115,6 +115,10 @@ test('a bill that ran high and came back has not changed level', () => {
     [30000, 30000, 54418, 54500, 30000, 30000],
     [1000, 1000, 1500, 1000, 1510, 1000],
     [1000, 700, 1500, 1510, 1000, 1000],
+    [10000, 15000, 15000, 10000, 10000, 10000],
+    [-10000, -15000, -15000, -10000, -10000, -10000],
+    [30000, 54418, 54418, 30000, 30000, 30000],
+    [5000, 1500, 1500, 1500, 5000, 5000],
   ]) {
     assert.equal(expectedAmount(series(amounts)).changedFrom, null, String(amounts));
   }
@@ -137,6 +141,7 @@ test('a named old level is never the amount being forecast', () => {
       const result = expectedAmount(series(prefix));
       if (result.changedFrom !== null) {
         assert.notEqual(Math.abs(result.changedFrom - result.amount) <= result.amount * 0.15, true, String(prefix));
+        assert.notEqual(Math.abs(result.changedFrom - prefix[0]) <= Math.abs(prefix[0]) * 0.15, true, String(prefix));
       }
     }
     if (prefix.length < 6) for (const value of values) walk([...prefix, value]);
