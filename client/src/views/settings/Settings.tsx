@@ -26,6 +26,7 @@ import { SimplefinSection } from './SimplefinSection';
 import { CoinbaseSection } from './CoinbaseSection';
 import { CategoriesSection } from './CategoriesSection';
 import { RulesSection } from './RulesSection';
+import { NotificationRulesSection } from './NotificationRulesSection';
 import { DataSection } from './DataSection';
 import { AdvisorMemorySection } from './AdvisorMemorySection';
 import { SetupSection, useSetupPlan } from './SetupSection';
@@ -44,6 +45,7 @@ type PanelId =
   | 'coinbase'
   | 'import'
   | 'categories'
+  | 'notifications'
   | 'advisor_profile'
   | 'advisor_memory'
   | 'advisor_model'
@@ -678,6 +680,7 @@ export function Settings() {
     else if (section === 'coinbase') setOpenPanel('coinbase');
     else if (section === 'data' || section === 'import') setOpenPanel('import');
     else if (section === 'ai_actions') setOpenPanel('ai_actions');
+    else if (section === 'notifications') setOpenPanel('notifications');
     // The category delete refusal names this panel, so it has to be linkable by name.
     else if (section === 'ai_declined') setOpenPanel('ai_declined');
   }, [searchParams]);
@@ -929,6 +932,17 @@ export function Settings() {
                 <CategoriesSection />
                 <RulesSection />
               </div>
+            </ExpandedPanel>
+          )}
+          <SettingsRow
+            title="Notifications"
+            sub="What the inbox tells you about, and desktop alerts"
+            trailing={<span className="text-muted">Rules</span>}
+            onClick={() => toggle('notifications')}
+          />
+          {openPanel === 'notifications' && (
+            <ExpandedPanel>
+              <NotificationRulesSection />
             </ExpandedPanel>
           )}
           <SettingsRow title="Appearance" trailing={<ThemeToggle />} last />
