@@ -243,7 +243,13 @@ function usualPaid(values: number[]): number {
 export function expectedAmount(recent: ReadonlyArray<{ amount: number; date: string }>): ExpectedAmount {
   const window = recent.slice(0, RECENT_AMOUNT_WINDOW);
   const amounts = window.map((row) => row.amount);
-  const unchanged = { amount: Math.round(median(amounts)), changedFrom: null, changedOn: null };
+  const settled = amounts.length >= 3
+    && [[0, 1], [0, 2], [1, 2]].every(([a, b]) => farFrom(amounts[a], amounts[b]) === 0);
+  const unchanged = {
+    amount: Math.round(settled ? usualPaid(amounts.slice(0, 3)) : median(amounts)),
+    changedFrom: null,
+    changedOn: null,
+  };
   const loneSpike = amounts.length >= 4
     && farFrom(amounts[1], amounts[0]) !== 0
     && farFrom(amounts[1], amounts[2]) === 0

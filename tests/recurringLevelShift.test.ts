@@ -148,3 +148,7 @@ test('a named old level is never the amount being forecast', () => {
   };
   walk([]);
 });
+
+test('three agreeing occurrences after an erratic stretch are the forecast, with nothing named', () => {
+  assert.deepEqual(expectedAmount(series([700, 700, 700, 1000, 1500, 3000])), { amount: 700, changedFrom: null, changedOn: null });
+});
