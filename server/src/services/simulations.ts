@@ -5,6 +5,7 @@ import { getMonthlyBudgetsWithProjection } from './budgetProjection';
 import { getCashflowReport, getSpendingReport } from './reporting';
 import { calculateGoalProgress } from './goalProgress';
 import { toCents, toDollars } from './money';
+import { excludedFromTotalsSql, expenseSideSql, reportDateSql, spendAmountSql } from './transactionFilters';
 
 const ymd = (date: Date) => format(date, 'yyyy-MM-dd');
 
@@ -19,6 +20,7 @@ interface Curve {
   lowest: number;
   lowestDate: string;
   firstNegativeDate: string | null;
+  daily: number[];
 }
 
 function runCurve(start: number, perDay: number, effects: ScheduledEffect[], days: number, today: Date): Curve {
@@ -30,13 +32,15 @@ function runCurve(start: number, perDay: number, effects: ScheduledEffect[], day
   let lowest = Number.POSITIVE_INFINITY;
   let lowestDate = todayKey;
   let firstNegativeDate: string | null = null;
+  const daily: number[] = [];
   for (let day = 0; day <= days; day++) {
     const key = ymd(addDays(today, day));
     value += (byDate.get(key) ?? 0) - (day > 0 ? perDay : 0);
+    daily.push(value);
     if (value < lowest) { lowest = value; lowestDate = key; }
     if (value < 0 && firstNegativeDate === null) firstNegativeDate = key;
   }
-  return { end: Math.round(value), lowest: Math.round(lowest), lowestDate, firstNegativeDate };
+  return { end: Math.round(value), lowest: Math.round(lowest), lowestDate, firstNegativeDate, daily };
 }
 
 function adjustedEffects(effects: ScheduledEffect[], adjustments: ProjectionAdjustment[], today: Date, days: number): ScheduledEffect[] {
@@ -254,6 +258,116 @@ export function emergencyFund(
       `Essentials are these categories: ${[...categories].join(', ')}. The owner can change the set.`,
       `${measured.length} complete months measured; ${Math.round((options.confidence ?? 0.9) * 100)}% confidence; ${cover} months of cover.`,
       'Liquid accounts less what the cards owe; goal earmarks are counted as available.',
+    ],
+  };
+}
+
+const BAND_HISTORY_DAYS = 182;
+const BAND_MIN_HISTORY_DAYS = 90;
+const BAND_BLOCK_DAYS = 7;
+
+function seededRandom(seed: number): () => number {
+  let state = seed >>> 0;
+  return () => {
+    state = (state + 0x6d2b79f5) >>> 0;
+    let t = state;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+function quantile(sorted: number[], q: number): number {
+  const position = (sorted.length - 1) * q;
+  const low = Math.floor(position);
+  const high = Math.ceil(position);
+  return sorted[low] + (sorted[high] - sorted[low]) * (position - low);
+}
+
+/** Daily non-recurring spend over the history window, oldest first, refunds netted to their purchase date. */
+function dailyDiscretionarySpend(db: Database.Database, today: Date): { daily: number[]; coveredDays: number } {
+  const start = ymd(addDays(today, -BAND_HISTORY_DAYS));
+  const end = ymd(addDays(today, -1));
+  const rows = db.prepare(`
+    SELECT ${reportDateSql('t')} AS day, SUM(${spendAmountSql('t')}) AS cents
+    FROM transactions t LEFT JOIN categories c ON c.id = t.category_id
+    WHERE t.pending = 0 AND ${excludedFromTotalsSql('t')} AND ${expenseSideSql('t', 'c')}
+      AND ${reportDateSql('t')} BETWEEN ? AND ?
+      AND NOT EXISTS (SELECT 1 FROM recurring_patterns rp WHERE rp.id = t.recurring_id AND rp.is_active = 1)
+    GROUP BY 1
+  `).all(start, end) as Array<{ day: string; cents: number }>;
+  const first = db.prepare('SELECT MIN(date) AS first FROM transactions').get() as { first: string | null };
+  const byDay = new Map(rows.map((row) => [row.day, row.cents]));
+  const daily: number[] = [];
+  for (let day = BAND_HISTORY_DAYS; day >= 1; day--) {
+    const key = ymd(addDays(today, -day));
+    if (first.first && key >= first.first) daily.push(byDay.get(key) ?? 0);
+  }
+  return { daily, coveredDays: daily.length };
+}
+
+/**
+ * The projection as a distribution: non-recurring spending is replayed from the owner's own days
+ * in 7-day blocks, and each income occurrence's amount is drawn from that pattern's last twelve.
+ * The point projection's own inputs are kept; only these two vary.
+ */
+export function projectFreeBand(db: Database.Database, days: number, paths = 4000, today = new Date(), seed = 20261016) {
+  const budgets = getMonthlyBudgetsWithProjection(db, today.getFullYear(), today.getMonth() + 1);
+  const sheet = computeSafeToSpend(db, { budgets, forecastDays: days });
+  const { daily, coveredDays } = dailyDiscretionarySpend(db, today);
+  if (coveredDays < BAND_MIN_HISTORY_DAYS) {
+    return { band: null, note: `Only ${coveredDays} days of spending history; a band needs ${BAND_MIN_HISTORY_DAYS}.` };
+  }
+  const meanDaily = daily.reduce((sum, value) => sum + value, 0) / daily.length;
+  const todayKey = ymd(today);
+  const recentAmounts = db.prepare('SELECT amount FROM transactions WHERE recurring_id = ? ORDER BY date DESC LIMIT 12');
+  const income = sheet.scheduled
+    .filter((item) => item.kind === 'income')
+    .map((item) => {
+      const history = (recentAmounts.all(item.patternId) as Array<{ amount: number }>).map((row) => row.amount).filter((amount) => amount > 0);
+      const offset = Math.max(0, Math.round((parseISO(item.date).getTime() - parseISO(todayKey).getTime()) / 86_400_000));
+      return { offset, expected: item.cents, history };
+    });
+  const pointEnd = runCurve(sheet.liquid - sheet.cardBalances - sheet.allocatedBudgets - sheet.allocatedGoals, sheet.estimatedUnbudgeted / days, sheet.scheduled, days, today);
+
+  const random = seededRandom(seed);
+  const ends: number[] = [];
+  let pathsBelowZero = 0;
+  for (let path = 0; path < paths; path++) {
+    const deviation = new Array<number>(days + 1).fill(0);
+    for (let day = 1; day <= days; day += BAND_BLOCK_DAYS) {
+      const start = Math.floor(random() * Math.max(1, daily.length - BAND_BLOCK_DAYS));
+      for (let k = 0; k < BAND_BLOCK_DAYS && day + k <= days; k++) deviation[day + k] -= daily[start + k] - meanDaily;
+    }
+    for (const item of income) {
+      if (item.history.length >= 3 && item.offset <= days) {
+        deviation[item.offset] += item.history[Math.floor(random() * item.history.length)] - item.expected;
+      }
+    }
+    let shift = 0;
+    let lowest = Number.POSITIVE_INFINITY;
+    for (let day = 0; day <= days; day++) {
+      shift += deviation[day];
+      lowest = Math.min(lowest, pointEnd.daily[day] + shift);
+    }
+    ends.push(pointEnd.end + shift);
+    if (lowest < 0) pathsBelowZero++;
+  }
+  ends.sort((a, b) => a - b);
+  return {
+    days,
+    paths,
+    point_estimate: toDollars(pointEnd.end),
+    band: {
+      p10: toDollars(Math.round(quantile(ends, 0.1))),
+      p50: toDollars(Math.round(quantile(ends, 0.5))),
+      p90: toDollars(Math.round(quantile(ends, 0.9))),
+    },
+    chance_of_dropping_below_claims: Math.round((pathsBelowZero / paths) * 100) / 100,
+    assumptions: [
+      `Non-recurring spending is replayed from ${coveredDays} days of history in ${BAND_BLOCK_DAYS}-day blocks around its daily average.`,
+      'Each expected income occurrence is drawn from its pattern\'s last twelve amounts; patterns with fewer than three keep the forecast amount.',
+      'Everything else (claims, bills, transfers, budgets) is as in the point projection. "Below claims" is not an overdraft.',
     ],
   };
 }

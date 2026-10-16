@@ -8,7 +8,7 @@ import { proposeChanges, MAX_PROPOSALS_PER_CALL } from './advisorProposals';
 import { listNotificationRules, listNotifications, notificationRuleToDollars, notificationToDollars } from './notifications';
 import { format, subMonths } from 'date-fns';
 import { explainMonth, fundingMix } from './monthStudies';
-import { cashRunway, checkAdjustments, compoundGrowth, emergencyFund, debtPayoff, goalTimeline, goalTimelineFor, projectFree } from './simulations';
+import { cashRunway, checkAdjustments, compoundGrowth, emergencyFund, projectFreeBand, debtPayoff, goalTimeline, goalTimelineFor, projectFree } from './simulations';
 
 type ToolInput = Record<string, unknown>;
 
@@ -109,7 +109,7 @@ export const AGENT_TOOLS: Anthropic.Tool[] = [
   {
     name: 'run_simulation',
     description:
-      'Estimates and what-ifs computed from the owner\'s real data. type "project": what is free day by day over `days` (default 30, max 120), its lowest point and the first day it drops below the claims already on the money (not an overdraft), built from the same inputs as free to spend; pass `adjustments` for a what-if: {kind:"one_off", date, amount (dollars, negative to spend)}, {kind:"monthly", amount, start_date?}, {kind:"cancel_recurring", pattern_id}, {kind:"scale_unbudgeted", percent (e.g. -20)}. Use it for "can I afford X", "what if I cut Y", "when do I run short". type "debt_payoff": {account_id or balance, apr, monthly_payment}. type "goal_timeline": {goal_id or target and current, monthly_contribution, annual_return?}. type "runway": {months?} months the liquid accounts, less card balances, cover at recent spending. type "growth": {principal, monthly_contribution, annual_return, years}. type "emergency_fund": {months? (default 3), confidence? 0.8|0.9|0.95, categories? (category ids counted as essential), history? months} sizes a cushion from how much essential spending varies. Every result states its assumptions; repeat them when you quote it.',
+      'Estimates and what-ifs computed from the owner\'s real data. type "project": what is free day by day over `days` (default 30, max 120), its lowest point and the first day it drops below the claims already on the money (not an overdraft), built from the same inputs as free to spend; pass `adjustments` for a what-if: {kind:"one_off", date, amount (dollars, negative to spend)}, {kind:"monthly", amount, start_date?}, {kind:"cancel_recurring", pattern_id}, {kind:"scale_unbudgeted", percent (e.g. -20)}. Pass band:true (no adjustments) for a 10th/50th/90th percentile range and the chance of dropping below claims, from replaying the owner\'s own spending and pay. Use it for "can I afford X", "what if I cut Y", "when do I run short". type "debt_payoff": {account_id or balance, apr, monthly_payment}. type "goal_timeline": {goal_id or target and current, monthly_contribution, annual_return?}. type "runway": {months?} months the liquid accounts, less card balances, cover at recent spending. type "growth": {principal, monthly_contribution, annual_return, years}. type "emergency_fund": {months? (default 3), confidence? 0.8|0.9|0.95, categories? (category ids counted as essential), history? months} sizes a cushion from how much essential spending varies. Every result states its assumptions; repeat them when you quote it.',
     input_schema: {
       type: 'object',
       properties: {
@@ -234,6 +234,7 @@ function runSimulationTool(db: Database.Database, input: ToolInput): unknown {
       const days = Math.min(Math.max(Math.round(num(params.days, 30)), 1), 120);
       const checked = checkAdjustments(db, params.adjustments, days);
       if (!checked.ok) return { error: 'Some adjustments were refused', details: checked.errors };
+      if (params.band === true && checked.adjustments.length === 0) return projectFreeBand(db, days);
       return projectFree(db, days, checked.adjustments);
     }
     case 'debt_payoff': {

@@ -4,7 +4,7 @@ import type Database from 'better-sqlite3';
 import { format, subDays } from 'date-fns';
 import { _setDbForTesting } from '../server/src/db/index';
 import { computeSafeToSpend, readSafeToSpend } from '../server/src/services/safeToSpend';
-import { checkAdjustments, compoundGrowth, cashRunway, debtPayoff, emergencyFund, goalTimeline, projectFree } from '../server/src/services/simulations';
+import { checkAdjustments, compoundGrowth, cashRunway, debtPayoff, emergencyFund, goalTimeline, projectFree, projectFreeBand } from '../server/src/services/simulations';
 import { getMonthlyBudgetsWithProjection } from '../server/src/services/budgetProjection';
 import { detectRecurring } from '../server/src/services/recurring';
 import { refreshTransactionIntegrity } from '../server/src/services/transactionIntegrity';
@@ -173,5 +173,42 @@ test('income expected already but not posted is named when a projection counts i
     const late = projectFree(db, 30) as { overdue_income_counted?: Array<{ name: string; expected_on: string }>; assumptions: string[] };
     assert.ok(late.overdue_income_counted && late.overdue_income_counted.some((item) => item.expected_on === day(3)));
     assert.ok(late.assumptions.some((line) => line.includes('has not posted')));
+  });
+});
+
+function steadyLedger(): Database.Database {
+  const db = migratedTestDb();
+  const chase = insertAccount(db, { account_name: 'Chase', type: 'checking', current_balance: 500000 });
+  for (let back = 150; back >= 1; back--) {
+    insertTransaction(db, { account_id: chase, date: day(back), amount: -2000, merchant_name: `Cafe ${back}`, original_name: `CAFE ${back}`, category_id: 'cat_food_restaurants' });
+  }
+  for (let weeks = 20; weeks >= 1; weeks--) {
+    insertTransaction(db, { account_id: chase, date: day(7 * weeks), amount: 50000, merchant_name: 'Payroll', original_name: 'PAYROLL', category_id: 'cat_income_paycheck' });
+  }
+  _setDbForTesting(db);
+  detectRecurring();
+  return db;
+}
+
+test('HEALTHY: steady spending and fixed pay give a band of no width around the point estimate', () => {
+  const db = steadyLedger();
+  try {
+    const result = projectFreeBand(db, 30, 500) as { point_estimate: number; band: { p10: number; p50: number; p90: number }; chance_of_dropping_below_claims: number };
+    assert.ok(result.band);
+    assert.ok(Math.abs(result.band.p90 - result.band.p10) < 1, `${result.band.p10}..${result.band.p90}`);
+    assert.ok(Math.abs(result.band.p50 - result.point_estimate) < 1);
+    assert.equal(result.chance_of_dropping_below_claims, 0, 'a comfortable ledger never reads as at risk');
+  } finally {
+    _setDbForTesting(undefined as unknown as Database.Database);
+  }
+});
+
+test('a band is refused without ninety days of history, and the same seed gives the same band', () => {
+  const young = migratedTestDb();
+  insertTransaction(young, { date: day(10), amount: -500, category_id: 'cat_food' });
+  assert.equal((projectFreeBand(young, 30, 100) as { band: unknown }).band, null);
+  withLedger((db) => {
+    db.prepare("UPDATE transactions SET date = ? WHERE id = (SELECT id FROM transactions ORDER BY date LIMIT 1)").run(day(120));
+    assert.deepEqual(projectFreeBand(db, 30, 300), projectFreeBand(db, 30, 300));
   });
 });
