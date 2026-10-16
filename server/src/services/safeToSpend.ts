@@ -186,7 +186,7 @@ export function computeSafeToSpend(
 
 const INVESTMENT_TYPES = new Set(['brokerage', 'ira_traditional', 'ira_roth', 'crypto_wallet']);
 
-/** Forecast income, less income filed under Investments or Crypto or last paid into an investment account. */
+/** Forecast income, less income filed under Investments or Crypto or last paid into an investment or crypto account. */
 function inflowsIntoPool(db: Database.Database, occurrences: readonly RecurringForecastOccurrence[]): number {
   const landing = db.prepare(`
     SELECT a.type FROM transactions t JOIN accounts a ON a.id = t.account_id

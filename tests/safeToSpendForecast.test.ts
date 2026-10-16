@@ -150,7 +150,7 @@ test('a paycheck last paid into an account since closed still counts, and a type
   });
 });
 
-test('uncategorized income last paid into a brokerage is left out by the account alone, and a typed-in crypto reward by its category', () => {
+test('income filed as pay but last paid into a brokerage is left out by the account alone, and a typed-in crypto reward by its category', () => {
   withDb((db, ids) => {
     seedSchedules(db, ids);
     const before = computeSafeToSpend(db, { forecastDays: 30 }).expectedInflows;

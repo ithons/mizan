@@ -63,7 +63,7 @@ export function claimLines(
       key: 'inflows',
       label: `Income expected in the next ${sheet.forecast_days} days`,
       delta: sheet.expected_inflows,
-      note: 'Recurring income, except income filed under Investments or Crypto, or last paid into an investment account.',
+      note: 'Recurring income, except income filed under Investments or Crypto, or last paid into an investment or crypto account.',
     }),
     {
       key: 'cards',
