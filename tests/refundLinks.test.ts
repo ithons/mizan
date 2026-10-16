@@ -149,3 +149,20 @@ test('a credit is never linked to a negative row filed as income, so linking set
   assert.equal(link(db, credit).refund_of_id, null);
   assert.deepEqual(refreshRefundLinks(db), { linked: 0, newlyLinked: 0 });
 });
+
+test('a credit matching an older charge exactly is not passed off as part of a newer, bigger one', () => {
+  const db = migratedTestDb();
+  const checking = insertAccount(db, { account_name: 'Chase Checking', type: 'checking' });
+  const merchant = { merchant_name: 'Zeffy Xi Sam Fenway', original_name: 'Zeffy Xi Sam Fenway', category_id: 'cat_home_rent' };
+  insertTransaction(db, { account_id: checking, date: '2026-06-02', amount: -35000, ...merchant });
+  insertTransaction(db, { account_id: checking, date: '2026-06-04', amount: -15000, ...merchant });
+  const payment = insertTransaction(db, { account_id: checking, date: '2026-08-12', amount: -200000, ...merchant });
+  const credit = insertTransaction(db, { account_id: checking, date: '2026-09-27', amount: 35000, merchant_name: merchant.merchant_name, original_name: merchant.original_name });
+
+  refreshRefundLinks(db);
+  assert.equal(link(db, credit).refund_of_id, null);
+
+  const partial = insertTransaction(db, { account_id: checking, date: '2026-09-28', amount: 20000, merchant_name: merchant.merchant_name, original_name: merchant.original_name });
+  refreshRefundLinks(db);
+  assert.equal(link(db, partial).refund_of_id, payment, 'a partial with no exact charge behind it still links');
+});
