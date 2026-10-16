@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useLocation } from 'react-router-dom';
 import { format, isToday, isYesterday, parseISO } from 'date-fns';
 import { aiApi } from '../lib/api';
 import { useAppStore } from '../store';
@@ -151,7 +152,11 @@ type NarrowPane = 'chat' | 'conversations' | 'changes';
 export default function Advisor() {
   const chat = useAdvisorChat();
   const qc = useQueryClient();
-  const [draft, setDraft] = useState('');
+  const location = useLocation();
+  const [draft, setDraft] = useState(() => {
+    const handed = (location.state as { draft?: unknown } | null)?.draft;
+    return typeof handed === 'string' ? handed : '';
+  });
   const [pane, setPane] = useState<NarrowPane>('chat');
   const { data: conversations = [] } = useQuery({
     queryKey: ['ai-conversations'],

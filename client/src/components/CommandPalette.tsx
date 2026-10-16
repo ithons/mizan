@@ -687,7 +687,10 @@ export function CommandPalette() {
               chat={chat}
               draft={query}
               onDraftChange={setQuery}
-              onExpand={pathname === '/advisor' ? undefined : () => { setOpen(false); navigate('/advisor'); }}
+              onExpand={pathname === '/advisor' ? undefined : () => {
+                setOpen(false);
+                navigate('/advisor', { state: { draft: query } });
+              }}
             />
           )}
           {mode === 'digest' && <AiDigestPanel onBack={() => setMode('search')} />}
