@@ -24,6 +24,7 @@ const KIND_LABEL: Record<NotificationRuleKind, string> = {
   goal_milestone: 'Goal milestone',
   unusual_spending: 'Unusual spending',
   recurring_amount_changed: 'Recurring amount changed',
+  income_late: 'Pay is late',
 };
 
 const DEFAULT_SPECS: { [K in NotificationRuleKind]: Extract<NotificationRuleSpec, { kind: K }> } = {
@@ -36,6 +37,7 @@ const DEFAULT_SPECS: { [K in NotificationRuleKind]: Extract<NotificationRuleSpec
   goal_milestone: { kind: 'goal_milestone', params: { goal_id: null, milestones: [50, 100] } },
   unusual_spending: { kind: 'unusual_spending', params: { category_id: null, ratio: 1.5, min_amount: 100 } },
   recurring_amount_changed: { kind: 'recurring_amount_changed', params: {} },
+  income_late: { kind: 'income_late', params: { min_days_late: 2 } },
 };
 
 const USD = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' });
@@ -76,6 +78,8 @@ function describeRule(spec: NotificationRuleSpec, lookups: Lookups): string {
       return `When ${category(spec.params.category_id, 'a top-level category')} runs at ${spec.params.ratio}x its usual month-to-date pace and at least ${USD.format(spec.params.min_amount)} over it.`;
     case 'recurring_amount_changed':
       return 'When a recurring bill or deposit moves to a new amount.';
+    case 'income_late':
+      return `When expected pay is later than it usually runs, and at least ${spec.params.min_days_late} day${spec.params.min_days_late === 1 ? '' : 's'} late.`;
   }
 }
 
@@ -171,6 +175,8 @@ function ParamsEditor({ spec, onChange, lookups }: {
     case 'safe_to_spend_negative':
     case 'recurring_amount_changed':
       return <p className="text-note text-muted-2">Nothing to set.</p>;
+    case 'income_late':
+      return <NumberField label="At least this many days late" value={spec.params.min_days_late} onChange={(v) => onChange({ ...spec, params: { min_days_late: v } })} />;
   }
 }
 

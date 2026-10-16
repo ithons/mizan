@@ -37,6 +37,7 @@ export const NOTIFICATION_PARAM_MONEY_FIELDS: Readonly<Record<NotificationRuleKi
   goal_milestone: [],
   unusual_spending: ['min_amount'],
   recurring_amount_changed: [],
+  income_late: [],
 };
 
 /** Money fields inside each kind's notification payload. */
@@ -50,6 +51,7 @@ export const NOTIFICATION_PAYLOAD_MONEY_FIELDS: Readonly<Record<NotificationRule
   goal_milestone: ['progress_amount', 'target_amount'],
   unusual_spending: ['month_to_date', 'baseline'],
   recurring_amount_changed: ['amount', 'changed_from'],
+  income_late: ['amount'],
 };
 
 export type UpsertNotificationRuleInput = NotificationRuleSpec & {
@@ -598,6 +600,40 @@ const recurringAmountChanged: Evaluator<'recurring_amount_changed'> = (ctx) => {
   });
 };
 
+/**
+ * Income past its expected date by more than its own timing usually wanders: the 95th percentile
+ * of how far its past gaps strayed from their median gap, and never less than `min_days_late`.
+ */
+const incomeLate: Evaluator<'income_late'> = (ctx, params) => {
+  const today = format(ctx.now, 'yyyy-MM-dd');
+  const patterns = ctx.db.prepare(`
+    SELECT rp.id, rp.merchant_name, rp.next_expected, rp.average_amount
+    FROM recurring_patterns rp LEFT JOIN categories c ON c.id = rp.category_id
+    WHERE rp.is_active = 1 AND rp.dismissed_at IS NULL AND rp.kind = 'flow' AND rp.next_expected < ?
+      AND (c.is_income = 1 OR (SELECT AVG(t.amount) FROM transactions t WHERE t.recurring_id = rp.id) > 0)
+  `).all(today) as Array<{ id: string; merchant_name: string; next_expected: string; average_amount: number }>;
+  const datesOf = ctx.db.prepare('SELECT date FROM transactions WHERE recurring_id = ? AND pending = 0 ORDER BY date');
+  return patterns.flatMap((pattern) => {
+    const dates = (datesOf.all(pattern.id) as Array<{ date: string }>).map((row) => parseISO(row.date).getTime());
+    if (dates.length < 3) return [];
+    const gaps = dates.slice(1).map((time, i) => Math.round((time - dates[i]) / 86_400_000));
+    const sortedGaps = [...gaps].sort((a, b) => a - b);
+    const medianGap = sortedGaps[Math.floor(sortedGaps.length / 2)];
+    const strays = gaps.map((gap) => Math.abs(gap - medianGap)).sort((a, b) => a - b);
+    const tolerance = Math.max(params.min_days_late, strays[Math.min(strays.length - 1, Math.floor(strays.length * 0.95))]);
+    const daysLate = Math.round((parseISO(today).getTime() - parseISO(pattern.next_expected).getTime()) / 86_400_000);
+    if (daysLate <= tolerance) return [];
+    return [{
+      dedupe_key: `income_late:${pattern.id}:${pattern.next_expected}`,
+      title: `${pattern.merchant_name} is ${daysLate} days late`,
+      body: `It was expected on ${shortDate(pattern.next_expected)} and usually arrives within ${tolerance} days of that. Nothing has posted yet.`,
+      severity: 'warning' as const,
+      payload: { pattern_id: pattern.id, expected_on: pattern.next_expected, days_late: daysLate, amount: Math.abs(pattern.average_amount) },
+      route: SCHEDULED_ROUTE,
+    }];
+  });
+};
+
 const EVALUATORS: { [K in NotificationRuleKind]: Evaluator<K> } = {
   budget_threshold: budgetThreshold,
   large_transaction: largeTransaction,
@@ -608,6 +644,7 @@ const EVALUATORS: { [K in NotificationRuleKind]: Evaluator<K> } = {
   goal_milestone: goalMilestone,
   unusual_spending: unusualSpending,
   recurring_amount_changed: recurringAmountChanged,
+  income_late: incomeLate,
 };
 
 function candidatesFor(ctx: EvaluationContext, spec: NotificationRuleSpec): Candidate[] {

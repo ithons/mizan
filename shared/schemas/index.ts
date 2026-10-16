@@ -335,6 +335,7 @@ export const NotificationRuleParamsSchemas = {
     min_amount: z.number().nonnegative().default(0),
   }),
   recurring_amount_changed: z.object({}),
+  income_late: z.object({ min_days_late: z.number().int().min(0).max(30).default(2) }),
 } as const;
 
 const notificationRuleVariant = <K extends keyof typeof NotificationRuleParamsSchemas>(kind: K) =>
@@ -350,6 +351,7 @@ export const NotificationRuleSpecSchema = z.discriminatedUnion('kind', [
   notificationRuleVariant('goal_milestone'),
   notificationRuleVariant('unusual_spending'),
   notificationRuleVariant('recurring_amount_changed'),
+  notificationRuleVariant('income_late'),
 ]);
 
 export const CreateNotificationRuleSchema = z.object({

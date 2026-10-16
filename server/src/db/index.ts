@@ -100,6 +100,7 @@ export const ROW_REPAIR_MIGRATIONS: readonly string[] = [
   '065_transfer_source.sql',
   '071_balance_only_accounts.sql',
   '072_notifications.sql',
+  '073_income_late_rule.sql',
 ];
 
 function migrationStatements(file: string): string[] {

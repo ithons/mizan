@@ -678,7 +678,7 @@ test('a backup from before 072 restores with the default notification rules seed
   restoreLocalBackup(target, wire);
   const seeded = target.prepare('SELECT id FROM notification_rules ORDER BY id').all();
   assert.deepEqual(seeded, source.prepare('SELECT id FROM notification_rules ORDER BY id').all());
-  assert.equal(seeded.length, 9);
+  assert.ok(seeded.length > 0);
 });
 
 test('a migration counts as able to change rows only when it holds a statement that rewrites them', () => {

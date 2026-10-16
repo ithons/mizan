@@ -1892,6 +1892,7 @@ export const NOTIFICATION_RULE_KINDS = [
   'goal_milestone',
   'unusual_spending',
   'recurring_amount_changed',
+  'income_late',
 ] as const;
 
 export type NotificationRuleKind = (typeof NOTIFICATION_RULE_KINDS)[number];
@@ -1923,6 +1924,8 @@ export interface NotificationRuleParamsByKind {
    */
   unusual_spending: { category_id: string | null; ratio: number; min_amount: number };
   recurring_amount_changed: Record<string, never>;
+  /** Expected income later than the larger of `min_days_late` and its own usual timing spread. */
+  income_late: { min_days_late: number };
 }
 
 export type NotificationRuleSpec = {

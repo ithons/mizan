@@ -368,3 +368,37 @@ test('HEALTHY: spending on a recurring bill is left out of unusual spending', ()
   db.prepare('UPDATE transactions SET recurring_id = ? WHERE id = ?').run(pattern, bill);
   assert.deepEqual(fires(db), []);
 });
+
+function payFixture(gaps: number[], daysLate: number, amount = 50000): { db: Database.Database; pattern: string } {
+  const { db } = withOnlyRule({ kind: 'income_late', params: { min_days_late: 2 } });
+  const income = insertCategory(db, { name: 'Pay', is_income: 1 });
+  const pattern = insertPattern(db, { category_id: income, next_expected: localDaysFromToday(-daysLate), average_amount: amount });
+  let back = daysLate + gaps.reduce((sum, gap) => sum + gap, 0);
+  const dates = [localDaysFromToday(-back)];
+  for (const gap of gaps) { back -= gap; dates.push(localDaysFromToday(-back)); }
+  for (const date of dates.slice(0, -1)) {
+    const id = insertTransaction(db, { amount, category_id: income, date });
+    db.prepare('UPDATE transactions SET recurring_id = ? WHERE id = ?').run(pattern, id);
+  }
+  return { db, pattern };
+}
+
+test('income_late warns once when steady weekly pay is well past due', () => {
+  const { db, pattern } = payFixture([7, 7, 7, 7, 7], 5);
+  const keys = fires(db);
+  assert.equal(keys.length, 1);
+  assert.match(keys[0], new RegExp(`^income_late:${pattern}:`));
+  assertIdempotent(db);
+});
+
+test('HEALTHY: income_late is silent for pay within its usual wobble, and for a late bill', () => {
+  assert.deepEqual(fires(payFixture([7, 10, 6, 7, 9], 3).db), []);
+  assert.deepEqual(fires(payFixture([7, 7, 7, 7, 7], 1).db), []);
+  const { db } = withOnlyRule({ kind: 'income_late', params: { min_days_late: 2 } });
+  const bill = insertPattern(db, { next_expected: localDaysFromToday(-10), average_amount: 1500 });
+  for (const back of [40, 33, 26, 19]) {
+    const id = insertTransaction(db, { amount: -1500, category_id: 'cat_subscriptions', date: localDaysFromToday(-back) });
+    db.prepare('UPDATE transactions SET recurring_id = ? WHERE id = ?').run(bill, id);
+  }
+  assert.deepEqual(fires(db), []);
+});

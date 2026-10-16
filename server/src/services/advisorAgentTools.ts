@@ -24,7 +24,7 @@ const PAYLOAD_GUIDE = [
   'create_recurring_adjustment {recurring_id, original_date, action:"skip"|"snooze"|"adjust", adjusted_date?, adjusted_amount? (dollars), note?}.',
   'update_account {account_id, account_name?, is_hidden?, current_balance? (dollars, manual accounts only), statement_balance? (dollars owed), statement_due_date?, credit_limit? (dollars)}.',
   'set_manual_cost_basis {holding_id, manual_cost_basis (dollars) | null, note?}.',
-  'set_notification_rule {rule_id? (to edit), rule_kind, params, enabled?}: rule_kind and params are budget_threshold {category_id|null, percent}, large_transaction {min_amount (dollars), account_id|null, lookback_days}, bill_due {days_ahead}, low_balance {account_id|null, threshold (dollars)}, safe_to_spend_negative {}, sync_failed {include_partial}, goal_milestone {goal_id|null, milestones:[percents]}, unusual_spending {category_id|null, ratio, min_amount (dollars)}, recurring_amount_changed {}.',
+  'set_notification_rule {rule_id? (to edit), rule_kind, params, enabled?}: rule_kind and params are budget_threshold {category_id|null, percent}, large_transaction {min_amount (dollars), account_id|null, lookback_days}, bill_due {days_ahead}, low_balance {account_id|null, threshold (dollars)}, safe_to_spend_negative {}, sync_failed {include_partial}, goal_milestone {goal_id|null, milestones:[percents]}, unusual_spending {category_id|null, ratio, min_amount (dollars)}, recurring_amount_changed {}, income_late {min_days_late}.',
   'delete_notification_rule {rule_id}.',
 ].join(' ');
 
