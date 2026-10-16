@@ -227,20 +227,17 @@ export interface FoldedLedger {
 }
 
 /**
- * The list as the owner reads it: a transfer whose two legs are both on screen is one row (the
- * leg that left), and trades inside a brokerage are left off unless asked for.
+ * The list as the owner reads it: trades inside a brokerage are left off unless asked for. A
+ * transfer is folded to one row by the ledger query, which knows whether its partner is in the list.
  */
 export function foldLedgerRows(transactions: Transaction[], showTrades: boolean): FoldedLedger {
-  const leaving = new Set(
-    transactions.filter((t) => t.transfer_pair_id && t.amount < 0).map((t) => t.transfer_pair_id as string)
-  );
   let hiddenTrades = 0;
   const rows = transactions.filter((t) => {
     if (t.is_internal_trade && !showTrades) {
       hiddenTrades++;
       return false;
     }
-    return !(t.transfer_pair_id && t.amount > 0 && leaving.has(t.transfer_pair_id));
+    return true;
   });
   return { rows, hiddenTrades };
 }

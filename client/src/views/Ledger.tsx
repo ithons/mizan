@@ -146,6 +146,9 @@ export function Ledger() {
     return () => clearTimeout(t);
   }, [search]);
 
+  const deepLinkKey = ['uncategorized', 'range', 'accountId', 'categoryId']
+    .map((key) => searchParams.get(key) ?? '')
+    .join('|');
   // Deep links the retired screens answered: /transactions?uncategorized=1&range=all.
   // Plus `accountId`, which is how a finding hands over the rows it is made of rather than a
   // description of them: `LedgerIntegrityPanel` links here so acting on a flow-conservation
@@ -165,7 +168,8 @@ export function Ledger() {
     // to come here and re-select it by hand to see the rows behind it.
     const category = searchParams.get('categoryId');
     if (category) setCategoryFilter(category);
-  }, [searchParams]);
+    // Keyed on the deep-link params alone: switching tabs rewrites `view` and must not re-apply them.
+  }, [deepLinkKey]);
 
   useEffect(() => {
     setSelectedIds(new Set());
@@ -511,7 +515,8 @@ export function Ledger() {
         sub={
           view === 'scheduled' ? (
             <>
-              <span className="tabular-nums">{occurrences.length}</span> scheduled in the next 30 days
+              <span className="tabular-nums">{occurrences.filter((o) => o.adjustment_action !== 'skip').length}</span> on the
+              schedule
             </>
           ) : (
             <>
@@ -592,6 +597,7 @@ export function Ledger() {
       </div>
       )}
 
+      {view === 'entries' && (
       <ExplainPanel disclosure={filterExplain}>
         <p>Each entry carries a mark for who chose its category. No mark means it was set before mizān recorded
         who set it.
@@ -606,6 +612,7 @@ export function Ledger() {
             ' from carrying it and stops the advisor proposing about it. It stays on this list,' +
             ' marked, so setting one aside is never a way of losing it.'}</p>
       </ExplainPanel>
+      )}
 
 
       {view === 'entries' && selectedAccount && (

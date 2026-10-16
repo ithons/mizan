@@ -456,7 +456,7 @@ test('the id filter has a stated ceiling rather than a silent one', () => {
   assert.equal(MAX_SUGGESTED_IDS, 200);
 });
 
-test('a transfer with both legs on screen is one row, read from the leg that left', () => {
+test('trades are left off the list until asked for, and the account line reads a transfer\'s direction', () => {
   const leg = (id: string, amount: number, account: string, counterparty: string) => ({
     id, amount, account_name: account, transfer_counterparty_name: counterparty, transfer_pair_id: 'xfer_1',
     date: '2026-10-05', is_internal_trade: false,
@@ -466,13 +466,11 @@ test('a transfer with both legs on screen is one row, read from the leg that lef
   const trade = { ...leg('trade', -10000, 'Fidelity Individual', ''), transfer_pair_id: null, transfer_counterparty_name: null, is_internal_trade: true } as unknown as Transaction;
 
   const folded = foldLedgerRows([out, into, trade], false);
-  assert.deepEqual(folded.rows.map((t) => t.id), ['out']);
+  assert.deepEqual(folded.rows.map((t) => t.id), ['out', 'in']);
   assert.equal(folded.hiddenTrades, 1);
   assert.equal(accountLine(out), 'Chase Checking → Fidelity Individual');
-
-  assert.deepEqual(foldLedgerRows([into], false).rows.map((t) => t.id), ['in'], 'a lone leg still shows');
   assert.equal(accountLine(into), 'Chase Checking → Fidelity Individual');
-  assert.deepEqual(foldLedgerRows([out, into, trade], true).rows.map((t) => t.id), ['out', 'trade']);
+  assert.deepEqual(foldLedgerRows([out, into, trade], true).rows.map((t) => t.id), ['out', 'in', 'trade']);
 });
 
 test('the suggestion keys walk nothing while the Scheduled tab hides the entries', () => {
