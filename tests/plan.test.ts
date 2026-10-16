@@ -473,5 +473,5 @@ test('scheduled transfers that net into the pool are named as coming in', () => 
 test('the expected income line says which income it leaves out', () => {
   const line = claimLines({ ...SHEET, expected_inflows: 1143.95 }, 1, 1).find((l) => l.key === 'inflows');
   assert.ok(line);
-  assert.match(line.note ?? '', /except income filed under Investments or last paid into an investment account\./);
+  assert.match(line.note ?? '', /except income filed under Investments or Crypto, or last paid into an investment account\./);
 });

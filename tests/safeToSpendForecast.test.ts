@@ -149,3 +149,23 @@ test('a paycheck last paid into an account since closed still counts, and a type
     assert.equal(computeSafeToSpend(db, { forecastDays: 30 }).expectedInflows, before);
   });
 });
+
+test('uncategorized income last paid into a brokerage is left out by the account alone, and a typed-in crypto reward by its category', () => {
+  withDb((db, ids) => {
+    seedSchedules(db, ids);
+    const before = computeSafeToSpend(db, { forecastDays: 30 }).expectedInflows;
+    const soon = format(new Date(Date.now() + 10 * 86_400_000), 'yyyy-MM-dd');
+    db.prepare(`
+      INSERT INTO recurring_patterns
+        (id, merchant_name, category_id, average_amount, frequency, last_seen, next_expected,
+         is_active, is_confirmed, transaction_count, created_at, updated_at)
+      VALUES ('p_unfiled', 'core interest', 'cat_income_paycheck', 900, 'monthly', ?, ?, 1, 0, 5, '2026-01-01', '2026-01-01'),
+             ('p_reward', 'staking reward', 'cat_crypto_reward', 7000, 'monthly', ?, ?, 1, 1, 0, '2026-01-01', '2026-01-01')
+    `).run(day(5), soon, day(20), soon);
+    for (const monthsAgo of [5, 4, 3, 2, 1]) {
+      const id = insertTransaction(db, { account_id: ids.fidelity, date: day(30 * monthsAgo), amount: 900, original_name: 'INTEREST EARNED' });
+      db.prepare("UPDATE transactions SET recurring_id = 'p_unfiled' WHERE id = ?").run(id);
+    }
+    assert.equal(computeSafeToSpend(db, { forecastDays: 30 }).expectedInflows, before);
+  });
+});

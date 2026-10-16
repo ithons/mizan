@@ -186,7 +186,7 @@ export function computeSafeToSpend(
 
 const INVESTMENT_TYPES = new Set(['brokerage', 'ira_traditional', 'ira_roth', 'crypto_wallet']);
 
-/** Forecast income, less income filed under Investments or last paid into an investment account. */
+/** Forecast income, less income filed under Investments or Crypto or last paid into an investment account. */
 function inflowsIntoPool(db: Database.Database, occurrences: readonly RecurringForecastOccurrence[]): number {
   const landing = db.prepare(`
     SELECT a.type FROM transactions t JOIN accounts a ON a.id = t.account_id
@@ -194,7 +194,7 @@ function inflowsIntoPool(db: Database.Database, occurrences: readonly RecurringF
   `);
   const investmentCategory = db.prepare(`
     WITH RECURSIVE invested(id) AS (
-      SELECT id FROM categories WHERE id = 'cat_inv'
+      SELECT id FROM categories WHERE id IN ('cat_inv', 'cat_crypto')
       UNION ALL SELECT c.id FROM categories c JOIN invested i ON c.parent_id = i.id
     )
     SELECT 1 FROM invested WHERE id = ?
