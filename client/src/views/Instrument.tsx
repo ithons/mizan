@@ -717,7 +717,12 @@ export function Instrument() {
             <p>{weekCaption.reading}</p>
             {weekCaption.note && <p>{weekCaption.note}</p>}
             {snapshot?.in_transit ? (
-              <p>Counts {formatCurrency(snapshot.in_transit)} moving between your own accounts as landed.</p>
+              <p>
+                Counts {formatCurrency(Math.abs(snapshot.in_transit))} moving between your own accounts as landed,{' '}
+                {snapshot.in_transit > 0
+                  ? 'because one account had sent it and the other had not shown it yet.'
+                  : 'because one account had shown it arriving before the other showed it leaving.'}
+              </p>
             ) : null}
           </ExplainPanel>
         </div>
