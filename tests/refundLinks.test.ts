@@ -166,3 +166,19 @@ test('a credit matching an older charge exactly is not passed off as part of a n
   refreshRefundLinks(db);
   assert.equal(link(db, partial).refund_of_id, payment, 'a partial with no exact charge behind it still links');
 });
+
+test('an older exact charge already refunded, or long gone, does not block a partial refund', () => {
+  const db = migratedTestDb();
+  const card = insertAccount(db, { account_name: 'Chase Sapphire', type: 'credit', is_liability: 1 });
+  const amazon = { merchant_name: 'Amazon', original_name: 'AMAZON MKTPL', category_id: 'cat_shop' };
+  insertTransaction(db, { account_id: card, date: '2026-03-01', amount: -2999, ...amazon });
+  insertTransaction(db, { account_id: card, date: '2026-03-10', amount: 2999, merchant_name: 'Amazon', original_name: 'AMAZON MKTPL' });
+  insertTransaction(db, { account_id: card, date: '2024-01-05', amount: -4000, ...amazon });
+  const order = insertTransaction(db, { account_id: card, date: '2026-09-01', amount: -8997, ...amazon });
+  const partial = insertTransaction(db, { account_id: card, date: '2026-09-10', amount: 2999, merchant_name: 'Amazon', original_name: 'AMAZON MKTPL' });
+  const other = insertTransaction(db, { account_id: card, date: '2026-09-11', amount: 4000, merchant_name: 'Amazon', original_name: 'AMAZON MKTPL' });
+
+  refreshRefundLinks(db);
+  assert.equal(link(db, partial).refund_of_id, order);
+  assert.equal(link(db, other).refund_of_id, order);
+});

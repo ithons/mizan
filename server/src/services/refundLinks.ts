@@ -107,11 +107,15 @@ function choosePurchase(
     (purchase.account_id === refund.account_id ? 0 : 2) + (-purchase.amount === refund.amount ? 0 : 1);
   const best = eligible.sort((a, b) => rank(a) - rank(b) || b.date.localeCompare(a.date))[0];
   if (!best) return null;
-  const exactFurtherBack = purchases.some((purchase) =>
-    purchase.account_id === refund.account_id
-    && -purchase.amount === refund.amount
-    && daysBetween(purchase.date, refund.date) > REFUND_WINDOW_DAYS
-    && refundMerchantKey(purchase) === key);
+  const exactFurtherBack = purchases.some((purchase) => {
+    const gap = daysBetween(purchase.date, refund.date);
+    return purchase.account_id === refund.account_id
+      && -purchase.amount === refund.amount
+      && gap > REFUND_WINDOW_DAYS
+      && gap <= 2 * REFUND_WINDOW_DAYS
+      && (remaining.get(purchase.id) ?? 0) >= refund.amount
+      && refundMerchantKey(purchase) === key;
+  });
   if (-best.amount !== refund.amount && exactFurtherBack) return null;
   // A refund on another card is only taken for the exact amount: a partial match across accounts
   // is more often a second purchase than a return.
