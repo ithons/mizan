@@ -654,7 +654,7 @@ export function Instrument() {
 
   const trendPoints = (historyQ.data ?? []).map((s) => ({
     date: s.date,
-    value: s.net_worth,
+    value: settledNetWorth(s),
     estimated: Boolean(s.is_estimated),
     // NULL on rows written before migration 044, and undefined there rather than zero: the chart
     // draws a coverage change only where it has two counts to compare.
@@ -705,25 +705,38 @@ export function Instrument() {
           )}
         </div>
 
-        <div>
-          <Figure scale="lead" label="Net worth">
-            {formatCurrency(snapshot ? settledNetWorth(snapshot) : 0)}
-          </Figure>
-          <div className={`mt-2 flex items-center gap-2 text-note tabular-nums ${weekChangeTone(weekChange)}`}>
-            <span>{weekCaption.short}</span>
-            <ExplainToggle disclosure={weekExplain} label="the week's change" />
+        {!snapshot ? (
+          <div>
+            <SectionLabel className="mb-2">Net worth</SectionLabel>
+            <p className="text-body text-muted-2">
+              {sheetLoading
+                ? 'Reading the balance sheet.'
+                : snapshotQ.isError
+                  ? 'The balance sheet could not be read.'
+                  : 'No balance sheet has been recorded yet.'}
+            </p>
           </div>
-          <ExplainPanel disclosure={weekExplain}>
-            <p>{weekCaption.reading}</p>
-            {weekCaption.note && <p>{weekCaption.note}</p>}
-            {snapshot?.in_transit ? (
-              <p>
-                Adjusted by {formatCurrency(snapshot.in_transit, { showSign: true })} for transfers between your own
-                accounts that one side had shown and the other had not yet.
-              </p>
-            ) : null}
-          </ExplainPanel>
-        </div>
+        ) : (
+          <div>
+            <Figure scale="lead" label="Net worth">
+              {formatCurrency(settledNetWorth(snapshot))}
+            </Figure>
+            <div className={`mt-2 flex items-center gap-2 text-note tabular-nums ${weekChangeTone(weekChange)}`}>
+              <span>{weekCaption.short}</span>
+              <ExplainToggle disclosure={weekExplain} label="the week's change" />
+            </div>
+            <ExplainPanel disclosure={weekExplain}>
+              <p>{weekCaption.reading}</p>
+              {weekCaption.note && <p>{weekCaption.note}</p>}
+              {snapshot?.in_transit ? (
+                <p>
+                  Adjusted by {formatCurrency(snapshot.in_transit, { showSign: true })} for transfers between your own
+                  accounts that one side had shown and the other had not yet.
+                </p>
+              ) : null}
+            </ExplainPanel>
+          </div>
+        )}
       </div>
 
       {needsYou && (

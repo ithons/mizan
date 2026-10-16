@@ -81,9 +81,11 @@ test('a window with no returns renders as an ordinary ranking, with no returned 
 });
 
 test('a surface with no balance sheet states that, rather than drawing a zeroed one', () => {
-  const body = text(render('this-month', { snapshot: null }));
+  const html = render('this-month', { snapshot: null });
+  const body = text(html);
 
-  assert.match(body, /No balance sheet has been recorded yet\./);
+  assert.match(text(visible(html)), /Net worth\s*No balance sheet has been recorded yet\./, 'said where the figure would be, not folded away');
+  assert.doesNotMatch(text(visible(html)), /Net worth\s*\$0\.00/);
   // The flow half does not depend on a sheet and still renders.
   assert.match(body, /Where it went/);
   assert.match(body, /Busiest merchants/);
