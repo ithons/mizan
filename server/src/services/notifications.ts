@@ -23,7 +23,7 @@ import { calculateGoalProgress, type GoalProgressInput } from './goalProgress';
 import { buildRecurringForecast } from './recurringForecast';
 import { getSpendingReport } from './reporting';
 import { computeSafeToSpend, type SafeToSpendBreakdown } from './safeToSpend';
-import { excludedFromTotalsSql } from './transactionFilters';
+import { excludedFromTotalsSql, expenseSideSql, reportDateSql, spendAmountSql } from './transactionFilters';
 import { dollarizeFields, toCents } from './money';
 
 /** Money fields inside each kind's params, cents in the database and dollars over the API. */
@@ -486,7 +486,7 @@ const goalMilestone: Evaluator<'goal_milestone'> = (ctx, params) => {
     const verb = goal.type === 'debt' ? 'paid down' : 'saved';
     return [{
       dedupe_key: `goal_milestone:${goal.id}:${milestone}`,
-      title: milestone >= 100 ? `${goal.name} reached its target` : `${goal.name} is ${milestone}% of the way`,
+      title: milestone >= 100 ? `${goal.name} reached its target` : `${goal.name} has passed ${milestone}% of its target`,
       body: `${money(progress.progress_amount)} of ${money(goal.target_amount)} ${verb}.`,
       severity: 'info',
       payload: { goal_id: goal.id, milestone, progress_amount: progress.progress_amount, target_amount: goal.target_amount },
@@ -508,6 +508,7 @@ function flattenSpending(categories: SpendingReport['categories']): Map<string, 
 }
 
 const BASELINE_MONTHS = 3;
+const TIMING_TOLERANCE_DAYS = 3;
 
 const unusualSpending: Evaluator<'unusual_spending'> = (ctx, params) => {
   const day = ctx.now.getDate();
@@ -515,7 +516,8 @@ const unusualSpending: Evaluator<'unusual_spending'> = (ctx, params) => {
   const ymd = (d: Date) => format(d, 'yyyy-MM-dd');
   const priorWindows = Array.from({ length: BASELINE_MONTHS }, (_, i) => {
     const start = subMonths(monthStart, i + 1);
-    const end = new Date(start.getFullYear(), start.getMonth(), Math.min(day, getDaysInMonth(start)));
+    // A few days past the same day, so a payment that lands a little early is not read as a spike.
+    const end = new Date(start.getFullYear(), start.getMonth(), Math.min(day + TIMING_TOLERANCE_DAYS, getDaysInMonth(start)));
     return { startDate: ymd(start), endDate: ymd(end) };
   });
   // A ledger younger than the baseline would read its missing months as zero spend.
@@ -523,8 +525,33 @@ const unusualSpending: Evaluator<'unusual_spending'> = (ctx, params) => {
   if (!earliest.d || earliest.d > priorWindows[BASELINE_MONTHS - 1].startDate) return [];
 
   const parentOnly = params.category_id === null;
-  const report = (range: { startDate: string; endDate: string }) =>
-    flattenSpending(getSpendingReport(ctx.db, { ...range, parentOnly }).categories);
+  const parents = new Map((ctx.db.prepare('SELECT id, parent_id FROM categories').all() as Array<{ id: string; parent_id: string | null }>).map((row) => [row.id, row.parent_id]));
+  const recurringSpend = (range: { startDate: string; endDate: string }) => {
+    const rows = ctx.db.prepare(`
+      SELECT t.category_id, SUM(${spendAmountSql('t')}) AS cents
+      FROM transactions t LEFT JOIN categories c ON c.id = t.category_id
+      JOIN recurring_patterns rp ON rp.id = t.recurring_id AND rp.is_active = 1
+      WHERE t.pending = 0 AND ${excludedFromTotalsSql('t')} AND ${expenseSideSql('t', 'c')}
+        AND ${reportDateSql('t')} BETWEEN ? AND ?
+      GROUP BY t.category_id
+    `).all(range.startDate, range.endDate) as Array<{ category_id: string | null; cents: number }>;
+    const out = new Map<string, number>();
+    for (const row of rows) {
+      if (!row.category_id) continue;
+      const parent = parents.get(row.category_id) ?? null;
+      for (const key of parentOnly ? [parent ?? row.category_id] : [row.category_id, ...(parent ? [parent] : [])]) {
+        out.set(key, (out.get(key) ?? 0) + row.cents);
+      }
+    }
+    return out;
+  };
+  // Recurring bills are expected and forecast; a bill landing a day early is not unusual spending.
+  const report = (range: { startDate: string; endDate: string }) => {
+    const spending = flattenSpending(getSpendingReport(ctx.db, { ...range, parentOnly }).categories);
+    const recurring = recurringSpend(range);
+    for (const [id, entry] of spending) spending.set(id, { ...entry, amount: entry.amount - (recurring.get(id) ?? 0) });
+    return spending;
+  };
   const current = report({ startDate: ymd(monthStart), endDate: ymd(ctx.now) });
   const prior = priorWindows.map(report);
 
@@ -536,7 +563,7 @@ const unusualSpending: Evaluator<'unusual_spending'> = (ctx, params) => {
     candidates.push({
       dedupe_key: `unusual_spending:${categoryId}:${ctx.month}`,
       title: `${name} is at ${(amount / baseline).toFixed(1)}x its usual pace`,
-      body: `${money(amount)} so far this month, against an average of ${money(baseline)} by day ${day} over the last ${BASELINE_MONTHS} months.`,
+      body: `${money(amount)} so far this month, against an average of ${money(baseline)} by day ${day + TIMING_TOLERANCE_DAYS} over the last ${BASELINE_MONTHS} months, leaving out recurring bills.`,
       severity: 'info',
       payload: { category_id: categoryId, month: ctx.month, month_to_date: amount, baseline },
       route: `/ledger?categoryId=${encodeURIComponent(categoryId)}&range=this-month`,

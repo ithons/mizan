@@ -346,3 +346,25 @@ test('read and dismiss move the unread count, and dismissed rows leave the list'
   assert.equal(listNotifications(db).length, 1);
   assert.equal(markNotificationsRead(db, 'all'), 0);
 });
+
+test('HEALTHY: a regular payment landing a day earlier than usual is not unusual spending', () => {
+  const { db } = withOnlyRule({ kind: 'unusual_spending', params: { category_id: null, ratio: 1.5, min_amount: 10000 } });
+  const category = insertCategory(db, { name: 'Housing' });
+  for (const back of [1, 2, 3]) {
+    const now = new Date();
+    const d = new Date(now.getFullYear(), now.getMonth() - back, 2);
+    insertTransaction(db, { amount: -200000, category_id: category, date: `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-02` });
+  }
+  insertTransaction(db, { amount: -200000, category_id: category, date: dayInThisMonth(1) });
+  assert.deepEqual(fires(db), []);
+});
+
+test('HEALTHY: spending on a recurring bill is left out of unusual spending', () => {
+  const { db } = withOnlyRule({ kind: 'unusual_spending', params: { category_id: null, ratio: 1.5, min_amount: 10000 } });
+  const category = insertCategory(db, { name: 'Utilities' });
+  const pattern = insertPattern(db, { category_id: category });
+  for (const back of [1, 2, 3]) insertTransaction(db, { amount: -5000, category_id: category, date: priorMonthDay1(back) });
+  const bill = insertTransaction(db, { amount: -90000, category_id: category, date: dayInThisMonth(1) });
+  db.prepare('UPDATE transactions SET recurring_id = ? WHERE id = ?').run(pattern, bill);
+  assert.deepEqual(fires(db), []);
+});
