@@ -280,9 +280,11 @@ export function expectedAmount(recent: ReadonlyArray<{ amount: number; date: str
     if (run > SHIFT_REPORTED_FOR || returned || left.length === 0) {
       return { amount: Math.round(amount), changedFrom: null, changedOn: null };
     }
+    const named = usualPaid(left);
+    if (![amount, ...amounts.slice(0, run)].every((value) => farFrom(named, value) !== 0)) continue;
     let first = run - 1;
     while (first > 0 && farFrom(amount, amounts[first]) !== 0) first--;
-    return { amount: Math.round(amount), changedFrom: Math.round(usualPaid(left)), changedOn: window[first].date };
+    return { amount: Math.round(amount), changedFrom: Math.round(named), changedOn: window[first].date };
   }
   return unchanged;
 }

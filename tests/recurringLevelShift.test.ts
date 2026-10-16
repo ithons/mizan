@@ -134,23 +134,25 @@ test('a bonus on a raise only two checks old is still not the forecast', () => {
   });
 });
 
-test('every series of five amounts names only a real level it left, dated on its first new amount', () => {
-  const near = (a: number, b: number) => Math.abs(a - b) <= Math.abs(b) * 0.15;
+test('every series of these amounts names only a real level it left, dated on its first new amount', () => {
+  const nearOld = (old: number, value: number) => Math.abs(value - old) <= Math.abs(old) * 0.15;
   for (const sign of [1, -1]) {
-    const values = [700, 1000, 1050, 1500, 3000].map((value) => value * sign);
+    const values = [700, 900, 1000, 1050, 1160, 1200, 1500].map((value) => value * sign);
     const walk = (prefix: number[]): void => {
       if (prefix.length >= 4) {
         const rows = series(prefix);
         const result = expectedAmount(rows);
         const label = String(prefix);
         if (result.changedFrom !== null) {
-          assert.ok(!near(result.changedFrom, result.amount), label);
-          assert.ok(!near(result.changedFrom, prefix[0]), label);
+          assert.ok(!nearOld(result.changedFrom, result.amount), label);
+          assert.ok(!nearOld(result.changedFrom, prefix[0]), label);
           assert.ok(prefix.includes(result.changedFrom), label);
           const paidThen = rows.find((row) => row.date === result.changedOn)?.amount;
-          assert.ok(paidThen !== undefined && !near(paidThen, result.changedFrom) && !near(result.changedFrom, paidThen), label);
+          assert.ok(paidThen !== undefined && !nearOld(result.changedFrom, paidThen), label);
+          const since = rows.findIndex((row) => row.date === result.changedOn);
+          for (const value of prefix.slice(0, since + 1)) assert.ok(!nearOld(result.changedFrom, value), label);
         }
-        if (prefix.every((value) => near(value, prefix[0]))) assert.equal(result.changedFrom, null, label);
+        if (prefix.every((value) => nearOld(prefix[0], value) && nearOld(value, prefix[0]))) assert.equal(result.changedFrom, null, label);
       }
       if (prefix.length < 6) for (const value of values) walk([...prefix, value]);
     };
@@ -186,4 +188,20 @@ test('a payment still at the old level is never the date a change began', () => 
 test('a bill that rises a little every cycle has no level to have changed from', () => {
   assert.equal(expectedAmount(series([1400, 1300, 1200, 1100, 1000, 900])).changedFrom, null);
   assert.equal(expectedAmount(series([-1400, -1300, -1200, -1100, -1000, -900])).changedFrom, null);
+});
+
+test('the level named is re-checked against the forecast and every payment since', () => {
+  for (const amounts of [
+    [12000, 12000, 12000, 10500, 10000],
+    [700, 1000, 700, 1050, 1200, 1500],
+    [900, 1000, 1160, 1200, 1500],
+    [1640, 1560, 1400, 880, 1340],
+  ]) {
+    const result = expectedAmount(series(amounts));
+    if (result.changedFrom !== null) {
+      for (const value of [result.amount, ...amounts.slice(0, amounts.indexOf(result.changedFrom))]) {
+        assert.ok(Math.abs(value - result.changedFrom) > Math.abs(result.changedFrom) * 0.15, `${amounts}: ${value}`);
+      }
+    }
+  }
 });
