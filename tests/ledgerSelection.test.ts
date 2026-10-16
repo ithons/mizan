@@ -19,5 +19,9 @@ test('the Scheduled tab shows nothing it cannot back while the forecast loads or
 });
 
 test('an Entries page whose only rows are hidden trades says so instead of claiming nothing matches', () => {
-  assert.match(source, /folded\.hiddenTrades > 0\s*\?\s*'Every entry here is a brokerage trade, which is hidden\.'/);
+  assert.match(
+    source,
+    /folded\.hiddenTrades > 0\s*\?\s*hasNextPage\s*\?\s*'Every entry loaded so far is a brokerage trade, which is hidden\. More entries are below\.'\s*:\s*'Every entry here is a brokerage trade, which is hidden\.'/,
+    'the all-trades claim is made only once nothing is left to load'
+  );
 });
