@@ -38,8 +38,8 @@ CREATE INDEX idx_notifications_created_at ON notifications(created_at DESC);
 CREATE INDEX idx_notifications_unread ON notifications(read_at, dismissed_at);
 CREATE INDEX idx_notifications_rule_id ON notifications(rule_id);
 
--- The three that need an owner's own numbers ship disabled, so a fresh install is quiet.
-INSERT INTO notification_rules (id, kind, params, enabled, created_by, created_at, updated_at) VALUES
+-- The three that need an owner's own numbers ship disabled. OR IGNORE because restore replays this.
+INSERT OR IGNORE INTO notification_rules (id, kind, params, enabled, created_by, created_at, updated_at) VALUES
   ('nrule_budget_90', 'budget_threshold', '{"category_id":null,"percent":90}', 1, 'owner',
     strftime('%Y-%m-%dT%H:%M:%SZ', 'now'), strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
   ('nrule_bill_due_3', 'bill_due', '{"days_ahead":3}', 1, 'owner',

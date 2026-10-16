@@ -115,7 +115,7 @@ function migrationStatements(file: string): string[] {
 /** The row-level statements of a repair migration, read from the file so the replay cannot drift from it. */
 export function rowRepairStatements(file: string): string[] {
   return migrationStatements(file).filter((statement) =>
-    /^UPDATE (transactions|accounts)\s/.test(statement) || /^INSERT INTO (transaction_field_revisions|notification_rules)\s/.test(statement));
+    /^UPDATE (transactions|accounts)\s/.test(statement) || /^INSERT INTO transaction_field_revisions\s/.test(statement) || /^INSERT OR IGNORE INTO notification_rules\s/.test(statement));
 }
 
 export function migrationFileExists(file: string): boolean {
