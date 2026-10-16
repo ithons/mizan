@@ -139,7 +139,7 @@ export function useAiChat() {
     }
 
     if (!isCurrent()) {
-      updateAssistant((m) => ({ ...m, content: m.content + NOT_SAVED_NOTE }));
+      updateAssistant((m) => ({ ...m, streaming: false, thinkingActive: false, content: m.content + NOT_SAVED_NOTE }));
       return;
     }
     const controller = new AbortController();

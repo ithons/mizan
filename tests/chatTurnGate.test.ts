@@ -28,7 +28,7 @@ test('the chat hook clears streaming and adopts a new conversation only for the 
   assert.match(send, /if \(isCurrent\(\)\) \{\s*setConversationId\(created\.id\)[\s\S]*?\} else \{\s*aiApi\.deleteConversation\(created\.id\)/);
   assert.match(
     send,
-    /if \(!isCurrent\(\)\) \{\s*updateAssistant\(\(m\) => \(\{ \.\.\.m, content: m\.content \+ NOT_SAVED_NOTE \}\)\);\s*return;\s*\}\s*const controller = new AbortController\(\);/,
+    /if \(!isCurrent\(\)\) \{\s*updateAssistant\(\(m\) => \(\{ \.\.\.m, streaming: false, thinkingActive: false, content: m\.content \+ NOT_SAVED_NOTE \}\)\);\s*return;\s*\}\s*const controller = new AbortController\(\);/,
     'a superseded turn never starts its stream, and says it was not saved'
   );
   const load = source.slice(source.indexOf('const loadConversation'), source.indexOf('const sendMessage'));
