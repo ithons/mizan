@@ -386,7 +386,7 @@ function backupForeignKeyErrors(
   return errors;
 }
 
-/** Migrations whose row changes a restore already carries out: 062 to 065 by replay, 054 by skipping retired keys. */
+/** Migrations whose row changes a restore already carries out: the replayed repairs, and 054 by skipping retired keys. */
 const HANDLED_ON_RESTORE: ReadonlySet<string> = new Set([...ROW_REPAIR_MIGRATIONS, '054_drop_dead_preferences.sql']);
 
 export function buildLocalBackupRestorePreview(

@@ -298,6 +298,10 @@ router.post(
       const result = createManualTransaction(db, req.body);
 
       if (!result.ok) {
+        if (result.reason === 'balance_only') {
+          res.status(400).json({ error: 'That account holds a balance only and keeps no transactions' });
+          return;
+        }
         const error = result.reason === 'account_not_found' ? 'Account not found' : 'Category not found';
         res.status(404).json({ error });
         return;

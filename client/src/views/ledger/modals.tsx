@@ -107,7 +107,7 @@ export function AddEntryModal({ open, onClose }: { open: boolean; onClose: () =>
             >
               <option value="">Pick an account…</option>
               {(accounts ?? [])
-                .filter((a) => !a.is_hidden)
+                .filter((a) => !a.is_hidden && !a.balance_only)
                 .map((a) => (
                   <option key={a.id} value={a.id}>
                     {a.account_name}

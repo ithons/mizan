@@ -29,6 +29,8 @@ export interface Account {
   /** A card's last statement balance and due date, entered by the owner. */
   statement_balance?: number | null;
   statement_due_date?: string | null;
+  /** 1 when the account holds a balance only and keeps no transactions. */
+  balance_only?: number;
   currency: string;
   native_currency?: string | null;
   native_balance?: number | null;

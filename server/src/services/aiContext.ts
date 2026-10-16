@@ -271,7 +271,7 @@ function pushLedgerIntegrity(db: Database.Database, lines: string[]): void {
     // Same population reconcileAccounts draws from, so an account missing from its results was
     // skipped by it rather than filtered out here.
     const visible = db.prepare(
-      'SELECT id, account_name, type FROM accounts WHERE is_hidden = 0 ORDER BY account_name'
+      'SELECT id, account_name, type FROM accounts WHERE is_hidden = 0 AND balance_only = 0 ORDER BY account_name'
     ).all() as VisibleAccountRow[];
     const typeById = new Map(visible.map((account) => [account.id, account.type]));
     const reached = new Set(report.accounts.map((account) => account.account_id));
@@ -356,6 +356,7 @@ interface AccountReach {
   account_id: string;
   account_name: string | null;
   type: string;
+  balance_only: number;
   transaction_count: number;
   first_date: string | null;
   last_date: string | null;
@@ -374,6 +375,7 @@ function readAccountReach(db: Database.Database): AccountReach[] {
       a.id AS account_id,
       a.account_name,
       a.type,
+      a.balance_only,
       COUNT(t.id) AS transaction_count,
       MIN(t.date) AS first_date,
       MAX(t.date) AS last_date
@@ -418,7 +420,9 @@ function pushLedgerReach(lines: string[], reach: AccountReach[], span: LedgerSpa
   for (const account of reach) {
     const name = `${account.account_name ?? account.account_id} (${account.type})`;
     lines.push(
-      account.transaction_count === 0
+      account.balance_only === 1
+        ? `  ${name}: holds a balance only and keeps no transactions, by the owner's choice`
+        : account.transaction_count === 0
         ? `  ${name}: no transactions`
         : `  ${name}: ${plural(account.transaction_count, 'row')}, ${account.first_date} to ${account.last_date}`
     );

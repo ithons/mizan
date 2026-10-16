@@ -29,6 +29,7 @@ export const UpdateAccountSchema = z.object({
   /** A card's last statement, in dollars owed. null clears it. */
   statement_balance: z.number().nonnegative().nullable().optional(),
   statement_due_date: calendarDate.nullable().optional(),
+  balance_only: z.boolean().optional(),
 });
 
 export const CreateManualTransactionSchema = z.object({

@@ -67,7 +67,7 @@ function findAccount(
     const account = db.prepare(`
       SELECT id, account_name, institution_name, is_manual
       FROM accounts
-      WHERE account_name = ? OR institution_name = ?
+      WHERE (account_name = ? OR institution_name = ?) AND balance_only = 0
       LIMIT 1
     `).get(accountValue, accountValue) as AccountMatch | undefined;
     if (account) return account;
@@ -76,7 +76,7 @@ function findAccount(
   const fallback = db.prepare(`
     SELECT id, account_name, institution_name, is_manual
     FROM accounts
-    WHERE is_manual = 1
+    WHERE is_manual = 1 AND balance_only = 0
     LIMIT 1
   `).get() as AccountMatch | undefined;
 

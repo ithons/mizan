@@ -121,11 +121,17 @@ export interface UpdateAccountInput {
   current_balance?: number; // dollars
   statement_balance?: number | null; // dollars
   statement_due_date?: string | null;
+  /** Holds a balance and nothing else: no transactions are kept against it. */
+  balance_only?: boolean;
 }
 
 export type UpdateAccountResult =
   | { ok: true; row: Record<string, unknown>; balanceChanged: boolean }
-  | { ok: false; reason: 'not_found' | 'manual_only' };
+  | { ok: false; reason: 'not_found' | 'manual_only' | 'has_transactions' };
+
+function hasTransactions(db: Database.Database, accountId: string): boolean {
+  return db.prepare('SELECT 1 FROM transactions WHERE account_id = ? LIMIT 1').get(accountId) !== undefined;
+}
 
 export function updateAccount(db: Database.Database, id: string, input: UpdateAccountInput): UpdateAccountResult {
   const existing = db.prepare('SELECT * FROM accounts WHERE id = ?').get(id) as
@@ -210,6 +216,11 @@ export function updateAccount(db: Database.Database, id: string, input: UpdateAc
     updates.push('statement_due_date = ?');
     values.push(input.statement_due_date);
   }
+  if (input.balance_only !== undefined) {
+    if (input.balance_only && hasTransactions(db, id)) return { ok: false, reason: 'has_transactions' };
+    updates.push('balance_only = ?');
+    values.push(input.balance_only ? 1 : 0);
+  }
 
   if (updates.length === 0) {
     return { ok: true, row: existing, balanceChanged: false };
@@ -227,7 +238,7 @@ export function updateAccount(db: Database.Database, id: string, input: UpdateAc
 
 export type MergeAccountsResult =
   | { ok: true }
-  | { ok: false; reason: 'same_account' | 'not_found' };
+  | { ok: false; reason: 'same_account' | 'not_found' | 'balance_only' };
 
 export function mergeAccounts(
   db: Database.Database,
@@ -243,6 +254,9 @@ export function mergeAccounts(
 
   if (!target || !source) {
     return { ok: false, reason: 'not_found' };
+  }
+  if (target.balance_only === 1 && hasTransactions(db, sourceAccountId)) {
+    return { ok: false, reason: 'balance_only' };
   }
 
   const now = new Date().toISOString();

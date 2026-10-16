@@ -58,6 +58,10 @@ function accountExists(db: Database.Database, accountId: string): boolean {
   return Boolean(db.prepare('SELECT id FROM accounts WHERE id = ?').get(accountId));
 }
 
+function isBalanceOnly(db: Database.Database, accountId: string): boolean {
+  return db.prepare('SELECT 1 FROM accounts WHERE id = ? AND balance_only = 1').get(accountId) !== undefined;
+}
+
 function categoryExists(db: Database.Database, categoryId: string): boolean {
   return Boolean(db.prepare('SELECT id FROM categories WHERE id = ?').get(categoryId));
 }
@@ -363,7 +367,7 @@ export interface CreateManualTransactionInput {
 
 export type CreateManualTransactionResult =
   | { ok: true; row: Record<string, unknown>; balanceChanged: boolean }
-  | { ok: false; reason: 'account_not_found' | 'category_not_found' };
+  | { ok: false; reason: 'account_not_found' | 'category_not_found' | 'balance_only' };
 
 export function createManualTransaction(
   db: Database.Database,
@@ -376,6 +380,9 @@ export function createManualTransaction(
 
   if (!accountExists(db, input.account_id)) {
     return { ok: false, reason: 'account_not_found' };
+  }
+  if (isBalanceOnly(db, input.account_id)) {
+    return { ok: false, reason: 'balance_only' };
   }
   if (categoryId && !categoryExists(db, categoryId)) {
     return { ok: false, reason: 'category_not_found' };

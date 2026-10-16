@@ -111,6 +111,8 @@ router.patch(
       if (!result.ok) {
         if (result.reason === 'not_found') {
           res.status(404).json({ error: 'Account not found' });
+        } else if (result.reason === 'has_transactions') {
+          res.status(409).json({ error: 'This account has transactions, so it cannot be set to hold a balance only' });
         } else {
           res.status(400).json({ error: 'Only manual accounts can be edited directly' });
         }
@@ -145,6 +147,8 @@ router.post(
       if (!result.ok) {
         if (result.reason === 'same_account') {
           res.status(400).json({ error: 'Cannot merge an account into itself' });
+        } else if (result.reason === 'balance_only') {
+          res.status(409).json({ error: 'That account holds a balance only, so it cannot take another account\'s transactions' });
         } else {
           res.status(404).json({ error: 'One or both accounts not found' });
         }

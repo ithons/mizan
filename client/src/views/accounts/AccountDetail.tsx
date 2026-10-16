@@ -85,11 +85,12 @@ export function AccountDetail() {
   const { data: accounts, isLoading } = useQuery({ queryKey: ['accounts'], queryFn: () => accountsApi.list() });
   const account = accounts?.find((a) => a.id === id) ?? null;
   const isInvestment = account ? INVESTMENT_TYPES.has(account.type) : false;
+  const balanceOnly = account?.balance_only === 1;
 
   const { data: history } = useQuery({
     queryKey: ['account', id, 'history'],
     queryFn: () => accountsApi.history(id),
-    enabled: Boolean(id),
+    enabled: Boolean(id) && !balanceOnly,
     retry: false,
   });
   const { data: holdings } = useQuery({
@@ -101,7 +102,7 @@ export function AccountDetail() {
   const txQ = useQuery({
     queryKey: ['account', id, 'transactions'],
     queryFn: () => transactionsApi.list({ accountId: [id], limit: 25 }),
-    enabled: Boolean(id),
+    enabled: Boolean(id) && !balanceOnly,
   });
   const { data: txPage } = txQ;
 
@@ -171,10 +172,13 @@ export function AccountDetail() {
             {formatWholeCurrency(signedBalance)}
           </div>
           {inCredit && <div className="mt-2 text-note text-sage-deep">{creditNote(account)}</div>}
+          {balanceOnly && (
+            <div className="mt-2 text-note text-muted">Holds a balance only, with no transactions. Edit it when it changes.</div>
+          )}
         </div>
       </div>
 
-      {history && (
+      {history && !balanceOnly && (
         <div className="mb-8">
           <SectionLabel
             className="mb-2"
@@ -210,6 +214,7 @@ export function AccountDetail() {
         </div>
       )}
 
+      {!balanceOnly && (
       <div className="mb-8">
         <div className="mb-1.5 flex items-baseline justify-between">
           <SectionLabel underline className="flex-1">
@@ -217,11 +222,6 @@ export function AccountDetail() {
           </SectionLabel>
           <TextButton onClick={() => navigate('/ledger')}>View all</TextButton>
         </div>
-        {/* "No transactions for this account yet." is a statement about the ACCOUNT, and it was
-            being made before the transactions query had answered and permanently if it failed. The
-            only loading guard on this screen reads `isLoading` from the ACCOUNTS query, which
-            resolves first, so the sentence rendered in the gap. The other four money screens carry
-            a QueryErrorBanner; this one had no error surface at all. */}
         {txQ.isPending ? (
           <SkeletonRows rows={4} />
         ) : txQ.isError ? (
@@ -243,6 +243,7 @@ export function AccountDetail() {
           })
         )}
       </div>
+      )}
     </Screen>
   );
 }

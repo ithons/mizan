@@ -245,7 +245,7 @@ export function reconcileAccounts(
 ): ReconciliationReport {
   const snapshots = readSnapshots(db, { since: options.since, measuredOnly: true, order: 'asc' });
   const accounts = db.prepare(
-    'SELECT id, account_name, is_liability, type FROM accounts WHERE is_hidden = 0'
+    'SELECT id, account_name, is_liability, type FROM accounts WHERE is_hidden = 0 AND balance_only = 0'
   ).all() as AccountRow[];
 
   if (snapshots.length < 2) {

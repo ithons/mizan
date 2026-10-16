@@ -120,7 +120,7 @@ export const accountsApi = {
       method: 'POST',
       body: JSON.stringify(body),
     }),
-  update: (id: string, body: Partial<Account>) =>
+  update: (id: string, body: Omit<Partial<Account>, 'balance_only'> & { balance_only?: boolean }) =>
     apiFetch<Account>(`/api/accounts/${id}`, {
       method: 'PATCH',
       body: JSON.stringify(body),

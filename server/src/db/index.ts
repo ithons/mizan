@@ -98,6 +98,7 @@ export const ROW_REPAIR_MIGRATIONS: readonly string[] = [
   '063_internal_trades.sql',
   '064_brokerage_descriptor_signs.sql',
   '065_transfer_source.sql',
+  '071_balance_only_accounts.sql',
 ];
 
 function migrationStatements(file: string): string[] {
@@ -113,7 +114,7 @@ function migrationStatements(file: string): string[] {
 /** The row-level statements of a repair migration, read from the file so the replay cannot drift from it. */
 export function rowRepairStatements(file: string): string[] {
   return migrationStatements(file).filter((statement) =>
-    /^UPDATE transactions\s/.test(statement) || /^INSERT INTO transaction_field_revisions\s/.test(statement));
+    /^UPDATE (transactions|accounts)\s/.test(statement) || /^INSERT INTO transaction_field_revisions\s/.test(statement));
 }
 
 export function migrationFileExists(file: string): boolean {
@@ -126,7 +127,7 @@ export function migrationChangesRows(file: string): boolean {
     /^(UPDATE|DELETE FROM)\s/i.test(statement) || (/^INSERT\s/i.test(statement) && !/^INSERT INTO \w+_new\b/i.test(statement)));
 }
 
-/** Re-applies the row repairs of migrations 062 to 065 that this database has run and the restored rows predate. */
+/** Re-applies the row repairs of the listed migrations that this database has run and the restored rows predate. */
 export function replayRowRepairs(db: Database.Database, appliedToRows: ReadonlySet<string>): string[] {
   const appliedHere = appliedMigrationNames(db);
   if (appliedHere.size === 0) return [];

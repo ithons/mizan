@@ -569,7 +569,7 @@ export function Ledger() {
           value={accountFilter}
           onChange={setAccountFilter}
           placeholder="All accounts"
-          options={(accounts ?? []).filter((a) => !a.is_hidden).map((a) => ({ value: a.id, label: a.account_name }))}
+          options={(accounts ?? []).filter((a) => !a.is_hidden && !a.balance_only).map((a) => ({ value: a.id, label: a.account_name }))}
         />
         <CategoryPicker value={categoryFilter} onChange={setCategoryFilter} placeholder="Category" categories={categories} />
         <Select

@@ -257,9 +257,11 @@ export function EditAccountModal({ open, account, onClose }: {
     is_liability: false,
   });
   const [statement, setStatement] = useState<StatementForm>({ balance: '', dueDate: '' });
+  const [balanceOnly, setBalanceOnly] = useState(false);
 
   useEffect(() => {
     if (account) {
+      setBalanceOnly(account.balance_only === 1);
       setForm({
         account_name: account.account_name,
         institution_name: account.institution_name ?? '',
@@ -289,6 +291,7 @@ export function EditAccountModal({ open, account, onClose }: {
         type: form.type as AccountType,
         is_liability: form.is_liability,
         current_balance: account?.is_manual ? currentBalance : undefined,
+        balance_only: account?.is_manual ? balanceOnly : undefined,
         ...(form.is_liability ? statementBody(statement) : {}),
       });
     },
@@ -307,6 +310,17 @@ export function EditAccountModal({ open, account, onClose }: {
       <div className="space-y-4">
         <AccountFields form={form} setForm={setForm} showBalance={Boolean(account.is_manual)} />
         {form.is_liability && <StatementFields form={statement} setForm={setStatement} />}
+        {Boolean(account.is_manual) && (
+          <label className="flex cursor-pointer items-center gap-2">
+            <input
+              type="checkbox"
+              checked={balanceOnly}
+              onChange={(e) => setBalanceOnly(e.target.checked)}
+              className="rounded border-line-3 text-sage focus:ring-0"
+            />
+            <span className="text-body-lg text-ink">Balance only, no transactions</span>
+          </label>
+        )}
         <div className="flex items-center gap-5 pt-1">
           <InkButton onClick={() => mutation.mutate()} disabled={mutation.isPending}>
             {mutation.isPending ? 'Saving…' : 'Save changes'}
