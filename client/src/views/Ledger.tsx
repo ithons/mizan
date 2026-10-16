@@ -173,7 +173,7 @@ export function Ledger() {
 
   useEffect(() => {
     setSelectedIds(new Set());
-  }, [range, debouncedSearch, accountFilter, categoryFilter, sourceFilter, filter]);
+  }, [range, debouncedSearch, accountFilter, categoryFilter, sourceFilter, filter, view]);
 
   useEffect(() => {
     const open = () => setShowAddEntry(true);
@@ -862,7 +862,7 @@ export function Ledger() {
 
         {(folded.hiddenTrades > 0 || showTrades) && (
           <div className="flex justify-center pt-4">
-            <TextButton onClick={() => setShowTrades((shown) => !shown)}>
+            <TextButton onClick={() => { setShowTrades((shown) => !shown); setSelectedIds(new Set()); }}>
               {showTrades
                 ? 'Hide brokerage trades'
                 : `${folded.hiddenTrades} brokerage ${folded.hiddenTrades === 1 ? 'trade' : 'trades'} hidden · show`}
