@@ -47,6 +47,8 @@ const TOOL_LABELS: Record<string, string> = {
   forget: 'Forgetting that…',
   get_open_proposals: 'Checking what is already waiting for you…',
   run_simulation: 'Running the numbers…',
+  explain_month: 'Comparing the month with the ones before…',
+  get_funding_mix: 'Working out what is paying for what…',
 };
 
 // The active conversation id is remembered across reloads so the thread resumes; the

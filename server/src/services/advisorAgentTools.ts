@@ -5,6 +5,8 @@ import { readSafeToSpend } from './safeToSpend';
 import { getAnomalyInsights } from './anomalyInsights';
 import { createMemory, deleteMemory, listMemories } from './aiMemory';
 import { proposeChanges, MAX_PROPOSALS_PER_CALL } from './advisorProposals';
+import { format, subMonths } from 'date-fns';
+import { explainMonth, fundingMix } from './monthStudies';
 import { cashRunway, checkAdjustments, compoundGrowth, debtPayoff, goalTimeline, goalTimelineFor, projectFree } from './simulations';
 
 type ToolInput = Record<string, unknown>;
@@ -113,6 +115,16 @@ export const AGENT_TOOLS: Anthropic.Tool[] = [
       },
       required: ['type'],
     },
+  },
+  {
+    name: 'explain_month',
+    description: 'What changed in a month against the three before it: categories that moved past their usual range, large one-off items, recurring items that changed price, income and spending against usual, and what the named moves leave unexplained. Use for "why was this month different", "where did my money go", monthly reviews.',
+    input_schema: { type: 'object', properties: { month: { type: 'string', description: 'YYYY-MM; default the last complete month.' } } },
+  },
+  {
+    name: 'get_funding_mix',
+    description: 'Per month: income from recurring patterns (pay), other income (one-off deposits, refunds), spending, money moved into investments, and the share of spending recurring income covers. Use for "is my pay covering my life", "what is funding my investing".',
+    input_schema: { type: 'object', properties: { months: { type: 'integer', description: 'Complete months back, default 6, max 24.' } } },
   },
   {
     name: 'get_open_proposals',
@@ -252,6 +264,11 @@ export function runAgentTool(db: Database.Database, name: string, input: ToolInp
     case 'forget': return forgetTool(db, input);
     case 'get_open_proposals': return getOpenProposalsTool(db);
     case 'run_simulation': return runSimulationTool(db, input);
+    case 'explain_month': {
+      const month = typeof input.month === 'string' && input.month ? input.month : format(subMonths(new Date(), 1), 'yyyy-MM');
+      return explainMonth(db, month);
+    }
+    case 'get_funding_mix': return fundingMix(db, Math.min(Math.max(Math.round(num(input.months, 6)), 1), 24));
     default: return undefined;
   }
 }
