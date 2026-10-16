@@ -231,6 +231,11 @@ const SHIFT_REPORTED_FOR = 3;
 
 const PRIOR_LEVEL_SPAN = 3;
 
+/** Half a cent rounds away from zero, so an amount and its negation round to the same magnitude. */
+function cents(value: number): number {
+  return Math.sign(value) * Math.round(Math.abs(value));
+}
+
 function usualPaid(values: number[]): number {
   const middle = median(values);
   const count = (value: number) => values.filter((other) => other === value).length;
@@ -247,7 +252,7 @@ export function expectedAmount(recent: ReadonlyArray<{ amount: number; date: str
   const settled = amounts.length >= 3
     && [[0, 1], [0, 2], [1, 2]].every(([a, b]) => farFrom(amounts[a], amounts[b]) === 0);
   const unchanged = {
-    amount: Math.round(settled ? usualPaid(amounts.slice(0, 3)) : median(amounts)),
+    amount: cents(settled ? usualPaid(amounts.slice(0, 3)) : median(amounts)),
     changedFrom: null,
     changedOn: null,
   };
@@ -256,7 +261,8 @@ export function expectedAmount(recent: ReadonlyArray<{ amount: number; date: str
     && farFrom(amounts[1], amounts[2]) === 0
     && amounts.slice(3).every((amount) => farFrom(amount, amounts[0]) !== 0);
   if (loneSpike) {
-    return expectedAmount(recent.slice(1));
+    const withoutNewest = expectedAmount(recent.slice(1));
+    if (farFrom(withoutNewest.amount, amounts[0]) !== 0) return withoutNewest;
   }
 
   for (let k = 2; k <= window.length - 2; k++) {
@@ -281,17 +287,17 @@ export function expectedAmount(recent: ReadonlyArray<{ amount: number; date: str
     const left = before.filter((value) => farFrom(level, value) === 0);
     const returned = before.some((value) => farFrom(amount, value) === 0 && farFrom(level, value) !== 0);
     if (run > SHIFT_REPORTED_FOR || returned || left.length === 0) {
-      return { amount: Math.round(amount), changedFrom: null, changedOn: null };
+      return { amount: cents(amount), changedFrom: null, changedOn: null };
     }
     const named = usualPaid(left);
+    if (before.filter((value) => farFrom(named, value) === 0).length < 2) continue;
     if (![amount, ...amounts.slice(0, run)].every((value) => farFrom(named, value) !== 0)) continue;
-    const boundary = amounts[run];
-    if (boundary !== undefined && farFrom(amount, boundary) === 0 && farFrom(named, boundary) !== 0) {
-      return { amount: Math.round(amount), changedFrom: null, changedOn: null };
+    if (before.some((value) => farFrom(amount, value) === 0 && farFrom(named, value) !== 0)) {
+      return { amount: cents(amount), changedFrom: null, changedOn: null };
     }
     let first = run - 1;
     while (first > 0 && farFrom(amount, amounts[first]) !== 0) first--;
-    return { amount: Math.round(amount), changedFrom: Math.round(named), changedOn: window[first].date };
+    return { amount: cents(amount), changedFrom: cents(named), changedOn: window[first].date };
   }
   return unchanged;
 }

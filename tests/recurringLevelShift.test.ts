@@ -194,19 +194,14 @@ test('a bill that rises a little every cycle has no level to have changed from',
   assert.equal(expectedAmount(series([-1400, -1300, -1200, -1100, -1000, -900])).changedFrom, null);
 });
 
-test('the level named is re-checked against the forecast and every payment since', () => {
+test('a level that would sit within reach of the forecast or a later payment is not named', () => {
   for (const amounts of [
     [12000, 12000, 12000, 10500, 10000],
     [700, 1000, 700, 1050, 1200, 1500],
     [900, 1000, 1160, 1200, 1500],
     [1640, 1560, 1400, 880, 1340],
   ]) {
-    const result = expectedAmount(series(amounts));
-    if (result.changedFrom !== null) {
-      for (const value of [result.amount, ...amounts.slice(0, amounts.indexOf(result.changedFrom))]) {
-        assert.ok(Math.abs(value - result.changedFrom) > Math.abs(result.changedFrom) * 0.15, `${amounts}: ${value}`);
-      }
-    }
+    assert.equal(expectedAmount(series(amounts)).changedFrom, null, String(amounts));
   }
 });
 
@@ -214,4 +209,19 @@ test('a level with ordinary noise is still a level the bill can leave', () => {
   assert.deepEqual(expectedAmount(series([-6500, -6500, -4500, -5200, -4700, -5000])).amount, -6500);
   assert.notEqual(expectedAmount(series([-6500, -6500, -4500, -5200, -4700, -5000])).changedFrom, null);
   assert.equal(expectedAmount(series([15000, 15000, 10000, 11000, 9000, 10000])).amount, 15000);
+});
+
+test('one dip among payments at the usual amount is not a level the bill moved off', () => {
+  assert.equal(expectedAmount(series([993, 985, 720, 971])).changedFrom, null);
+  assert.equal(expectedAmount(series([1001, 1034, 1004, 759, 981])).changedFrom, null);
+});
+
+test('a newest payment at the level it would be measured against is not dropped as a spike', () => {
+  assert.deepEqual(expectedAmount(series([1000, 1200, 1100, 1200, 1500, 1500])), { amount: 1100, changedFrom: null, changedOn: null });
+});
+
+test('an expense and its income twin quote the same magnitude to the cent', () => {
+  for (const amounts of [[1301, 1300, 1000, 1000, 1000, 1000], [1301, 1300, 1000, 1500, 1200]]) {
+    assert.equal(expectedAmount(series(amounts)).amount, -expectedAmount(series(amounts.map((a) => -a))).amount, String(amounts));
+  }
 });
