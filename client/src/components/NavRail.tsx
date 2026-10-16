@@ -5,6 +5,7 @@ import { syncApi } from '../lib/api';
 import { formatCompactRelative } from '../lib/formatters';
 import { useShortcuts, type ShortcutHandlers, type ShortcutId } from '../lib/keyboard';
 import { useAppStore } from '../store';
+import { NotificationBell } from './NotificationInbox';
 
 /**
  * Six words, labelled at every width.
@@ -216,6 +217,7 @@ export function NavRail() {
       <div className="mx-3 border-t border-faint" />
 
       <div className="pt-[18px]">
+        <NotificationBell />
         <RailItem to={SETTINGS_ITEM.to} label={SETTINGS_ITEM.label} icon={SETTINGS_ITEM.icon} />
         <button
           type="button"

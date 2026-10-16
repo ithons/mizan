@@ -16,6 +16,7 @@ import type {
   AiMemoryInput,
   AiMemoryRevision,
   AiStreamEvent,
+  AppNotification,
   AppPreference,
   Budget,
   BudgetRolloverLedgerEntry,
@@ -37,6 +38,9 @@ import type {
   MerchantRuleSuggestion,
   NetWorthAttribution,
   NetWorthSnapshot,
+  NotificationEvaluationSummary,
+  NotificationRule,
+  NotificationRuleSpec,
   PaginatedResponse,
   RecurringForecast,
   RecurringOccurrenceAdjustment,
@@ -1089,4 +1093,29 @@ export const aiApi = {
       }
     }
   },
+};
+
+// ─── Notifications ──────────────────────────────────────────────────────────
+
+export const notificationsApi = {
+  list: (options: { unreadOnly?: boolean; limit?: number } = {}) => {
+    const params = new URLSearchParams();
+    if (options.unreadOnly) params.set('unread_only', 'true');
+    if (options.limit) params.set('limit', String(options.limit));
+    const query = params.toString();
+    return apiFetch<AppNotification[]>(`/api/notifications${query ? `?${query}` : ''}`);
+  },
+  unreadCount: () => apiFetch<{ count: number }>('/api/notifications/unread-count'),
+  markRead: (ids: string[] | 'all') =>
+    apiFetch<{ marked: number }>('/api/notifications/read', { method: 'POST', body: JSON.stringify({ ids }) }),
+  dismiss: (id: string) =>
+    apiFetch<{ dismissed: boolean }>(`/api/notifications/${encodeURIComponent(id)}/dismiss`, { method: 'POST' }),
+  evaluate: () => apiFetch<NotificationEvaluationSummary>('/api/notifications/evaluate', { method: 'POST' }),
+  rules: () => apiFetch<NotificationRule[]>('/api/notifications/rules'),
+  createRule: (spec: NotificationRuleSpec & { enabled?: boolean }) =>
+    apiFetch<NotificationRule>('/api/notifications/rules', { method: 'POST', body: JSON.stringify(spec) }),
+  updateRule: (id: string, body: { enabled?: boolean; params?: NotificationRuleSpec['params'] }) =>
+    apiFetch<NotificationRule>(`/api/notifications/rules/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify(body) }),
+  deleteRule: (id: string) =>
+    apiFetch<{ deleted: boolean }>(`/api/notifications/rules/${encodeURIComponent(id)}`, { method: 'DELETE' }),
 };
