@@ -336,7 +336,7 @@ export function projectFreeBand(db: Database.Database, days: number, paths = 400
   for (let path = 0; path < paths; path++) {
     const deviation = new Array<number>(days + 1).fill(0);
     for (let day = 1; day <= days; day += BAND_BLOCK_DAYS) {
-      const start = Math.floor(random() * Math.max(1, daily.length - BAND_BLOCK_DAYS));
+      const start = Math.floor(random() * Math.max(1, daily.length - BAND_BLOCK_DAYS + 1));
       for (let k = 0; k < BAND_BLOCK_DAYS && day + k <= days; k++) deviation[day + k] -= daily[start + k] - meanDaily;
     }
     for (const item of income) {
