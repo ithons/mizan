@@ -90,3 +90,22 @@ test('a shift is still found once the new level fills half the window', () => {
   assert.equal(expectedAmount(series([8000, 8000, 10000, 10000])).amount, 8000);
   assert.equal(expectedAmount(series([12500, 12500, 10000, 10000])).amount, 12500);
 });
+
+test('a bonus on the latest check is not the new level, even with an older level beneath it', () => {
+  assert.equal(expectedAmount(series([112542, 54418, 54418, 54418, 30000, 30000])).amount, 54418);
+  assert.equal(expectedAmount(series([22878, 54418, 54418, 54418, 80000, 80000])).amount, 54418);
+});
+
+test('the most recent change is the one named, whatever was paid before it', () => {
+  assert.deepEqual(expectedAmount(series([30000, 30000, 54418, 54418, 80000, 80000])), {
+    amount: 30000, changedFrom: 54418, changedOn: '2026-10-06',
+  });
+});
+
+test('a change is dated from the first charge at the new amount, not the latest one', () => {
+  const backblaze = series(
+    [-1037, -1037, -1004, -1834, -1883, -1803],
+    ['2026-09-17', '2026-08-17', '2026-07-17', '2026-06-17', '2026-05-17', '2026-04-17']
+  );
+  assert.deepEqual(expectedAmount(backblaze), { amount: -1037, changedFrom: -1834, changedOn: '2026-07-17' });
+});

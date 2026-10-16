@@ -228,34 +228,44 @@ function farFrom(level: number, value: number): -1 | 0 | 1 {
 /** How long a new level is reported as new. */
 const SHIFT_REPORTED_FOR = 3;
 
-/**
- * What the next occurrence should be, from the most recent ones (newest first).
- *
- * Looks for the point where the series changed level: the newest occurrences all sit off, on one
- * side, the level that most of the older ones agree on. One odd occurrence, or recent ones pulling
- * opposite ways, is not a level, and the window median stays in charge. The level moved off is
- * named only while the change is recent, and always as an amount that was actually paid.
- */
+const PRIOR_LEVEL_SPAN = 3;
+
+function usualPaid(values: number[]): number {
+  const middle = median(values);
+  const count = (value: number) => values.filter((other) => other === value).length;
+  return values.reduce((best, value) =>
+    count(value) > count(best) || (count(value) === count(best) && Math.abs(value - middle) < Math.abs(best - middle))
+      ? value
+      : best);
+}
+
+/** The next occurrence's amount, from the newest occurrences first, and the level it most recently moved off. */
 export function expectedAmount(recent: ReadonlyArray<{ amount: number; date: string }>): ExpectedAmount {
   const window = recent.slice(0, RECENT_AMOUNT_WINDOW);
   const amounts = window.map((row) => row.amount);
   const unchanged = { amount: Math.round(median(amounts)), changedFrom: null, changedOn: null };
 
-  for (let k = window.length - 2; k >= 2; k--) {
+  for (let k = 2; k <= window.length - 2; k++) {
     const fresh = amounts.slice(0, k);
-    const older = amounts.slice(k);
-    const level = median(older);
-    if (level === 0 || older.filter((amount) => farFrom(level, amount) === 0).length * 2 <= older.length) continue;
+    const prior = amounts.slice(k, k + PRIOR_LEVEL_SPAN);
+    const level = median(prior);
+    if (level === 0 || prior.filter((amount) => farFrom(level, amount) === 0).length * 2 <= prior.length) continue;
     const direction = farFrom(level, fresh[0]);
     if (direction === 0 || fresh.some((amount) => farFrom(level, amount) !== direction)) continue;
 
     const [latest, previous] = fresh;
-    const agree = farFrom(latest, previous) === 0;
-    const sorted = [...older].sort((a, b) => a - b);
+    const amount = k === 2
+      ? (farFrom(latest, previous) === 0 ? (latest + previous) / 2 : latest)
+      : usualPaid(fresh);
+    let run = k;
+    while (run < amounts.length && farFrom(amount, amounts[run]) === 0) run++;
+    const recentChange = run <= SHIFT_REPORTED_FOR;
+    let first = run - 1;
+    while (first > 0 && farFrom(amount, amounts[first]) !== 0) first--;
     return {
-      amount: Math.round(agree ? (latest + previous) / 2 : latest),
-      changedFrom: k <= SHIFT_REPORTED_FOR ? Math.round(sorted[Math.floor((sorted.length - 1) / 2)]) : null,
-      changedOn: k <= SHIFT_REPORTED_FOR ? window[0].date : null,
+      amount: Math.round(amount),
+      changedFrom: recentChange ? Math.round(usualPaid(amounts.slice(run))) : null,
+      changedOn: recentChange ? window[first].date : null,
     };
   }
   return unchanged;
