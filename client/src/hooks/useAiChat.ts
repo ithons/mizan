@@ -73,7 +73,9 @@ export function useAiChat() {
         setConversationId(conv.id);
         setMessages(conv.messages.map((m) => ({ ...m, id: crypto.randomUUID() })));
       })
-      .catch(() => localStorage.removeItem(ACTIVE_KEY));
+      .catch(() => {
+        if (localStorage.getItem(ACTIVE_KEY) === active) localStorage.removeItem(ACTIVE_KEY);
+      });
     return () => {
       cancelled = true;
     };
