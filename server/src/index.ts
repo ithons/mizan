@@ -35,6 +35,7 @@ import syncRouter from './routes/sync';
 import settingsRouter from './routes/settings';
 import healthRouter from './routes/health';
 import aiRouter from './routes/ai';
+import notificationsRouter from './routes/notifications';
 
 const PORT = parseInt(process.env.PORT || '3001', 10);
 const IS_PROD = process.env.NODE_ENV === 'production';
@@ -181,6 +182,7 @@ async function main() {
   app.use('/api/settings', settingsRouter);
   app.use('/api/health', healthRouter);
   app.use('/api/ai', aiRouter);
+  app.use('/api/notifications', notificationsRouter);
 
   // Serve built React app in production
   if (IS_PROD) {
