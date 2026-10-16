@@ -123,15 +123,19 @@ export function useAiChat() {
       try {
         const created = await aiApi.createConversation();
         convId = created.id;
-        if (isCurrent()) {
-          setConversationId(created.id);
-          localStorage.setItem(ACTIVE_KEY, created.id);
+        if (!isCurrent()) {
+          aiApi.deleteConversation(created.id).catch((err) =>
+            console.warn('Failed to remove a conversation created for a stopped turn', err));
+          return;
         }
+        setConversationId(created.id);
+        localStorage.setItem(ACTIVE_KEY, created.id);
       } catch (err) {
         console.warn('Failed to create conversation; chat will not be saved', err);
       }
     }
 
+    if (!isCurrent()) return;
     const controller = new AbortController();
     abortRef.current = controller;
 
