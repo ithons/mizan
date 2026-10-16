@@ -49,6 +49,7 @@ import type {
   AdvisorDraftActionKind,
   ChatMessage,
 } from '../../../shared/types';
+import type { ProposalsResult } from '../services/advisorProposals';
 
 const router = Router();
 
@@ -58,6 +59,9 @@ const router = Router();
  * forever. Exported so a test asserts against the same bound the loop uses.
  */
 export const MAX_TOOL_ROUNDS = 8;
+
+/** Tools whose call can change what the screens show, so the client refreshes after them. */
+const WRITING_TOOLS = new Set(['categorize_transactions', 'create_merchant_rule', 'remember', 'forget', 'propose_changes']);
 
 /**
  * Output ceiling for one chat turn.
@@ -674,7 +678,15 @@ router.post('/chat', async (req: Request, res: Response, next: NextFunction): Pr
         // write, scoped to the autonomous domain and routed through confirmAdvisorDraft so
         // each one lands in the audit trail and is undoable by action id. Model-authored SQL
         // still runs on the read-only connection only.
-        runTool: (name, input) => runAdvisorTool(db, name, input),
+        runTool: (name, input) => {
+          const output = runAdvisorTool(db, name, input);
+          if (name === 'propose_changes') {
+            const drafts = (output as ProposalsResult).proposed;
+            if (drafts.length > 0) emit({ type: 'proposals', drafts });
+          }
+          if (WRITING_TOOLS.has(name)) emit({ type: 'wrote' });
+          return output;
+        },
       },
       emit
     );

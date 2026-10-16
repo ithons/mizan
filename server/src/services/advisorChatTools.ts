@@ -23,6 +23,7 @@ import { buildSchemaDoc, describeTables, getCategoryProvenance, transactionRepor
 import type { AdvisorToolSpec } from './aiProviders/types';
 import type { AdvisorDraftAction, AdvisorDraftPayload } from '../../../shared/types';
 import { settledNetWorthCents } from './inTransit';
+import { AGENT_TOOLS, runAgentTool } from './advisorAgentTools';
 
 /** Stable id per payload, matching advisorDrafts' own scheme, so repeats collapse. */
 function draftIdFor(payload: AdvisorDraftPayload): string {
@@ -269,6 +270,7 @@ export const ADVISOR_TOOLS: Anthropic.Tool[] = [
       required: ['sql'],
     },
   },
+  ...AGENT_TOOLS,
 ];
 
 /**
@@ -1183,6 +1185,6 @@ export function runAdvisorTool(db: Database.Database, name: string, input: ToolI
     case 'get_reconciliation': return getReconciliationTool(db, input);
     case 'describe_schema': return describeSchemaTool(db, input);
     case 'run_sql_query': return runSqlQueryTool(input);
-    default: return { error: `Unknown tool: ${name}` };
+    default: return runAgentTool(db, name, input) ?? { error: `Unknown tool: ${name}` };
   }
 }

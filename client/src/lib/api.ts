@@ -1029,7 +1029,8 @@ export const aiApi = {
     // When the thread is saved, send its id and the new turn only: the server rebuilds the history
     // from its own tables, so the prefix in front of the cached system block is one it controls.
     // Without an id (the conversation row failed to create) the array is still sent, unchanged.
-    conversationId?: string | null
+    conversationId?: string | null,
+    handlers: { onProposals?: (drafts: AdvisorDraftAction[]) => void; onWrote?: () => void } = {}
   ): Promise<void> => {
     const latest = messages[messages.length - 1];
     const body =
@@ -1077,6 +1078,8 @@ export const aiApi = {
           else if (ev.type === 'thinking' && ev.text) onThinkingChunk?.(ev.text);
           else if (ev.type === 'thinking_end') onThinkingEnd?.();
           else if (ev.type === 'tool_use' && ev.name) onToolUse?.(ev.name);
+          else if (ev.type === 'proposals' && ev.drafts) handlers.onProposals?.(ev.drafts);
+          else if (ev.type === 'wrote') handlers.onWrote?.();
           else if (ev.type === 'done') onDone();
           else if (ev.type === 'error') onError(ev.message ?? 'Unknown error');
         } catch (err) {

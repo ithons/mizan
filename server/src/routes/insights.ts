@@ -6,7 +6,7 @@ import { getDataQualitySummary } from '../services/dataQuality';
 import { buildRecurringForecast } from '../services/recurringForecast';
 import { suggestMerchantRules } from '../services/rules';
 import { getAnomalyInsights } from '../services/anomalyInsights';
-import { computeSafeToSpend } from '../services/safeToSpend';
+import { computeSafeToSpend, readSafeToSpend } from '../services/safeToSpend';
 import { reconcileAccounts, unreconciledResidual } from '../services/reconciliation';
 import { findFlowConservationViolations } from '../services/flowConservation';
 import { getMonthlyBudgetsWithProjection } from '../services/budgetProjection';
@@ -151,25 +151,7 @@ router.get('/reconciliation', (_req: Request, res: Response, next: NextFunction)
 router.get('/safe-to-spend', (_req: Request, res: Response, next: NextFunction): void => {
   try {
     const db = getDb();
-    const now = new Date();
-    const budgets = getMonthlyBudgetsWithProjection(db, now.getFullYear(), now.getMonth() + 1);
-    const breakdown = computeSafeToSpend(db, { budgets });
-    res.json({
-      data: {
-        liquid: toDollars(breakdown.liquid),
-        card_balances: toDollars(breakdown.cardBalances),
-        upcoming_bills: toDollars(breakdown.upcomingBills),
-        expected_inflows: toDollars(breakdown.expectedInflows),
-        recurring_transfers: toDollars(breakdown.recurringTransfers),
-        card_relief: toDollars(breakdown.cardRelief),
-        estimated_unbudgeted: toDollars(breakdown.estimatedUnbudgeted),
-        unbudgeted_basis_days: breakdown.unbudgetedBasisDays,
-        allocated_budgets: toDollars(breakdown.allocatedBudgets),
-        allocated_goals: toDollars(breakdown.allocatedGoals),
-        free: toDollars(breakdown.free),
-        forecast_days: breakdown.forecastDays,
-      },
-    });
+    res.json({ data: readSafeToSpend(db) });
   } catch (err) {
     next(err);
   }

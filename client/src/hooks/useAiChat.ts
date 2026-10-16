@@ -1,7 +1,8 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { aiApi } from '../lib/api';
 import { createTurnGate } from '../lib/turnGate';
-import type { AdvisorAnalysis, ChatMessage } from '@shared/types';
+import type { AdvisorAnalysis, AdvisorDraftAction, ChatMessage } from '@shared/types';
 
 export interface DisplayMessage extends ChatMessage {
   id: string;
@@ -10,6 +11,8 @@ export interface DisplayMessage extends ChatMessage {
   thinking?: string;
   thinkingActive?: boolean;
   toolActivity?: string;
+  /** Changes the model put in front of the owner during this answer. */
+  proposals?: AdvisorDraftAction[];
 }
 
 // Friendly labels for the read-only DB tools the advisor can call, shown while it queries.
@@ -24,6 +27,25 @@ const TOOL_LABELS: Record<string, string> = {
   get_net_worth_history: 'Tracing your net-worth history…',
   describe_schema: 'Inspecting your data model…',
   run_sql_query: 'Querying your financial data…',
+  get_merchant_rules: 'Reading your merchant rules…',
+  get_provenance_summary: 'Checking how categories were set…',
+  get_transaction_full: 'Opening the transaction…',
+  get_my_action_history: 'Reading what it has changed…',
+  get_holding_history: 'Tracing a holding…',
+  get_sync_runs: 'Checking recent syncs…',
+  get_reconciliation: 'Reconciling balances…',
+  categorize_transactions: 'Filing transactions…',
+  create_merchant_rule: 'Writing a merchant rule…',
+  propose_changes: 'Preparing changes for you…',
+  get_accounts: 'Reading your accounts…',
+  get_categories: 'Reading your categories…',
+  get_safe_to_spend: 'Working out what is free to spend…',
+  get_recurring_patterns: 'Reviewing recurring items…',
+  get_insights: 'Looking for anything unusual…',
+  get_memories: 'Recalling what you have told it…',
+  remember: 'Noting that down…',
+  forget: 'Forgetting that…',
+  get_open_proposals: 'Checking what is already waiting for you…',
 };
 
 // The active conversation id is remembered across reloads so the thread resumes; the
@@ -59,6 +81,7 @@ export function useAiChat() {
   const [conversationId, setConversationId] = useState<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   const turns = useRef(createTurnGate()).current;
+  const queryClient = useQueryClient();
 
   // Resume the last conversation on mount, if it still exists.
   useEffect(() => {
@@ -217,7 +240,11 @@ export function useAiChat() {
           toolActivity: TOOL_LABELS[toolName] ?? 'Looking things up…',
         })),
         // The server rebuilds the earlier turns from this conversation; only the new one is sent.
-        convId
+        convId,
+        {
+          onProposals: (drafts) => updateAssistant((m) => ({ ...m, proposals: [...(m.proposals ?? []), ...drafts] })),
+          onWrote: () => void queryClient.invalidateQueries(),
+        }
       );
 
       const analysis = await analysisPromise;

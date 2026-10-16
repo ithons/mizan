@@ -3,6 +3,8 @@ import { buildRecurringForecast } from './recurringForecast';
 import { calculateGoalProgress, type GoalProgressInput } from './goalProgress';
 import { excludedFromTotalsSql, expenseSideSql, reportDateSql, spendAmountSql } from './transactionFilters';
 import type { RecurringForecastOccurrence } from '../../../shared/types';
+import { getMonthlyBudgetsWithProjection } from './budgetProjection';
+import { toDollars } from './money';
 
 /** The columns `calculateGoalProgress` needs, plus enough of the linked account to know whether
  * the liquid pool counted it. */
@@ -310,4 +312,25 @@ function earmarksFromPool(goal: GoalEarmarkRow): boolean {
     is_hidden: goal.account_is_hidden ?? 1,
     is_liability: goal.account_is_liability ?? 1,
   });
+}
+
+/** The breakdown the screen and the advisor both read, in dollars, for this month's budgets. */
+export function readSafeToSpend(db: Database.Database, forecastDays?: number) {
+  const now = new Date();
+  const budgets = getMonthlyBudgetsWithProjection(db, now.getFullYear(), now.getMonth() + 1);
+  const breakdown = computeSafeToSpend(db, { budgets, ...(forecastDays ? { forecastDays } : {}) });
+  return {
+    liquid: toDollars(breakdown.liquid),
+    card_balances: toDollars(breakdown.cardBalances),
+    upcoming_bills: toDollars(breakdown.upcomingBills),
+    expected_inflows: toDollars(breakdown.expectedInflows),
+    recurring_transfers: toDollars(breakdown.recurringTransfers),
+    card_relief: toDollars(breakdown.cardRelief),
+    estimated_unbudgeted: toDollars(breakdown.estimatedUnbudgeted),
+    unbudgeted_basis_days: breakdown.unbudgetedBasisDays,
+    allocated_budgets: toDollars(breakdown.allocatedBudgets),
+    allocated_goals: toDollars(breakdown.allocatedGoals),
+    free: toDollars(breakdown.free),
+    forecast_days: breakdown.forecastDays,
+  };
 }

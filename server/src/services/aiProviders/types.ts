@@ -1,4 +1,5 @@
 import type { AdvisorEffort } from '../../../../shared/types';
+import type { AdvisorDraftAction } from '../../../../shared/types';
 
 /**
  * The provider-neutral seam over the three SDK call sites: the streaming chat with tools
@@ -86,7 +87,9 @@ export type ChatStreamEvent =
   | { type: 'thinking_start' }
   | { type: 'thinking'; text: string }
   | { type: 'thinking_end' }
-  | { type: 'tool_use'; name: string };
+  | { type: 'tool_use'; name: string }
+  | { type: 'proposals'; drafts: AdvisorDraftAction[] }
+  | { type: 'wrote' };
 
 export type ChatEmit = (event: ChatStreamEvent) => void;
 
