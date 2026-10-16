@@ -131,3 +131,21 @@ test('a recurring credit posted to a card still counts, since the card is a clai
     assert.equal(computeSafeToSpend(db, { forecastDays: 30 }).expectedInflows, before + 700);
   });
 });
+
+test('a paycheck last paid into an account since closed still counts, and a typed-in dividend does not', () => {
+  withDb((db, ids) => {
+    seedSchedules(db, ids);
+    const before = computeSafeToSpend(db, { forecastDays: 30 }).expectedInflows;
+    db.prepare("UPDATE accounts SET type = 'closed' WHERE id = ?").run(ids.chase);
+    assert.equal(computeSafeToSpend(db, { forecastDays: 30 }).expectedInflows, before);
+    db.prepare("UPDATE accounts SET type = 'checking' WHERE id = ?").run(ids.chase);
+
+    db.prepare(`
+      INSERT INTO recurring_patterns
+        (id, merchant_name, category_id, average_amount, frequency, last_seen, next_expected,
+         is_active, is_confirmed, transaction_count, created_at, updated_at)
+      VALUES ('p_typed', 'Fidelity dividend', 'cat_inv_dividend', 7000, 'monthly', ?, ?, 1, 1, 0, '2026-01-01', '2026-01-01')
+    `).run(day(20), format(new Date(Date.now() + 10 * 86_400_000), 'yyyy-MM-dd'));
+    assert.equal(computeSafeToSpend(db, { forecastDays: 30 }).expectedInflows, before);
+  });
+});

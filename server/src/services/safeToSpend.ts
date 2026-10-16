@@ -113,7 +113,7 @@ export function computeSafeToSpend(
 
   const forecast = buildRecurringForecast(db, forecastDays);
   const upcomingBills = Math.abs(forecast.bills);
-  const expectedInflows = inflowsIntoPool(db, forecast.occurrences, pool, liabilities);
+  const expectedInflows = inflowsIntoPool(db, forecast.occurrences);
   const recurringTransfers = transfersLeavingPool(forecast.occurrences, pool, liabilities);
   const estimatedUnbudgeted = unbudgetedPace(db, inputs.budgets ?? [], forecastDays);
 
@@ -184,20 +184,27 @@ export function computeSafeToSpend(
   };
 }
 
-/** Forecast income, less what its pattern last paid into an asset outside the pool, such as a dividend into a brokerage; a card credit still counts. */
-function inflowsIntoPool(
-  db: Database.Database,
-  occurrences: readonly RecurringForecastOccurrence[],
-  pool: Set<string>,
-  liabilities: Set<string>
-): number {
+const INVESTMENT_TYPES = new Set(['brokerage', 'ira_traditional', 'ira_roth', 'crypto_wallet']);
+
+/** Forecast income, less income filed under Investments or last paid into an investment account. */
+function inflowsIntoPool(db: Database.Database, occurrences: readonly RecurringForecastOccurrence[]): number {
   const landing = db.prepare(`
-    SELECT account_id FROM transactions WHERE recurring_id = ? ORDER BY date DESC, id DESC LIMIT 1
+    SELECT a.type FROM transactions t JOIN accounts a ON a.id = t.account_id
+    WHERE t.recurring_id = ? ORDER BY t.date DESC, t.id DESC LIMIT 1
+  `);
+  const investmentCategory = db.prepare(`
+    WITH RECURSIVE invested(id) AS (
+      SELECT id FROM categories WHERE id = 'cat_inv'
+      UNION ALL SELECT c.id FROM categories c JOIN invested i ON c.parent_id = i.id
+    )
+    SELECT 1 FROM invested WHERE id = ?
   `);
   return occurrences.reduce((sum, occurrence) => {
     if (occurrence.kind === 'transfer' || occurrence.adjustment_action === 'skip' || occurrence.amount <= 0) return sum;
-    const account = (landing.get(occurrence.pattern_id) as { account_id: string } | undefined)?.account_id;
-    return account !== undefined && !pool.has(account) && !liabilities.has(account) ? sum : sum + occurrence.amount;
+    const landedIn = (landing.get(occurrence.pattern_id) as { type: string } | undefined)?.type;
+    const invested = (landedIn !== undefined && INVESTMENT_TYPES.has(landedIn))
+      || (occurrence.category_id !== null && investmentCategory.get(occurrence.category_id) !== undefined);
+    return invested ? sum : sum + occurrence.amount;
   }, 0);
 }
 
