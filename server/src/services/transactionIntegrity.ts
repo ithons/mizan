@@ -477,10 +477,41 @@ function assignGreedily(edges: PairEdge[]): PairEdge[] {
   return chosen;
 }
 
+/**
+ * Edges that are the strictly nearest choice for both of their legs belong to every best matching,
+ * so they are fixed first and the rest is searched with them removed.
+ */
+function settleMutualNearest(edges: PairEdge[]): { fixed: PairEdge[]; rest: PairEdge[] } {
+  const fixed: PairEdge[] = [];
+  let rest = edges;
+  for (;;) {
+    const nearest = new Map<string, { gap: number; count: number }>();
+    for (const edge of rest) {
+      for (const leg of [edge.outflow.id, edge.inflow.id]) {
+        const seen = nearest.get(leg);
+        const gap = edgeGap(edge);
+        if (!seen || gap < seen.gap) nearest.set(leg, { gap, count: 1 });
+        else if (gap === seen.gap) seen.count++;
+      }
+    }
+    const isNearest = (leg: string, gap: number) => {
+      const seen = nearest.get(leg);
+      return seen !== undefined && seen.gap === gap && seen.count === 1;
+    };
+    const round = rest.filter((edge) => isNearest(edge.outflow.id, edgeGap(edge)) && isNearest(edge.inflow.id, edgeGap(edge)));
+    if (round.length === 0) return { fixed, rest };
+    fixed.push(...round);
+    const taken = new Set(round.flatMap((edge) => [edge.outflow.id, edge.inflow.id]));
+    rest = rest.filter((edge) => !taken.has(edge.outflow.id) && !taken.has(edge.inflow.id));
+  }
+}
+
 function assignPairs(edges: PairEdge[]): PairEdge[] {
-  return groupsOf(edges)
-    .flatMap((group) => (group.length <= EXACT_GROUP_EDGES ? assignExactly(group) : assignGreedily(group)))
-    .sort(edgeOrder);
+  const { fixed, rest } = settleMutualNearest(edges);
+  return [
+    ...fixed,
+    ...groupsOf(rest).flatMap((group) => (group.length <= EXACT_GROUP_EDGES ? assignExactly(group) : assignGreedily(group))),
+  ].sort(edgeOrder);
 }
 
 interface TransferLeg {

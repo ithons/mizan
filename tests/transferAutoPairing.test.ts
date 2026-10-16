@@ -274,3 +274,20 @@ test('a same-day exact pair is not broken up to stretch two farther matches', ()
   refreshTransferCandidates(db);
   assert.equal(partnerOf(db, 'o1'), 'i1');
 });
+
+test('two identical moves on one day still pair inside a long weekly history', () => {
+  const db = migratedTestDb();
+  const checking = insertAccount(db, { type: 'checking', account_name: 'Checking' });
+  const savings = insertAccount(db, { type: 'savings', account_name: 'Savings' });
+  const mondays = ['2026-08-03', '2026-08-10', '2026-08-17', '2026-08-24', '2026-08-31', '2026-09-07', '2026-09-14', '2026-09-21'];
+  mondays.forEach((date, week) => {
+    insertTransaction(db, { id: `o${week}`, account_id: checking, date, amount: -20000, original_name: 'ONLINE TRANSFER TO SAVINGS' });
+    insertTransaction(db, { id: `i${week}`, account_id: savings, date, amount: 20000, original_name: 'ONLINE TRANSFER FROM CHECKING' });
+  });
+  insertTransaction(db, { id: 'oX', account_id: checking, date: '2026-09-07', amount: -20000, original_name: 'ONLINE TRANSFER TO SAVINGS' });
+  insertTransaction(db, { id: 'iX', account_id: savings, date: '2026-09-07', amount: 20000, original_name: 'ONLINE TRANSFER FROM CHECKING' });
+  refreshTransferCandidates(db);
+  for (const id of [...mondays.flatMap((_, week) => [`o${week}`, `i${week}`]), 'oX', 'iX']) {
+    assert.notEqual(leg(db, id).transfer_pair_id, null, id);
+  }
+});
