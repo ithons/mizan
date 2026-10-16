@@ -246,3 +246,31 @@ test('two identical moves between the same two accounts on one day both pair', (
   for (const id of ['o1', 'o2', 'i1', 'i2']) assert.notEqual(leg(db, id).transfer_pair_id, null, id);
   assert.notEqual(partnerOf(db, 'o1'), partnerOf(db, 'o2'));
 });
+
+test('a tie is not settled by taking the one leg a third transfer could reach', () => {
+  for (const [early, late] of [['i2', 'i1'], ['i1', 'i2']]) {
+    const db = migratedTestDb();
+    const checking = insertAccount(db, { type: 'checking', account_name: 'Checking' });
+    const joint = insertAccount(db, { type: 'checking', account_name: 'Joint' });
+    const savings = insertAccount(db, { type: 'savings', account_name: 'Savings' });
+    insertTransaction(db, { id: 'o1', account_id: checking, date: '2026-10-06', amount: -20000, original_name: 'ONLINE TRANSFER TO SAVINGS' });
+    insertTransaction(db, { id: 'oJ', account_id: joint, date: '2026-10-13', amount: -20000, original_name: 'ONLINE TRANSFER TO SAVINGS' });
+    insertTransaction(db, { id: early, account_id: savings, date: '2026-10-05', amount: 20000, original_name: 'ONLINE TRANSFER FROM CHECKING' });
+    insertTransaction(db, { id: late, account_id: savings, date: '2026-10-07', amount: 20000, original_name: 'ONLINE TRANSFER FROM CHECKING' });
+    refreshTransferCandidates(db);
+    assert.equal(partnerOf(db, 'o1'), early, `ids ${early}/${late}`);
+    assert.equal(partnerOf(db, 'oJ'), late, `ids ${early}/${late}`);
+  }
+});
+
+test('a same-day exact pair is not broken up to stretch two farther matches', () => {
+  const db = migratedTestDb();
+  const checking = insertAccount(db, { type: 'checking', account_name: 'Checking' });
+  const savings = insertAccount(db, { type: 'savings', account_name: 'Savings' });
+  insertTransaction(db, { id: 'o1', account_id: checking, date: '2026-10-05', amount: -20000, original_name: 'ONLINE TRANSFER TO SAVINGS' });
+  insertTransaction(db, { id: 'i1', account_id: savings, date: '2026-10-05', amount: 20000, original_name: 'ONLINE TRANSFER FROM CHECKING' });
+  insertTransaction(db, { id: 'o2', account_id: checking, date: '2026-09-28', amount: -20000, original_name: 'ONLINE TRANSFER TO SAVINGS' });
+  insertTransaction(db, { id: 'i2', account_id: savings, date: '2026-10-12', amount: 20000, original_name: 'ONLINE TRANSFER FROM CHECKING' });
+  refreshTransferCandidates(db);
+  assert.equal(partnerOf(db, 'o1'), 'i1');
+});

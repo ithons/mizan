@@ -378,33 +378,109 @@ function candidateEdges(rows: TransferRow[]): PairEdge[] {
   return edges.sort(edgeOrder);
 }
 
+/** Above this many candidate edges a group is assigned greedily rather than searched. */
+const EXACT_GROUP_EDGES = 14;
+
+function edgeGap(edge: PairEdge): number {
+  return edge.businessGap * 100 + edge.calendarGap;
+}
+
+/** Nearer pairs first; when the nearest agree, the matching that pairs more legs. */
+function compareMatchings(a: PairEdge[], b: PairEdge[]): number {
+  const gapsA = a.map(edgeGap).sort((x, y) => x - y);
+  const gapsB = b.map(edgeGap).sort((x, y) => x - y);
+  for (let i = 0; i < Math.min(gapsA.length, gapsB.length); i++) {
+    if (gapsA[i] !== gapsB[i]) return gapsA[i] - gapsB[i];
+  }
+  return gapsB.length - gapsA.length;
+}
+
+function moveSignature(matching: PairEdge[]): string {
+  return matching
+    .map(({ outflow, inflow }) =>
+      [outflow.account_id, outflow.date, outflow.original_name, inflow.account_id, inflow.date, inflow.original_name].join('|'))
+    .sort()
+    .join('\n');
+}
+
+function groupsOf(edges: PairEdge[]): PairEdge[][] {
+  const parent = new Map<string, string>();
+  const find = (id: string): string => {
+    const up = parent.get(id) ?? id;
+    if (up === id) return id;
+    const root = find(up);
+    parent.set(id, root);
+    return root;
+  };
+  for (const edge of edges) parent.set(find(edge.outflow.id), find(edge.inflow.id));
+  const groups = new Map<string, PairEdge[]>();
+  for (const edge of edges) {
+    const root = find(edge.outflow.id);
+    groups.set(root, [...(groups.get(root) ?? []), edge]);
+  }
+  return [...groups.values()];
+}
+
+function bestMatchings(edges: PairEdge[]): PairEdge[][] {
+  let best: PairEdge[][] = [];
+  const walk = (i: number, used: Set<string>, picked: PairEdge[]): void => {
+    if (i === edges.length) {
+      const order = best.length === 0 ? -1 : compareMatchings(picked, best[0]);
+      if (order < 0) best = [[...picked]];
+      else if (order === 0) best.push([...picked]);
+      return;
+    }
+    const edge = edges[i];
+    if (!used.has(edge.outflow.id) && !used.has(edge.inflow.id)) {
+      used.add(edge.outflow.id);
+      used.add(edge.inflow.id);
+      walk(i + 1, used, [...picked, edge]);
+      used.delete(edge.outflow.id);
+      used.delete(edge.inflow.id);
+    }
+    walk(i + 1, used, picked);
+  };
+  walk(0, new Set(), []);
+  return best;
+}
+
 /**
- * Nearest legs first. A weekly transfer puts next week's leg exactly at the edge of the window, so
- * uniqueness inside the window cannot be the test; distance is. Two equally near counterparts are
- * a genuine ambiguity, and both rows are left alone rather than guessed at.
+ * Every best matching in a small group is found. When they all describe the same moves, one is
+ * taken; when they disagree, only the pairs every one of them makes are kept.
  */
-function assignPairs(edges: PairEdge[]): PairEdge[] {
+function assignExactly(edges: PairEdge[]): PairEdge[] {
+  const best = bestMatchings(edges);
+  if (best.length === 0) return [];
+  if (best.every((matching) => moveSignature(matching) === moveSignature(best[0]))) return best[0];
+  return best[0].filter((edge) => best.every((matching) => matching.includes(edge)));
+}
+
+/** Nearest legs first, and a tie between equally near counterparts leaves every row in it alone. */
+function assignGreedily(edges: PairEdge[]): PairEdge[] {
   const settled = new Set<string>();
   const chosen: PairEdge[] = [];
   for (const edge of edges) {
     if (settled.has(edge.outflow.id) || settled.has(edge.inflow.id)) continue;
     const rivals = edges.filter((other) =>
       other !== edge
-      && other.businessGap === edge.businessGap
-      && other.calendarGap === edge.calendarGap
+      && edgeGap(other) === edgeGap(edge)
       && (other.outflow.id === edge.outflow.id || other.inflow.id === edge.inflow.id)
       && !settled.has(other.outflow.id)
       && !settled.has(other.inflow.id)
     );
-    const interchangeable = rivals.every((other) =>
-      other.outflow.account_id === edge.outflow.account_id && other.inflow.account_id === edge.inflow.account_id);
-    for (const tied of interchangeable ? [edge] : [edge, ...rivals]) {
+    for (const tied of [edge, ...rivals]) {
       settled.add(tied.outflow.id);
       settled.add(tied.inflow.id);
     }
-    if (interchangeable) chosen.push(edge);
+    if (rivals.length === 0) chosen.push(edge);
   }
   return chosen;
+}
+
+function assignPairs(edges: PairEdge[]): PairEdge[] {
+  return groupsOf(edges)
+    .flatMap((group) => (group.length <= EXACT_GROUP_EDGES ? assignExactly(group) : assignGreedily(group)))
+    .sort(edgeOrder);
 }
 
 interface TransferLeg {
