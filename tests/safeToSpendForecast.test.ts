@@ -169,3 +169,23 @@ test('income filed as pay but last paid into a brokerage is left out by the acco
     assert.equal(computeSafeToSpend(db, { forecastDays: 30 }).expectedInflows, before);
   });
 });
+
+test('pay that lands outside the pool and is moved in by a recurring transfer is counted once, by the transfer', () => {
+  for (const side of [{ type: 'other', is_hidden: 0 }, { type: 'checking', is_hidden: 1 }]) {
+    withDb((db, ids) => {
+      const other = insertAccount(db, { account_name: 'Side', type: side.type, current_balance: 0 });
+      db.prepare('UPDATE accounts SET is_hidden = ? WHERE id = ?').run(side.is_hidden, other);
+      for (const weeksAgo of [6, 5, 4, 3, 2, 1]) {
+        insertTransaction(db, { account_id: other, date: day(7 * weeksAgo + 1), amount: 50000, merchant_name: 'Side Gig', original_name: 'SIDE GIG PAYROLL', category_id: 'cat_income_paycheck' });
+        insertTransaction(db, { account_id: other, date: day(7 * weeksAgo), amount: -50000, original_name: 'TRANSFER TO CHASE CHECKING' });
+        insertTransaction(db, { account_id: ids.chase, date: day(7 * weeksAgo), amount: 50000, original_name: 'TRANSFER FROM SIDE' });
+      }
+      refreshTransactionIntegrity(db);
+      detectRecurring();
+      const sheet = computeSafeToSpend(db, { forecastDays: 30 });
+      assert.equal(sheet.expectedInflows + -sheet.recurringTransfers <= 5 * 50000, true, `${side.type}/${side.is_hidden}: ${sheet.expectedInflows} in, ${sheet.recurringTransfers} transfers`);
+      assert.equal(sheet.expectedInflows, 0, `${side.type}/${side.is_hidden}`);
+      assert.ok(sheet.recurringTransfers < 0, 'the transfer into the pool is what brings the pay in');
+    });
+  }
+});

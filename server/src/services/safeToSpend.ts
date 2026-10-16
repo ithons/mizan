@@ -113,7 +113,7 @@ export function computeSafeToSpend(
 
   const forecast = buildRecurringForecast(db, forecastDays);
   const upcomingBills = Math.abs(forecast.bills);
-  const expectedInflows = inflowsIntoPool(db, forecast.occurrences);
+  const expectedInflows = inflowsIntoPool(db, forecast.occurrences, pool, liabilities);
   const recurringTransfers = transfersLeavingPool(forecast.occurrences, pool, liabilities);
   const estimatedUnbudgeted = unbudgetedPace(db, inputs.budgets ?? [], forecastDays);
 
@@ -184,12 +184,20 @@ export function computeSafeToSpend(
   };
 }
 
-const INVESTMENT_TYPES = new Set(['brokerage', 'ira_traditional', 'ira_roth', 'crypto_wallet']);
-
-/** Forecast income, less income filed under Investments or Crypto or last paid into an investment or crypto account. */
-function inflowsIntoPool(db: Database.Database, occurrences: readonly RecurringForecastOccurrence[]): number {
+/**
+ * Forecast income that reaches the pool: paid into a pool account, onto a card, or into an account
+ * since closed. Income paid anywhere else reaches the pool only through a transfer, which
+ * `transfersLeavingPool` already counts. A pattern with no deposit on record counts unless it is
+ * filed under Investments or Crypto.
+ */
+function inflowsIntoPool(
+  db: Database.Database,
+  occurrences: readonly RecurringForecastOccurrence[],
+  pool: Set<string>,
+  liabilities: Set<string>
+): number {
   const landing = db.prepare(`
-    SELECT a.type FROM transactions t JOIN accounts a ON a.id = t.account_id
+    SELECT a.id, a.type FROM transactions t JOIN accounts a ON a.id = t.account_id
     WHERE t.recurring_id = ? ORDER BY t.date DESC, t.id DESC LIMIT 1
   `);
   const investmentCategory = db.prepare(`
@@ -201,10 +209,11 @@ function inflowsIntoPool(db: Database.Database, occurrences: readonly RecurringF
   `);
   return occurrences.reduce((sum, occurrence) => {
     if (occurrence.kind === 'transfer' || occurrence.adjustment_action === 'skip' || occurrence.amount <= 0) return sum;
-    const landedIn = (landing.get(occurrence.pattern_id) as { type: string } | undefined)?.type;
-    const invested = (landedIn !== undefined && INVESTMENT_TYPES.has(landedIn))
-      || (occurrence.category_id !== null && investmentCategory.get(occurrence.category_id) !== undefined);
-    return invested ? sum : sum + occurrence.amount;
+    const landed = landing.get(occurrence.pattern_id) as { id: string; type: string } | undefined;
+    const reachesPool = landed
+      ? pool.has(landed.id) || liabilities.has(landed.id) || landed.type === 'closed'
+      : occurrence.category_id === null || investmentCategory.get(occurrence.category_id) === undefined;
+    return reachesPool ? sum + occurrence.amount : sum;
   }, 0);
 }
 
