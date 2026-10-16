@@ -114,7 +114,8 @@ export function computeSafeToSpend(
   const forecast = buildRecurringForecast(db, forecastDays);
   const upcomingBills = Math.abs(forecast.bills);
   const expectedInflows = inflowsIntoPool(db, forecast.occurrences, pool, liabilities);
-  const recurringTransfers = transfersLeavingPool(forecast.occurrences, pool, liabilities);
+  const owed = new Map(accounts.filter((account) => account.is_liability).map((account) => [account.id, account.current_balance]));
+  const recurringTransfers = transfersLeavingPool(forecast.occurrences, pool, owed);
   const estimatedUnbudgeted = unbudgetedPace(db, inputs.budgets ?? [], forecastDays);
 
   // Clamped to what was actually budgeted. Now that refunds net a category's spend down,
@@ -186,8 +187,8 @@ export function computeSafeToSpend(
 
 /**
  * Forecast income that reaches the pool: last paid into a pool account or onto a card. Income paid
- * anywhere else reaches the pool only through a transfer, which `transfersLeavingPool` already
- * counts. With no deposit on record, or the last one into an account since closed, where it lands
+ * anywhere else reaches the pool, or pays down a card the pool owes, only through a transfer, which
+ * `transfersLeavingPool` counts. With no deposit on record, or the last one into an account since closed, where it lands
  * is unknown, and it counts unless filed under Investments or Crypto.
  */
 function inflowsIntoPool(
@@ -217,17 +218,30 @@ function inflowsIntoPool(
   }, 0);
 }
 
+/**
+ * Money the schedule moves across the pool's edge. A card is already claimed in full, so a payment
+ * to it from the pool changes nothing, and one from outside the pool relieves that claim, never by
+ * more than the card owes.
+ */
 function transfersLeavingPool(
   occurrences: readonly RecurringForecastOccurrence[],
   pool: Set<string>,
-  liabilities: Set<string>
+  owed: Map<string, number>
 ): number {
+  const relieved = new Map<string, number>();
   return occurrences.reduce((sum, occurrence) => {
     if (occurrence.kind !== 'transfer' || occurrence.adjustment_action === 'skip') return sum;
     const from = occurrence.account_id ?? '';
     const to = occurrence.counterparty_account_id ?? '';
-    if (liabilities.has(to) || pool.has(from) === pool.has(to)) return sum;
     const size = Math.abs(occurrence.amount);
+    if (owed.has(to)) {
+      if (pool.has(from) || owed.has(from)) return sum;
+      const room = Math.max(0, (owed.get(to) ?? 0) - (relieved.get(to) ?? 0));
+      const relief = Math.min(size, room);
+      relieved.set(to, (relieved.get(to) ?? 0) + relief);
+      return sum - relief;
+    }
+    if (pool.has(from) === pool.has(to)) return sum;
     return pool.has(from) ? sum + size : sum - size;
   }, 0);
 }

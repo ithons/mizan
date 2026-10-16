@@ -208,3 +208,30 @@ test('a dividend last paid into a brokerage since closed is still investment inc
     assert.equal(computeSafeToSpend(db, { forecastDays: 30 }).expectedInflows, before);
   });
 });
+
+test('a card autopaid from an account outside the pool is relieved by that payment, never past what it owes', () => {
+  for (const side of [{ type: 'other', is_hidden: 0 }, { type: 'checking', is_hidden: 1 }]) {
+    const db = migratedTestDb();
+    _setDbForTesting(db);
+    try {
+      insertAccount(db, { account_name: 'Chase Checking', type: 'checking', current_balance: 100000 });
+      const other = insertAccount(db, { account_name: 'Side', type: side.type, current_balance: 50000 });
+      db.prepare('UPDATE accounts SET is_hidden = ? WHERE id = ?').run(side.is_hidden, other);
+      const card = insertAccount(db, { account_name: 'Sapphire', type: 'credit', is_liability: 1, current_balance: 100000 });
+      for (const m of [4, 3, 2, 1]) {
+        insertTransaction(db, { account_id: other, date: day(30 * m + 2), amount: 300000, merchant_name: 'Mass Inst Payroll', original_name: 'MASS INST PAYROLL PPD ID: 9111111101', category_id: 'cat_income_paycheck' });
+        insertTransaction(db, { account_id: other, date: day(30 * m), amount: -150000, original_name: 'CHASE CREDIT CRD AUTOPAY PPD ID: XXXXXX9224' });
+        insertTransaction(db, { account_id: card, date: day(30 * m), amount: 150000, original_name: 'AUTOMATIC PAYMENT - THANK' });
+      }
+      refreshTransactionIntegrity(db);
+      detectRecurring();
+      const sheet = computeSafeToSpend(db, { forecastDays: 30 });
+      assert.equal(sheet.expectedInflows, 0, `${side.type}/${side.is_hidden}`);
+      assert.equal(sheet.recurringTransfers, -100000, 'a $1,500 autopay relieves the $1,000 owed and no more');
+      assert.equal(sheet.free, 100000, 'the pool keeps its own $1,000');
+    } finally {
+      _setDbForTesting(undefined as unknown as Database.Database);
+      db.close();
+    }
+  }
+});
