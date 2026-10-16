@@ -22,7 +22,7 @@ const PAYLOAD_GUIDE = [
   'retire_merchant_rule {rule_id}.',
   'confirm_recurring {recurring_id} / dismiss_recurring {recurring_id}.',
   'create_recurring_adjustment {recurring_id, original_date, action:"skip"|"snooze"|"adjust", adjusted_date?, adjusted_amount? (dollars), note?}.',
-  'update_account {account_id, account_name?, is_hidden?, current_balance? (dollars, manual accounts only), statement_balance? (dollars owed), statement_due_date?}.',
+  'update_account {account_id, account_name?, is_hidden?, current_balance? (dollars, manual accounts only), statement_balance? (dollars owed), statement_due_date?, credit_limit? (dollars)}.',
   'set_manual_cost_basis {holding_id, manual_cost_basis (dollars) | null, note?}.',
   'set_notification_rule {rule_id? (to edit), rule_kind, params, enabled?}: rule_kind and params are budget_threshold {category_id|null, percent}, large_transaction {min_amount (dollars), account_id|null, lookback_days}, bill_due {days_ahead}, low_balance {account_id|null, threshold (dollars)}, safe_to_spend_negative {}, sync_failed {include_partial}, goal_milestone {goal_id|null, milestones:[percents]}, unusual_spending {category_id|null, ratio, min_amount (dollars)}, recurring_amount_changed {}.',
   'delete_notification_rule {rule_id}.',
@@ -149,9 +149,9 @@ export const AGENT_TOOLS: Anthropic.Tool[] = [
 function getAccountsTool(db: Database.Database): unknown {
   const rows = db.prepare(`
     SELECT id, account_name, institution_name, type, connection_type, current_balance, is_liability,
-           is_hidden, balance_only, statement_balance, statement_due_date, provider_seen_at, updated_at
+           is_hidden, balance_only, statement_balance, statement_due_date, credit_limit, provider_seen_at, updated_at
     FROM accounts ORDER BY is_hidden, account_name
-  `).all() as Array<Record<string, unknown> & { current_balance: number; statement_balance: number | null }>;
+  `).all() as Array<Record<string, unknown> & { current_balance: number; statement_balance: number | null; credit_limit: number | null }>;
   return {
     accounts: rows.map((row) => ({
       id: row.id,
@@ -165,6 +165,8 @@ function getAccountsTool(db: Database.Database): unknown {
       balance_only: row.balance_only === 1,
       statement_balance: row.statement_balance === null ? null : toDollars(row.statement_balance),
       statement_due_date: row.statement_due_date,
+      credit_limit: row.credit_limit === null ? null : toDollars(row.credit_limit),
+      utilization: row.is_liability === 1 && row.credit_limit ? Math.round((row.current_balance / row.credit_limit) * 1000) / 10 : null,
       last_seen_by_provider: row.provider_seen_at,
       last_updated: row.updated_at,
     })),

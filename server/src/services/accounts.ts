@@ -123,6 +123,7 @@ export interface UpdateAccountInput {
   statement_due_date?: string | null;
   /** Holds a balance and nothing else: no transactions are kept against it. */
   balance_only?: boolean;
+  credit_limit?: number | null; // dollars
 }
 
 export type UpdateAccountResult =
@@ -215,6 +216,10 @@ export function updateAccount(db: Database.Database, id: string, input: UpdateAc
   if (input.statement_due_date !== undefined) {
     updates.push('statement_due_date = ?');
     values.push(input.statement_due_date);
+  }
+  if (input.credit_limit !== undefined) {
+    updates.push('credit_limit = ?');
+    values.push(input.credit_limit === null ? null : toCents(input.credit_limit));
   }
   if (input.balance_only !== undefined) {
     if (input.balance_only && hasTransactions(db, id)) return { ok: false, reason: 'has_transactions' };

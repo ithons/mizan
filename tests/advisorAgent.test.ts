@@ -137,3 +137,12 @@ test('the advisor reads rules and the inbox with money in dollars', () => {
   assert.equal(rules.find((rule) => rule.kind === 'low_balance' && rule.params.threshold === 500)?.params.threshold, 500);
   assert.deepEqual(runAdvisorTool(db, 'get_notifications', { unread_only: true }), { notifications: [] });
 });
+
+test('a card limit set through the advisor is stored in cents and read back as utilization', () => {
+  const db = migratedTestDb();
+  const card = insertAccount(db, { account_name: 'Sapphire', type: 'credit', is_liability: 1, current_balance: 250000, connection_type: 'simplefin', is_manual: 0 });
+  assert.equal(confirmOne(db, { kind: 'update_account', account_id: card, credit_limit: 10000 }).status, 'applied');
+  assert.deepEqual(db.prepare('SELECT credit_limit FROM accounts WHERE id = ?').get(card), { credit_limit: 1000000 });
+  const read = (runAdvisorTool(db, 'get_accounts', {}) as { accounts: Array<{ id: string; credit_limit: number; utilization: number }> }).accounts.find((a) => a.id === card);
+  assert.deepEqual([read?.credit_limit, read?.utilization], [10000, 25]);
+});

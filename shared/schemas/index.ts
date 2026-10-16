@@ -30,6 +30,7 @@ export const UpdateAccountSchema = z.object({
   statement_balance: z.number().nonnegative().nullable().optional(),
   statement_due_date: calendarDate.nullable().optional(),
   balance_only: z.boolean().optional(),
+  credit_limit: z.number().positive().nullable().optional(),
 });
 
 export const CreateManualTransactionSchema = z.object({
@@ -272,6 +273,7 @@ export const AdvisorDraftPayloadSchema = z.discriminatedUnion('kind', [
     current_balance: z.number().optional(),
     statement_balance: z.number().nonnegative().nullable().optional(),
     statement_due_date: calendarDate.nullable().optional(),
+    credit_limit: z.number().positive().nullable().optional(),
   }),
   z.object({
     kind: z.literal('set_notification_rule'),

@@ -943,6 +943,7 @@ export type AdvisorDraftPayload =
       current_balance?: number;
       statement_balance?: number | null;
       statement_due_date?: string | null;
+      credit_limit?: number | null;
     }
   | {
       /** Creates a rule, or edits `rule_id`'s params or enabled state. Money params in dollars. */
