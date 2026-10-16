@@ -48,7 +48,7 @@ import { budgetIdForCategory, deleteBudget } from './budgets';
 import { createGoal } from './goals';
 import { dismissRecurringPattern } from './recurring';
 import { updateAccount } from './accounts';
-import { deleteNotificationRule, notificationParamsFromDollars, upsertNotificationRule, type UpsertNotificationRuleInput } from './notifications';
+import { deleteNotificationRule, listNotificationRules, notificationParamsFromDollars, upsertNotificationRule, type UpsertNotificationRuleInput } from './notifications';
 
 interface CategoryRow {
   id: string;
@@ -963,9 +963,12 @@ function confirmSetNotificationRule(db: Database.Database, payload: Extract<Advi
   changed: number;
   result: unknown;
 } {
+  const existing = payload.rule_id ? listNotificationRules(db).find((rule) => rule.id === payload.rule_id) : undefined;
+  if (payload.rule_id && !existing) throw new Error('No notification rule with that id');
+  if (existing && existing.kind !== payload.rule_kind) throw new Error('A rule\'s kind cannot change');
   const outcome = upsertNotificationRule(db, {
     kind: payload.rule_kind,
-    params: notificationParamsFromDollars(payload.rule_kind, payload.params),
+    params: { ...(existing?.params ?? {}), ...notificationParamsFromDollars(payload.rule_kind, payload.params) },
     id: payload.rule_id,
     enabled: payload.enabled,
     created_by: 'advisor',

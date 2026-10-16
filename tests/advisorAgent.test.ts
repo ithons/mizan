@@ -146,3 +146,55 @@ test('a card limit set through the advisor is stored in cents and read back as u
   const read = (runAdvisorTool(db, 'get_accounts', {}) as { accounts: Array<{ id: string; credit_limit: number; utilization: number }> }).accounts.find((a) => a.id === card);
   assert.deepEqual([read?.credit_limit, read?.utilization], [10000, 25]);
 });
+
+test('an advisor edit to a rule changes only the params it names', () => {
+  const db = migratedTestDb();
+  confirmOne(db, { kind: 'set_notification_rule', rule_kind: 'budget_threshold', params: { category_id: 'cat_food', percent: 90 } });
+  const id = (db.prepare("SELECT id FROM notification_rules WHERE created_by = 'advisor'").get() as { id: string }).id;
+  assert.equal(confirmOne(db, { kind: 'set_notification_rule', rule_id: id, rule_kind: 'budget_threshold', params: { percent: 80 } }).status, 'applied');
+  assert.deepEqual(JSON.parse((db.prepare('SELECT params FROM notification_rules WHERE id = ?').get(id) as { params: string }).params), { category_id: 'cat_food', percent: 80 });
+});
+
+test('a card shows the change its payload makes, whatever the model wrote', () => {
+  const db = migratedTestDb();
+  const { proposed } = proposeChanges(db, { changes: [{ label: 'Set Groceries budget to $500', summary: 'Caps groceries at $500.', payload: { kind: 'update_budget', category_id: 'cat_food', amount: 5000, period: 'monthly', rollover: false } }] });
+  assert.deepEqual(proposed[0].changes, [{ field: 'Food & Drink budget', before: 'none', after: '$5,000.00 a month' }]);
+  assert.deepEqual(listOpenDrafts(db)[0].changes, proposed[0].changes);
+});
+
+test('proposing the same change twice leaves one card', () => {
+  const db = migratedTestDb();
+  const payload = { kind: 'create_goal', name: 'Trip', type: 'savings', target_amount: 900 };
+  const first = propose(db, payload).proposed[0];
+  const second = propose(db, payload).proposed[0];
+  assert.equal(first.id, second.id);
+  assert.deepEqual(db.prepare("SELECT COUNT(*) AS n FROM advisor_drafts WHERE status = 'open'").get(), { n: 1 });
+});
+
+test('every kind of change can be described from its payload', () => {
+  const db = migratedTestDb();
+  const account = insertAccount(db, { account_name: 'Wallet', type: 'cash', connection_type: 'manual', is_manual: 1 });
+  const txn = insertTransaction(db, { account_id: account, amount: -1200, merchant_name: 'Cafe' });
+  const payloads: Array<Record<string, unknown>> = [
+    { kind: 'update_budget', category_id: 'cat_food', amount: 300, period: 'monthly', rollover: true },
+    { kind: 'delete_budget', category_id: 'cat_food' },
+    { kind: 'create_goal', name: 'Bike', type: 'savings', target_amount: 400, target_date: '2027-01-01' },
+    { kind: 'update_goal_target', goal_id: 'nope', target_amount: 10 },
+    { kind: 'categorize_transaction', transaction_id: txn, category_id: 'cat_food' },
+    { kind: 'create_merchant_rule', pattern: 'cafe', category_id: 'cat_food', apply_existing: true },
+    { kind: 'retire_merchant_rule', rule_id: 'nope' },
+    { kind: 'confirm_recurring', recurring_id: 'nope' },
+    { kind: 'dismiss_recurring', recurring_id: 'nope' },
+    { kind: 'create_recurring_adjustment', recurring_id: 'nope', original_date: '2026-11-01', action: 'skip' },
+    { kind: 'update_account', account_id: account, current_balance: 85, account_name: 'Cash' },
+    { kind: 'set_manual_cost_basis', holding_id: 'nope', manual_cost_basis: 100 },
+    { kind: 'set_sector_metadata', security_id: 'nope', sector: 'Tech' },
+    { kind: 'set_notification_rule', rule_kind: 'budget_threshold', params: { category_id: 'cat_food', percent: 80 } },
+    { kind: 'delete_notification_rule', rule_id: 'nope' },
+  ];
+  for (const payload of payloads) {
+    const result = propose(db, payload);
+    assert.deepEqual(result.refused, [], String(payload.kind));
+    assert.ok(result.proposed[0].changes.length > 0, String(payload.kind));
+  }
+});
