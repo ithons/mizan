@@ -139,3 +139,13 @@ test('the merchant key ignores store numbers and punctuation', () => {
   assert.equal(refundMerchantKey({ merchant_name: null, original_name: 'APPLE STORE  #R149' }), 'apple store');
   assert.equal(refundMerchantKey({ merchant_name: 'REI #80 BOSTON', original_name: '' }), 'rei boston');
 });
+
+test('a credit is never linked to a negative row filed as income, so linking settles', () => {
+  const db = migratedTestDb();
+  const checking = insertAccount(db, { type: 'checking' });
+  insertTransaction(db, { account_id: checking, date: '2026-09-02', amount: -5000, merchant_name: 'Mass Inst Payroll', category_id: 'cat_income_paycheck' });
+  const credit = insertTransaction(db, { account_id: checking, date: '2026-09-09', amount: 5000, merchant_name: 'Mass Inst Payroll' });
+  refreshRefundLinks(db);
+  assert.equal(link(db, credit).refund_of_id, null);
+  assert.deepEqual(refreshRefundLinks(db), { linked: 0, newlyLinked: 0 });
+});

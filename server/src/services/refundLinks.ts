@@ -71,7 +71,9 @@ function purchaseRows(db: Database.Database): LedgerRow[] {
     ${OUT_OF_SCOPE_CTE}
     SELECT ${ROW_COLUMNS}
     FROM transactions t
+    LEFT JOIN categories c ON c.id = t.category_id
     WHERE t.pending = 0
+      AND COALESCE(c.is_income, 0) = 0
       AND t.amount < 0
       AND ${excludedFromTotalsSql('t')}
       AND COALESCE(t.category_id, '') NOT IN (SELECT id FROM out_of_scope)
