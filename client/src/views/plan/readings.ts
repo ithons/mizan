@@ -59,7 +59,12 @@ export function claimLines(
       delta: sheet.liquid,
       note: 'Checking, savings and cash. Not investments, not crypto.',
     },
-    ...optional({ key: 'inflows', label: `Income expected in the next ${sheet.forecast_days} days`, delta: sheet.expected_inflows }),
+    ...optional({
+      key: 'inflows',
+      label: `Income expected in the next ${sheet.forecast_days} days`,
+      delta: sheet.expected_inflows,
+      note: 'Recurring income that lands in these accounts or on a card. Income paid into investments is not counted.',
+    }),
     {
       key: 'cards',
       label: cards.inCredit ? 'Cards in credit' : cards.label,

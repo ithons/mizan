@@ -469,3 +469,9 @@ test('scheduled transfers that net into the pool are named as coming in', () => 
   const transfers = lines.find((line) => line.key === 'transfers');
   assert.deepEqual([transfers?.label, transfers?.delta], ['Scheduled transfers in', 400]);
 });
+
+test('the expected income line says it counts only income landing in the pool or on a card', () => {
+  const line = claimLines({ ...SHEET, expected_inflows: 1143.95 }, 1, 1).find((l) => l.key === 'inflows');
+  assert.ok(line);
+  assert.match(line.note ?? '', /lands in these accounts or on a card\. Income paid into investments is not counted\./);
+});
