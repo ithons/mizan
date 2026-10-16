@@ -1255,6 +1255,8 @@ test('OpenAI: a tool round replays the output items verbatim and answers', async
       // and make the next request fail.
       assert.ok(second.some((item) => item.type === 'reasoning'), 'the reasoning item must be replayed');
       assert.ok(second.some((item) => item.type === 'function_call'));
+      // The real API refuses this SDK-added field on input, which broke every tool round.
+      assert.ok(second.every((item) => !('parsed_arguments' in item)), 'no replayed item may carry parsed_arguments');
       // A tool result is a TOP-LEVEL item here, not a content block inside a user message.
       const result = second.find((item) => item.type === 'function_call_output');
       assert.ok(result, 'the tool result must be a top-level input item');

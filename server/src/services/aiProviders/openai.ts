@@ -208,6 +208,15 @@ function toolCallsOf(response: OpenAI.Responses.Response): ParsedToolCall[] {
   return calls;
 }
 
+/** The SDK's streaming helper adds `parsed_arguments` to each call; the API refuses it as input. */
+function replayable(item: unknown): ResponseInputItem {
+  if (item && typeof item === 'object' && 'parsed_arguments' in item) {
+    const { parsed_arguments: _parsed, ...rest } = item as Record<string, unknown>;
+    return rest as unknown as ResponseInputItem;
+  }
+  return item as ResponseInputItem;
+}
+
 async function streamChat(request: ChatRequest, emit: ChatEmit): Promise<ChatResult> {
   const openai = client({ timeoutMs: request.timeoutMs });
   const input: ResponseInput = [
@@ -300,7 +309,7 @@ async function streamChat(request: ChatRequest, emit: ChatEmit): Promise<ChatRes
     // states outright that filtering `response.output` down to messages "can drop required
     // reasoning or tool-call items and cause the next request to fail". `encrypted_content`
     // is populated by default, so this works with store:false.
-    for (const item of response.output) input.push(item as ResponseInputItem);
+    for (const item of response.output) input.push(replayable(item));
 
     for (const call of calls) {
       const output = call.parseError
