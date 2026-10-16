@@ -411,3 +411,32 @@ test('HEALTHY: income_late respects pay the owner snoozed or skipped', () => {
     assert.deepEqual(fires(db), [], action);
   }
 });
+
+function shortfallFixture(checkingCents: number, paymentCents: number, dueIn: number, daysAhead = 14) {
+  const { db } = withOnlyRule({ kind: 'account_shortfall', params: { days_ahead: daysAhead } });
+  const checking = insertAccount(db, { account_name: 'Checking', type: 'checking', current_balance: checkingCents });
+  const card = insertAccount(db, { account_name: 'Card', type: 'credit', is_liability: 1, current_balance: paymentCents });
+  db.prepare(`INSERT INTO recurring_patterns (id, merchant_name, average_amount, frequency, last_seen, next_expected,
+      is_active, is_confirmed, transaction_count, created_at, updated_at, kind, account_id, counterparty_account_id)
+    VALUES ('rp_card', 'Checking to Card', ?, 'monthly', ?, ?, 1, 1, 3, ?, ?, 'transfer', ?, ?)`)
+    .run(-paymentCents, localDaysFromToday(-30), localDaysFromToday(dueIn), TEST_NOW, TEST_NOW, checking, card);
+  return { db, checking };
+}
+
+test('account_shortfall warns once when a scheduled card payment would overdraw checking', () => {
+  const { db, checking } = shortfallFixture(100000, 130012, 5);
+  const created = evaluateNotifications(db).created;
+  assert.deepEqual(created.map((n) => n.dedupe_key), [`account_shortfall:${checking}:rp_card:${localDaysFromToday(5)}`]);
+  assert.match(created[0].title, /^Checking would be \$300\.12 below zero on /);
+  assertIdempotent(db);
+});
+
+test('HEALTHY: account_shortfall is silent when checking covers the payment, or the shortfall is past the window', () => {
+  assert.deepEqual(fires(shortfallFixture(500000, 130012, 5).db), []);
+  assert.deepEqual(fires(shortfallFixture(100000, 130012, 20, 14).db), []);
+});
+
+test('an overdue payment keys its shortfall on the date it was due, so it does not re-alert each day', () => {
+  const { db, checking } = shortfallFixture(100000, 130000, -3);
+  assert.deepEqual(fires(db), [`account_shortfall:${checking}:rp_card:${localDaysFromToday(-3)}`]);
+});

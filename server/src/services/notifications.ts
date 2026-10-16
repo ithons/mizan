@@ -25,6 +25,7 @@ import { getSpendingReport } from './reporting';
 import { computeSafeToSpend, type SafeToSpendBreakdown } from './safeToSpend';
 import { excludedFromTotalsSql, expenseSideSql, reportDateSql, spendAmountSql } from './transactionFilters';
 import { dollarizeFields, toCents } from './money';
+import { projectedShortfalls } from './accountCoverage';
 
 /** Money fields inside each kind's params, cents in the database and dollars over the API. */
 export const NOTIFICATION_PARAM_MONEY_FIELDS: Readonly<Record<NotificationRuleKind, readonly string[]>> = {
@@ -38,6 +39,7 @@ export const NOTIFICATION_PARAM_MONEY_FIELDS: Readonly<Record<NotificationRuleKi
   unusual_spending: ['min_amount'],
   recurring_amount_changed: [],
   income_late: [],
+  account_shortfall: [],
 };
 
 /** Money fields inside each kind's notification payload. */
@@ -52,6 +54,7 @@ export const NOTIFICATION_PAYLOAD_MONEY_FIELDS: Readonly<Record<NotificationRule
   unusual_spending: ['month_to_date', 'baseline'],
   recurring_amount_changed: ['amount', 'changed_from'],
   income_late: ['amount'],
+  account_shortfall: ['balance', 'balance_now'],
 };
 
 export type UpsertNotificationRuleInput = NotificationRuleSpec & {
@@ -640,6 +643,22 @@ const incomeLate: Evaluator<'income_late'> = (ctx, params) => {
   });
 };
 
+/** A cash account the schedule takes below zero, keyed on the item that does it so a late payment does not re-alert daily. */
+const accountShortfall: Evaluator<'account_shortfall'> = (ctx, params) =>
+  projectedShortfalls(ctx.db, params.days_ahead, ctx.now).map((shortfall) => {
+    const outflows = shortfall.that_day.filter((movement) => movement.cents < 0);
+    const trigger = outflows[0] ?? shortfall.that_day[0];
+    const items = shortfall.that_day.map((movement) => `${movement.label} ${money(movement.cents)}${movement.overdue ? ' (overdue)' : ''}`).join(', ');
+    return {
+      dedupe_key: `account_shortfall:${shortfall.account_id}:${trigger.patternId}:${trigger.expectedDate}`,
+      title: `${shortfall.account_name} would be ${money(-shortfall.cents)} below zero on ${shortDate(shortfall.date)}`,
+      body: `Scheduled that day: ${items}. It holds ${money(shortfall.balance_now)} now. Spending from it that is not scheduled is not counted.`,
+      severity: 'warning' as const,
+      payload: { account_id: shortfall.account_id, date: shortfall.date, balance: shortfall.cents, balance_now: shortfall.balance_now },
+      route: `/accounts/${encodeURIComponent(shortfall.account_id)}`,
+    };
+  });
+
 const EVALUATORS: { [K in NotificationRuleKind]: Evaluator<K> } = {
   budget_threshold: budgetThreshold,
   large_transaction: largeTransaction,
@@ -651,6 +670,7 @@ const EVALUATORS: { [K in NotificationRuleKind]: Evaluator<K> } = {
   unusual_spending: unusualSpending,
   recurring_amount_changed: recurringAmountChanged,
   income_late: incomeLate,
+  account_shortfall: accountShortfall,
 };
 
 function candidatesFor(ctx: EvaluationContext, spec: NotificationRuleSpec): Candidate[] {

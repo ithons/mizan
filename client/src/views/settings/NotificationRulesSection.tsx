@@ -25,6 +25,7 @@ const KIND_LABEL: Record<NotificationRuleKind, string> = {
   unusual_spending: 'Unusual spending',
   recurring_amount_changed: 'Recurring amount changed',
   income_late: 'Pay is late',
+  account_shortfall: 'Account would go below zero',
 };
 
 const DEFAULT_SPECS: { [K in NotificationRuleKind]: Extract<NotificationRuleSpec, { kind: K }> } = {
@@ -38,6 +39,7 @@ const DEFAULT_SPECS: { [K in NotificationRuleKind]: Extract<NotificationRuleSpec
   unusual_spending: { kind: 'unusual_spending', params: { category_id: null, ratio: 1.5, min_amount: 100 } },
   recurring_amount_changed: { kind: 'recurring_amount_changed', params: {} },
   income_late: { kind: 'income_late', params: { min_days_late: 2 } },
+  account_shortfall: { kind: 'account_shortfall', params: { days_ahead: 14 } },
 };
 
 const USD = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' });
@@ -80,6 +82,8 @@ function describeRule(spec: NotificationRuleSpec, lookups: Lookups): string {
       return 'When a recurring bill or deposit moves to a new amount.';
     case 'income_late':
       return `When expected pay is later than it usually runs, and at least ${spec.params.min_days_late} day${spec.params.min_days_late === 1 ? '' : 's'} late.`;
+    case 'account_shortfall':
+      return `When scheduled bills, transfers and card payments would take a checking, savings or cash account below zero within ${spec.params.days_ahead} day${spec.params.days_ahead === 1 ? '' : 's'}.`;
   }
 }
 
@@ -177,6 +181,8 @@ function ParamsEditor({ spec, onChange, lookups }: {
       return <p className="text-note text-muted-2">Nothing to set.</p>;
     case 'income_late':
       return <NumberField label="At least this many days late" value={spec.params.min_days_late} onChange={(v) => onChange({ ...spec, params: { min_days_late: v } })} />;
+    case 'account_shortfall':
+      return <NumberField label="Days ahead to look" value={spec.params.days_ahead} onChange={(v) => onChange({ ...spec, params: { days_ahead: v } })} />;
   }
 }
 

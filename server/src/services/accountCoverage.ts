@@ -20,6 +20,7 @@ interface Movement {
   cents: number;
   label: string;
   patternId: string;
+  expectedDate: string;
   overdue: boolean;
 }
 
@@ -47,6 +48,7 @@ function movementsByAccount(db: Database.Database, occurrences: readonly Recurri
       cents,
       label: occurrence.merchant_name,
       patternId: occurrence.pattern_id,
+      expectedDate: occurrence.expected_date,
       overdue: occurrence.status === 'overdue',
     });
     byAccount.set(accountId, list);
@@ -88,12 +90,34 @@ function walk(start: number, movements: Movement[]) {
     endOfDay.set(movement.date, balance);
   }
   let lowest = { date: null as string | null, cents: start };
-  let firstBelowZero: { date: string; cents: number } | null = null;
+  let firstBelowZero: { date: string; cents: number; that_day: Movement[] } | null = null;
   for (const [date, cents] of endOfDay) {
     if (cents < lowest.cents) lowest = { date, cents };
-    if (cents < 0 && !firstBelowZero) firstBelowZero = { date, cents };
+    if (cents < 0 && !firstBelowZero) firstBelowZero = { date, cents, that_day: sorted.filter((movement) => movement.date === date) };
   }
   return { sorted, endOfDay, lowest, firstBelowZero, end: balance };
+}
+
+function walkCashAccounts(db: Database.Database, days: number, today: Date) {
+  const todayStr = format(today, 'yyyy-MM-dd');
+  const accounts = db.prepare(`
+    SELECT id, account_name, type, is_liability, current_balance FROM accounts
+    WHERE is_hidden = 0 AND type <> 'closed'
+  `).all() as AccountRow[];
+  const { occurrences } = buildRecurringForecast(db, days);
+  const { byAccount, unplaced, overdueIncome } = movementsByAccount(db, occurrences, todayStr);
+  const cash = accounts.filter((account) => !account.is_liability && ASSET_TYPES.has(account.type));
+  const walks = new Map(cash.map((account) => [account.id, walk(account.current_balance, byAccount.get(account.id) ?? [])]));
+  return { todayStr, accounts, cash, occurrences, walks, unplaced, overdueIncome };
+}
+
+/** Cash accounts the schedule takes below zero within `days`, with what moves on that day. */
+export function projectedShortfalls(db: Database.Database, days: number, today = new Date()) {
+  const { cash, walks } = walkCashAccounts(db, days, today);
+  return cash.flatMap((account) => {
+    const below = walks.get(account.id)?.firstBelowZero;
+    return below ? [{ account_id: account.id, account_name: account.account_name, balance_now: account.current_balance, ...below }] : [];
+  });
 }
 
 /**
@@ -102,19 +126,10 @@ function walk(start: number, movements: Movement[]) {
  * is reported unjudged rather than covered.
  */
 export function accountCoverage(db: Database.Database, days = 45, today = new Date()) {
-  const todayStr = format(today, 'yyyy-MM-dd');
-  const accounts = db.prepare(`
-    SELECT id, account_name, type, is_liability, current_balance FROM accounts
-    WHERE is_hidden = 0 AND type <> 'closed'
-  `).all() as AccountRow[];
-  const { occurrences } = buildRecurringForecast(db, days);
-  const { byAccount, unplaced, overdueIncome } = movementsByAccount(db, occurrences, todayStr);
+  const { todayStr, accounts, cash: cashAccounts, occurrences, walks, unplaced, overdueIncome } = walkCashAccounts(db, days, today);
   const nameOf = new Map(accounts.map((account) => [account.id, account.account_name]));
-
-  const walks = new Map<string, ReturnType<typeof walk>>();
-  const cash = accounts.filter((account) => !account.is_liability && ASSET_TYPES.has(account.type)).map((account) => {
-    const result = walk(account.current_balance, byAccount.get(account.id) ?? []);
-    walks.set(account.id, result);
+  const cash = cashAccounts.map((account) => {
+    const result = walks.get(account.id)!;
     return {
       account: account.account_name,
       balance_now: toDollars(account.current_balance),

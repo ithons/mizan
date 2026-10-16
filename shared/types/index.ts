@@ -1893,6 +1893,7 @@ export const NOTIFICATION_RULE_KINDS = [
   'unusual_spending',
   'recurring_amount_changed',
   'income_late',
+  'account_shortfall',
 ] as const;
 
 export type NotificationRuleKind = (typeof NOTIFICATION_RULE_KINDS)[number];
@@ -1926,6 +1927,8 @@ export interface NotificationRuleParamsByKind {
   recurring_amount_changed: Record<string, never>;
   /** Expected income later than the larger of `min_days_late` and its own usual timing spread. */
   income_late: { min_days_late: number };
+  /** A cash account the schedule takes below zero within `days_ahead`. */
+  account_shortfall: { days_ahead: number };
 }
 
 export type NotificationRuleSpec = {
