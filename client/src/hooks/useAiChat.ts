@@ -1,5 +1,6 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
 import { aiApi } from '../lib/api';
+import { createTurnGate } from '../lib/turnGate';
 import type { AdvisorAnalysis, ChatMessage } from '@shared/types';
 
 export interface DisplayMessage extends ChatMessage {
@@ -57,6 +58,7 @@ export function useAiChat() {
   const [isStreaming, setIsStreaming] = useState(false);
   const [conversationId, setConversationId] = useState<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
+  const turns = useRef(createTurnGate()).current;
 
   // Resume the last conversation on mount, if it still exists.
   useEffect(() => {
@@ -77,10 +79,12 @@ export function useAiChat() {
   }, []);
 
   const loadConversation = useCallback(async (id: string) => {
+    const isCurrent = turns.begin();
     abortRef.current?.abort();
     abortRef.current = null;
     setIsStreaming(false);
     const conv = await aiApi.getConversation(id);
+    if (!isCurrent()) return;
     setConversationId(conv.id);
     localStorage.setItem(ACTIVE_KEY, conv.id);
     setMessages(conv.messages.map((m) => ({ ...m, id: crypto.randomUUID() })));
@@ -88,6 +92,7 @@ export function useAiChat() {
 
   const sendMessage = useCallback(async (userText: string) => {
     if (isStreaming || !userText.trim()) return;
+    const isCurrent = turns.begin();
 
     const userMsg: DisplayMessage = {
       id: crypto.randomUUID(),
@@ -118,8 +123,10 @@ export function useAiChat() {
       try {
         const created = await aiApi.createConversation();
         convId = created.id;
-        setConversationId(created.id);
-        localStorage.setItem(ACTIVE_KEY, created.id);
+        if (isCurrent()) {
+          setConversationId(created.id);
+          localStorage.setItem(ACTIVE_KEY, created.id);
+        }
       } catch (err) {
         console.warn('Failed to create conversation; chat will not be saved', err);
       }
@@ -159,7 +166,7 @@ export function useAiChat() {
     let settled = false;
     const finish = () => {
       settled = true;
-      setIsStreaming(false);
+      if (isCurrent()) setIsStreaming(false);
       if (abortRef.current === controller) abortRef.current = null;
     };
     // Nothing is persisted here: `Error: ...` is this client's status line, not something the model
@@ -247,6 +254,7 @@ export function useAiChat() {
   }, [isStreaming, messages, conversationId]);
 
   const stopStreaming = useCallback(() => {
+    turns.supersede();
     abortRef.current?.abort();
     abortRef.current = null;
     setMessages((prev) =>
