@@ -1866,3 +1866,89 @@ export interface SimplefinRelinkDismissResponse {
   proposal: SimplefinRelinkProposalView;
   acknowledged_provider_ids: string[];
 }
+
+export const NOTIFICATION_RULE_KINDS = [
+  'budget_threshold',
+  'large_transaction',
+  'bill_due',
+  'low_balance',
+  'safe_to_spend_negative',
+  'sync_failed',
+  'goal_milestone',
+  'unusual_spending',
+  'recurring_amount_changed',
+] as const;
+
+export type NotificationRuleKind = (typeof NOTIFICATION_RULE_KINDS)[number];
+export type NotificationSeverity = 'info' | 'warning' | 'critical';
+export type NotificationRuleCreator = 'owner' | 'advisor';
+
+/**
+ * Params per rule kind. Money fields (`min_amount`, `threshold`) are integer cents inside the
+ * server and dollars over the API, the same split every other money field has.
+ */
+export interface NotificationRuleParamsByKind {
+  /** `category_id` null means every budget. `percent` is spent over budget plus rollover. */
+  budget_threshold: { category_id: string | null; percent: number };
+  /** Outflows at least `min_amount`, posted, dated within `lookback_days`. */
+  large_transaction: { min_amount: number; account_id: string | null; lookback_days: number };
+  /** Scheduled outflows (recurring kind 'flow') due within `days_ahead` days. */
+  bill_due: { days_ahead: number };
+  /** `account_id` null means the liquid pool safe-to-spend counts. */
+  low_balance: { account_id: string | null; threshold: number };
+  safe_to_spend_negative: Record<string, never>;
+  /** Partial runs count as failed when `include_partial`. */
+  sync_failed: { include_partial: boolean };
+  /** `goal_id` null means every active goal. Percents of target, 1 to 100. */
+  goal_milestone: { goal_id: string | null; milestones: number[] };
+  /**
+   * Month-to-date spend in a category at least `ratio` times its trailing three-month average to
+   * the same day of month, and at least `min_amount` above it. `category_id` null means every
+   * top-level category.
+   */
+  unusual_spending: { category_id: string | null; ratio: number; min_amount: number };
+  recurring_amount_changed: Record<string, never>;
+}
+
+export type NotificationRuleSpec = {
+  [K in NotificationRuleKind]: { kind: K; params: NotificationRuleParamsByKind[K] };
+}[NotificationRuleKind];
+
+export type NotificationRule = NotificationRuleSpec & {
+  id: string;
+  enabled: boolean;
+  created_by: NotificationRuleCreator;
+  created_at: string;
+  updated_at: string;
+};
+
+/** Named `AppNotification` so it does not shadow the browser's `Notification`. */
+export interface AppNotification {
+  id: string;
+  rule_id: string | null;
+  kind: NotificationRuleKind;
+  title: string;
+  body: string;
+  severity: NotificationSeverity;
+  dedupe_key: string;
+  created_at: string;
+  read_at: string | null;
+  dismissed_at: string | null;
+  /** Money fields are cents inside the server and dollars over the API. */
+  payload: Record<string, unknown>;
+  /** An in-app path to where the condition can be acted on. */
+  route: string | null;
+}
+
+export interface NotificationEvaluationError {
+  rule_id: string;
+  kind: NotificationRuleKind;
+  message: string;
+}
+
+export interface NotificationEvaluationSummary {
+  rules_evaluated: number;
+  created: AppNotification[];
+  /** One entry per rule that threw. The other rules still ran. */
+  errors: NotificationEvaluationError[];
+}

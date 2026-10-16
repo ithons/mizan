@@ -299,3 +299,65 @@ export const AiWorkerDraftSchema = z
     citations: z.array(z.unknown()).optional().default([]),
   })
   .refine((d) => d.kind === d.payload.kind, { message: 'draft.kind must match payload.kind' });
+
+// Unit-agnostic: the route takes dollars and converts after parsing, the service takes cents.
+const nullableId = z.string().min(1).nullable().default(null);
+
+export const NotificationRuleParamsSchemas = {
+  budget_threshold: z.object({ category_id: nullableId, percent: z.number().gt(0).max(1000) }),
+  large_transaction: z.object({
+    min_amount: z.number().positive(),
+    account_id: nullableId,
+    lookback_days: z.number().int().min(1).max(90).default(7),
+  }),
+  bill_due: z.object({ days_ahead: z.number().int().min(0).max(60) }),
+  low_balance: z.object({ account_id: nullableId, threshold: z.number().finite() }),
+  safe_to_spend_negative: z.object({}),
+  sync_failed: z.object({ include_partial: z.boolean().default(true) }),
+  goal_milestone: z.object({
+    goal_id: nullableId,
+    milestones: z.array(z.number().int().min(1).max(100)).min(1).max(10)
+      .refine((values) => new Set(values).size === values.length, 'Milestones must be distinct'),
+  }),
+  unusual_spending: z.object({
+    category_id: nullableId,
+    ratio: z.number().gt(1).max(20),
+    min_amount: z.number().nonnegative().default(0),
+  }),
+  recurring_amount_changed: z.object({}),
+} as const;
+
+const notificationRuleVariant = <K extends keyof typeof NotificationRuleParamsSchemas>(kind: K) =>
+  z.object({ kind: z.literal(kind), params: NotificationRuleParamsSchemas[kind] });
+
+export const NotificationRuleSpecSchema = z.discriminatedUnion('kind', [
+  notificationRuleVariant('budget_threshold'),
+  notificationRuleVariant('large_transaction'),
+  notificationRuleVariant('bill_due'),
+  notificationRuleVariant('low_balance'),
+  notificationRuleVariant('safe_to_spend_negative'),
+  notificationRuleVariant('sync_failed'),
+  notificationRuleVariant('goal_milestone'),
+  notificationRuleVariant('unusual_spending'),
+  notificationRuleVariant('recurring_amount_changed'),
+]);
+
+export const CreateNotificationRuleSchema = z.object({
+  kind: z.string().min(1),
+  params: z.record(z.unknown()).default({}),
+  enabled: z.boolean().optional(),
+});
+
+export const UpdateNotificationRuleSchema = z.object({
+  enabled: z.boolean().optional(),
+  params: z.record(z.unknown()).optional(),
+}).refine((body) => body.enabled !== undefined || body.params !== undefined, 'Nothing to update');
+
+export const MarkNotificationsReadSchema = z.object({
+  ids: z.union([z.literal('all'), z.array(z.string().min(1)).min(1).max(500)]),
+});
+
+export const ListNotificationsQuerySchema = z.object({
+  unread_only: z.enum(['true', 'false']).optional().transform((value) => value === 'true'),
+  limit: z.coerce.number().int().min(1).max(200).optional().default(50),
+});
