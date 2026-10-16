@@ -541,3 +541,22 @@ test('advisor drafts and confirms investment metadata changes', (t) => {
   assert.equal(security.sector, 'Cash');
   assert.equal(security.sector_source, 'manual');
 });
+
+test('the quick bills answer keeps transfers between your own accounts out of the bills it lists', (t) => {
+  const db = setupAdvisorDb();
+  t.after(() => db.close());
+  insertAccount(db, { id: 'xfer_from', account_name: 'Chase Checking', type: 'checking' });
+  insertAccount(db, { id: 'xfer_to', account_name: 'Fidelity Individual', type: 'brokerage' });
+  const soon = format(new Date(Date.now() + 2 * 86_400_000), 'yyyy-MM-dd');
+  db.prepare(`
+    INSERT INTO recurring_patterns
+      (id, merchant_name, average_amount, frequency, last_seen, next_expected, kind, account_id,
+       counterparty_account_id, is_active, is_confirmed, transaction_count, created_at, updated_at)
+    VALUES ('p_xfer', 'Chase Checking to Fidelity Individual', 10000, 'weekly', '2026-01-01', ?, 'transfer',
+            'xfer_from', 'xfer_to', 1, 1, 6, '2026-01-01', '2026-01-01')
+  `).run(soon);
+  const analysis = analyzeAdvisorQuestion(db, 'What bills are coming up?');
+  assert.doesNotMatch(analysis.answer, /Chase Checking to Fidelity Individual -/);
+  assert.match(analysis.answer, /Separately, \$[\d,.]+k? is scheduled to move between your own accounts; it is not in those figures\./);
+  assert.ok(!analysis.citations.some((citation) => citation.record_id === 'p_xfer'));
+});

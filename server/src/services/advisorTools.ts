@@ -330,7 +330,7 @@ function analyzeBudget(
 
 function analyzeRecurring(db: Database.Database): Pick<AdvisorAnalysis, 'answer' | 'citations'> {
   const forecast = buildRecurringForecast(db, 60);
-  const nextItems = forecast.occurrences.slice(0, 5);
+  const nextItems = forecast.occurrences.filter((item) => item.kind !== 'transfer').slice(0, 5);
   const adjustedItems = forecast.occurrences
     .filter((item) => item.adjustment_action)
     .slice(0, 3);
@@ -339,6 +339,9 @@ function analyzeRecurring(db: Database.Database): Pick<AdvisorAnalysis, 'answer'
   const lines = [
     `Over the next 60 days, Mizān projects ${fmt(toDollars(forecast.income))} income, ${fmt(toDollars(forecast.bills))} bills, and ${fmt(toDollars(forecast.net))} net scheduled cash flow.`,
   ];
+  if (forecast.transfers > 0) {
+    lines.push(`Separately, ${fmt(toDollars(forecast.transfers))} is scheduled to move between your own accounts; it is not in those figures.`);
+  }
   if (forecast.review_count > 0) {
     lines.push(`${forecast.review_count} recurring item${forecast.review_count === 1 ? '' : 's'} need review, including ${forecast.overdue_count} overdue.`);
   }
