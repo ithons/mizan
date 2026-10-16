@@ -95,3 +95,21 @@ test('an empty ledger claims nothing beyond the balances', () => {
     );
   });
 });
+
+test('income that its pattern pays into a brokerage is not counted as coming into the cash pool', () => {
+  withDb((db, ids) => {
+    seedSchedules(db, ids);
+    const before = computeSafeToSpend(db, { forecastDays: 30 }).expectedInflows;
+    db.prepare(`
+      INSERT INTO recurring_patterns
+        (id, merchant_name, category_id, average_amount, frequency, last_seen, next_expected,
+         is_active, is_confirmed, transaction_count, created_at, updated_at)
+      VALUES ('p_div', 'dividend', 'cat_inv_dividend', 5000, 'monthly', ?, ?, 1, 0, 5, '2026-01-01', '2026-01-01')
+    `).run(day(5), format(new Date(Date.now() + 10 * 86_400_000), 'yyyy-MM-dd'));
+    for (const monthsAgo of [5, 4, 3, 2, 1]) {
+      const id = insertTransaction(db, { account_id: ids.fidelity, date: day(30 * monthsAgo), amount: 5000, merchant_name: 'Dividend', original_name: 'DIVIDEND RECEIVED', category_id: 'cat_inv_dividend' });
+      db.prepare("UPDATE transactions SET recurring_id = 'p_div' WHERE id = ?").run(id);
+    }
+    assert.equal(computeSafeToSpend(db, { forecastDays: 30 }).expectedInflows, before);
+  });
+});
