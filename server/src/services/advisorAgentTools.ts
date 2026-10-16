@@ -5,6 +5,7 @@ import { readSafeToSpend } from './safeToSpend';
 import { getAnomalyInsights } from './anomalyInsights';
 import { createMemory, deleteMemory, listMemories } from './aiMemory';
 import { proposeChanges, MAX_PROPOSALS_PER_CALL } from './advisorProposals';
+import { cashRunway, compoundGrowth, debtPayoff, goalTimeline, goalTimelineFor, projectFree, type ProjectionAdjustment } from './simulations';
 
 type ToolInput = Record<string, unknown>;
 
@@ -101,6 +102,19 @@ export const AGENT_TOOLS: Anthropic.Tool[] = [
     input_schema: { type: 'object', properties: { memory_id: { type: 'string' } }, required: ['memory_id'] },
   },
   {
+    name: 'run_simulation',
+    description:
+      'Estimates and what-ifs computed from the owner\'s real data. type "project": what is free day by day over `days` (default 30, max 120), its lowest point and the first day it goes short, built from the same inputs as free to spend; pass `adjustments` for a what-if: {kind:"one_off", date, amount (dollars, negative to spend)}, {kind:"monthly", amount, start_date?}, {kind:"cancel_recurring", pattern_id}, {kind:"scale_unbudgeted", percent (e.g. -20)}. Use it for "can I afford X", "what if I cut Y", "when do I run short". type "debt_payoff": {account_id or balance, apr, monthly_payment}. type "goal_timeline": {goal_id or target and current, monthly_contribution, annual_return?}. type "runway": {months?} months the liquid accounts cover at recent spending. type "growth": {principal, monthly_contribution, annual_return, years}. Every result states its assumptions; repeat them when you quote it.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        type: { type: 'string', enum: ['project', 'debt_payoff', 'goal_timeline', 'runway', 'growth'] },
+        params: { type: 'object' },
+      },
+      required: ['type'],
+    },
+  },
+  {
     name: 'get_open_proposals',
     description: 'Changes already proposed and still waiting for the owner, so you do not propose them twice.',
     input_schema: { type: 'object', properties: {} },
@@ -181,6 +195,43 @@ function getOpenProposalsTool(db: Database.Database): unknown {
   };
 }
 
+function num(value: unknown, fallback: number): number {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function runSimulationTool(db: Database.Database, input: ToolInput): unknown {
+  const params = (input.params && typeof input.params === 'object' ? input.params : {}) as Record<string, unknown>;
+  switch (input.type) {
+    case 'project': {
+      const days = Math.min(Math.max(Math.round(num(params.days, 30)), 1), 120);
+      const adjustments = Array.isArray(params.adjustments) ? (params.adjustments as ProjectionAdjustment[]) : [];
+      return projectFree(db, days, adjustments);
+    }
+    case 'debt_payoff': {
+      let balance = num(params.balance, NaN);
+      if (!Number.isFinite(balance) && typeof params.account_id === 'string') {
+        const row = db.prepare('SELECT current_balance FROM accounts WHERE id = ? AND is_liability = 1').get(params.account_id) as { current_balance: number } | undefined;
+        if (!row) return { error: 'No card or loan account with that id' };
+        balance = toDollars(row.current_balance);
+      }
+      if (!Number.isFinite(balance) || balance <= 0) return { error: 'Give a positive balance or the id of an account that owes one' };
+      return { balance, ...debtPayoff(balance, num(params.apr, 0), num(params.monthly_payment, 0)) };
+    }
+    case 'goal_timeline':
+      if (typeof params.goal_id === 'string') {
+        return goalTimelineFor(db, params.goal_id, num(params.monthly_contribution, 0), num(params.annual_return, 0));
+      }
+      return goalTimeline(num(params.target, 0), num(params.current, 0), num(params.monthly_contribution, 0), num(params.annual_return, 0));
+    case 'runway':
+      return cashRunway(db, Math.min(Math.max(Math.round(num(params.months, 3)), 1), 12));
+    case 'growth':
+      return compoundGrowth(num(params.principal, 0), num(params.monthly_contribution, 0), num(params.annual_return, 0), Math.min(num(params.years, 10), 60));
+    default:
+      return { error: 'type must be one of project, debt_payoff, goal_timeline, runway, growth' };
+  }
+}
+
 /** Undefined when the name is not one of these tools, so the caller can fall through. */
 export function runAgentTool(db: Database.Database, name: string, input: ToolInput): unknown {
   switch (name) {
@@ -197,6 +248,7 @@ export function runAgentTool(db: Database.Database, name: string, input: ToolInp
     case 'remember': return rememberTool(db, input);
     case 'forget': return forgetTool(db, input);
     case 'get_open_proposals': return getOpenProposalsTool(db);
+    case 'run_simulation': return runSimulationTool(db, input);
     default: return undefined;
   }
 }

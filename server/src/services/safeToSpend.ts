@@ -74,6 +74,16 @@ export interface SafeToSpendBreakdown {
   /** Signed. Negative means the claims exceed the pool. */
   free: number;
   forecastDays: number;
+  /** Every dated scheduled item behind inflows, bills, transfers and card relief, as its effect on free, in cents. */
+  scheduled: ScheduledEffect[];
+}
+
+export interface ScheduledEffect {
+  date: string;
+  cents: number;
+  kind: 'income' | 'bill' | 'transfer' | 'card_relief';
+  label: string;
+  patternId: string;
 }
 
 export interface SafeToSpendInputs {
@@ -117,10 +127,11 @@ export function computeSafeToSpend(
 
   const forecast = buildRecurringForecast(db, forecastDays);
   const upcomingBills = Math.abs(forecast.bills);
-  const expectedInflows = inflowsIntoPool(db, forecast.occurrences, pool, liabilities);
+  const incomeEffects = inflowsIntoPool(db, forecast.occurrences, pool, liabilities);
+  const expectedInflows = incomeEffects.reduce((sum, item) => sum + item.cents, 0);
   const owed = new Map(accounts.filter((account) => account.is_liability).map((account) => [account.id, account.current_balance]));
   const cards = new Set((db.prepare('SELECT id FROM accounts WHERE is_liability = 1').all() as Array<{ id: string }>).map((row) => row.id));
-  const { transfers: recurringTransfers, cardRelief } = transfersAcrossPool(forecast.occurrences, pool, cards, owed);
+  const { transfers: recurringTransfers, cardRelief, effects: transferEffects } = transfersAcrossPool(forecast.occurrences, pool, cards, owed);
   const estimatedUnbudgeted = unbudgetedPace(db, inputs.budgets ?? [], forecastDays);
 
   // Clamped to what was actually budgeted. Now that refunds net a category's spend down,
@@ -188,6 +199,8 @@ export function computeSafeToSpend(
     free: liquid + expectedInflows + cardRelief - cardBalances - upcomingBills - recurringTransfers
       - allocatedBudgets - estimatedUnbudgeted - allocatedGoals,
     forecastDays,
+    scheduled: [...incomeEffects, ...billEffects(forecast.occurrences), ...transferEffects]
+      .sort((a, b) => a.date.localeCompare(b.date) || a.label.localeCompare(b.label)),
   };
 }
 
@@ -203,7 +216,7 @@ function inflowsIntoPool(
   occurrences: readonly RecurringForecastOccurrence[],
   pool: Set<string>,
   liabilities: Set<string>
-): number {
+): ScheduledEffect[] {
   const landing = db.prepare(`
     SELECT a.id, a.type FROM transactions t JOIN accounts a ON a.id = t.account_id
     WHERE t.recurring_id = ? ORDER BY t.date DESC, t.id DESC LIMIT 1
@@ -215,14 +228,25 @@ function inflowsIntoPool(
     )
     SELECT 1 FROM invested WHERE id = ?
   `);
-  return occurrences.reduce((sum, occurrence) => {
-    if (occurrence.kind === 'transfer' || occurrence.adjustment_action === 'skip' || occurrence.amount <= 0) return sum;
+  return occurrences.flatMap((occurrence): ScheduledEffect[] => {
+    if (occurrence.kind === 'transfer' || occurrence.adjustment_action === 'skip' || occurrence.amount <= 0) return [];
     const landed = landing.get(occurrence.pattern_id) as { id: string; type: string } | undefined;
     const reachesPool = landed && landed.type !== 'closed'
       ? pool.has(landed.id) || liabilities.has(landed.id)
       : occurrence.category_id === null || investmentCategory.get(occurrence.category_id) === undefined;
-    return reachesPool ? sum + occurrence.amount : sum;
-  }, 0);
+    return reachesPool ? [effect(occurrence, occurrence.amount, 'income')] : [];
+  });
+}
+
+function effect(occurrence: RecurringForecastOccurrence, cents: number, kind: ScheduledEffect['kind']): ScheduledEffect {
+  return { date: occurrence.expected_date, cents, kind, label: occurrence.merchant_name, patternId: occurrence.pattern_id };
+}
+
+/** The forecast's bills, dated: the same occurrences `forecast.bills` sums. */
+function billEffects(occurrences: readonly RecurringForecastOccurrence[]): ScheduledEffect[] {
+  return occurrences
+    .filter((occurrence) => occurrence.kind !== 'transfer' && occurrence.adjustment_action !== 'skip' && occurrence.amount < 0)
+    .map((occurrence) => effect(occurrence, occurrence.amount, 'bill'));
 }
 
 /**
@@ -237,8 +261,9 @@ function transfersAcrossPool(
   pool: Set<string>,
   cards: Set<string>,
   owed: Map<string, number>
-): { transfers: number; cardRelief: number } {
+): { transfers: number; cardRelief: number; effects: ScheduledEffect[] } {
   const relieved = new Map<string, number>();
+  const effects: ScheduledEffect[] = [];
   let transfers = 0;
   for (const occurrence of occurrences) {
     if (occurrence.kind !== 'transfer' || occurrence.adjustment_action === 'skip') continue;
@@ -248,13 +273,17 @@ function transfersAcrossPool(
     if (owed.has(to)) {
       if (pool.has(from) || cards.has(from)) continue;
       const room = Math.max(0, (owed.get(to) ?? 0) - (relieved.get(to) ?? 0));
-      relieved.set(to, (relieved.get(to) ?? 0) + Math.min(size, room));
+      const relief = Math.min(size, room);
+      relieved.set(to, (relieved.get(to) ?? 0) + relief);
+      if (relief > 0) effects.push(effect(occurrence, relief, 'card_relief'));
       continue;
     }
     if (cards.has(from) || pool.has(from) === pool.has(to)) continue;
-    transfers += pool.has(from) ? size : -size;
+    const leaving = pool.has(from) ? size : -size;
+    transfers += leaving;
+    effects.push(effect(occurrence, -leaving, 'transfer'));
   }
-  return { transfers, cardRelief: [...relieved.values()].reduce((sum, value) => sum + value, 0) };
+  return { transfers, cardRelief: [...relieved.values()].reduce((sum, value) => sum + value, 0), effects };
 }
 
 export const UNBUDGETED_BASIS_DAYS = 90;
