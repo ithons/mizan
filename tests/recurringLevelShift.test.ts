@@ -81,3 +81,12 @@ test('one old outlier is not a level the series moved off', () => {
   assert.equal(expectedAmount(series([250000, 250000, 250000, 120000])).changedFrom, null);
   assert.equal(expectedAmount(series([10000, 10000, 10000, 10000, 5000, 5000])).changedFrom, null);
 });
+
+test('a shift is still found once the new level fills half the window', () => {
+  assert.deepEqual(
+    [expectedAmount(series([8000, 8000, 8000, 10000, 10000, 10000])).amount, expectedAmount(series([8000, 8000, 8000, 10000, 10000, 10000])).changedFrom],
+    [8000, 10000]
+  );
+  assert.equal(expectedAmount(series([8000, 8000, 10000, 10000])).amount, 8000);
+  assert.equal(expectedAmount(series([12500, 12500, 10000, 10000])).amount, 12500);
+});

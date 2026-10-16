@@ -225,34 +225,40 @@ function farFrom(level: number, value: number): -1 | 0 | 1 {
   return value > level ? 1 : -1;
 }
 
+/** How long a new level is reported as new. */
+const SHIFT_REPORTED_FOR = 3;
+
 /**
  * What the next occurrence should be, from the most recent ones (newest first).
  *
- * The window median survives an outlier and stale history. When the latest occurrences have all
- * left it on the same side, at least two of them, they are a new level: forecast at their mean when
- * the last two agree and at the latest when they do not, and name the level they moved off as the
- * median of the occurrences before them, which is an amount that was paid.
+ * Looks for the point where the series changed level: the newest occurrences all sit off, on one
+ * side, the level that most of the older ones agree on. One odd occurrence, or recent ones pulling
+ * opposite ways, is not a level, and the window median stays in charge. The level moved off is
+ * named only while the change is recent, and always as an amount that was actually paid.
  */
 export function expectedAmount(recent: ReadonlyArray<{ amount: number; date: string }>): ExpectedAmount {
   const window = recent.slice(0, RECENT_AMOUNT_WINDOW);
-  const level = median(window.map((row) => row.amount));
-  const unchanged = { amount: Math.round(level), changedFrom: null, changedOn: null };
-  if (window.length < 4 || level === 0) return unchanged;
+  const amounts = window.map((row) => row.amount);
+  const unchanged = { amount: Math.round(median(amounts)), changedFrom: null, changedOn: null };
 
-  const direction = farFrom(level, window[0].amount);
-  if (direction === 0) return unchanged;
-  let run = 1;
-  while (run < window.length && farFrom(level, window[run].amount) === direction) run++;
-  const prior = window.slice(run).map((row) => row.amount).sort((a, b) => a - b);
-  if (run < 2 || prior.length === 0) return unchanged;
+  for (let k = window.length - 2; k >= 2; k--) {
+    const fresh = amounts.slice(0, k);
+    const older = amounts.slice(k);
+    const level = median(older);
+    if (level === 0 || older.filter((amount) => farFrom(level, amount) === 0).length * 2 <= older.length) continue;
+    const direction = farFrom(level, fresh[0]);
+    if (direction === 0 || fresh.some((amount) => farFrom(level, amount) !== direction)) continue;
 
-  const [latest, previous] = window;
-  const agree = farFrom(latest.amount, previous.amount) === 0;
-  return {
-    amount: Math.round(agree ? (latest.amount + previous.amount) / 2 : latest.amount),
-    changedFrom: Math.round(prior[Math.floor((prior.length - 1) / 2)]),
-    changedOn: latest.date,
-  };
+    const [latest, previous] = fresh;
+    const agree = farFrom(latest, previous) === 0;
+    const sorted = [...older].sort((a, b) => a - b);
+    return {
+      amount: Math.round(agree ? (latest + previous) / 2 : latest),
+      changedFrom: k <= SHIFT_REPORTED_FOR ? Math.round(sorted[Math.floor((sorted.length - 1) / 2)]) : null,
+      changedOn: k <= SHIFT_REPORTED_FOR ? window[0].date : null,
+    };
+  }
+  return unchanged;
 }
 
 /**
