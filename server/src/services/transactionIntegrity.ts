@@ -481,8 +481,9 @@ function desiredLegs(pairs: PairEdge[], confirmedBefore: Set<string>): Map<strin
 }
 
 /**
- * Drop a row out of its pair, and hand back the category only if this detector is the one that
- * wrote it. A category the importer, a rule, the model or the owner chose is left exactly as it is.
+ * Drop a row out of its pair. The latest category write is undone only when it is a heuristic write
+ * of a transfer-leg category, which is what pairing writes; an importer, rule, model or owner
+ * category is left as it is.
  */
 function releaseTransferLeg(db: Database.Database, transactionId: string, now: string): void {
   const revision = latestRevertableRevision(db, transactionId);
@@ -517,7 +518,7 @@ const TRANSFER_CLASS_SQL = `(
 
 /**
  * The owner categorized a leg of an automatic pair by hand, which settles it: kept as a transfer
- * category, the pair becomes theirs; filed anywhere else, it is not a transfer and is let go.
+ * category, the pair becomes theirs; filed anywhere else, that leg is not a transfer.
  */
 function settleTouchedAutoPairs(db: Database.Database, now: string): void {
   const touched = db.prepare(`
@@ -534,10 +535,17 @@ function settleTouchedAutoPairs(db: Database.Database, now: string): void {
         .run(now, pairId);
       continue;
     }
-    const legs = db.prepare('SELECT id FROM transactions WHERE transfer_pair_id = ?').all(pairId) as Array<{ id: string }>;
+    // The decision was about the leg the owner re-filed. Its partner goes back to the pool, where
+    // it can still pair with its real counterpart.
+    const legs = db.prepare(`
+      SELECT id, (manually_categorized = 1 OR category_source = 'human') AS touched
+      FROM transactions WHERE transfer_pair_id = ?
+    `).all(pairId) as Array<{ id: string; touched: number }>;
     for (const leg of legs) {
       releaseTransferLeg(db, leg.id, now);
-      db.prepare("UPDATE transactions SET transfer_status = 'dismissed', updated_at = ? WHERE id = ?").run(now, leg.id);
+      if (leg.touched) {
+        db.prepare("UPDATE transactions SET transfer_status = 'dismissed', updated_at = ? WHERE id = ?").run(now, leg.id);
+      }
     }
   }
 }

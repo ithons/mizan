@@ -189,7 +189,7 @@ test('the owner re-filing a leg of an automatic pair keeps their category and se
   writeTransactionCategory(db, { transactionId: other, categoryId: 'cat_shop', source: 'human', markManual: true }, later());
   refreshTransferCandidates(db);
   assert.deepEqual([leg(db, other).category_id, leg(db, other).transfer_status], ['cat_shop', 'dismissed']);
-  assert.deepEqual([leg(db, otherIn).category_id, leg(db, otherIn).transfer_status], [null, 'dismissed']);
+  assert.deepEqual([leg(db, otherIn).category_id, leg(db, otherIn).transfer_status], [null, 'none']);
 });
 
 test('undoing a pair leaves a category the importer or the model chose', () => {
@@ -202,4 +202,21 @@ test('undoing a pair leaves a category the importer or the model chose', () => {
   dismissTransferPair(db, leg(db, deposit).transfer_pair_id as string);
   assert.equal(leg(db, deposit).category_id, 'cat_xfer_in');
   assert.ok(out);
+});
+
+test('re-filing the wrong card leg frees the payment to pair with the card it really paid', () => {
+  const db = migratedTestDb();
+  const checking = insertAccount(db, { type: 'checking' });
+  const card1 = insertAccount(db, { type: 'credit', is_liability: 1 });
+  const card2 = insertAccount(db, { type: 'credit', is_liability: 1 });
+  const out = insertTransaction(db, { account_id: checking, date: '2026-09-11', amount: -30000, original_name: 'CHASE CREDIT CRD AUTOPAY PPD ID: XXXXXX9224' });
+  const wrong = insertTransaction(db, { account_id: card1, date: '2026-09-11', amount: 30000, original_name: 'AUTOMATIC PAYMENT - THANK YOU' });
+  const right = insertTransaction(db, { account_id: card2, date: '2026-09-14', amount: 30000, original_name: 'AUTOMATIC PAYMENT - THANK YOU' });
+  refreshTransferCandidates(db);
+  assert.equal(leg(db, out).transfer_pair_id, leg(db, wrong).transfer_pair_id);
+
+  writeTransactionCategory(db, { transactionId: wrong, categoryId: 'cat_shop', source: 'human', markManual: true }, later());
+  refreshTransferCandidates(db);
+  assert.ok(leg(db, out).transfer_pair_id);
+  assert.equal(leg(db, out).transfer_pair_id, leg(db, right).transfer_pair_id);
 });
