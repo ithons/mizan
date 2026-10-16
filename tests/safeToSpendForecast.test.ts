@@ -227,11 +227,35 @@ test('a card autopaid from an account outside the pool is relieved by that payme
       detectRecurring();
       const sheet = computeSafeToSpend(db, { forecastDays: 30 });
       assert.equal(sheet.expectedInflows, 0, `${side.type}/${side.is_hidden}`);
-      assert.equal(sheet.recurringTransfers, -100000, 'a $1,500 autopay relieves the $1,000 owed and no more');
+      assert.equal(sheet.recurringTransfers, 0, 'a card payment is not a transfer into the pool');
+      assert.equal(sheet.cardRelief, 100000, 'a $1,500 autopay relieves the $1,000 owed and no more');
       assert.equal(sheet.free, 100000, 'the pool keeps its own $1,000');
     } finally {
       _setDbForTesting(undefined as unknown as Database.Database);
       db.close();
     }
+  }
+});
+
+test('a payment to a card from another card relieves nothing, even when the paying card is hidden', () => {
+  const db = migratedTestDb();
+  _setDbForTesting(db);
+  try {
+    insertAccount(db, { account_name: 'Chase Checking', type: 'checking', current_balance: 100000 });
+    const payer = insertAccount(db, { account_name: 'Old Card', type: 'credit', is_liability: 1, current_balance: 50000 });
+    db.prepare('UPDATE accounts SET is_hidden = 1 WHERE id = ?').run(payer);
+    const card = insertAccount(db, { account_name: 'Sapphire', type: 'credit', is_liability: 1, current_balance: 150000 });
+    for (const m of [5, 4, 3, 2, 1]) {
+      insertTransaction(db, { account_id: payer, date: day(30 * m), amount: -60000, original_name: 'CARD PAYMENT OUT' });
+      insertTransaction(db, { account_id: card, date: day(30 * m), amount: 60000, original_name: 'PAYMENT - THANK YOU' });
+    }
+    refreshTransactionIntegrity(db);
+    detectRecurring();
+    const sheet = computeSafeToSpend(db, { forecastDays: 30 });
+    assert.equal(sheet.cardRelief, 0);
+    assert.equal(sheet.recurringTransfers, 0);
+  } finally {
+    _setDbForTesting(undefined as unknown as Database.Database);
+    db.close();
   }
 });

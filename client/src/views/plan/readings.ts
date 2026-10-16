@@ -77,6 +77,12 @@ export function claimLines(
         ? 'The cards owe you. That is money coming back to the pool, not a claim on it.'
         : 'The whole balance is taken out here, not a minimum payment.',
     },
+    ...optional({
+      key: 'card-relief',
+      label: 'Card payments from outside these accounts',
+      delta: sheet.card_relief,
+      note: 'Scheduled payments to a card from an account other than checking, savings or cash, up to what the card owes.',
+    }),
     { key: 'bills', label: `Bills due in the next ${sheet.forecast_days} days`, delta: -sheet.upcoming_bills },
     ...optional({
       key: 'transfers',

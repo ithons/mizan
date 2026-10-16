@@ -1427,8 +1427,10 @@ export interface SafeToSpend {
   upcoming_bills: number;
   /** Scheduled income over forecast_days. */
   expected_inflows: number;
-  /** Scheduled transfers out of the liquid pool to other accounts, less those into it. */
+  /** Scheduled transfers out of the liquid pool to the owner's other non-card accounts, less those into it. */
   recurring_transfers: number;
+  /** Scheduled payments to a card from accounts outside the pool, up to what each card owes. */
+  card_relief: number;
   /** Spending in unbudgeted categories at the pace of the last unbudgeted_basis_days. */
   estimated_unbudgeted: number;
   unbudgeted_basis_days: number;

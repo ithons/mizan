@@ -475,3 +475,13 @@ test('the expected income line says which income it leaves out', () => {
   assert.ok(line);
   assert.match(line.note ?? '', /last paid into these accounts or onto a card\. Income paid anywhere else is not counted here; one with no deposit yet, or last paid into an account since closed, counts unless filed under Investments or Crypto\./);
 });
+
+test('a card paid from outside the pool shows as its own line, not as a transfer in', () => {
+  const lines = claimLines({ ...SHEET, card_relief: 600 }, 1, 1);
+  const relief = lines.find((line) => line.key === 'card-relief');
+  assert.ok(relief);
+  assert.equal(relief.delta, 600);
+  assert.equal(relief.label, 'Card payments from outside these accounts');
+  assert.ok(!lines.some((line) => line.label === 'Scheduled transfers in'));
+  assert.equal(lines.reduce((sum, line) => sum + line.delta, 0), claimLines({ ...SHEET, card_relief: 0 }, 1, 1).reduce((sum, line) => sum + line.delta, 0) + 600);
+});

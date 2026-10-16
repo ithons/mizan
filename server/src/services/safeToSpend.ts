@@ -55,10 +55,12 @@ export interface SafeToSpendBreakdown {
   /** Scheduled income in the forecast window. */
   expectedInflows: number;
   /**
-   * Scheduled transfers out of the pool to the owner's other accounts, less any scheduled into it.
-   * Card payments are not here: the whole card balance is already a claim.
+   * Scheduled transfers out of the pool to the owner's other non-card accounts, less any scheduled
+   * into it. Card payments are not here: the whole card balance is already a claim.
    */
   recurringTransfers: number;
+  /** Scheduled payments to a card from accounts outside the pool, up to what each card owes. */
+  cardRelief: number;
   /** Spending in categories no budget covers, at the trailing pace, over the forecast window. */
   estimatedUnbudgeted: number;
   /** Days of history the unbudgeted pace is taken from. */
@@ -115,7 +117,8 @@ export function computeSafeToSpend(
   const upcomingBills = Math.abs(forecast.bills);
   const expectedInflows = inflowsIntoPool(db, forecast.occurrences, pool, liabilities);
   const owed = new Map(accounts.filter((account) => account.is_liability).map((account) => [account.id, account.current_balance]));
-  const recurringTransfers = transfersLeavingPool(forecast.occurrences, pool, owed);
+  const cards = new Set((db.prepare('SELECT id FROM accounts WHERE is_liability = 1').all() as Array<{ id: string }>).map((row) => row.id));
+  const { transfers: recurringTransfers, cardRelief } = transfersAcrossPool(forecast.occurrences, pool, cards, owed);
   const estimatedUnbudgeted = unbudgetedPace(db, inputs.budgets ?? [], forecastDays);
 
   // Clamped to what was actually budgeted. Now that refunds net a category's spend down,
@@ -175,11 +178,12 @@ export function computeSafeToSpend(
     upcomingBills,
     expectedInflows,
     recurringTransfers,
+    cardRelief,
     estimatedUnbudgeted,
     unbudgetedBasisDays: UNBUDGETED_BASIS_DAYS,
     allocatedBudgets,
     allocatedGoals,
-    free: liquid + expectedInflows - cardBalances - upcomingBills - recurringTransfers
+    free: liquid + expectedInflows + cardRelief - cardBalances - upcomingBills - recurringTransfers
       - allocatedBudgets - estimatedUnbudgeted - allocatedGoals,
     forecastDays,
   };
@@ -220,30 +224,32 @@ function inflowsIntoPool(
 
 /**
  * Money the schedule moves across the pool's edge. A card is already claimed in full, so a payment
- * to it from the pool changes nothing, and one from outside the pool relieves that claim, never by
- * more than the card owes.
+ * to it from the pool or from another card changes nothing; one from outside the pool relieves
+ * that claim, never by more than the card owes, and is returned apart from the transfers.
  */
-function transfersLeavingPool(
+function transfersAcrossPool(
   occurrences: readonly RecurringForecastOccurrence[],
   pool: Set<string>,
+  cards: Set<string>,
   owed: Map<string, number>
-): number {
+): { transfers: number; cardRelief: number } {
   const relieved = new Map<string, number>();
-  return occurrences.reduce((sum, occurrence) => {
-    if (occurrence.kind !== 'transfer' || occurrence.adjustment_action === 'skip') return sum;
+  let transfers = 0;
+  for (const occurrence of occurrences) {
+    if (occurrence.kind !== 'transfer' || occurrence.adjustment_action === 'skip') continue;
     const from = occurrence.account_id ?? '';
     const to = occurrence.counterparty_account_id ?? '';
     const size = Math.abs(occurrence.amount);
-    if (owed.has(to)) {
-      if (pool.has(from) || owed.has(from)) return sum;
+    if (cards.has(to)) {
+      if (pool.has(from) || cards.has(from)) continue;
       const room = Math.max(0, (owed.get(to) ?? 0) - (relieved.get(to) ?? 0));
-      const relief = Math.min(size, room);
-      relieved.set(to, (relieved.get(to) ?? 0) + relief);
-      return sum - relief;
+      relieved.set(to, (relieved.get(to) ?? 0) + Math.min(size, room));
+      continue;
     }
-    if (pool.has(from) === pool.has(to)) return sum;
-    return pool.has(from) ? sum + size : sum - size;
-  }, 0);
+    if (cards.has(from) || pool.has(from) === pool.has(to)) continue;
+    transfers += pool.has(from) ? size : -size;
+  }
+  return { transfers, cardRelief: [...relieved.values()].reduce((sum, value) => sum + value, 0) };
 }
 
 export const UNBUDGETED_BASIS_DAYS = 90;

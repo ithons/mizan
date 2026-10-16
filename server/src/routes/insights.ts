@@ -161,6 +161,7 @@ router.get('/safe-to-spend', (_req: Request, res: Response, next: NextFunction):
         upcoming_bills: toDollars(breakdown.upcomingBills),
         expected_inflows: toDollars(breakdown.expectedInflows),
         recurring_transfers: toDollars(breakdown.recurringTransfers),
+        card_relief: toDollars(breakdown.cardRelief),
         estimated_unbudgeted: toDollars(breakdown.estimatedUnbudgeted),
         unbudgeted_basis_days: breakdown.unbudgetedBasisDays,
         allocated_budgets: toDollars(breakdown.allocatedBudgets),

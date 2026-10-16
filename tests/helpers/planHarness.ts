@@ -41,6 +41,7 @@ export const SHEET: SafeToSpend = {
   upcoming_bills: 64.04,
   expected_inflows: 0,
   recurring_transfers: 0,
+  card_relief: 0,
   estimated_unbudgeted: 0,
   unbudgeted_basis_days: 90,
   allocated_budgets: 500,
