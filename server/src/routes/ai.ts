@@ -683,12 +683,16 @@ router.post('/chat', async (req: Request, res: Response, next: NextFunction): Pr
         ),
         timeoutMs: CHAT_TIMEOUT_MS,
         maxToolRounds: MAX_TOOL_ROUNDS,
-        // Most tools are pure SELECTs; two (categorize_transactions, create_merchant_rule)
-        // write, scoped to the autonomous domain and routed through confirmAdvisorDraft so
-        // each one lands in the audit trail and is undoable by action id. Model-authored SQL
-        // still runs on the read-only connection only.
+        // Reads are SELECTs on the read-only paths. The tools in WRITING_TOOLS write: two inside the
+        // autonomous domain, memory, and proposals that apply only when the owner confirms them.
         runTool: (name, input) => {
-          const output = runAdvisorTool(db, name, input);
+          let output: unknown;
+          try {
+            output = runAdvisorTool(db, name, input);
+          } catch (err) {
+            console.error(`[ai/chat] tool ${name} failed:`, err);
+            return { error: `The ${name} tool failed: ${(err as Error).message}` };
+          }
           if (name === 'propose_changes') {
             const drafts = (output as ProposalsResult).proposed;
             if (drafts.length > 0) emit({ type: 'proposals', drafts });

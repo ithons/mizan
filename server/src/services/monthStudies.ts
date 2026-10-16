@@ -28,8 +28,8 @@ const LARGE_ONE_OFF_CENTS = 50000;
  * steady month says nothing about categories.
  */
 export function explainMonth(db: Database.Database, month: string) {
-  if (!/^\d{4}-\d{2}$/.test(month)) return { error: 'month must be YYYY-MM' };
   const target = parseISO(`${month}-01`);
+  if (!/^\d{4}-\d{2}$/.test(month) || Number.isNaN(target.getTime())) return { error: 'month must be YYYY-MM' };
   const priors = [1, 2, 3].map((back) => format(subMonths(target, back), 'yyyy-MM'));
   const spendByCategory = (m: string) => new Map(
     getSpendingReport(db, { ...monthRange(m), parentOnly: true }).categories.map((c) => [c.category_id, { name: c.category_name, amount: c.amount }])

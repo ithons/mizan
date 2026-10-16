@@ -34,6 +34,7 @@ test('a category well past its usual range is named with its usual level and cha
 
 test('a malformed month is refused', () => {
   assert.deepEqual(explainMonth(migratedTestDb(), 'Sept'), { error: 'month must be YYYY-MM' });
+  assert.deepEqual(explainMonth(migratedTestDb(), '2026-13'), { error: 'month must be YYYY-MM' });
 });
 
 test('funding mix splits income into recurring and other, and reports what pay covers', () => {

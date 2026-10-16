@@ -212,3 +212,20 @@ test('a band is refused without ninety days of history, and the same seed gives 
     assert.deepEqual(projectFreeBand(db, 30, 300), projectFreeBand(db, 30, 300));
   });
 });
+
+test('the daily allowance spends only what exists before the next pay, not the pay after it', () => {
+  const db = migratedTestDb();
+  _setDbForTesting(db);
+  try {
+    const chase = insertAccount(db, { account_name: 'Chase', type: 'checking', current_balance: 10000 });
+    for (const k of [8, 7, 6, 5, 4, 3, 2, 1]) {
+      insertTransaction(db, { account_id: chase, date: day(14 * k - 5), amount: 200000, merchant_name: 'Payroll', original_name: 'ACME PAYROLL PPD', category_id: 'cat_income_paycheck' });
+    }
+    detectRecurring();
+    const sheet = readSafeToSpend(db);
+    assert.ok(sheet.expected_inflows >= 4000, 'two paychecks are in the window');
+    assert.ok(sheet.per_day_until_next_income !== null && sheet.per_day_until_next_income <= 100, `${sheet.per_day_until_next_income} a day from $100 on hand`);
+  } finally {
+    _setDbForTesting(undefined as unknown as Database.Database);
+  }
+});

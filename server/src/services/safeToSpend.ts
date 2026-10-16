@@ -398,11 +398,19 @@ export function readSafeToSpend(db: Database.Database, forecastDays?: number) {
   };
 }
 
-/** What is free spread over the days to the next expected income; nothing when there is no room or no income ahead. */
+/**
+ * What is free before the next expected income, spread over the days until it: claims taken now,
+ * every scheduled item dated before that day, and the usual pace for those days. Income after it
+ * is not counted, because it has not arrived when this money is being spent.
+ */
 function dailyAllowance(breakdown: SafeToSpendBreakdown, now: Date): { next_income_date: string | null; per_day_until_next_income: number | null } {
   const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
   const next = breakdown.scheduled.find((item) => item.kind === 'income' && item.date > today)?.date ?? null;
-  if (!next || breakdown.free <= 0) return { next_income_date: next, per_day_until_next_income: null };
+  if (!next) return { next_income_date: null, per_day_until_next_income: null };
   const days = Math.max(1, Math.round((Date.parse(`${next}T00:00:00`) - Date.parse(`${today}T00:00:00`)) / 86_400_000));
-  return { next_income_date: next, per_day_until_next_income: toDollars(Math.floor(breakdown.free / days)) };
+  const scheduledBefore = breakdown.scheduled.filter((item) => item.date < next).reduce((sum, item) => sum + item.cents, 0);
+  const available = breakdown.liquid - breakdown.cardBalances - breakdown.allocatedBudgets - breakdown.allocatedGoals
+    + scheduledBefore - (breakdown.estimatedUnbudgeted / breakdown.forecastDays) * (days - 1);
+  if (available <= 0) return { next_income_date: next, per_day_until_next_income: null };
+  return { next_income_date: next, per_day_until_next_income: toDollars(Math.floor(available / days)) };
 }
