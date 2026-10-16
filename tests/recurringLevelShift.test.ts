@@ -76,3 +76,8 @@ test('once the new level has repeated, the old one is still named as it was paid
   const paid = series([22878, 22878, 22878, 54418, 54418, 54418]);
   assert.deepEqual(expectedAmount(paid).changedFrom, 54418);
 });
+
+test('one old outlier is not a level the series moved off', () => {
+  assert.equal(expectedAmount(series([250000, 250000, 250000, 120000])).changedFrom, null);
+  assert.equal(expectedAmount(series([10000, 10000, 10000, 10000, 5000, 5000])).changedFrom, null);
+});

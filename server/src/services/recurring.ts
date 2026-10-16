@@ -228,30 +228,29 @@ function farFrom(level: number, value: number): -1 | 0 | 1 {
 /**
  * What the next occurrence should be, from the most recent ones (newest first).
  *
- * The window median survives an outlier and stale history, and is also what kept forecasting
- * $544.18 after pay dropped. Two occurrences in a row on the same side of it, both well off it, are
- * a new level rather than noise: forecast at their mean when they agree, and at the latest when
- * they do not. One odd occurrence, or two pulling opposite ways, leave the median in charge.
+ * The window median survives an outlier and stale history. When the latest occurrences have all
+ * left it on the same side, at least two of them, they are a new level: forecast at their mean when
+ * the last two agree and at the latest when they do not, and name the level they moved off as the
+ * median of the occurrences before them, which is an amount that was paid.
  */
 export function expectedAmount(recent: ReadonlyArray<{ amount: number; date: string }>): ExpectedAmount {
   const window = recent.slice(0, RECENT_AMOUNT_WINDOW);
-  const unchanged = { amount: Math.round(median(window.map((row) => row.amount))), changedFrom: null, changedOn: null };
-  if (window.length < 4) return unchanged;
+  const level = median(window.map((row) => row.amount));
+  const unchanged = { amount: Math.round(level), changedFrom: null, changedOn: null };
+  if (window.length < 4 || level === 0) return unchanged;
 
-  // The level the last two are measured against is what came before them, and it is an amount
-  // that was actually paid: the lower median, never a midpoint between two levels.
-  const before = window.slice(2).map((row) => row.amount).sort((a, b) => a - b);
-  const level = before[Math.floor((before.length - 1) / 2)];
-  if (level === 0) return unchanged;
+  const direction = farFrom(level, window[0].amount);
+  if (direction === 0) return unchanged;
+  let run = 1;
+  while (run < window.length && farFrom(level, window[run].amount) === direction) run++;
+  const prior = window.slice(run).map((row) => row.amount).sort((a, b) => a - b);
+  if (run < 2 || prior.length === 0) return unchanged;
 
   const [latest, previous] = window;
-  const direction = farFrom(level, latest.amount);
-  if (direction === 0 || farFrom(level, previous.amount) !== direction) return unchanged;
-
   const agree = farFrom(latest.amount, previous.amount) === 0;
   return {
     amount: Math.round(agree ? (latest.amount + previous.amount) / 2 : latest.amount),
-    changedFrom: Math.round(level),
+    changedFrom: Math.round(prior[Math.floor((prior.length - 1) / 2)]),
     changedOn: latest.date,
   };
 }
