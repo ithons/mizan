@@ -718,10 +718,8 @@ export function Instrument() {
             {weekCaption.note && <p>{weekCaption.note}</p>}
             {snapshot?.in_transit ? (
               <p>
-                Counts {formatCurrency(Math.abs(snapshot.in_transit))} moving between your own accounts as landed,{' '}
-                {snapshot.in_transit > 0
-                  ? 'because one account had sent it and the other had not shown it yet.'
-                  : 'because one account had shown it arriving before the other showed it leaving.'}
+                Adjusted by {formatCurrency(snapshot.in_transit, { showSign: true })} for transfers between your own
+                accounts that one side had shown and the other had not yet.
               </p>
             ) : null}
           </ExplainPanel>
@@ -791,8 +789,9 @@ export function Instrument() {
       <Details summary="Balance sheet details" className="mt-10 border-t border-line-2 pt-6">
         {snapshot?.in_transit ? (
           <p className="mb-4 max-w-[66ch] text-note leading-relaxed text-muted-2">
-            These are the balances each institution reported. {formatCurrency(Math.abs(snapshot.in_transit))} was
-            moving between your own accounts at the time, which the net worth above counts as landed.
+            These are the balances each institution reported. The net worth above is adjusted by{' '}
+            {formatCurrency(snapshot.in_transit, { showSign: true })} for transfers between your own accounts that
+            one side had shown and the other had not yet.
           </p>
         ) : null}
       {sheetLoading ? (
@@ -1080,9 +1079,10 @@ export function Instrument() {
               </p>
               {(attribution.start_in_transit !== 0 || attribution.end_in_transit !== 0) && (
                 <p>
-                  {formatCurrency(Math.max(Math.abs(attribution.start_in_transit), Math.abs(attribution.end_in_transit)))}{' '}
-                  moving between your own accounts had left one and not yet reached the other, and is counted as landed.
-                </p>
+                    Both ends are adjusted for transfers between your own accounts that one side had shown and the
+                    other had not yet: {formatCurrency(attribution.start_in_transit, { showSign: true })} at the start,{' '}
+                    {formatCurrency(attribution.end_in_transit, { showSign: true })} at the end.
+                  </p>
               )}
                   </>
                 }
