@@ -250,3 +250,16 @@ test('next month\'s budget does not claim a recurring bill the forecast already 
     _setDbForTesting(undefined as unknown as Database.Database);
   }
 });
+
+test('a purchase in a band what-if lowers the typical outcome by its amount and never lowers the risk', () => {
+  withLedger((db) => {
+    db.prepare("UPDATE transactions SET date = ? WHERE id = (SELECT id FROM transactions ORDER BY date LIMIT 1)").run(day(120));
+    const soon = format(new Date(Date.now() + 3 * 86_400_000), 'yyyy-MM-dd');
+    const result = projectFreeBand(db, 30, 400, new Date(), 7, [{ kind: 'one_off', date: soon, amount: -1500 }]) as {
+      band: { p50: number }; chance_of_dropping_below_claims: number;
+      scenario: { band: { p50: number }; chance_of_dropping_below_claims: number };
+    };
+    assert.ok(Math.abs(result.band.p50 - result.scenario.band.p50 - 1500) < 0.01, `${result.band.p50} vs ${result.scenario.band.p50}`);
+    assert.ok(result.scenario.chance_of_dropping_below_claims >= result.chance_of_dropping_below_claims);
+  });
+});

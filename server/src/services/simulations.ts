@@ -311,7 +311,7 @@ function dailyDiscretionarySpend(db: Database.Database, today: Date): { daily: n
  * in 7-day blocks, and each income occurrence's amount is drawn from that pattern's last twelve.
  * The point projection's own inputs are kept; only these two vary.
  */
-export function projectFreeBand(db: Database.Database, days: number, paths = 4000, today = new Date(), seed = 20261016) {
+export function projectFreeBand(db: Database.Database, days: number, paths = 4000, today = new Date(), seed = 20261016, adjustments: ProjectionAdjustment[] = []) {
   const budgets = getMonthlyBudgetsWithProjection(db, today.getFullYear(), today.getMonth() + 1);
   const sheet = computeSafeToSpend(db, { budgets, forecastDays: days });
   const { daily, coveredDays } = dailyDiscretionarySpend(db, today);
@@ -326,10 +326,34 @@ export function projectFreeBand(db: Database.Database, days: number, paths = 400
     .map((item) => {
       const history = (recentAmounts.all(item.patternId) as Array<{ amount: number }>).map((row) => row.amount).filter((amount) => amount > 0);
       const offset = Math.max(0, Math.round((parseISO(item.date).getTime() - parseISO(todayKey).getTime()) / 86_400_000));
-      return { offset, expected: item.cents, history };
+      return { offset, expected: item.cents, history, patternId: item.patternId };
     });
-  const pointEnd = runCurve(sheet.liquid - sheet.cardBalances - sheet.allocatedBudgets - sheet.allocatedGoals, sheet.estimatedUnbudgeted / days, sheet.scheduled, days, today);
+  const start = sheet.liquid - sheet.cardBalances - sheet.allocatedBudgets - sheet.allocatedGoals;
+  const scale = adjustments.reduce((factor, a) => (a.kind === 'scale_unbudgeted' ? factor * (1 + a.percent / 100) : factor), 1);
+  const baselineCurve = runCurve(start, sheet.estimatedUnbudgeted / days, sheet.scheduled, days, today);
+  const cancelled = new Set(adjustments.flatMap((a) => (a.kind === 'cancel_recurring' ? [a.pattern_id] : [])));
+  const run = (curve: Curve, spendScale: number, draws = income) => simulateBand(curve, daily, meanDaily, draws, days, paths, seed, spendScale);
+  const baseline = run(baselineCurve, 1);
+  const assumptions = [
+    `Non-recurring spending is replayed from ${coveredDays} days of history in ${BAND_BLOCK_DAYS}-day blocks around its daily average.`,
+    'Each expected income occurrence is drawn from its pattern\'s last twelve amounts; patterns with fewer than three keep the forecast amount.',
+    'Everything else (claims, bills, transfers, budgets) is as in the point projection. "Below claims" is not an overdraft.',
+  ];
+  if (adjustments.length === 0) return { days, paths, ...baseline, assumptions };
+  const scenarioCurve = runCurve(start, (sheet.estimatedUnbudgeted / days) * scale, adjustedEffects(sheet.scheduled, adjustments, today, days), days, today);
+  return { days, paths, ...baseline, scenario: run(scenarioCurve, scale, income.filter((item) => !cancelled.has(item.patternId))), assumptions };
+}
 
+function simulateBand(
+  pointEnd: Curve,
+  daily: number[],
+  meanDaily: number,
+  income: Array<{ offset: number; expected: number; history: number[]; patternId: string }>,
+  days: number,
+  paths: number,
+  seed: number,
+  spendScale: number
+) {
   const random = seededRandom(seed);
   const ends: number[] = [];
   let pathsBelowZero = 0;
@@ -337,7 +361,7 @@ export function projectFreeBand(db: Database.Database, days: number, paths = 400
     const deviation = new Array<number>(days + 1).fill(0);
     for (let day = 1; day <= days; day += BAND_BLOCK_DAYS) {
       const start = Math.floor(random() * Math.max(1, daily.length - BAND_BLOCK_DAYS + 1));
-      for (let k = 0; k < BAND_BLOCK_DAYS && day + k <= days; k++) deviation[day + k] -= daily[start + k] - meanDaily;
+      for (let k = 0; k < BAND_BLOCK_DAYS && day + k <= days; k++) deviation[day + k] -= (daily[start + k] - meanDaily) * spendScale;
     }
     for (const item of income) {
       if (item.history.length >= 3 && item.offset <= days) {
@@ -355,8 +379,6 @@ export function projectFreeBand(db: Database.Database, days: number, paths = 400
   }
   ends.sort((a, b) => a - b);
   return {
-    days,
-    paths,
     point_estimate: toDollars(pointEnd.end),
     band: {
       p10: toDollars(Math.round(quantile(ends, 0.1))),
@@ -364,10 +386,5 @@ export function projectFreeBand(db: Database.Database, days: number, paths = 400
       p90: toDollars(Math.round(quantile(ends, 0.9))),
     },
     chance_of_dropping_below_claims: Math.round((pathsBelowZero / paths) * 100) / 100,
-    assumptions: [
-      `Non-recurring spending is replayed from ${coveredDays} days of history in ${BAND_BLOCK_DAYS}-day blocks around its daily average.`,
-      'Each expected income occurrence is drawn from its pattern\'s last twelve amounts; patterns with fewer than three keep the forecast amount.',
-      'Everything else (claims, bills, transfers, budgets) is as in the point projection. "Below claims" is not an overdraft.',
-    ],
   };
 }
