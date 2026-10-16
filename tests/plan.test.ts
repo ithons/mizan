@@ -463,3 +463,9 @@ describe('bar fills are visible against their own track', () => {
     assert.match(BAR, /ring-1 ring-line-3/, 'the bar declares no boundary; the finding is open again');
   });
 });
+
+test('scheduled transfers that net into the pool are named as coming in', () => {
+  const lines = claimLines({ ...SHEET, recurring_transfers: -400 }, 1, 1);
+  const transfers = lines.find((line) => line.key === 'transfers');
+  assert.deepEqual([transfers?.label, transfers?.delta], ['Scheduled transfers in', 400]);
+});

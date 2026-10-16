@@ -73,7 +73,11 @@ export function claimLines(
         : 'The whole balance is taken out here, not a minimum payment.',
     },
     { key: 'bills', label: `Bills due in the next ${sheet.forecast_days} days`, delta: -sheet.upcoming_bills },
-    ...optional({ key: 'transfers', label: 'Scheduled transfers out', delta: -sheet.recurring_transfers }),
+    ...optional({
+      key: 'transfers',
+      label: sheet.recurring_transfers >= 0 ? 'Scheduled transfers out' : 'Scheduled transfers in',
+      delta: -sheet.recurring_transfers,
+    }),
     {
       key: 'budgets',
       label: 'Budgeted, not yet spent',
