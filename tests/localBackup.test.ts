@@ -262,6 +262,11 @@ function seedEveryTable(db: Database.Database, tag: string): SeededIds {
     VALUES (?, ?, 'user', 'hello', ?)
   `).run(`msg_${tag}`, conversationId, TEST_NOW);
 
+  db.prepare(`
+    INSERT INTO notifications (id, rule_id, kind, title, body, severity, dedupe_key, created_at)
+    VALUES (?, 'nrule_sync_failed', 'sync_failed', 'Sync failed', 'x', 'critical', ?, ?)
+  `).run(`note_${tag}`, `sync_failed:${tag}`, TEST_NOW);
+
   return { accountId, categoryId, transactionId, securityId, actionId };
 }
 
@@ -659,6 +664,21 @@ test('HEALTHY: a backup behind only by migrations that add columns restores with
   wire.tables.schema_migrations = wire.tables.schema_migrations.filter((row) => String(row.name) < '066');
   const preview = buildLocalBackupRestorePreview(target, wire);
   assert.ok(!preview.warnings.some((w) => w.startsWith('This backup predates')), preview.warnings.join(' | '));
+});
+
+test('a backup from before 072 restores with the default notification rules seeded again', (t) => {
+  const source = migratedTestDb();
+  const target = migratedTestDb();
+  t.after(() => source.close());
+  t.after(() => target.close());
+  const wire = overTheWire(buildLocalBackup(source)) as { tables: Record<string, WireRow[]> };
+  wire.tables.schema_migrations = wire.tables.schema_migrations.filter((row) => String(row.name) < '072');
+  delete wire.tables.notification_rules;
+  delete wire.tables.notifications;
+  restoreLocalBackup(target, wire);
+  const seeded = target.prepare('SELECT id FROM notification_rules ORDER BY id').all();
+  assert.deepEqual(seeded, source.prepare('SELECT id FROM notification_rules ORDER BY id').all());
+  assert.equal(seeded.length, 9);
 });
 
 test('a migration counts as able to change rows only when it holds a statement that rewrites them', () => {

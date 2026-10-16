@@ -73,6 +73,8 @@ export const LOCAL_BACKUP_TABLES = [
   'ai_incidents',
   'conversations',
   'messages',
+  'notification_rules',
+  'notifications',
 ] as const;
 
 export type LocalBackupTableName = typeof LOCAL_BACKUP_TABLES[number];

@@ -99,6 +99,7 @@ export const ROW_REPAIR_MIGRATIONS: readonly string[] = [
   '064_brokerage_descriptor_signs.sql',
   '065_transfer_source.sql',
   '071_balance_only_accounts.sql',
+  '072_notifications.sql',
 ];
 
 function migrationStatements(file: string): string[] {
@@ -114,7 +115,7 @@ function migrationStatements(file: string): string[] {
 /** The row-level statements of a repair migration, read from the file so the replay cannot drift from it. */
 export function rowRepairStatements(file: string): string[] {
   return migrationStatements(file).filter((statement) =>
-    /^UPDATE (transactions|accounts)\s/.test(statement) || /^INSERT INTO transaction_field_revisions\s/.test(statement));
+    /^UPDATE (transactions|accounts)\s/.test(statement) || /^INSERT INTO (transaction_field_revisions|notification_rules)\s/.test(statement));
 }
 
 export function migrationFileExists(file: string): boolean {

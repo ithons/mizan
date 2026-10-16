@@ -917,7 +917,8 @@ test('a two-tool turn stays small enough to answer in', (t) => {
   const rules = bytes(runAdvisorTool(db, 'get_merchant_rules', { merchant: 'SPOTIFY 877-778-1161, NY' }));
   const expansion = bytes(runAdvisorTool(db, 'describe_schema', { tables: ['holdings'] }));
 
-  assert.ok(schema < 28_000, `describe_schema returned ${schema} bytes`);
+  // 28,500 since 072: its two tables add 332 bytes to the index (28,295 on this fixture).
+  assert.ok(schema < 28_500, `describe_schema returned ${schema} bytes`);
   assert.ok(rules < 3_000, `get_merchant_rules returned ${rules} bytes for one merchant`);
   assert.ok(expansion < 3_000, `expanding one table returned ${expansion} bytes`);
   assert.ok(schema + rules < 32_000, `a two-tool turn cost ${schema + rules} bytes`);
