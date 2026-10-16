@@ -396,11 +396,13 @@ function assignPairs(edges: PairEdge[]): PairEdge[] {
       && !settled.has(other.outflow.id)
       && !settled.has(other.inflow.id)
     );
-    for (const tied of [edge, ...rivals]) {
+    const interchangeable = rivals.every((other) =>
+      other.outflow.account_id === edge.outflow.account_id && other.inflow.account_id === edge.inflow.account_id);
+    for (const tied of interchangeable ? [edge] : [edge, ...rivals]) {
       settled.add(tied.outflow.id);
       settled.add(tied.inflow.id);
     }
-    if (rivals.length === 0) chosen.push(edge);
+    if (interchangeable) chosen.push(edge);
   }
   return chosen;
 }

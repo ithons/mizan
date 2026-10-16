@@ -235,3 +235,14 @@ test('two card payments of one amount on one day are both left alone, not paired
   refreshTransferCandidates(db);
   for (const id of legs) assert.equal(leg(db, id).transfer_pair_id, null, id);
 });
+
+test('two identical moves between the same two accounts on one day both pair', () => {
+  const db = migratedTestDb();
+  const checking = insertAccount(db, { type: 'checking', account_name: 'Checking' });
+  const savings = insertAccount(db, { type: 'savings', account_name: 'Savings' });
+  for (const id of ['o1', 'o2']) insertTransaction(db, { id, account_id: checking, date: '2026-10-05', amount: -20000, original_name: 'ONLINE TRANSFER TO SAVINGS' });
+  for (const id of ['i1', 'i2']) insertTransaction(db, { id, account_id: savings, date: '2026-10-05', amount: 20000, original_name: 'ONLINE TRANSFER FROM CHECKING' });
+  refreshTransferCandidates(db);
+  for (const id of ['o1', 'o2', 'i1', 'i2']) assert.notEqual(leg(db, id).transfer_pair_id, null, id);
+  assert.notEqual(partnerOf(db, 'o1'), partnerOf(db, 'o2'));
+});
