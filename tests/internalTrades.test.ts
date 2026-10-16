@@ -142,3 +142,12 @@ test('an estimated wallet month undoes the buy, not also the paired deposit that
     db.close();
   }
 });
+
+test('a resync corrects a trade flag that a restored backup left unset', () => {
+  const db = migratedTestDb();
+  applySimplefinResponse(db, fidelityWeek(), TEST_NOW);
+  db.prepare("UPDATE transactions SET is_internal_trade = 0 WHERE simplefin_transaction_id = 'TRN-fskax'").run();
+  applySimplefinResponse(db, fidelityWeek(), TEST_NOW);
+  const row = db.prepare("SELECT is_internal_trade FROM transactions WHERE simplefin_transaction_id = 'TRN-fskax'").get();
+  assert.deepEqual(row, { is_internal_trade: 1 });
+});

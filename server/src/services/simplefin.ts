@@ -565,6 +565,7 @@ interface ExistingTransactionRow {
   merchant_name_source: string | null;
   original_name: string;
   pending: number;
+  is_internal_trade: number;
 }
 
 /**
@@ -626,7 +627,7 @@ export function upsertSimplefinTransaction(
 ): SimplefinTransactionWrite {
   const existing = db.prepare(`
     SELECT id, date, date_source, amount, amount_source, merchant_name, merchant_name_source,
-           original_name, pending
+           original_name, pending, is_internal_trade
     FROM transactions
     WHERE simplefin_transaction_id = ?
   `).get(values.providerId) as ExistingTransactionRow | undefined;
@@ -731,7 +732,8 @@ export function upsertSimplefinTransaction(
     existing.amount === amount &&
     existing.merchant_name === merchantName &&
     existing.original_name === values.originalName &&
-    existing.pending === values.pending
+    existing.pending === values.pending &&
+    existing.is_internal_trade === (isInternalTrade(values.originalName) ? 1 : 0)
   ) {
     return 'unchanged';
   }
