@@ -1067,3 +1067,29 @@ test('HEALTHY: a forecast with nothing late says nothing about being overdue', (
   assert.match(section, /payroll deposit [+-]\$500\.00 \(Uncategorized, weekly, confirmed pattern\)/);
   assert.doesNotMatch(section, /overdue/i);
 });
+
+test('a scheduled transfer is listed as one and kept out of every figure that says it is in the totals', (t) => {
+  const db = migratedTestDb();
+  t.after(() => { _setDbForTesting(null); db.close(); });
+  _setDbForTesting(db);
+  insertAccount(db, { id: 'acct', account_name: 'Chase Checking', type: 'checking', current_balance: 500000 });
+  insertAccount(db, { id: 'brk', account_name: 'Fidelity Individual', type: 'brokerage' });
+  const paycheck = insertCategory(db, { name: 'Paycheck Test', is_income: 1 });
+  const late = daysAgo(7);
+  const insert = db.prepare(`
+    INSERT INTO recurring_patterns
+      (id, merchant_name, category_id, average_amount, frequency, last_seen, next_expected, kind,
+       account_id, counterparty_account_id, is_active, is_confirmed, transaction_count, created_at, updated_at)
+    VALUES (?, ?, ?, ?, 'weekly', ?, ?, ?, ?, ?, 1, 1, 8, '2026-01-01', '2026-01-01')
+  `);
+  insert.run('p_pay', 'payroll deposit', paycheck, 50000, daysAgo(14), late, 'flow', 'acct', null);
+  insert.run('p_xfer', 'Chase Checking to Fidelity Individual', null, 10000, daysAgo(14), late, 'transfer', 'acct', 'brk');
+
+  const ctx = buildFinancialContext();
+  const section = ctx.slice(ctx.indexOf('### Forward Cash Flow'));
+
+  assert.match(section, /Overdue and counted in the totals above: \$500\.00 in, \$0\.00 out\./);
+  assert.match(section, /Scheduled transfers between your own accounts, not in the totals above: \$\d/);
+  const line = section.split('\n').find((l) => l.includes(`${late}: Chase Checking to Fidelity Individual`)) ?? '';
+  assert.match(line, /transfer from Chase Checking to Fidelity Individual, not in the totals/);
+});

@@ -502,7 +502,9 @@ function getUpcomingBillsTool(db: Database.Database, input: ToolInput): unknown 
   // The forecast already honors per-occurrence skip/snooze/adjust overrides and projects each
   // pattern forward by its cadence. Reading recurring_patterns.next_expected directly (as this
   // tool used to) reports a single stale date per pattern and ignores every adjustment.
-  const bills = forecast.occurrences.filter((o) => o.adjustment_action !== 'skip');
+  const kept = forecast.occurrences.filter((o) => o.adjustment_action !== 'skip');
+  const bills = kept.filter((o) => o.kind !== 'transfer');
+  const transfers = kept.filter((o) => o.kind === 'transfer');
 
   return {
     window_days: days,
@@ -520,6 +522,15 @@ function getUpcomingBillsTool(db: Database.Database, input: ToolInput): unknown 
       status: o.status,
       confirmed: o.is_confirmed,
       category: o.category_name,
+    })),
+    scheduled_transfers_between_own_accounts: toDollars(forecast.transfers),
+    transfers: transfers.map((o) => ({
+      from_account: o.account_name,
+      to_account: o.counterparty_account_name,
+      amount: toDollars(Math.abs(o.amount)),
+      frequency: o.frequency,
+      due: o.expected_date,
+      status: o.status,
     })),
   };
 }

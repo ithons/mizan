@@ -1245,3 +1245,32 @@ test('HEALTHY: a row the provider still owns carries no provider_amount, and not
   assert.equal(result.transaction.amount, -42);
   assert.equal(result.transaction.provider_amount, null);
 });
+
+test('get_upcoming_bills keeps transfers between accounts out of the bills it sums', (t) => {
+  const db = setup();
+  t.after(() => db.close());
+  insertAccount(db, { id: 'brk', account_name: 'Fidelity Individual', type: 'brokerage' });
+  const soon = format(new Date(Date.now() + 3 * 86_400_000), 'yyyy-MM-dd');
+  db.prepare(`
+    INSERT INTO recurring_patterns
+      (id, merchant_name, average_amount, frequency, last_seen, next_expected, kind, account_id,
+       counterparty_account_id, is_active, is_confirmed, transaction_count, created_at, updated_at)
+    VALUES ('p_xfer', 'Checking to Fidelity Individual', 10000, 'monthly', '2026-01-01', ?, 'transfer', 'chk', 'brk',
+            1, 1, 6, '2026-01-01', '2026-01-01')
+  `).run(soon);
+  const r = runAdvisorTool(db, 'get_upcoming_bills', {}) as {
+    scheduled_bills: number;
+    bills: Array<{ merchant: string; amount: number }>;
+    scheduled_transfers_between_own_accounts: number;
+    transfers: Array<{ from_account: string; to_account: string; amount: number }>;
+  };
+  assert.ok(!r.bills.some((b) => b.merchant.includes('Fidelity')));
+  assert.equal(
+    Math.round(r.bills.filter((b) => b.amount < 0).reduce((sum, b) => sum - b.amount, 0) * 100),
+    Math.round(r.scheduled_bills * 100),
+    'the listed bills add up to the stated total'
+  );
+  assert.ok(r.transfers.length > 0);
+  for (const x of r.transfers) assert.deepEqual([x.from_account, x.to_account, x.amount], ['Checking', 'Fidelity Individual', 100]);
+  assert.equal(r.scheduled_transfers_between_own_accounts, 100 * r.transfers.length);
+});

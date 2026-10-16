@@ -1074,12 +1074,13 @@ export function buildFinancialContext(): string {
     lines.push(`  Scheduled net:    ${fmt(toDollars(forecast.net))}`);
     // `liquid` is dollars (from dollarized balances); forecast.net is cents.
     lines.push(`  Liquid after scheduled net: ${fmt(liquid + toDollars(forecast.net))}`);
-    // The forecast counts an overdue occurrence in its totals, so the totals above include money
-    // whose date has already passed without arriving. Saying how much keeps the model from reading
-    // a late paycheck as income it can plan on. Skipped rows are out of the totals and stay out here.
-    const overdue = forecast.occurrences.filter(
-      (o) => o.status === 'overdue' && o.adjustment_action !== 'skip'
-    );
+    if (forecast.transfers > 0) {
+      lines.push(`  Scheduled transfers between your own accounts, not in the totals above: ${fmt(toDollars(forecast.transfers))}`);
+    }
+    const inTotals = (o: { kind?: string; adjustment_action?: string | null }) =>
+      o.kind !== 'transfer' && o.adjustment_action !== 'skip';
+    // An overdue occurrence is still in the totals; naming it keeps a late paycheck from reading as plannable.
+    const overdue = forecast.occurrences.filter((o) => o.status === 'overdue' && inTotals(o));
     if (overdue.length > 0) {
       const overdueIn = overdue.reduce((sum, o) => (o.amount > 0 ? sum + o.amount : sum), 0);
       const overdueOut = overdue.reduce((sum, o) => (o.amount < 0 ? sum - o.amount : sum), 0);
@@ -1087,11 +1088,7 @@ export function buildFinancialContext(): string {
         `  Overdue and counted in the totals above: ${fmt(toDollars(overdueIn))} in, ${fmt(toDollars(overdueOut))} out.`
       );
     }
-    // The totals three lines above cover EVERY occurrence; this list does not. Say so, with the
-    // count and the money, or the model reads the list as the whole of what is scheduled and
-    // silently disagrees with the totals printed directly above it. On the live ledger the
-    // forecast returns 17 occurrences over 60 days and this list shows 10, leaving three October
-    // bills and four payroll rows unmentioned under a "Scheduled net" that includes them.
+    // The list is shorter than what the totals cover, so the remainder is stated with its money.
     const SHOWN = 10;
     const shown = forecast.occurrences.slice(0, SHOWN);
     const omitted = forecast.occurrences.slice(SHOWN);
@@ -1109,7 +1106,9 @@ export function buildFinancialContext(): string {
       const status = occurrence.status === 'overdue'
         ? `${pattern}, overdue: expected ${occurrence.expected_date}, no posting matched to it yet`
         : pattern;
-      const category = occurrence.category_name ?? 'Uncategorized';
+      const category = occurrence.kind === 'transfer'
+        ? `transfer from ${occurrence.account_name ?? 'an account'} to ${occurrence.counterparty_account_name ?? 'another account'}, not in the totals`
+        : occurrence.category_name ?? 'Uncategorized';
       const adjustment = occurrence.adjustment_action
         ? `, ${occurrence.adjustment_action} adjustment from ${occurrence.original_expected_date ?? occurrence.expected_date}`
         : '';
@@ -1120,11 +1119,14 @@ export function buildFinancialContext(): string {
     if (omitted.length > 0) {
       // Split by direction rather than netted: "$2,138.89 more" would hide that it is $2,176.72 of
       // income against $37.83 of bills, and the two answer different questions.
-      const omittedIn = omitted.reduce((sum, o) => (o.amount > 0 ? sum + o.amount : sum), 0);
-      const omittedOut = omitted.reduce((sum, o) => (o.amount < 0 ? sum - o.amount : sum), 0);
+      const counted = omitted.filter(inTotals);
+      const omittedIn = counted.reduce((sum, o) => (o.amount > 0 ? sum + o.amount : sum), 0);
+      const omittedOut = counted.reduce((sum, o) => (o.amount < 0 ? sum - o.amount : sum), 0);
+      const omittedTransfers = omitted.length - counted.length;
       lines.push(
         `    ...and ${omitted.length} more through ${omitted[omitted.length - 1].expected_date}: ` +
-          `${fmt(toDollars(omittedIn))} in, ${fmt(toDollars(omittedOut))} out. The totals above include these.`
+          `${fmt(toDollars(omittedIn))} in, ${fmt(toDollars(omittedOut))} out. The totals above include these` +
+          (omittedTransfers > 0 ? `, but not ${omittedTransfers} transfer or skipped occurrence${omittedTransfers === 1 ? '' : 's'} also listed.` : '.')
       );
     }
   }
