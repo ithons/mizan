@@ -41,3 +41,17 @@ test('a transfer is listed once, as the leg that left, unless only the arriving 
   assert.equal(list([]).total, 1, 'the count is of what is shown');
   assert.deepEqual(list([fid]).rows.map((row) => row.id), [into], 'the arriving leg stands in for the transfer on its own account');
 });
+
+test('a transfer whose leaving leg falls outside the list still shows by its arriving leg', () => {
+  const db = migratedTestDb();
+  const chase = insertAccount(db, { account_name: 'Chase Checking' });
+  const savings = insertAccount(db, { account_name: 'Savings', type: 'savings' });
+  const out = insertTransaction(db, { account_id: chase, date: '2026-09-30', amount: -50000, original_name: 'ONLINE TRANSFER TO SAV' });
+  const into = insertTransaction(db, { account_id: savings, date: '2026-10-01', amount: 50000, original_name: 'ONLINE TRANSFER FROM CHK' });
+  db.prepare("UPDATE transactions SET transfer_pair_id = 'xfer_2', transfer_status = 'confirmed' WHERE id IN (?, ?)").run(out, into);
+  const base = { limit: 50, page: 1, sortBy: 'date' as const, sortDir: 'desc' as const, accountIds: [], categoryIds: [], foldTransfers: true };
+
+  assert.deepEqual(listTransactions(db, { ...base, startDate: '2026-10-01', endDate: '2026-10-31' }).rows.map((r) => r.id), [into]);
+  assert.deepEqual(listTransactions(db, { ...base, search: 'FROM CHK' }).rows.map((r) => r.id), [into]);
+  assert.deepEqual(listTransactions(db, { ...base, startDate: '2026-09-01', endDate: '2026-10-31' }).rows.map((r) => r.id), [out]);
+});

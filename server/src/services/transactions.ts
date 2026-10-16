@@ -159,6 +159,21 @@ function transactionOrderBy(sortBy: TransactionSortBy, sortDir: TransactionSortD
   }
 }
 
+/** Filters a partner leg might fail where its row would not: with any of them on, both legs show. */
+function foldable(filters: TransactionListFilters): boolean {
+  return !filters.search
+    && filters.categoryIds.length === 0
+    && filters.ids === undefined
+    && !(filters.categorySources && filters.categorySources.length > 0)
+    && filters.uncategorized === undefined
+    && filters.duplicateStatus === undefined
+    && filters.transferStatus === undefined
+    && filters.reviewStatus === undefined
+    && filters.type === undefined
+    && filters.minAmount === undefined
+    && filters.maxAmount === undefined;
+}
+
 export function listTransactions(db: Database.Database, filters: TransactionListFilters): TransactionListResult {
   const conditions: string[] = [];
   const params: unknown[] = [];
@@ -253,16 +268,29 @@ export function listTransactions(db: Database.Database, filters: TransactionList
     conditions.push('t.duplicate_status = ?');
     params.push(filters.duplicateStatus);
   }
-  if (filters.foldTransfers) {
-    const partnerAccounts = filters.accountIds.length > 0
-      ? `AND partner.account_id IN (${filters.accountIds.map(() => '?').join(',')})`
-      : '';
+  if (filters.foldTransfers && foldable(filters)) {
+    // The arriving leg steps aside only for a partner this same list would show.
+    const partner: string[] = [];
+    const partnerParams: unknown[] = [];
+    if (filters.accountIds.length > 0) {
+      partner.push(`partner.account_id IN (${filters.accountIds.map(() => '?').join(',')})`);
+      partnerParams.push(...filters.accountIds);
+    }
+    if (filters.startDate) {
+      partner.push('partner.date >= ?');
+      partnerParams.push(filters.startDate);
+    }
+    if (filters.endDate) {
+      partner.push('partner.date <= ?');
+      partnerParams.push(filters.endDate);
+    }
     conditions.push(`NOT (t.amount > 0 AND t.transfer_pair_id IS NOT NULL AND EXISTS (
       SELECT 1 FROM transactions partner
       WHERE partner.transfer_pair_id = t.transfer_pair_id AND partner.id <> t.id AND partner.amount < 0
-      ${partnerAccounts}
+        AND partner.pending = 0
+      ${partner.map((c) => `AND ${c}`).join(' ')}
     ))`);
-    params.push(...filters.accountIds);
+    params.push(...partnerParams);
   }
   if (filters.transferStatus !== undefined) {
     conditions.push('t.transfer_status = ?');
