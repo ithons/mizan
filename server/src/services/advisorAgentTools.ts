@@ -5,6 +5,7 @@ import { readSafeToSpend } from './safeToSpend';
 import { getAnomalyInsights } from './anomalyInsights';
 import { createMemory, deleteMemory, listMemories } from './aiMemory';
 import { proposeChanges, MAX_PROPOSALS_PER_CALL } from './advisorProposals';
+import { listNotificationRules, listNotifications, notificationRuleToDollars, notificationToDollars } from './notifications';
 import { format, subMonths } from 'date-fns';
 import { explainMonth, fundingMix } from './monthStudies';
 import { cashRunway, checkAdjustments, compoundGrowth, emergencyFund, debtPayoff, goalTimeline, goalTimelineFor, projectFree } from './simulations';
@@ -23,6 +24,8 @@ const PAYLOAD_GUIDE = [
   'create_recurring_adjustment {recurring_id, original_date, action:"skip"|"snooze"|"adjust", adjusted_date?, adjusted_amount? (dollars), note?}.',
   'update_account {account_id, account_name?, is_hidden?, current_balance? (dollars, manual accounts only), statement_balance? (dollars owed), statement_due_date?}.',
   'set_manual_cost_basis {holding_id, manual_cost_basis (dollars) | null, note?}.',
+  'set_notification_rule {rule_id? (to edit), rule_kind, params, enabled?}: rule_kind and params are budget_threshold {category_id|null, percent}, large_transaction {min_amount (dollars), account_id|null, lookback_days}, bill_due {days_ahead}, low_balance {account_id|null, threshold (dollars)}, safe_to_spend_negative {}, sync_failed {include_partial}, goal_milestone {goal_id|null, milestones:[percents]}, unusual_spending {category_id|null, ratio, min_amount (dollars)}, recurring_amount_changed {}.',
+  'delete_notification_rule {rule_id}.',
 ].join(' ');
 
 export const AGENT_TOOLS: Anthropic.Tool[] = [
@@ -125,6 +128,16 @@ export const AGENT_TOOLS: Anthropic.Tool[] = [
     name: 'get_funding_mix',
     description: 'Per month: income from recurring patterns (pay), other income (one-off deposits, refunds), spending, money moved into investments, and the share of spending recurring income covers. Use for "is my pay covering my life", "what is funding my investing".',
     input_schema: { type: 'object', properties: { months: { type: 'integer', description: 'Complete months back, default 6, max 24.' } } },
+  },
+  {
+    name: 'get_notifications',
+    description: 'What the inbox has told the owner: title, body, severity, when, read or not. Use when they ask what they missed or what needs attention.',
+    input_schema: { type: 'object', properties: { unread_only: { type: 'boolean' }, limit: { type: 'integer', description: 'Default 30, max 200.' } } },
+  },
+  {
+    name: 'get_notification_rules',
+    description: 'The rules that decide what the owner is notified about, with ids, params (money in dollars) and whether each is on. Read before proposing a rule change.',
+    input_schema: { type: 'object', properties: {} },
   },
   {
     name: 'get_open_proposals',
@@ -272,6 +285,14 @@ export function runAgentTool(db: Database.Database, name: string, input: ToolInp
     case 'remember': return rememberTool(db, input);
     case 'forget': return forgetTool(db, input);
     case 'get_open_proposals': return getOpenProposalsTool(db);
+    case 'get_notifications':
+      return {
+        notifications: listNotifications(db, {
+          unreadOnly: input.unread_only === true,
+          limit: Math.min(Math.max(Math.round(num(input.limit, 30)), 1), 200),
+        }).map(notificationToDollars),
+      };
+    case 'get_notification_rules': return { rules: listNotificationRules(db).map(notificationRuleToDollars) };
     case 'run_simulation': return runSimulationTool(db, input);
     case 'explain_month': {
       const month = typeof input.month === 'string' && input.month ? input.month : format(subMonths(new Date(), 1), 'yyyy-MM');

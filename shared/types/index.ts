@@ -851,7 +851,9 @@ export type AdvisorDraftActionKind =
   | 'delete_budget'
   | 'create_goal'
   | 'dismiss_recurring'
-  | 'update_account';
+  | 'update_account'
+  | 'set_notification_rule'
+  | 'delete_notification_rule';
 
 export interface AdvisorDraftChange {
   field: string;
@@ -941,6 +943,18 @@ export type AdvisorDraftPayload =
       current_balance?: number;
       statement_balance?: number | null;
       statement_due_date?: string | null;
+    }
+  | {
+      /** Creates a rule, or edits `rule_id`'s params or enabled state. Money params in dollars. */
+      kind: 'set_notification_rule';
+      rule_id?: string;
+      rule_kind: string;
+      params: Record<string, unknown>;
+      enabled?: boolean;
+    }
+  | {
+      kind: 'delete_notification_rule';
+      rule_id: string;
     };
 
 export type AdvisorAutonomy = 'autonomous' | 'proposal_only';

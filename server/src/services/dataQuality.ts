@@ -175,6 +175,8 @@ const DRAFT_KIND_MOVES_REPORTS: Readonly<Record<AdvisorDraftActionKind, boolean>
   create_goal: false,
   dismiss_recurring: false,
   update_account: false,
+  set_notification_rule: false,
+  delete_notification_rule: false,
 };
 
 function reviewQueueCounts(reviewSummary: TransactionReviewSummary): { reports: Counted[]; other: Counted[] } {

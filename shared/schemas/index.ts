@@ -273,6 +273,14 @@ export const AdvisorDraftPayloadSchema = z.discriminatedUnion('kind', [
     statement_balance: z.number().nonnegative().nullable().optional(),
     statement_due_date: calendarDate.nullable().optional(),
   }),
+  z.object({
+    kind: z.literal('set_notification_rule'),
+    rule_id: z.string().min(1).optional(),
+    rule_kind: z.string().min(1),
+    params: z.record(z.unknown()),
+    enabled: z.boolean().optional(),
+  }),
+  z.object({ kind: z.literal('delete_notification_rule'), rule_id: id }),
 ]);
 
 // Top-level draft object as emitted by the worker LLM. label/summary/route/changes/

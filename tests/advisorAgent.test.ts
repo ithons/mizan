@@ -111,3 +111,29 @@ test('the waiting list holds open proposals only, newest first', () => {
   confirmAdvisorDraftsByIds(db, [c.id]);
   assert.deepEqual(listOpenDrafts(db).map((draft) => draft.id), [a.id]);
 });
+
+test('the advisor can set a notification rule from dollars, and a bad one is refused with nothing written', () => {
+  const db = migratedTestDb();
+  const before = (db.prepare('SELECT COUNT(*) AS n FROM notification_rules').get() as { n: number }).n;
+  const made = confirmOne(db, { kind: 'set_notification_rule', rule_kind: 'large_transaction', params: { min_amount: 250, account_id: null, lookback_days: 7 }, enabled: true });
+  assert.equal(made.status, 'applied');
+  const rule = db.prepare("SELECT params, created_by, enabled FROM notification_rules WHERE created_by = 'advisor'").get() as { params: string; created_by: string; enabled: number };
+  assert.equal(JSON.parse(rule.params).min_amount, 25000);
+  assert.equal(rule.enabled, 1);
+
+  const bad = confirmOne(db, { kind: 'set_notification_rule', rule_kind: 'budget_threshold', params: { percent: 'lots' } });
+  assert.equal(bad.status, 'skipped');
+  assert.equal((db.prepare('SELECT COUNT(*) AS n FROM notification_rules').get() as { n: number }).n, before + 1);
+
+  const id = (db.prepare("SELECT id FROM notification_rules WHERE created_by = 'advisor'").get() as { id: string }).id;
+  assert.equal(confirmOne(db, { kind: 'delete_notification_rule', rule_id: id }).status, 'applied');
+  assert.equal((db.prepare('SELECT COUNT(*) AS n FROM notification_rules').get() as { n: number }).n, before);
+});
+
+test('the advisor reads rules and the inbox with money in dollars', () => {
+  const db = migratedTestDb();
+  confirmOne(db, { kind: 'set_notification_rule', rule_kind: 'low_balance', params: { account_id: null, threshold: 500 } });
+  const rules = (runAdvisorTool(db, 'get_notification_rules', {}) as { rules: Array<{ kind: string; params: { threshold?: number } }> }).rules;
+  assert.equal(rules.find((rule) => rule.kind === 'low_balance' && rule.params.threshold === 500)?.params.threshold, 500);
+  assert.deepEqual(runAdvisorTool(db, 'get_notifications', { unread_only: true }), { notifications: [] });
+});

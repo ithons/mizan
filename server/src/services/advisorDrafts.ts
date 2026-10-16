@@ -48,6 +48,7 @@ import { budgetIdForCategory, deleteBudget } from './budgets';
 import { createGoal } from './goals';
 import { dismissRecurringPattern } from './recurring';
 import { updateAccount } from './accounts';
+import { deleteNotificationRule, notificationParamsFromDollars, upsertNotificationRule, type UpsertNotificationRuleInput } from './notifications';
 
 interface CategoryRow {
   id: string;
@@ -956,6 +957,29 @@ function confirmUpdateAccount(db: Database.Database, payload: Extract<AdvisorDra
     throw new Error(updated.reason === 'not_found' ? 'Account not found' : 'Only a manual account\'s balance can be set by hand');
   }
   return { changed: updated.balanceChanged || Object.keys(fields).length > 0 ? 1 : 0, result: { account_id: accountId } };
+}
+
+function confirmSetNotificationRule(db: Database.Database, payload: Extract<AdvisorDraftPayload, { kind: 'set_notification_rule' }>): {
+  changed: number;
+  result: unknown;
+} {
+  const outcome = upsertNotificationRule(db, {
+    kind: payload.rule_kind,
+    params: notificationParamsFromDollars(payload.rule_kind, payload.params),
+    id: payload.rule_id,
+    enabled: payload.enabled,
+    created_by: 'advisor',
+  } as UpsertNotificationRuleInput);
+  if (!outcome.ok) throw new Error(outcome.error);
+  return { changed: 1, result: { rule_id: outcome.rule.id } };
+}
+
+function confirmDeleteNotificationRule(db: Database.Database, payload: Extract<AdvisorDraftPayload, { kind: 'delete_notification_rule' }>): {
+  changed: number;
+  result: unknown;
+} {
+  if (!deleteNotificationRule(db, payload.rule_id)) throw new Error('No notification rule with that id');
+  return { changed: 1, result: { rule_id: payload.rule_id } };
 }
 
 function confirmGoalTarget(db: Database.Database, payload: Extract<AdvisorDraftPayload, { kind: 'update_goal_target' }>): {
@@ -1885,6 +1909,10 @@ export function confirmAdvisorDraft(
         result = confirmDismissRecurring(db, draftAction.payload); break;
       case 'update_account':
         result = confirmUpdateAccount(db, draftAction.payload); break;
+      case 'set_notification_rule':
+        result = confirmSetNotificationRule(db, draftAction.payload); break;
+      case 'delete_notification_rule':
+        result = confirmDeleteNotificationRule(db, draftAction.payload); break;
       default:
         throw new Error(`Unhandled draft kind: ${(draftAction.payload as { kind: string }).kind}`);
     }

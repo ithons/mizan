@@ -138,6 +138,8 @@ const AUTONOMY_PHRASE: Record<AdvisorDraftActionKind, string> = {
   create_goal: 'creating a goal',
   dismiss_recurring: 'dismissing a recurring item',
   update_account: 'renaming, hiding or setting the balance of an account',
+  set_notification_rule: 'setting what you are notified about',
+  delete_notification_rule: 'removing a notification rule',
 };
 
 /**

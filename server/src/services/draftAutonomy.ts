@@ -201,6 +201,18 @@ export const DRAFT_KIND_AUTONOMY: Readonly<Record<AdvisorDraftActionKind, DraftA
     argument: 'Names, visibility and hand-entered balances are the owner\'s own settings.',
   },
 
+  set_notification_rule: {
+    autonomy: 'proposal_only',
+    fails: ['observation', 'exact_inverse'],
+    argument: 'What the owner wants to be told about is their choice, and an edit keeps no record of the params it replaced.',
+  },
+
+  delete_notification_rule: {
+    autonomy: 'proposal_only',
+    fails: ['exact_inverse'],
+    argument: 'Deleting a rule loses its params, and the owner may have set them.',
+  },
+
 };
 
 /**

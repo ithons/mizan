@@ -19,6 +19,8 @@ const ROUTE_FOR_KIND: Readonly<Record<AdvisorDraftActionKind, string>> = {
   set_manual_cost_basis: '/investments',
   set_sector_metadata: '/investments',
   update_account: '/accounts',
+  set_notification_rule: '/settings?section=notifications',
+  delete_notification_rule: '/settings?section=notifications',
 };
 
 export const MAX_PROPOSALS_PER_CALL = 20;
