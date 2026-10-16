@@ -514,7 +514,7 @@ export function Ledger() {
         title="Ledger"
         sub={
           view === 'scheduled' ? (
-            forecastQ.isSuccess ? (
+            forecastQ.data !== undefined ? (
               <>
                 <span className="tabular-nums">{occurrences.filter((o) => o.adjustment_action !== 'skip').length}</span> on the
                 schedule
@@ -711,7 +711,7 @@ export function Ledger() {
       {/* ── Ahead of the rule ──────────────────────────────────────────────── */}
       {view === 'scheduled' && forecastQ.isPending && <SkeletonRows rows={6} />}
 
-      {view === 'scheduled' && forecastQ.isSuccess && (
+      {view === 'scheduled' && forecastQ.data !== undefined && (
         <>
           <SectionLabel
             summary={
@@ -791,38 +791,37 @@ export function Ledger() {
               Nothing scheduled in the next 30 days. Recurring charges appear here once mizān has seen enough of them.
             </p>
           )}
-
-          {unscheduledCandidates.length > 0 && (
-            <div className="mt-4 border-t border-line pt-3">
-              <SectionLabel className="mb-1">Might repeat, not confirmed</SectionLabel>
-              {unscheduledCandidates.map((p) => (
-                <div key={p.id} className="flex flex-wrap items-baseline gap-x-4 gap-y-1 py-1.5">
-                  <span className="text-body-lg text-ink">{p.merchant_name}</span>
-                  <span className="text-note text-muted-2">
-                    {p.frequency} · seen {p.transaction_count} times · {formatCurrency(p.average_amount)}
-                  </span>
-                  <button
-                    type="button"
-                    disabled={scheduleBusy}
-                    onClick={() => confirmPattern.mutate(p.id)}
-                    className="border-b border-ink pb-0.5 text-body text-ink transition-opacity hover:opacity-75 disabled:opacity-40"
-                  >
-                    Confirm it repeats
-                  </button>
-                  <button
-                    type="button"
-                    disabled={scheduleBusy}
-                    onClick={() => dismissPattern.mutate(p.id)}
-                    className="text-body text-muted transition-colors hover:text-ink disabled:opacity-40"
-                  >
-                    Not recurring
-                  </button>
-                </div>
-              ))}
-            </div>
-          )}
-
         </>
+      )}
+
+      {view === 'scheduled' && !forecastQ.isPending && unscheduledCandidates.length > 0 && (
+        <div className="mt-4 border-t border-line pt-3">
+          <SectionLabel className="mb-1">Might repeat, not confirmed</SectionLabel>
+          {unscheduledCandidates.map((p) => (
+            <div key={p.id} className="flex flex-wrap items-baseline gap-x-4 gap-y-1 py-1.5">
+              <span className="text-body-lg text-ink">{p.merchant_name}</span>
+              <span className="text-note text-muted-2">
+                {p.frequency} · seen {p.transaction_count} times · {formatCurrency(p.average_amount)}
+              </span>
+              <button
+                type="button"
+                disabled={scheduleBusy}
+                onClick={() => confirmPattern.mutate(p.id)}
+                className="border-b border-ink pb-0.5 text-body text-ink transition-opacity hover:opacity-75 disabled:opacity-40"
+              >
+                Confirm it repeats
+              </button>
+              <button
+                type="button"
+                disabled={scheduleBusy}
+                onClick={() => dismissPattern.mutate(p.id)}
+                className="text-body text-muted transition-colors hover:text-ink disabled:opacity-40"
+              >
+                Not recurring
+              </button>
+            </div>
+          ))}
+        </div>
       )}
 
       {/* ── Behind the rule ────────────────────────────────────────────────── */}
