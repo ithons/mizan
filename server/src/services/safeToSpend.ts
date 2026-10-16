@@ -113,7 +113,7 @@ export function computeSafeToSpend(
 
   const forecast = buildRecurringForecast(db, forecastDays);
   const upcomingBills = Math.abs(forecast.bills);
-  const expectedInflows = inflowsIntoPool(db, forecast.occurrences, pool);
+  const expectedInflows = inflowsIntoPool(db, forecast.occurrences, pool, liabilities);
   const recurringTransfers = transfersLeavingPool(forecast.occurrences, pool, liabilities);
   const estimatedUnbudgeted = unbudgetedPace(db, inputs.budgets ?? [], forecastDays);
 
@@ -184,11 +184,12 @@ export function computeSafeToSpend(
   };
 }
 
-/** Forecast income, less what its pattern last paid into an account outside the pool, such as a dividend into a brokerage. */
+/** Forecast income, less what its pattern last paid into an asset outside the pool, such as a dividend into a brokerage; a card credit still counts. */
 function inflowsIntoPool(
   db: Database.Database,
   occurrences: readonly RecurringForecastOccurrence[],
-  pool: Set<string>
+  pool: Set<string>,
+  liabilities: Set<string>
 ): number {
   const landing = db.prepare(`
     SELECT account_id FROM transactions WHERE recurring_id = ? ORDER BY date DESC, id DESC LIMIT 1
@@ -196,7 +197,7 @@ function inflowsIntoPool(
   return occurrences.reduce((sum, occurrence) => {
     if (occurrence.kind === 'transfer' || occurrence.adjustment_action === 'skip' || occurrence.amount <= 0) return sum;
     const account = (landing.get(occurrence.pattern_id) as { account_id: string } | undefined)?.account_id;
-    return account !== undefined && !pool.has(account) ? sum : sum + occurrence.amount;
+    return account !== undefined && !pool.has(account) && !liabilities.has(account) ? sum : sum + occurrence.amount;
   }, 0);
 }
 
