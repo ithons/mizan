@@ -102,6 +102,7 @@ export const ROW_REPAIR_MIGRATIONS: readonly string[] = [
   '072_notifications.sql',
   '073_income_late_rule.sql',
   '074_account_shortfall_rule.sql',
+  '075_card_payment_missing_rule.sql',
 ];
 
 function migrationStatements(file: string): string[] {

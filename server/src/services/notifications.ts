@@ -40,6 +40,7 @@ export const NOTIFICATION_PARAM_MONEY_FIELDS: Readonly<Record<NotificationRuleKi
   recurring_amount_changed: [],
   income_late: [],
   account_shortfall: [],
+  card_payment_missing: [],
 };
 
 /** Money fields inside each kind's notification payload. */
@@ -55,6 +56,7 @@ export const NOTIFICATION_PAYLOAD_MONEY_FIELDS: Readonly<Record<NotificationRule
   recurring_amount_changed: ['amount', 'changed_from'],
   income_late: ['amount'],
   account_shortfall: ['balance', 'balance_now'],
+  card_payment_missing: ['amount', 'owed'],
 };
 
 export type UpsertNotificationRuleInput = NotificationRuleSpec & {
@@ -603,6 +605,18 @@ const recurringAmountChanged: Evaluator<'recurring_amount_changed'> = (ctx) => {
   });
 };
 
+/** The 95th percentile of how far a pattern's gaps strayed from their median, or null under three postings. */
+function usualStrayDays(db: Database.Database, patternId: string): number | null {
+  const dates = (db.prepare('SELECT date FROM transactions WHERE recurring_id = ? AND pending = 0 ORDER BY date')
+    .all(patternId) as Array<{ date: string }>).map((row) => parseISO(row.date).getTime());
+  if (dates.length < 3) return null;
+  const gaps = dates.slice(1).map((time, i) => Math.round((time - dates[i]) / 86_400_000));
+  const sortedGaps = [...gaps].sort((a, b) => a - b);
+  const medianGap = sortedGaps[Math.floor(sortedGaps.length / 2)];
+  const strays = gaps.map((gap) => Math.abs(gap - medianGap)).sort((a, b) => a - b);
+  return strays[Math.min(strays.length - 1, Math.floor(strays.length * 0.95))];
+}
+
 /**
  * Income past its expected date by more than its own timing usually wanders: the 95th percentile
  * of how far its past gaps strayed from their median gap, and never less than `min_days_late`.
@@ -615,20 +629,14 @@ const incomeLate: Evaluator<'income_late'> = (ctx, params) => {
     WHERE rp.is_active = 1 AND rp.dismissed_at IS NULL AND rp.kind = 'flow' AND rp.next_expected < ?
       AND (c.is_income = 1 OR (SELECT AVG(t.amount) FROM transactions t WHERE t.recurring_id = rp.id) > 0)
   `).all(today) as Array<{ id: string; merchant_name: string; next_expected: string; average_amount: number }>;
-  const datesOf = ctx.db.prepare('SELECT date FROM transactions WHERE recurring_id = ? AND pending = 0 ORDER BY date');
   const adjustmentOf = ctx.db.prepare('SELECT action, adjusted_date FROM recurring_occurrence_adjustments WHERE recurring_id = ? AND original_date = ?');
   return patterns.flatMap((pattern) => {
     const adjustment = adjustmentOf.get(pattern.id, pattern.next_expected) as { action: string; adjusted_date: string | null } | undefined;
     if (adjustment?.action === 'skip') return [];
     const expectedOn = adjustment?.adjusted_date ?? pattern.next_expected;
     if (expectedOn >= today) return [];
-    const dates = (datesOf.all(pattern.id) as Array<{ date: string }>).map((row) => parseISO(row.date).getTime());
-    if (dates.length < 3) return [];
-    const gaps = dates.slice(1).map((time, i) => Math.round((time - dates[i]) / 86_400_000));
-    const sortedGaps = [...gaps].sort((a, b) => a - b);
-    const medianGap = sortedGaps[Math.floor(sortedGaps.length / 2)];
-    const strays = gaps.map((gap) => Math.abs(gap - medianGap)).sort((a, b) => a - b);
-    const usualStray = strays[Math.min(strays.length - 1, Math.floor(strays.length * 0.95))];
+    const usualStray = usualStrayDays(ctx.db, pattern.id);
+    if (usualStray === null) return [];
     const tolerance = Math.max(params.min_days_late, usualStray);
     const daysLate = Math.round((parseISO(today).getTime() - parseISO(expectedOn).getTime()) / 86_400_000);
     if (daysLate <= tolerance) return [];
@@ -659,6 +667,42 @@ const accountShortfall: Evaluator<'account_shortfall'> = (ctx, params) =>
     };
   });
 
+const cardPaymentMissing: Evaluator<'card_payment_missing'> = (ctx, params) => {
+  const today = format(ctx.now, 'yyyy-MM-dd');
+  const patterns = ctx.db.prepare(`
+    SELECT rp.id, rp.next_expected, rp.last_seen, rp.average_amount, card.id AS card_id, card.account_name AS card_name,
+           card.current_balance AS owed, src.account_name AS from_name
+    FROM recurring_patterns rp
+    JOIN accounts card ON card.id = rp.counterparty_account_id AND card.is_liability = 1 AND card.type <> 'closed'
+    LEFT JOIN accounts src ON src.id = rp.account_id
+    WHERE rp.kind = 'transfer' AND rp.is_active = 1 AND rp.dismissed_at IS NULL AND rp.next_expected < ? AND card.current_balance > 0
+  `).all(today) as Array<{ id: string; next_expected: string; last_seen: string; average_amount: number; card_id: string; card_name: string; owed: number; from_name: string | null }>;
+  const adjustmentOf = ctx.db.prepare('SELECT action, adjusted_date FROM recurring_occurrence_adjustments WHERE recurring_id = ? AND original_date = ?');
+  const paidSince = ctx.db.prepare(`
+    SELECT 1 FROM transactions WHERE account_id = ? AND amount > 0 AND date > ?
+      AND (transfer_pair_id IS NOT NULL OR category_id IN (SELECT id FROM categories WHERE id = 'cat_xfer' OR parent_id = 'cat_xfer'))
+    LIMIT 1
+  `);
+  return patterns.flatMap((pattern) => {
+    const adjustment = adjustmentOf.get(pattern.id, pattern.next_expected) as { action: string; adjusted_date: string | null } | undefined;
+    if (adjustment?.action === 'skip') return [];
+    const expectedOn = adjustment?.adjusted_date ?? pattern.next_expected;
+    if (expectedOn >= today || paidSince.get(pattern.card_id, pattern.last_seen)) return [];
+    const usualStray = usualStrayDays(ctx.db, pattern.id) ?? 0;
+    const daysLate = Math.round((parseISO(today).getTime() - parseISO(expectedOn).getTime()) / 86_400_000);
+    if (daysLate <= Math.max(params.min_days_late, usualStray)) return [];
+    const amount = Math.abs(pattern.average_amount);
+    return [{
+      dedupe_key: `card_payment_missing:${pattern.id}:${expectedOn}`,
+      title: `No ${pattern.card_name} payment since ${shortDate(pattern.last_seen)}`,
+      body: `The usual ${money(amount)} payment${pattern.from_name ? ` from ${pattern.from_name}` : ''} was expected on ${shortDate(expectedOn)}, ${daysLate} days ago, and nothing has paid the card since. It owes ${money(pattern.owed)}.`,
+      severity: 'warning' as const,
+      payload: { pattern_id: pattern.id, card_id: pattern.card_id, expected_on: expectedOn, days_late: daysLate, amount, owed: pattern.owed },
+      route: SCHEDULED_ROUTE,
+    }];
+  });
+};
+
 const EVALUATORS: { [K in NotificationRuleKind]: Evaluator<K> } = {
   budget_threshold: budgetThreshold,
   large_transaction: largeTransaction,
@@ -671,6 +715,7 @@ const EVALUATORS: { [K in NotificationRuleKind]: Evaluator<K> } = {
   recurring_amount_changed: recurringAmountChanged,
   income_late: incomeLate,
   account_shortfall: accountShortfall,
+  card_payment_missing: cardPaymentMissing,
 };
 
 function candidatesFor(ctx: EvaluationContext, spec: NotificationRuleSpec): Candidate[] {

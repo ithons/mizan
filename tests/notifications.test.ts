@@ -440,3 +440,42 @@ test('an overdue payment keys its shortfall on the date it was due, so it does n
   const { db, checking } = shortfallFixture(100000, 130000, -3);
   assert.deepEqual(fires(db), [`account_shortfall:${checking}:rp_card:${localDaysFromToday(-3)}`]);
 });
+
+function missedCardFixture(daysLate: number, owed = 311174) {
+  const { db } = withOnlyRule({ kind: 'card_payment_missing', params: { min_days_late: 3 } });
+  const checking = insertAccount(db, { account_name: 'Checking', type: 'checking', current_balance: 500000 });
+  const card = insertAccount(db, { account_name: 'Sapphire', type: 'credit', is_liability: 1, current_balance: owed });
+  const lastSeen = localDaysFromToday(-daysLate - 30);
+  db.prepare(`INSERT INTO recurring_patterns (id, merchant_name, average_amount, frequency, last_seen, next_expected,
+      is_active, is_confirmed, transaction_count, created_at, updated_at, kind, account_id, counterparty_account_id)
+    VALUES ('rp_card', 'Checking to Sapphire', -278664, 'monthly', ?, ?, 1, 1, 3, ?, ?, 'transfer', ?, ?)`)
+    .run(lastSeen, localDaysFromToday(-daysLate), TEST_NOW, TEST_NOW, checking, card);
+  for (const back of [daysLate + 30, daysLate + 60, daysLate + 91]) {
+    const id = insertTransaction(db, { account_id: checking, date: localDaysFromToday(-back), amount: -278664 });
+    db.prepare('UPDATE transactions SET recurring_id = ? WHERE id = ?').run('rp_card', id);
+  }
+  return { db, card, checking };
+}
+
+test('card_payment_missing warns once when a card payment is well past due and nothing paid the card', () => {
+  const { db, card } = missedCardFixture(5);
+  insertTransaction(db, { account_id: card, date: localDaysFromToday(-10), amount: 249581, category_id: 'cat_shop_electronics' });
+  const created = evaluateNotifications(db).created;
+  assert.deepEqual(created.map((n) => n.dedupe_key), [`card_payment_missing:rp_card:${localDaysFromToday(-5)}`]);
+  assert.match(created[0].body, /^The usual \$2,786\.64 payment from Checking was expected on .*, 5 days ago, and nothing has paid the card since\. It owes \$3,111\.74\.$/);
+  assertIdempotent(db);
+});
+
+test('HEALTHY: card_payment_missing is silent when the card was paid, owes nothing, is barely late, or the payment was skipped', () => {
+  const paid = missedCardFixture(5);
+  insertTransaction(paid.db, { account_id: paid.card, date: localDaysFromToday(-2), amount: 100000, category_id: 'cat_xfer_in' });
+  assert.deepEqual(fires(paid.db), []);
+
+  assert.deepEqual(fires(missedCardFixture(5, 0).db), []);
+  assert.deepEqual(fires(missedCardFixture(2).db), []);
+
+  const skipped = missedCardFixture(5);
+  skipped.db.prepare(`INSERT INTO recurring_occurrence_adjustments (id, recurring_id, original_date, action, adjusted_date, created_at, updated_at)
+    VALUES ('adj', 'rp_card', ?, 'skip', NULL, ?, ?)`).run(localDaysFromToday(-5), TEST_NOW, TEST_NOW);
+  assert.deepEqual(fires(skipped.db), []);
+});

@@ -1894,6 +1894,7 @@ export const NOTIFICATION_RULE_KINDS = [
   'recurring_amount_changed',
   'income_late',
   'account_shortfall',
+  'card_payment_missing',
 ] as const;
 
 export type NotificationRuleKind = (typeof NOTIFICATION_RULE_KINDS)[number];
@@ -1929,6 +1930,8 @@ export interface NotificationRuleParamsByKind {
   income_late: { min_days_late: number };
   /** A cash account the schedule takes below zero within `days_ahead`. */
   account_shortfall: { days_ahead: number };
+  /** A scheduled card payment past due by more than `min_days_late` and its usual timing, with nothing paid to the card since. */
+  card_payment_missing: { min_days_late: number };
 }
 
 export type NotificationRuleSpec = {
