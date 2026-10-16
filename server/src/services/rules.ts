@@ -74,6 +74,7 @@ interface TransactionRuleCandidate {
   merchant_name: string | null;
   original_name: string;
   category_id: string | null;
+  amount: number;
 }
 
 interface RawMerchantRuleSuggestion {
@@ -687,6 +688,11 @@ export function merchantNamesClaimedByRule(
     });
 }
 
+/** Transfer In on money leaving an account, or Transfer Out on money arriving, is never right. */
+export function contradictsTransferDirection(categoryId: string, amount: number): boolean {
+  return (categoryId === 'cat_xfer_in' && amount < 0) || (categoryId === 'cat_xfer_out' && amount > 0);
+}
+
 export function applyMerchantRulesToExistingTransactions(
   db: Database.Database,
   options: { onlyUncategorized?: boolean; skipManual?: boolean; provenance?: CategoryProvenance } = {}
@@ -706,7 +712,7 @@ export function applyMerchantRulesToExistingTransactions(
   if (options.skipManual) clauses.push("manually_categorized = 0 AND COALESCE(category_source, '') <> 'human'");
   const conditions = clauses.length > 0 ? `WHERE ${clauses.join(' AND ')}` : '';
   const transactions = db.prepare(`
-    SELECT id, merchant_name, original_name, category_id
+    SELECT id, merchant_name, original_name, category_id, amount
     FROM transactions
     ${conditions}
   `).all() as Array<{
@@ -714,6 +720,7 @@ export function applyMerchantRulesToExistingTransactions(
     merchant_name: string | null;
     original_name: string;
     category_id: string | null;
+    amount: number;
   }>;
 
   const now = new Date().toISOString();
@@ -734,6 +741,7 @@ export function applyMerchantRulesToExistingTransactions(
     );
 
     if (!rule || rule.category_id === transaction.category_id) continue;
+    if (contradictsTransferDirection(rule.category_id, transaction.amount)) continue;
     if (!known.has(rule.category_id)) {
       staleRulePatterns.add(rule.pattern);
       continue;
@@ -843,7 +851,7 @@ export function countMerchantRuleImpact(
     : 'WHERE category_id IS NULL';
 
   const transactions = db.prepare(`
-    SELECT id, merchant_name, original_name, category_id
+    SELECT id, merchant_name, original_name, category_id, amount
     FROM transactions
     ${scanWhere}
   `).all() as TransactionRuleCandidate[];
@@ -859,6 +867,7 @@ export function countMerchantRuleImpact(
     const merchantName = transactionMerchantName(transaction);
     if (!merchantMatchesRulePattern(merchantName, normalizedPattern)) continue;
     if (transaction.category_id === categoryId) continue;
+    if (contradictsTransferDirection(categoryId, transaction.amount)) continue;
     const holder = higherPrecedenceHolder(outranking, merchantName);
     if (holder && holder.category_id !== categoryId) continue;
     count += 1;
@@ -885,7 +894,7 @@ export function applyMerchantRuleToMatchingTransactions(
     : 'WHERE category_id IS NULL';
 
   const transactions = db.prepare(`
-    SELECT id, merchant_name, original_name, category_id
+    SELECT id, merchant_name, original_name, category_id, amount
     FROM transactions
     ${scanWhere}
   `).all() as TransactionRuleCandidate[];
@@ -906,6 +915,7 @@ export function applyMerchantRuleToMatchingTransactions(
     const merchantName = transactionMerchantName(transaction);
     if (!merchantMatchesRulePattern(merchantName, normalizedPattern)) continue;
     if (transaction.category_id === categoryId) continue; // already correct
+    if (contradictsTransferDirection(categoryId, transaction.amount)) continue;
     const holder = higherPrecedenceHolder(outranking, merchantName);
     if (holder && holder.category_id !== categoryId) continue;
     writes.push({

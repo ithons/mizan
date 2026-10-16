@@ -9,6 +9,7 @@ import type {
 } from '../../../shared/types';
 import {
   applyMerchantRuleToMatchingTransactions,
+  contradictsTransferDirection,
   countMerchantRuleImpact,
   retireMerchantRule,
   suggestMerchantRules,
@@ -831,11 +832,17 @@ function confirmCategorizeTransaction(
 } {
   const category = assertCategory(db, payload.category_id);
   const transaction = db.prepare(`
-    SELECT id, merchant_name, original_name
+    SELECT id, merchant_name, original_name, amount
     FROM transactions
     WHERE id = ?
-  `).get(payload.transaction_id) as { id: string; merchant_name: string | null; original_name: string } | undefined;
+  `).get(payload.transaction_id) as { id: string; merchant_name: string | null; original_name: string; amount: number } | undefined;
   if (!transaction) throw new Error('Transaction not found');
+  if (contradictsTransferDirection(payload.category_id, transaction.amount)) {
+    throw new DraftRefusedError(
+      'contradicts_direction',
+      `${category.name} cannot hold money ${transaction.amount < 0 ? 'leaving' : 'arriving in'} an account.`
+    );
+  }
 
   // A hand-made choice is never overwritten by the model. `applyMerchantRulesToExistingTransactions`
   // has always had a skipManual guard; this path had none, and the chat tool accepts up to 200
