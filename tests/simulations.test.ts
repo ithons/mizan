@@ -164,3 +164,14 @@ test('the daily allowance appears only when something is free and income is ahea
   insertAccount(broke, { type: 'credit', is_liability: 1, current_balance: 50000 });
   assert.equal(readSafeToSpend(broke).per_day_until_next_income, null);
 });
+
+test('income expected already but not posted is named when a projection counts it', () => {
+  withLedger((db) => {
+    const healthy = projectFree(db, 30) as { overdue_income_counted?: unknown };
+    assert.equal(healthy.overdue_income_counted, undefined, 'HEALTHY: nothing named when pay is on time');
+    db.prepare("UPDATE recurring_patterns SET next_expected = ? WHERE merchant_name LIKE '%payroll%'").run(day(3));
+    const late = projectFree(db, 30) as { overdue_income_counted?: Array<{ name: string; expected_on: string }>; assumptions: string[] };
+    assert.ok(late.overdue_income_counted && late.overdue_income_counted.some((item) => item.expected_on === day(3)));
+    assert.ok(late.assumptions.some((line) => line.includes('has not posted')));
+  });
+});

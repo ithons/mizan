@@ -116,14 +116,20 @@ export function projectFree(db: Database.Database, days: number, adjustments: Pr
     lowest_on: curve.lowestDate,
     first_short_on: curve.firstNegativeDate,
   });
+  const todayKey = ymd(today);
+  const overdue = sheet.scheduled.filter((item) => item.kind === 'income' && item.date < todayKey);
   return {
     days,
     baseline: dollars(baseline),
+    ...(overdue.length > 0 ? {
+      overdue_income_counted: overdue.map((item) => ({ name: item.label, expected_on: item.date, amount: toDollars(item.cents) })),
+    } : {}),
     ...(adjustments.length > 0 ? { scenario: dollars(scenario), change_at_end: toDollars(scenario.end - baseline.end) } : {}),
     assumptions: [
       'Card balances, budgets still unspent and goal earmarks are claimed on day 0, so "short" means below those claims, not an overdrawn account.',
       'Scheduled income, bills and transfers land on their forecast dates.',
       `Spending outside budgets runs at its trailing ${sheet.unbudgetedBasisDays}-day pace, spread evenly.`,
+      ...(overdue.length > 0 ? ['Income that was expected already but has not posted is counted as arriving today; see overdue_income_counted.'] : []),
     ],
   };
 }
