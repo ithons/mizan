@@ -49,6 +49,7 @@ const TOOL_LABELS: Record<string, string> = {
   run_simulation: 'Running the numbers…',
   explain_month: 'Comparing the month with the ones before…',
   get_funding_mix: 'Working out what is paying for what…',
+  get_account_coverage: 'Checking each account can meet what is scheduled…',
   get_notifications: 'Reading your inbox…',
   get_notification_rules: 'Checking what you are notified about…',
 };

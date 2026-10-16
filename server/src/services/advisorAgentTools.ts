@@ -8,6 +8,7 @@ import { proposeChanges, MAX_PROPOSALS_PER_CALL } from './advisorProposals';
 import { listNotificationRules, listNotifications, notificationRuleToDollars, notificationToDollars } from './notifications';
 import { format, subMonths } from 'date-fns';
 import { explainMonth, fundingMix } from './monthStudies';
+import { accountCoverage } from './accountCoverage';
 import { cashRunway, checkAdjustments, compoundGrowth, emergencyFund, projectFreeBand, debtPayoff, goalTimeline, goalTimelineFor, projectFree } from './simulations';
 
 type ToolInput = Record<string, unknown>;
@@ -128,6 +129,11 @@ export const AGENT_TOOLS: Anthropic.Tool[] = [
     name: 'get_funding_mix',
     description: 'Per month: income from recurring patterns (pay), other income (one-off deposits, refunds), spending, money moved into investments, and the share of spending recurring income covers. Use for "is my pay covering my life", "what is funding my investing".',
     input_schema: { type: 'object', properties: { months: { type: 'integer', description: 'Complete months back, default 6, max 24.' } } },
+  },
+  {
+    name: 'get_account_coverage',
+    description: 'Each checking, savings and cash account walked forward through the scheduled income, bills and transfers that touch it (lowest point, first day below zero), and each card judged against the account its next scheduled payment comes from: covered, short, or unjudged when nothing schedules a payment. Use for "can I pay my cards", "will checking overdraw", "do I need to move money from savings".',
+    input_schema: { type: 'object', properties: { days: { type: 'integer', description: 'Window, default 45, max 120.' } } },
   },
   {
     name: 'get_notifications',
@@ -301,6 +307,7 @@ export function runAgentTool(db: Database.Database, name: string, input: ToolInp
       const month = typeof input.month === 'string' && input.month ? input.month : format(subMonths(new Date(), 1), 'yyyy-MM');
       return explainMonth(db, month);
     }
+    case 'get_account_coverage': return accountCoverage(db, Math.min(Math.max(Math.round(num(input.days, 45)), 1), 120));
     case 'get_funding_mix': return fundingMix(db, Math.min(Math.max(Math.round(num(input.months, 6)), 1), 24));
     default: return undefined;
   }
