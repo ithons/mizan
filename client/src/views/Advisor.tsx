@@ -85,7 +85,7 @@ function ConversationRow({
       <button type="button" onClick={onOpen} className="block w-full truncate text-left text-body text-ink">
         {conversation.title || 'Untitled chat'}
       </button>
-      <div className="absolute inset-y-0 right-1 hidden items-center gap-2 rounded-lg bg-well pl-2 pr-1 text-micro text-muted group-hover:flex focus-within:flex">
+      <div className="absolute inset-y-0 right-1 hidden items-center gap-2 rounded-lg bg-well pl-2 pr-1 text-micro text-muted group-hover:flex group-focus-within:flex">
         <button type="button" onClick={() => { setTitle(conversation.title); setEditing(true); }} className="hover:text-ink">
           Rename
         </button>
