@@ -226,7 +226,8 @@ function inflowsIntoPool(
  * Money the schedule moves across the pool's edge. A card counted in the card claims is already
  * claimed in full, so a payment to it from the pool or from another card changes nothing; one from
  * outside the pool relieves that claim, never by more than the card owes, and is returned apart
- * from the transfers. A card the claims leave out is just another account outside the pool.
+ * from the transfers. Paying a card the claims leave out is money leaving the pool. Money from any
+ * card is borrowed, so a transfer from a card never adds to what is free.
  */
 function transfersAcrossPool(
   occurrences: readonly RecurringForecastOccurrence[],

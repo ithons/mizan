@@ -37,9 +37,9 @@ export type MaybeCount = number | null;
  * The lines of the subtraction, in the order `computeSafeToSpend` performs it.
  *
  * `free = liquid + expected_inflows + card_relief - card_balances - upcoming_bills - recurring_transfers
- * - allocated_budgets - estimated_unbudgeted - allocated_goals`, so every
- * delta after the opening is the negation of the field, and the running total is a partial sum of
- * the server's own numbers rather than a second derivation of them.
+ * - allocated_budgets - estimated_unbudgeted - allocated_goals`, so every delta after the opening is
+ * its field with the sign it has in that sum, and the running total is a partial sum of the
+ * server's own numbers rather than a second derivation of them.
  */
 /** A line that only exists when there is something on it. */
 function optional(line: ClaimLine): ClaimLine[] {
