@@ -1127,7 +1127,9 @@ export function buildFinancialContext(): string {
       lines.push(
         `    ...and ${omitted.length} more through ${omitted[omitted.length - 1].expected_date}: ` +
           `${fmt(toDollars(omittedIn))} in, ${fmt(toDollars(omittedOut))} out. The totals above include these` +
-          (omittedTransfers > 0 ? `, but not ${omittedTransfers} transfer or skipped occurrence${omittedTransfers === 1 ? '' : 's'} also listed.` : '.')
+          (omittedTransfers > 0
+            ? `, except ${omittedTransfers} transfer or skipped occurrence${omittedTransfers === 1 ? '' : 's'} among them, which the figures here also leave out.`
+            : '.')
       );
     }
   }

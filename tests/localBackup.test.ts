@@ -617,6 +617,7 @@ test('HEALTHY: restoring a current backup replays no repair and changes no row',
   assert.ok(!result.warnings.some((warning) => warning.includes('Re-applied')));
   assert.deepEqual(target.prepare('SELECT * FROM transactions ORDER BY id').all(), before);
   assert.deepEqual(target.prepare('SELECT COUNT(*) AS n FROM transaction_field_revisions').get(), { n: 0 });
+  assert.ok(!result.warnings.some((warning) => warning.startsWith('This backup predates')));
 });
 
 test('the replay takes only the row repairs from each migration file', () => {
@@ -629,4 +630,19 @@ test('the replay takes only the row repairs from each migration file', () => {
       ['UPDATE transactions SET'],
     ]
   );
+});
+
+test('restoring a backup older than repairs the replay does not cover says so before it restores', (t) => {
+  const source = migratedTestDb();
+  const target = migratedTestDb();
+  t.after(() => source.close());
+  t.after(() => target.close());
+  brokerageLedger(source);
+  const wire = overTheWire(buildLocalBackup(source)) as { tables: Record<string, WireRow[]> };
+  wire.tables.schema_migrations = wire.tables.schema_migrations.filter((row) => String(row.name) < '045');
+
+  const preview = buildLocalBackupRestorePreview(target, wire);
+  const warning = preview.warnings.find((w) => w.startsWith('This backup predates')) ?? '';
+  assert.match(warning, /^This backup predates \d+ migrations \(045_\S+ to 07\d_\S+\) whose data changes are not re-applied/);
+  assert.doesNotMatch(warning, /06[2-5]_/);
 });

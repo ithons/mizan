@@ -1,6 +1,6 @@
 import type Database from 'better-sqlite3';
 import { RETIRED_PREFERENCE_KEYS } from './preferences';
-import { replayRowRepairs } from '../db/index';
+import { ROW_REPAIR_MIGRATIONS, appliedMigrationNames, replayRowRepairs } from '../db/index';
 
 /**
  * Every table a full backup carries, ordered parents before children.
@@ -471,6 +471,18 @@ export function buildLocalBackupRestorePreview(
     }
 
     errors.push(...backupForeignKeyErrors(db, parsed.backup.tables));
+
+    const backupMigrations = new Set(parsed.backup.tables.schema_migrations.map((row) => String(row.name)));
+    const notReplayed = [...appliedMigrationNames(db)]
+      .filter((name) => !backupMigrations.has(name) && !ROW_REPAIR_MIGRATIONS.includes(name))
+      .sort();
+    if (backupMigrations.size > 0 && notReplayed.length > 0) {
+      warnings.push(
+        `This backup predates ${notReplayed.length} migration${notReplayed.length === 1 ? '' : 's'} ` +
+        `(${notReplayed[0]} to ${notReplayed[notReplayed.length - 1]}) whose data changes are not re-applied; ` +
+        'rows they repaired come back as the backup had them.'
+      );
+    }
   }
 
   return {
@@ -569,7 +581,7 @@ export function restoreLocalBackup(
       skipped_tables: ['schema_migrations'],
       warnings: replayed.length === 0
         ? preview.warnings
-        : [...preview.warnings, `Re-applied the repairs this backup predates: ${replayed.join(', ')}.`],
+        : [...preview.warnings, `Re-applied the row repairs of ${replayed.join(', ')}, which this backup predates.`],
     };
   } finally {
     db.pragma(`foreign_keys = ${foreignKeysEnabled ? 'ON' : 'OFF'}`);

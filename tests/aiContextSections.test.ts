@@ -1092,4 +1092,6 @@ test('a scheduled transfer is listed as one and kept out of every figure that sa
   assert.match(section, /Scheduled transfers between your own accounts, not in the totals above: \$\d/);
   const line = section.split('\n').find((l) => l.includes(`${late}: Chase Checking to Fidelity Individual`)) ?? '';
   assert.match(line, /transfer from Chase Checking to Fidelity Individual, not in the totals/);
+  const remainder = section.split('\n').find((l) => l.includes('...and ')) ?? '';
+  assert.match(remainder, /\$[\d,]+\.\d\d in, \$0\.00 out\. The totals above include these, except \d+ transfer or skipped occurrences? among them/);
 });
