@@ -115,6 +115,9 @@ export function useAiChat() {
 
     setMessages((prev) => [...prev, userMsg, assistantMsg]);
     setIsStreaming(true);
+    const updateAssistant = (updater: (m: DisplayMessage) => DisplayMessage) => {
+      setMessages((prev) => prev.map((m) => (m.id === assistantId ? updater(m) : m)));
+    };
 
     // Ensure a conversation exists to persist into. Best-effort: if creation fails, chat
     // still works, it just isn't saved.
@@ -123,26 +126,26 @@ export function useAiChat() {
       try {
         const created = await aiApi.createConversation();
         convId = created.id;
-        if (!isCurrent()) {
+        if (isCurrent()) {
+          setConversationId(created.id);
+          localStorage.setItem(ACTIVE_KEY, created.id);
+        } else {
           aiApi.deleteConversation(created.id).catch((err) =>
             console.warn('Failed to remove a conversation created for a stopped turn', err));
-          return;
         }
-        setConversationId(created.id);
-        localStorage.setItem(ACTIVE_KEY, created.id);
       } catch (err) {
         console.warn('Failed to create conversation; chat will not be saved', err);
       }
     }
 
-    if (!isCurrent()) return;
+    if (!isCurrent()) {
+      updateAssistant((m) => ({ ...m, content: m.content + NOT_SAVED_NOTE }));
+      return;
+    }
     const controller = new AbortController();
     abortRef.current = controller;
 
     let assistantAccum = '';
-    const updateAssistant = (updater: (m: DisplayMessage) => DisplayMessage) => {
-      setMessages((prev) => prev.map((m) => (m.id === assistantId ? updater(m) : m)));
-    };
 
     /**
      * Save the exchange, and say on screen when it could not be saved.
