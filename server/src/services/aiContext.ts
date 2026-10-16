@@ -24,6 +24,7 @@ import { reconcileAccounts } from './reconciliation';
 import { listMemories } from './aiMemory';
 import { MAX_PAIR_DAY_GAP, findFlowConservationViolations } from './flowConservation';
 import { SCHEDULED_ROUTE } from '../../../shared/routes';
+import { settledNetWorthCents } from './inTransit';
 
 export const ADVISOR_PROFILE_PREFERENCE_KEY = 'advisor_user_profile';
 
@@ -981,7 +982,7 @@ export function buildFinancialContext(): string {
   const lastMonthSnapshot = readSnapshotBefore(db, thisMonthStart, { measuredOnly: true });
 
   // netWorth is dollars (from dollarized balances); the snapshot column is cents.
-  const nwDelta = lastMonthSnapshot ? netWorth - toDollars(lastMonthSnapshot.net_worth) : null;
+  const nwDelta = lastMonthSnapshot ? netWorth - toDollars(settledNetWorthCents(db, lastMonthSnapshot)) : null;
 
   lines.push('');
   lines.push(`### Net Worth: ${fmt(netWorth)}${nwDelta != null ? ` (${nwDelta >= 0 ? '+' : ''}${fmt(nwDelta)} vs last month)` : ''}`);
@@ -1511,7 +1512,7 @@ export function buildFinancialContext(): string {
       );
     }
     for (const snap of nwHistory) {
-      lines.push(`  ${snap.date}: ${fmt(toDollars(snap.net_worth))}${estimateNote(snap)}`);
+      lines.push(`  ${snap.date}: ${fmt(toDollars(settledNetWorthCents(db, snap)))}${estimateNote(snap)}`);
     }
   }
 

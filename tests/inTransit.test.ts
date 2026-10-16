@@ -3,6 +3,9 @@ import assert from 'node:assert/strict';
 import type Database from 'better-sqlite3';
 import { transfersInTransit } from '../server/src/services/inTransit';
 import { getNetWorthAttribution } from '../server/src/services/reporting';
+import { _setDbForTesting } from '../server/src/db/index';
+import { runAdvisorTool } from '../server/src/services/advisorChatTools';
+import { buildFinancialContext } from '../server/src/services/aiContext';
 import { insertAccount, insertTransaction, migratedTestDb } from './helpers/schema';
 
 function snapshot(db: Database.Database, date: string, createdAt: string, breakdown: Record<string, number>): void {
@@ -109,4 +112,15 @@ test('money that arrived before its sending bank showed it leaving is counted on
   const transit = transfersInTransit(db, { date: '2026-08-20', taken_at: '2026-08-20T09:00:00Z', created_at: '', breakdown: { chase: 0, wf: 0 } });
   assert.equal(transit.total, -200322);
   assert.equal(transit.byAccount.get('wf'), -200322);
+});
+
+test('the advisor reads net worth history the way Balance does, with money in flight counted', (t) => {
+  const db = migratedTestDb();
+  t.after(() => { _setDbForTesting(null); db.close(); });
+  _setDbForTesting(db);
+  chaseToWealthfront(db);
+  const history = (runAdvisorTool(db, 'get_net_worth_history', { months: 60 }) as { history: Array<{ date: string; net_worth: number }> }).history;
+  assert.equal(history.find((row) => row.date === '2026-10-01')?.net_worth, (650016 + 321 + 500000) / 100);
+  const context = buildFinancialContext();
+  assert.match(context, /2026-10-01: \$11,503\.37/);
 });

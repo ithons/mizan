@@ -76,6 +76,20 @@ export function transfersInTransit(db: Database.Database, snapshot: SnapshotMome
   return { total, byAccount };
 }
 
+/** A sheet's net worth with transfers caught between its balance reads counted, in cents. */
+export function settledNetWorthCents(
+  db: Database.Database,
+  sheet: { date: string; taken_at: string | null; created_at: string; breakdown: string | null; is_estimated: unknown; net_worth: number }
+): number {
+  if (sheet.is_estimated) return sheet.net_worth;
+  return sheet.net_worth + transfersInTransit(db, {
+    date: sheet.date,
+    taken_at: sheet.taken_at,
+    created_at: sheet.created_at,
+    breakdown: parseBreakdown(sheet.breakdown),
+  }).total;
+}
+
 export function parseBreakdown(raw: string | null): Record<string, number> {
   if (!raw) return {};
   try {

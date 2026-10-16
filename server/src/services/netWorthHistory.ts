@@ -33,12 +33,13 @@ export interface NetWorthSnapshotRow {
   breakdown: string;
   is_estimated: boolean;
   created_at: string;
+  taken_at: string | null;
 }
 
 const COLUMNS = `
   id, date, total_assets, total_liabilities, net_worth,
   liquid_assets, investment_assets, crypto_assets,
-  breakdown, is_estimated, created_at
+  breakdown, is_estimated, created_at, taken_at
 `;
 
 interface RawRow extends Omit<NetWorthSnapshotRow, 'is_estimated'> {

@@ -22,6 +22,7 @@ import { boundaryApplicableTo, reconcileAccounts, unreconciledResidual } from '.
 import { buildSchemaDoc, describeTables, getCategoryProvenance, transactionReportInclusion } from './schemaDoc';
 import type { AdvisorToolSpec } from './aiProviders/types';
 import type { AdvisorDraftAction, AdvisorDraftPayload } from '../../../shared/types';
+import { settledNetWorthCents } from './inTransit';
 
 /** Stable id per payload, matching advisorDrafts' own scheme, so repeats collapse. */
 function draftIdFor(payload: AdvisorDraftPayload): string {
@@ -544,7 +545,7 @@ function getNetWorthHistoryTool(db: Database.Database, input: ToolInput): unknow
   return {
     history: rows.map((r) => ({
       date: r.date,
-      net_worth: toDollars(r.net_worth),
+      net_worth: toDollars(settledNetWorthCents(db, r)),
       assets: toDollars(r.total_assets),
       liabilities: toDollars(r.total_liabilities),
       // A reconstruction, not a measurement. Without this the model narrates the join between the
