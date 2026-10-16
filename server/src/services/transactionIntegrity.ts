@@ -455,7 +455,12 @@ function assignExactly(edges: PairEdge[]): PairEdge[] {
   return best[0].filter((edge) => best.every((matching) => matching.includes(edge)));
 }
 
-/** Nearest legs first, and a tie between equally near counterparts leaves every row in it alone. */
+/** Two legs nothing can tell apart: any edge one has, the other has at the same distance. */
+function sameLeg(a: TransferRow, b: TransferRow): boolean {
+  return a.account_id === b.account_id && a.date === b.date && a.original_name === b.original_name;
+}
+
+/** Nearest legs first; a tie leaves every row in it alone unless its rivals differ only by indistinguishable legs. */
 function assignGreedily(edges: PairEdge[]): PairEdge[] {
   const settled = new Set<string>();
   const chosen: PairEdge[] = [];
@@ -468,11 +473,13 @@ function assignGreedily(edges: PairEdge[]): PairEdge[] {
       && !settled.has(other.outflow.id)
       && !settled.has(other.inflow.id)
     );
-    for (const tied of [edge, ...rivals]) {
+    const interchangeable = rivals.every((other) =>
+      sameLeg(other.outflow, edge.outflow) && sameLeg(other.inflow, edge.inflow));
+    for (const tied of interchangeable ? [edge] : [edge, ...rivals]) {
       settled.add(tied.outflow.id);
       settled.add(tied.inflow.id);
     }
-    if (rivals.length === 0) chosen.push(edge);
+    if (interchangeable) chosen.push(edge);
   }
   return chosen;
 }

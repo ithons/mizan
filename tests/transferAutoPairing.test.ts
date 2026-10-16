@@ -291,3 +291,18 @@ test('two identical moves on one day still pair inside a long weekly history', (
     assert.notEqual(leg(db, id).transfer_pair_id, null, id);
   }
 });
+
+test('any number of identical moves on one day pair, however large their group', () => {
+  for (const count of [4, 5]) {
+    const db = migratedTestDb();
+    const checking = insertAccount(db, { type: 'checking', account_name: 'Checking' });
+    const savings = insertAccount(db, { type: 'savings', account_name: 'Savings' });
+    const ids = Array.from({ length: count }, (_, n) => n);
+    for (const n of ids) {
+      insertTransaction(db, { id: `o${n}`, account_id: checking, date: '2026-10-05', amount: -20000, original_name: 'ONLINE TRANSFER TO SAVINGS' });
+      insertTransaction(db, { id: `i${n}`, account_id: savings, date: '2026-10-05', amount: 20000, original_name: 'ONLINE TRANSFER FROM CHECKING' });
+    }
+    refreshTransferCandidates(db);
+    for (const n of ids) assert.notEqual(leg(db, `o${n}`).transfer_pair_id, null, `${count}: o${n}`);
+  }
+});
