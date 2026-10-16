@@ -1,6 +1,6 @@
 import type Database from 'better-sqlite3';
 import { RETIRED_PREFERENCE_KEYS } from './preferences';
-import { ROW_REPAIR_MIGRATIONS, appliedMigrationNames, migrationChangesRows, replayRowRepairs } from '../db/index';
+import { ROW_REPAIR_MIGRATIONS, appliedMigrationNames, migrationChangesRows, migrationFileExists, replayRowRepairs } from '../db/index';
 
 /**
  * Every table a full backup carries, ordered parents before children.
@@ -476,9 +476,16 @@ export function buildLocalBackupRestorePreview(
     errors.push(...backupForeignKeyErrors(db, parsed.backup.tables));
 
     const backupMigrations = new Set(parsed.backup.tables.schema_migrations.map((row) => String(row.name)));
-    const notReplayed = [...appliedMigrationNames(db)]
-      .filter((name) => !backupMigrations.has(name) && !HANDLED_ON_RESTORE.has(name) && migrationChangesRows(name))
-      .sort();
+    const missingFromBackup = [...appliedMigrationNames(db)].filter((name) => !backupMigrations.has(name)).sort();
+    const unknown = missingFromBackup.filter((name) => !migrationFileExists(name));
+    const notReplayed = missingFromBackup
+      .filter((name) => !HANDLED_ON_RESTORE.has(name) && migrationFileExists(name) && migrationChangesRows(name));
+    if (backupMigrations.size > 0 && unknown.length > 0) {
+      warnings.push(
+        `This database has applied ${unknown.join(', ')}, which this copy of the app has no file for, ` +
+        'so what the backup lacks from it cannot be checked.'
+      );
+    }
     if (backupMigrations.size > 0 && notReplayed.length > 0) {
       warnings.push(
         `This backup predates ${notReplayed.join(', ')}, which can rewrite stored rows and are not re-run on restore; ` +

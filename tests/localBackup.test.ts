@@ -668,3 +668,17 @@ test('a migration counts as able to change rows only when it holds a statement t
     assert.equal(migrationChangesRows(file), false, file);
   }
 });
+
+test('a migration the database recorded but this checkout lacks is named, not a crash', (t) => {
+  const source = migratedTestDb();
+  const target = migratedTestDb();
+  t.after(() => source.close());
+  t.after(() => target.close());
+  brokerageLedger(source);
+  target.prepare("INSERT INTO schema_migrations (name, applied_at) VALUES ('071_from_newer_branch.sql', '2026-10-01')").run();
+  const backup = overTheWire(buildLocalBackup(source));
+  const preview = buildLocalBackupRestorePreview(target, backup);
+  assert.equal(preview.valid, true);
+  assert.ok(preview.warnings.some((w) => w.includes('071_from_newer_branch.sql') && w.includes('no file for')), preview.warnings.join(' | '));
+  restoreLocalBackup(target, backup);
+});
