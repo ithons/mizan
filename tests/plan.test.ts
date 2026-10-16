@@ -473,7 +473,7 @@ test('scheduled transfers that net into the pool are named as coming in', () => 
 test('the expected income line says which income it leaves out', () => {
   const line = claimLines({ ...SHEET, expected_inflows: 1143.95 }, 1, 1).find((l) => l.key === 'inflows');
   assert.ok(line);
-  assert.match(line.note ?? '', /last paid into these accounts or onto a card\. Income paid anywhere else is not counted here; one with no deposit yet, or last paid into an account since closed, counts unless filed under Investments or Crypto\./);
+  assert.match(line.note ?? '', /last paid into these accounts or onto a card counted here\. Income paid anywhere else is not counted here; one with no deposit yet, or last paid into an account since closed, counts unless filed under Investments or Crypto\./);
 });
 
 test('a card paid from outside the pool shows as its own line, not as a transfer in', () => {

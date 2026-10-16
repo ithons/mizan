@@ -190,10 +190,11 @@ export function computeSafeToSpend(
 }
 
 /**
- * Forecast income that reaches the pool: last paid into a pool account or onto a card. Income paid
- * anywhere else reaches the pool, or pays down a card the pool owes, only through a transfer, which
- * `transfersAcrossPool` counts. With no deposit on record, or the last one into an account since closed, where it lands
- * is unknown, and it counts unless filed under Investments or Crypto.
+ * Forecast income that reaches the pool: last paid into a pool account or onto a card counted in
+ * the card claims. Income paid anywhere else reaches the pool, or pays down a card the pool owes,
+ * only through a transfer, which `transfersAcrossPool` counts. With no deposit on record, or the
+ * last one into an account since closed, where it lands is unknown, and it counts unless filed
+ * under Investments or Crypto.
  */
 function inflowsIntoPool(
   db: Database.Database,
@@ -226,7 +227,7 @@ function inflowsIntoPool(
  * Money the schedule moves across the pool's edge. A card counted in the card claims is already
  * claimed in full, so a payment to it from the pool or from another card changes nothing; one from
  * outside the pool relieves that claim, never by more than the card owes, and is returned apart
- * from the transfers. Paying a card the claims leave out is money leaving the pool. Money from any
+ * from the transfers. Paying a card the claims leave out from the pool is money leaving it. Money from any
  * card is borrowed, so a transfer from a card never adds to what is free.
  */
 function transfersAcrossPool(
