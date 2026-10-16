@@ -332,7 +332,7 @@ export function projectFreeBand(db: Database.Database, days: number, paths = 400
   const scale = adjustments.reduce((factor, a) => (a.kind === 'scale_unbudgeted' ? factor * (1 + a.percent / 100) : factor), 1);
   const baselineCurve = runCurve(start, sheet.estimatedUnbudgeted / days, sheet.scheduled, days, today);
   const cancelled = new Set(adjustments.flatMap((a) => (a.kind === 'cancel_recurring' ? [a.pattern_id] : [])));
-  const run = (curve: Curve, spendScale: number, draws = income) => simulateBand(curve, daily, meanDaily, draws, days, paths, seed, spendScale);
+  const run = (curve: Curve, spendScale: number, dropped = new Set<string>()) => simulateBand(curve, daily, meanDaily, income, days, paths, seed, spendScale, dropped);
   const baseline = run(baselineCurve, 1);
   const assumptions = [
     `Non-recurring spending is replayed from ${coveredDays} days of history in ${BAND_BLOCK_DAYS}-day blocks around its daily average.`,
@@ -341,7 +341,7 @@ export function projectFreeBand(db: Database.Database, days: number, paths = 400
   ];
   if (adjustments.length === 0) return { days, paths, ...baseline, assumptions };
   const scenarioCurve = runCurve(start, (sheet.estimatedUnbudgeted / days) * scale, adjustedEffects(sheet.scheduled, adjustments, today, days), days, today);
-  return { days, paths, ...baseline, scenario: run(scenarioCurve, scale, income.filter((item) => !cancelled.has(item.patternId))), assumptions };
+  return { days, paths, ...baseline, scenario: run(scenarioCurve, scale, cancelled), assumptions };
 }
 
 function simulateBand(
@@ -352,7 +352,8 @@ function simulateBand(
   days: number,
   paths: number,
   seed: number,
-  spendScale: number
+  spendScale: number,
+  dropped: ReadonlySet<string>
 ) {
   const random = seededRandom(seed);
   const ends: number[] = [];
@@ -365,7 +366,8 @@ function simulateBand(
     }
     for (const item of income) {
       if (item.history.length >= 3 && item.offset <= days) {
-        deviation[item.offset] += item.history[Math.floor(random() * item.history.length)] - item.expected;
+        const drawn = item.history[Math.floor(random() * item.history.length)];
+        if (!dropped.has(item.patternId)) deviation[item.offset] += drawn - item.expected;
       }
     }
     let shift = 0;

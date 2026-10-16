@@ -263,3 +263,19 @@ test('a purchase in a band what-if lowers the typical outcome by its amount and 
     assert.ok(result.scenario.chance_of_dropping_below_claims >= result.chance_of_dropping_below_claims);
   });
 });
+
+test('cancelling steady pay in a band what-if moves every percentile by exactly that pay', () => {
+  const db = steadyLedger();
+  try {
+    const payroll = db.prepare("SELECT id FROM recurring_patterns WHERE merchant_name LIKE '%payroll%'").get() as { id: string };
+    const result = projectFreeBand(db, 30, 300, new Date(), 11, [{ kind: 'cancel_recurring', pattern_id: payroll.id }]) as {
+      point_estimate: number; band: { p10: number; p50: number; p90: number };
+      scenario: { point_estimate: number; band: { p10: number; p50: number; p90: number } };
+    };
+    const shift = result.point_estimate - result.scenario.point_estimate;
+    assert.ok(shift > 0);
+    for (const q of ['p10', 'p50', 'p90'] as const) assert.ok(Math.abs(result.band[q] - result.scenario.band[q] - shift) < 0.01, q);
+  } finally {
+    _setDbForTesting(undefined as unknown as Database.Database);
+  }
+});
