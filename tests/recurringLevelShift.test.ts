@@ -134,21 +134,56 @@ test('a bonus on a raise only two checks old is still not the forecast', () => {
   });
 });
 
-test('a named old level is never the amount being forecast', () => {
-  const values = [700, 1000, 1500, 1510];
-  const walk = (prefix: number[]): void => {
-    if (prefix.length >= 4) {
-      const result = expectedAmount(series(prefix));
-      if (result.changedFrom !== null) {
-        assert.notEqual(Math.abs(result.changedFrom - result.amount) <= result.amount * 0.15, true, String(prefix));
-        assert.notEqual(Math.abs(result.changedFrom - prefix[0]) <= Math.abs(prefix[0]) * 0.15, true, String(prefix));
+test('every series of five amounts names only a real level it left, dated on its first new amount', () => {
+  const near = (a: number, b: number) => Math.abs(a - b) <= Math.abs(b) * 0.15;
+  for (const sign of [1, -1]) {
+    const values = [700, 1000, 1050, 1500, 3000].map((value) => value * sign);
+    const walk = (prefix: number[]): void => {
+      if (prefix.length >= 4) {
+        const rows = series(prefix);
+        const result = expectedAmount(rows);
+        const label = String(prefix);
+        if (result.changedFrom !== null) {
+          assert.ok(!near(result.changedFrom, result.amount), label);
+          assert.ok(!near(result.changedFrom, prefix[0]), label);
+          assert.ok(prefix.includes(result.changedFrom), label);
+          const paidThen = rows.find((row) => row.date === result.changedOn)?.amount;
+          assert.ok(paidThen !== undefined && !near(paidThen, result.changedFrom) && !near(result.changedFrom, paidThen), label);
+        }
+        if (prefix.every((value) => near(value, prefix[0]))) assert.equal(result.changedFrom, null, label);
       }
+      if (prefix.length < 6) for (const value of values) walk([...prefix, value]);
+    };
+    walk([]);
+  }
+});
+
+test('a series that moves by a constant step is never a level change', () => {
+  for (const start of [500, 900, 1000, 3000]) for (const step of [20, 50, 80, 100, 150]) for (const length of [4, 5, 6]) {
+    for (const sign of [1, -1]) {
+      const amounts = Array.from({ length }, (_, i) => sign * (start + step * (length - 1 - i)));
+      assert.equal(expectedAmount(series(amounts)).changedFrom, null, String(amounts));
     }
-    if (prefix.length < 6) for (const value of values) walk([...prefix, value]);
-  };
-  walk([]);
+  }
 });
 
 test('three agreeing occurrences after an erratic stretch are the forecast, with nothing named', () => {
   assert.deepEqual(expectedAmount(series([700, 700, 700, 1000, 1500, 3000])), { amount: 700, changedFrom: null, changedOn: null });
+});
+
+test('a rise just past the threshold is still reported, against the level it left', () => {
+  assert.deepEqual(expectedAmount(series([11700, 11700, 10000, 10000, 10000, 10000])), {
+    amount: 11700, changedFrom: 10000, changedOn: '2026-10-06',
+  });
+  assert.equal(expectedAmount(series([11600, 11600, 11600, 10000, 10000, 10000])).changedFrom, 10000);
+});
+
+test('a payment still at the old level is never the date a change began', () => {
+  assert.equal(expectedAmount(series([11800, 11800, 10400, 10000, 10000, 10000])).changedOn, '2026-10-06');
+  assert.notEqual(expectedAmount(series([1400, 1350, 1200, 1100, 1100, 1100])).changedOn, '2026-10-05');
+});
+
+test('a bill that rises a little every cycle has no level to have changed from', () => {
+  assert.equal(expectedAmount(series([1400, 1300, 1200, 1100, 1000, 900])).changedFrom, null);
+  assert.equal(expectedAmount(series([-1400, -1300, -1200, -1100, -1000, -900])).changedFrom, null);
 });

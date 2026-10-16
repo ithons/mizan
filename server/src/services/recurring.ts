@@ -262,7 +262,8 @@ export function expectedAmount(recent: ReadonlyArray<{ amount: number; date: str
     const fresh = amounts.slice(0, k);
     const prior = amounts.slice(k, k + PRIOR_LEVEL_SPAN);
     const level = median(prior);
-    if (level === 0 || prior.filter((amount) => farFrom(level, amount) === 0).length * 2 <= prior.length) continue;
+    const agreeing = prior.filter((amount) => farFrom(level, amount) === 0);
+    if (level === 0 || agreeing.length * 2 <= prior.length) continue;
     const direction = farFrom(level, fresh[0]);
     if (direction === 0 || fresh.some((amount) => farFrom(level, amount) !== direction)) continue;
 
@@ -270,11 +271,12 @@ export function expectedAmount(recent: ReadonlyArray<{ amount: number; date: str
     const amount = k === 2
       ? (farFrom(latest, previous) === 0 ? (latest + previous) / 2 : latest)
       : usualPaid(fresh);
+    if ((Math.max(...agreeing) - Math.min(...agreeing)) * 3 >= Math.abs(amount - level)) continue;
     let run = k;
-    while (run < amounts.length && farFrom(amount, amounts[run]) === 0) run++;
+    while (run < amounts.length && farFrom(amount, amounts[run]) === 0 && farFrom(level, amounts[run]) !== 0) run++;
     const before = amounts.slice(run);
     const left = before.filter((value) => farFrom(level, value) === 0);
-    const returned = before.some((value) => farFrom(amount, value) === 0);
+    const returned = before.some((value) => farFrom(amount, value) === 0 && farFrom(level, value) !== 0);
     if (run > SHIFT_REPORTED_FOR || returned || left.length === 0) {
       return { amount: Math.round(amount), changedFrom: null, changedOn: null };
     }
