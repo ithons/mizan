@@ -3,8 +3,8 @@ import assert from 'node:assert/strict';
 import type Database from 'better-sqlite3';
 import { format, subDays } from 'date-fns';
 import { _setDbForTesting } from '../server/src/db/index';
-import { computeSafeToSpend } from '../server/src/services/safeToSpend';
-import { checkAdjustments, compoundGrowth, cashRunway, debtPayoff, goalTimeline, projectFree } from '../server/src/services/simulations';
+import { computeSafeToSpend, readSafeToSpend } from '../server/src/services/safeToSpend';
+import { checkAdjustments, compoundGrowth, cashRunway, debtPayoff, emergencyFund, goalTimeline, projectFree } from '../server/src/services/simulations';
 import { getMonthlyBudgetsWithProjection } from '../server/src/services/budgetProjection';
 import { detectRecurring } from '../server/src/services/recurring';
 import { refreshTransactionIntegrity } from '../server/src/services/transactionIntegrity';
@@ -129,4 +129,38 @@ test('a window reaching into next month claims that month\'s budgets for the day
   assert.equal(sheet.budgetsAhead, Math.round((30000 * into) / daysInNext));
   const none = computeSafeToSpend(db, { budgets: [{ category_id: 'cat_food', amount: 30000, projected_remaining: 0 }], forecastDays: daysLeft });
   assert.equal(none.budgetsAhead, 0, 'a window ending this month claims nothing ahead');
+});
+
+test('the emergency fund is sized from the spread of essential spending, with its assumptions', () => {
+  const db = migratedTestDb();
+  const chase = insertAccount(db, { account_name: 'Chase', type: 'checking', current_balance: 900000 });
+  const today = new Date('2026-10-16T12:00:00');
+  [100000, 120000, 80000, 100000, 120000, 80000].forEach((cents, index) => {
+    const month = format(new Date(2026, 3 + index, 10), 'yyyy-MM-dd');
+    insertTransaction(db, { account_id: chase, date: month, amount: -cents, category_id: 'cat_food' });
+  });
+  const result = emergencyFund(db, { months: 3, confidence: 0.9 }, today) as { target: number; essential_monthly_mean: number; essential_monthly_sd: number; assumptions: string[] };
+  assert.equal(result.essential_monthly_mean, 1000);
+  const sdCents = Math.sqrt((4 * 20000 ** 2) / 5);
+  assert.equal(result.target, Math.round(3 * 100000 + 1.28 * sdCents * Math.sqrt(3)) / 100);
+  assert.ok(result.assumptions.some((line) => line.includes('cat_food')));
+});
+
+test('with under three months of essentials it declines to size a fund', () => {
+  assert.equal((emergencyFund(migratedTestDb()) as { target: number | null }).target, null);
+});
+
+test('the daily allowance appears only when something is free and income is ahead', () => {
+  withLedger((db) => {
+    const sheet = readSafeToSpend(db);
+    if (sheet.free > 0) {
+      assert.ok(sheet.next_income_date && sheet.per_day_until_next_income !== null);
+      assert.ok(sheet.per_day_until_next_income! <= sheet.free);
+    } else {
+      assert.equal(sheet.per_day_until_next_income, null);
+    }
+  });
+  const broke = migratedTestDb();
+  insertAccount(broke, { type: 'credit', is_liability: 1, current_balance: 50000 });
+  assert.equal(readSafeToSpend(broke).per_day_until_next_income, null);
 });

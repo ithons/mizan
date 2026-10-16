@@ -1466,6 +1466,10 @@ export interface SafeToSpend {
   card_relief: number;
   /** Budgets of the months after this one that the window reaches, prorated by day. */
   budgets_ahead: number;
+  /** Date of the next expected income in the window, if any. */
+  next_income_date?: string | null;
+  /** Free divided by the days to that income; null when nothing is free or no income is ahead. */
+  per_day_until_next_income?: number | null;
   /** Spending in unbudgeted categories at the pace of the last unbudgeted_basis_days. */
   estimated_unbudgeted: number;
   unbudgeted_basis_days: number;

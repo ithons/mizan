@@ -2,7 +2,7 @@ import type Database from 'better-sqlite3';
 import { addDays, addMonths, format, parseISO, startOfMonth, subMonths, endOfMonth } from 'date-fns';
 import { computeSafeToSpend, type ScheduledEffect } from './safeToSpend';
 import { getMonthlyBudgetsWithProjection } from './budgetProjection';
-import { getCashflowReport } from './reporting';
+import { getCashflowReport, getSpendingReport } from './reporting';
 import { calculateGoalProgress } from './goalProgress';
 import { toCents, toDollars } from './money';
 
@@ -208,4 +208,46 @@ export function compoundGrowth(principal: number, monthlyContribution: number, a
   for (let month = 0; month < Math.round(years * 12); month++) value = value * (1 + rate) + monthlyContribution;
   const contributed = principal + monthlyContribution * Math.round(years * 12);
   return { final_value: Math.round(value * 100) / 100, contributed: Math.round(contributed * 100) / 100, growth: Math.round((value - contributed) * 100) / 100 };
+}
+
+export const DEFAULT_ESSENTIAL_CATEGORIES = ['cat_food', 'cat_home', 'cat_transport', 'cat_health', 'cat_pets', 'cat_subscriptions', 'cat_fees', 'cat_education'];
+
+/**
+ * A cushion sized from how much essential spending actually varies:
+ * months × mean + z × sd × √months, from the last complete months.
+ */
+export function emergencyFund(
+  db: Database.Database,
+  options: { months?: number; confidence?: 0.8 | 0.9 | 0.95; categories?: string[]; history?: number } = {},
+  today = new Date()
+) {
+  const cover = options.months ?? 3;
+  const z = { 0.8: 0.84, 0.9: 1.28, 0.95: 1.64 }[options.confidence ?? 0.9];
+  const categories = new Set(options.categories?.length ? options.categories : DEFAULT_ESSENTIAL_CATEGORIES);
+  const history = Math.min(Math.max(options.history ?? 6, 3), 24);
+  const totals: number[] = [];
+  for (let back = history; back >= 1; back--) {
+    const month = subMonths(today, back);
+    const report = getSpendingReport(db, { startDate: ymd(startOfMonth(month)), endDate: ymd(endOfMonth(month)), parentOnly: true });
+    totals.push(report.categories.filter((c) => categories.has(c.category_id)).reduce((sum, c) => sum + c.amount, 0));
+  }
+  const measured = totals.filter((value) => value !== 0);
+  if (measured.length < 3) return { target: null, note: 'Fewer than three months of essential spending to measure.' };
+  const mean = measured.reduce((sum, value) => sum + value, 0) / measured.length;
+  const sd = Math.sqrt(measured.reduce((sum, value) => sum + (value - mean) ** 2, 0) / (measured.length - 1));
+  const target = cover * mean + z * sd * Math.sqrt(cover);
+  const sheet = computeSafeToSpend(db, {});
+  const available = sheet.liquid - sheet.cardBalances;
+  return {
+    target: toDollars(Math.round(target)),
+    essential_monthly_mean: toDollars(Math.round(mean)),
+    essential_monthly_sd: toDollars(Math.round(sd)),
+    liquid_after_cards: toDollars(available),
+    months_of_essentials_covered: mean > 0 ? Math.round((available / mean) * 10) / 10 : null,
+    assumptions: [
+      `Essentials are these categories: ${[...categories].join(', ')}. The owner can change the set.`,
+      `${measured.length} complete months measured; ${Math.round((options.confidence ?? 0.9) * 100)}% confidence; ${cover} months of cover.`,
+      'Liquid accounts less what the cards owe; goal earmarks are counted as available.',
+    ],
+  };
 }

@@ -394,5 +394,15 @@ export function readSafeToSpend(db: Database.Database, forecastDays?: number) {
     budgets_ahead: toDollars(breakdown.budgetsAhead),
     free: toDollars(breakdown.free),
     forecast_days: breakdown.forecastDays,
+    ...dailyAllowance(breakdown, now),
   };
+}
+
+/** What is free spread over the days to the next expected income; nothing when there is no room or no income ahead. */
+function dailyAllowance(breakdown: SafeToSpendBreakdown, now: Date): { next_income_date: string | null; per_day_until_next_income: number | null } {
+  const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+  const next = breakdown.scheduled.find((item) => item.kind === 'income' && item.date > today)?.date ?? null;
+  if (!next || breakdown.free <= 0) return { next_income_date: next, per_day_until_next_income: null };
+  const days = Math.max(1, Math.round((Date.parse(`${next}T00:00:00`) - Date.parse(`${today}T00:00:00`)) / 86_400_000));
+  return { next_income_date: next, per_day_until_next_income: toDollars(Math.floor(breakdown.free / days)) };
 }
