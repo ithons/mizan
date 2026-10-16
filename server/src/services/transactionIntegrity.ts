@@ -388,7 +388,7 @@ function assignPairs(edges: PairEdge[]): PairEdge[] {
   const chosen: PairEdge[] = [];
   for (const edge of edges) {
     if (settled.has(edge.outflow.id) || settled.has(edge.inflow.id)) continue;
-    const rival = edges.find((other) =>
+    const rivals = edges.filter((other) =>
       other !== edge
       && other.businessGap === edge.businessGap
       && other.calendarGap === edge.calendarGap
@@ -396,9 +396,11 @@ function assignPairs(edges: PairEdge[]): PairEdge[] {
       && !settled.has(other.outflow.id)
       && !settled.has(other.inflow.id)
     );
-    settled.add(edge.outflow.id);
-    settled.add(edge.inflow.id);
-    if (!rival) chosen.push(edge);
+    for (const tied of [edge, ...rivals]) {
+      settled.add(tied.outflow.id);
+      settled.add(tied.inflow.id);
+    }
+    if (rivals.length === 0) chosen.push(edge);
   }
   return chosen;
 }

@@ -220,3 +220,18 @@ test('re-filing the wrong card leg frees the payment to pair with the card it re
   assert.ok(leg(db, out).transfer_pair_id);
   assert.equal(leg(db, out).transfer_pair_id, leg(db, right).transfer_pair_id);
 });
+
+test('two card payments of one amount on one day are both left alone, not paired by row order', () => {
+  const db = migratedTestDb();
+  const checking = insertAccount(db, { type: 'checking', account_name: 'Checking' });
+  const chase = insertAccount(db, { type: 'credit', is_liability: 1, account_name: 'Chase' });
+  const discover = insertAccount(db, { type: 'credit', is_liability: 1, account_name: 'Discover' });
+  const legs = [
+    insertTransaction(db, { id: 'o1', account_id: checking, date: '2026-10-05', amount: -50000, original_name: 'DISCOVER E-PAYMENT' }),
+    insertTransaction(db, { id: 'o2', account_id: checking, date: '2026-10-05', amount: -50000, original_name: 'CHASE CREDIT CRD AUTOPAY' }),
+    insertTransaction(db, { id: 'ia', account_id: chase, date: '2026-10-06', amount: 50000, original_name: 'AUTOMATIC PAYMENT - THANK' }),
+    insertTransaction(db, { id: 'ib', account_id: discover, date: '2026-10-06', amount: 50000, original_name: 'INTERNET PAYMENT - THANK YOU' }),
+  ];
+  refreshTransferCandidates(db);
+  for (const id of legs) assert.equal(leg(db, id).transfer_pair_id, null, id);
+});
