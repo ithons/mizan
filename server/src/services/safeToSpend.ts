@@ -185,10 +185,10 @@ export function computeSafeToSpend(
 }
 
 /**
- * Forecast income that reaches the pool: paid into a pool account, onto a card, or into an account
- * since closed. Income paid anywhere else reaches the pool only through a transfer, which
- * `transfersLeavingPool` already counts. A pattern with no deposit on record counts unless it is
- * filed under Investments or Crypto.
+ * Forecast income that reaches the pool: last paid into a pool account or onto a card. Income paid
+ * anywhere else reaches the pool only through a transfer, which `transfersLeavingPool` already
+ * counts. With no deposit on record, or the last one into an account since closed, where it lands
+ * is unknown, and it counts unless filed under Investments or Crypto.
  */
 function inflowsIntoPool(
   db: Database.Database,
@@ -210,8 +210,8 @@ function inflowsIntoPool(
   return occurrences.reduce((sum, occurrence) => {
     if (occurrence.kind === 'transfer' || occurrence.adjustment_action === 'skip' || occurrence.amount <= 0) return sum;
     const landed = landing.get(occurrence.pattern_id) as { id: string; type: string } | undefined;
-    const reachesPool = landed
-      ? pool.has(landed.id) || liabilities.has(landed.id) || landed.type === 'closed'
+    const reachesPool = landed && landed.type !== 'closed'
+      ? pool.has(landed.id) || liabilities.has(landed.id)
       : occurrence.category_id === null || investmentCategory.get(occurrence.category_id) === undefined;
     return reachesPool ? sum + occurrence.amount : sum;
   }, 0);
