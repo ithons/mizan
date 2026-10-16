@@ -171,8 +171,8 @@ test('an older exact charge already refunded, or long gone, does not block a par
   const db = migratedTestDb();
   const card = insertAccount(db, { account_name: 'Chase Sapphire', type: 'credit', is_liability: 1 });
   const amazon = { merchant_name: 'Amazon', original_name: 'AMAZON MKTPL', category_id: 'cat_shop' };
-  insertTransaction(db, { account_id: card, date: '2026-03-01', amount: -2999, ...amazon });
-  insertTransaction(db, { account_id: card, date: '2026-03-10', amount: 2999, merchant_name: 'Amazon', original_name: 'AMAZON MKTPL' });
+  insertTransaction(db, { account_id: card, date: '2026-05-01', amount: -2999, ...amazon });
+  insertTransaction(db, { account_id: card, date: '2026-05-10', amount: 2999, merchant_name: 'Amazon', original_name: 'AMAZON MKTPL' });
   insertTransaction(db, { account_id: card, date: '2024-01-05', amount: -4000, ...amazon });
   const order = insertTransaction(db, { account_id: card, date: '2026-09-01', amount: -8997, ...amazon });
   const partial = insertTransaction(db, { account_id: card, date: '2026-09-10', amount: 2999, merchant_name: 'Amazon', original_name: 'AMAZON MKTPL' });
