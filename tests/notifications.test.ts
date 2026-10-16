@@ -273,11 +273,12 @@ test('recurring_amount_changed fires once per level shift detection reports', ()
   assertIdempotent(db);
 });
 
-test('HEALTHY: recurring_amount_changed is silent on a steady pattern and a dismissed one', () => {
+test('HEALTHY: recurring_amount_changed is silent on a steady pattern, a dismissed one and an old change', () => {
   const { db } = withOnlyRule({ kind: 'recurring_amount_changed', params: {} });
   insertPattern(db, { id: 'steady' });
   insertPattern(db, { id: 'gone', amount_changed_from: 1000, amount_changed_on: localToday() });
   db.prepare("UPDATE recurring_patterns SET dismissed_at = ? WHERE id = 'gone'").run(TEST_NOW);
+  insertPattern(db, { id: 'old', amount_changed_from: 1000, amount_changed_on: localDaysFromToday(-90) });
   assert.deepEqual(fires(db), []);
 });
 

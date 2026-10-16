@@ -545,14 +545,18 @@ const unusualSpending: Evaluator<'unusual_spending'> = (ctx, params) => {
   return candidates;
 };
 
+/** A change detection still reports this long after it began is old news, not a notification. */
+const AMOUNT_CHANGE_RECENT_DAYS = 45;
+
 /** Detection stores both amounts as magnitudes and reports a shift for its first few payments only. */
 const recurringAmountChanged: Evaluator<'recurring_amount_changed'> = (ctx) => {
+  const since = format(subDays(ctx.now, AMOUNT_CHANGE_RECENT_DAYS), 'yyyy-MM-dd');
   const rows = ctx.db.prepare(`
     SELECT id, merchant_name, average_amount, amount_changed_from, amount_changed_on
     FROM recurring_patterns
     WHERE is_active = 1 AND dismissed_at IS NULL
-      AND amount_changed_from IS NOT NULL AND amount_changed_on IS NOT NULL
-  `).all() as Array<{ id: string; merchant_name: string; average_amount: number; amount_changed_from: number; amount_changed_on: string }>;
+      AND amount_changed_from IS NOT NULL AND amount_changed_on >= ?
+  `).all(since) as Array<{ id: string; merchant_name: string; average_amount: number; amount_changed_from: number; amount_changed_on: string }>;
   return rows.map((row) => {
     const amount = Math.abs(row.average_amount);
     const from = Math.abs(row.amount_changed_from);
