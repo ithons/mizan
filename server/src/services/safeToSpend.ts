@@ -192,7 +192,7 @@ export function computeSafeToSpend(
 /**
  * Forecast income that reaches the pool: last paid into a pool account or onto a card. Income paid
  * anywhere else reaches the pool, or pays down a card the pool owes, only through a transfer, which
- * `transfersLeavingPool` counts. With no deposit on record, or the last one into an account since closed, where it lands
+ * `transfersAcrossPool` counts. With no deposit on record, or the last one into an account since closed, where it lands
  * is unknown, and it counts unless filed under Investments or Crypto.
  */
 function inflowsIntoPool(
@@ -223,9 +223,10 @@ function inflowsIntoPool(
 }
 
 /**
- * Money the schedule moves across the pool's edge. A card is already claimed in full, so a payment
- * to it from the pool or from another card changes nothing; one from outside the pool relieves
- * that claim, never by more than the card owes, and is returned apart from the transfers.
+ * Money the schedule moves across the pool's edge. A card counted in the card claims is already
+ * claimed in full, so a payment to it from the pool or from another card changes nothing; one from
+ * outside the pool relieves that claim, never by more than the card owes, and is returned apart
+ * from the transfers. A card the claims leave out is just another account outside the pool.
  */
 function transfersAcrossPool(
   occurrences: readonly RecurringForecastOccurrence[],
@@ -240,7 +241,7 @@ function transfersAcrossPool(
     const from = occurrence.account_id ?? '';
     const to = occurrence.counterparty_account_id ?? '';
     const size = Math.abs(occurrence.amount);
-    if (cards.has(to)) {
+    if (owed.has(to)) {
       if (pool.has(from) || cards.has(from)) continue;
       const room = Math.max(0, (owed.get(to) ?? 0) - (relieved.get(to) ?? 0));
       relieved.set(to, (relieved.get(to) ?? 0) + Math.min(size, room));

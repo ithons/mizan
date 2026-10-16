@@ -259,3 +259,26 @@ test('a payment to a card from another card relieves nothing, even when the payi
     db.close();
   }
 });
+
+test('a payment from checking to a hidden card is money leaving the pool, since nothing else claims it', () => {
+  const db = migratedTestDb();
+  _setDbForTesting(db);
+  try {
+    const chase = insertAccount(db, { account_name: 'Chase Checking', type: 'checking', current_balance: 500000 });
+    const card = insertAccount(db, { account_name: 'Old Card', type: 'credit', is_liability: 1, current_balance: 150000 });
+    db.prepare('UPDATE accounts SET is_hidden = 1 WHERE id = ?').run(card);
+    for (const m of [4, 3, 2, 1]) {
+      insertTransaction(db, { account_id: chase, date: day(30 * m), amount: -150000, original_name: 'CHASE CREDIT CRD AUTOPAY PPD ID: XXXXXX9224' });
+      insertTransaction(db, { account_id: card, date: day(30 * m), amount: 150000, original_name: 'AUTOMATIC PAYMENT - THANK' });
+    }
+    refreshTransactionIntegrity(db);
+    detectRecurring();
+    const sheet = computeSafeToSpend(db, { forecastDays: 30 });
+    assert.equal(sheet.cardBalances, 0, 'a hidden card is not in the card claims');
+    assert.equal(sheet.recurringTransfers, 150000);
+    assert.equal(sheet.cardRelief, 0);
+  } finally {
+    _setDbForTesting(undefined as unknown as Database.Database);
+    db.close();
+  }
+});
