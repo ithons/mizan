@@ -4,10 +4,12 @@ import type Database from 'better-sqlite3';
 import {
   businessDaysBetween,
   confirmTransferPair,
+  dismissTransferPair,
   getTransferCandidatePairs,
   refreshTransferCandidates,
 } from '../server/src/services/transactionIntegrity';
 import { insertAccount, insertTransaction, migratedTestDb } from './helpers/schema';
+import { writeTransactionCategory } from '../server/src/services/categoryWrites';
 
 interface Leg {
   id: string;
@@ -163,4 +165,41 @@ test('a fresh card refund equal to a checking debit is not a card payment', () =
   const refund = insertTransaction(db, { account_id: sapphire, date: '2026-10-01', amount: 249581, original_name: 'APPLE STORE  #R149' });
   refreshTransferCandidates(db);
   for (const id of [debit, refund]) assert.equal(leg(db, id).transfer_status === 'confirmed', false);
+});
+
+/** An owner edit made after the pairing, as it always is in the app. */
+const later = () => new Date(Date.now() + 60_000).toISOString();
+
+test('the owner re-filing a leg of an automatic pair keeps their category and settles the pair', () => {
+  const db = migratedTestDb();
+  const checking = insertAccount(db, { type: 'checking' });
+  const card = insertAccount(db, { type: 'credit', is_liability: 1 });
+  const out = insertTransaction(db, { account_id: checking, date: '2026-09-11', amount: -30000, original_name: 'CHASE CREDIT CRD AUTOPAY PPD ID: XXXXXX9224' });
+  const into = insertTransaction(db, { account_id: card, date: '2026-09-10', amount: 30000, original_name: 'AUTOMATIC PAYMENT - THANK YOU' });
+  refreshTransferCandidates(db);
+
+  writeTransactionCategory(db, { transactionId: out, categoryId: 'cat_xfer_out', source: 'human', markManual: true }, later());
+  refreshTransferCandidates(db);
+  assert.deepEqual([leg(db, out).category_id, leg(db, out).transfer_source], ['cat_xfer_out', 'owner']);
+  assert.equal(leg(db, into).transfer_source, 'owner', 'both legs of a settled pair stay paired');
+
+  const other = insertTransaction(db, { account_id: checking, date: '2026-10-11', amount: -20000, original_name: 'CHASE CREDIT CRD AUTOPAY PPD ID: XXXXXX9224' });
+  const otherIn = insertTransaction(db, { account_id: card, date: '2026-10-10', amount: 20000, original_name: 'AUTOMATIC PAYMENT - THANK YOU' });
+  refreshTransferCandidates(db);
+  writeTransactionCategory(db, { transactionId: other, categoryId: 'cat_shop', source: 'human', markManual: true }, later());
+  refreshTransferCandidates(db);
+  assert.deepEqual([leg(db, other).category_id, leg(db, other).transfer_status], ['cat_shop', 'dismissed']);
+  assert.deepEqual([leg(db, otherIn).category_id, leg(db, otherIn).transfer_status], [null, 'dismissed']);
+});
+
+test('undoing a pair leaves a category the importer or the model chose', () => {
+  const db = migratedTestDb();
+  const checking = insertAccount(db, { type: 'checking' });
+  const coinbase = insertAccount(db, { type: 'crypto_wallet' });
+  const out = insertTransaction(db, { account_id: checking, date: '2026-09-02', amount: -10000, original_name: 'COINBASE.COM TRANSFER' });
+  const deposit = insertTransaction(db, { account_id: coinbase, date: '2026-09-02', amount: 10000, original_name: 'Coinbase deposit', category_id: 'cat_xfer_in' });
+  refreshTransferCandidates(db);
+  dismissTransferPair(db, leg(db, deposit).transfer_pair_id as string);
+  assert.equal(leg(db, deposit).category_id, 'cat_xfer_in');
+  assert.ok(out);
 });

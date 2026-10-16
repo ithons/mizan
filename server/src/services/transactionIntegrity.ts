@@ -481,27 +481,13 @@ function desiredLegs(pairs: PairEdge[], confirmedBefore: Set<string>): Map<strin
 }
 
 /**
- * Hand a row back the category the pairing displaced, then drop it out of the pair.
- *
- * Restoring needs the displaced value, and the only place that exists is the revision log, which
- * is why the write side goes through `categoryWrites` too.
+ * Drop a row out of its pair, and hand back the category only if this detector is the one that
+ * wrote it. A category the importer, a rule, the model or the owner chose is left exactly as it is.
  */
 function releaseTransferLeg(db: Database.Database, transactionId: string, now: string): void {
   const revision = latestRevertableRevision(db, transactionId);
-  if (revision && TRANSFER_LEG_CATEGORIES.has(revision.to_category_id ?? '')) {
+  if (revision && revision.to_source === 'heuristic' && TRANSFER_LEG_CATEGORIES.has(revision.to_category_id ?? '')) {
     revertRevisions(db, [revision], now);
-  } else {
-    // A later pass wrote this row (its decision stands), or the pair predates the revision log and
-    // nothing records what it displaced.
-    const current = db.prepare('SELECT category_id FROM transactions WHERE id = ?')
-      .get(transactionId) as { category_id: string | null } | undefined;
-    if (current && TRANSFER_LEG_CATEGORIES.has(current.category_id ?? '')) {
-      writeTransactionCategory(
-        db,
-        { transactionId, categoryId: null, source: null, reviewStatus: 'open' },
-        now
-      );
-    }
   }
   db.prepare(`
     UPDATE transactions
@@ -524,7 +510,40 @@ function claimTransferLeg(db: Database.Database, transactionId: string, leg: Tra
   }
 }
 
+const TRANSFER_CLASS_SQL = `(
+  category_id IN ('cat_xfer', 'cat_inv_transfer')
+  OR category_id IN (SELECT id FROM categories WHERE parent_id = 'cat_xfer')
+)`;
+
+/**
+ * The owner categorized a leg of an automatic pair by hand, which settles it: kept as a transfer
+ * category, the pair becomes theirs; filed anywhere else, it is not a transfer and is let go.
+ */
+function settleTouchedAutoPairs(db: Database.Database, now: string): void {
+  const touched = db.prepare(`
+    SELECT DISTINCT transfer_pair_id AS pair_id,
+           MIN(CASE WHEN ${TRANSFER_CLASS_SQL} THEN 1 ELSE 0 END) AS kept_as_transfer
+    FROM transactions
+    WHERE transfer_status = 'confirmed' AND transfer_source = 'auto'
+      AND (manually_categorized = 1 OR category_source = 'human')
+    GROUP BY transfer_pair_id
+  `).all() as Array<{ pair_id: string; kept_as_transfer: number }>;
+  for (const { pair_id: pairId, kept_as_transfer: kept } of touched) {
+    if (kept) {
+      db.prepare("UPDATE transactions SET transfer_source = 'owner', updated_at = ? WHERE transfer_pair_id = ?")
+        .run(now, pairId);
+      continue;
+    }
+    const legs = db.prepare('SELECT id FROM transactions WHERE transfer_pair_id = ?').all(pairId) as Array<{ id: string }>;
+    for (const leg of legs) {
+      releaseTransferLeg(db, leg.id, now);
+      db.prepare("UPDATE transactions SET transfer_status = 'dismissed', updated_at = ? WHERE id = ?").run(now, leg.id);
+    }
+  }
+}
+
 export function refreshTransferCandidates(db: Database.Database): TransferDetectionResult {
+  settleTouchedAutoPairs(db, new Date().toISOString());
   const pairs = assignPairs(candidateEdges(transferCandidateRows(db)));
   const desired = desiredLegs(pairs, ownerConfirmedAccountPairs(db));
   const now = new Date().toISOString();

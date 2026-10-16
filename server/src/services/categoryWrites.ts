@@ -157,6 +157,7 @@ export interface RevertableRevision {
   from_category_id: string | null;
   from_source: string | null;
   to_category_id: string | null;
+  to_source?: string | null;
 }
 
 /**
@@ -204,7 +205,7 @@ export function latestRevertableRevision(
   transactionId: string
 ): RevertableRevision | undefined {
   return db.prepare(`
-    SELECT id, transaction_id, from_category_id, from_source, to_category_id
+    SELECT id, transaction_id, from_category_id, from_source, to_category_id, to_source
     FROM transaction_category_revisions
     WHERE transaction_id = ?
       AND revert_of IS NULL
