@@ -39,5 +39,5 @@ test('resuming the last conversation on load yields to anything the owner opened
   const source = readFileSync(new URL('../client/src/hooks/useAiChat.ts', import.meta.url), 'utf8');
   const resume = source.slice(source.indexOf('Resume the last conversation'), source.indexOf('const loadConversation'));
   assert.match(resume, /const isCurrent = turns\.begin\(\);[\s\S]*if \(cancelled \|\| !isCurrent\(\)\) return;/);
-  assert.match(resume, /\.catch\(\(\) => \{\s*if \(localStorage\.getItem\(ACTIVE_KEY\) === active\) localStorage\.removeItem\(ACTIVE_KEY\);/, 'a failed resume clears only its own key');
+  assert.match(resume, /\.catch\(\(\) => \{\s*if \(isCurrent\(\) && localStorage\.getItem\(ACTIVE_KEY\) === active\) localStorage\.removeItem\(ACTIVE_KEY\);/, 'a failed resume clears only its own key');
 });
