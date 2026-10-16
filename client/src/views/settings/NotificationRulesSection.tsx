@@ -141,7 +141,7 @@ function ParamsEditor({ spec, onChange, lookups }: {
     case 'sync_failed':
       return (
         <label className="flex items-center gap-2 text-note text-muted">
-          <input type="checkbox" checked={spec.params.include_partial} onChange={(e) => onChange({ ...spec, params: { include_partial: e.target.checked } })} />
+          <input type="checkbox" className="rounded border-line-3 text-sage focus:ring-0" checked={spec.params.include_partial} onChange={(e) => onChange({ ...spec, params: { include_partial: e.target.checked } })} />
           Include runs that finished with issues
         </label>
       );
@@ -261,7 +261,7 @@ export function NotificationRulesSection() {
               <label className="flex items-start gap-2.5">
                 <input
                   type="checkbox"
-                  className="mt-1"
+                  className="mt-1 rounded border-line-3 text-sage focus:ring-0"
                   checked={rule.enabled}
                   onChange={(e) => update.mutate({ id: rule.id, body: { enabled: e.target.checked } })}
                 />
