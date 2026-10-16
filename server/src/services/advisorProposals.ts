@@ -3,6 +3,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { AdvisorDraftPayloadSchema } from '../../../shared/schemas';
 import { SCHEDULED_ROUTE } from '../../../shared/routes';
 import type { AdvisorDraftAction, AdvisorDraftActionKind } from '../../../shared/types';
+import { isDraftStillActionable } from './advisorDrafts';
 
 const ROUTE_FOR_KIND: Readonly<Record<AdvisorDraftActionKind, string>> = {
   categorize_transaction: '/ledger',
@@ -67,4 +68,19 @@ export function proposeChanges(db: Database.Database, input: { changes?: unknown
   });
   if (!Array.isArray(input.changes)) result.refused.push({ index: -1, reason: 'changes must be an array' });
   return result;
+}
+
+/** Open drafts whose premise still holds, newest first: what is waiting for the owner. */
+export function listOpenDrafts(db: Database.Database, limit = 100): AdvisorDraftAction[] {
+  const rows = db.prepare(`
+    SELECT id, kind, label, summary, route, payload FROM advisor_drafts
+    WHERE status = 'open' ORDER BY created_at DESC, id LIMIT ?
+  `).all(limit) as Array<{ id: string; kind: AdvisorDraftActionKind; label: string; summary: string; route: string; payload: string }>;
+  const drafts: AdvisorDraftAction[] = [];
+  for (const row of rows) {
+    const parsed = AdvisorDraftPayloadSchema.safeParse(JSON.parse(row.payload));
+    if (!parsed.success || !isDraftStillActionable(db, parsed.data)) continue;
+    drafts.push({ id: row.id, kind: row.kind, label: row.label, summary: row.summary, route: row.route, payload: parsed.data, changes: [], citations: [], confirmation_required: true });
+  }
+  return drafts;
 }

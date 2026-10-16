@@ -49,7 +49,7 @@ import type {
   AdvisorDraftActionKind,
   ChatMessage,
 } from '../../../shared/types';
-import type { ProposalsResult } from '../services/advisorProposals';
+import { listOpenDrafts, type ProposalsResult } from '../services/advisorProposals';
 
 const router = Router();
 
@@ -542,6 +542,15 @@ router.post('/confirm', (req: Request, res: Response, next: NextFunction): void 
     }
 
     res.json({ data: confirmAdvisorDraft(getDb(), body.draft, body.confirm) });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// GET /api/ai/drafts - proposals still waiting for the owner, from chat or the background review.
+router.get('/drafts', (_req: Request, res: Response, next: NextFunction): void => {
+  try {
+    res.json({ data: listOpenDrafts(getDb()) });
   } catch (err) {
     next(err);
   }

@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import type Database from 'better-sqlite3';
-import { proposeChanges } from '../server/src/services/advisorProposals';
+import { listOpenDrafts, proposeChanges } from '../server/src/services/advisorProposals';
 import { confirmAdvisorDraftsByIds } from '../server/src/services/advisorDrafts';
 import { ADVISOR_TOOLS, runAdvisorTool } from '../server/src/services/advisorChatTools';
 import { ADVISOR_SYSTEM_PROMPT } from '../server/src/services/aiContext';
@@ -99,4 +99,15 @@ test('every new ability is registered as a tool and named in the prompt', () => 
   }
   assert.match(ADVISOR_SYSTEM_PROMPT, /propose_changes/);
   assert.match(ADVISOR_SYSTEM_PROMPT, /remember/);
+});
+
+test('the waiting list holds open proposals only, newest first', () => {
+  const db = migratedTestDb();
+  const a = propose(db, { kind: 'update_budget', category_id: 'cat_food', amount: 300, period: 'monthly', rollover: false }).proposed[0];
+  const b = propose(db, { kind: 'create_goal', name: 'Trip', type: 'savings', target_amount: 900 }).proposed[0];
+  const c = propose(db, { kind: 'create_goal', name: 'Bike', type: 'savings', target_amount: 400 }).proposed[0];
+  db.prepare("UPDATE advisor_drafts SET created_at = '2026-10-01' WHERE id = ?").run(a.id);
+  db.prepare("UPDATE advisor_drafts SET status = 'dismissed' WHERE id = ?").run(b.id);
+  confirmAdvisorDraftsByIds(db, [c.id]);
+  assert.deepEqual(listOpenDrafts(db).map((draft) => draft.id), [a.id]);
 });

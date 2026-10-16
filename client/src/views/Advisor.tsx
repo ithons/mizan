@@ -8,6 +8,7 @@ import { useAdvisorChat } from '../hooks/advisorChat';
 import { AskPanel } from '../components/AskPanel';
 import { ConfirmRemoveModal } from '../components/ConfirmRemoveModal';
 import { AiActionsList } from '../components/AiActions';
+import { ProposalCard } from '../components/ProposalCard';
 import { SectionLabel, TextButton } from '../components/balance';
 
 type Conversation = Awaited<ReturnType<typeof aiApi.listConversations>>[number];
@@ -167,6 +168,7 @@ export default function Advisor() {
     queryKey: ['ai-conversations'],
     queryFn: () => aiApi.listConversations(),
   });
+  const { data: waiting = [] } = useQuery({ queryKey: ['ai-drafts', 'open'], queryFn: () => aiApi.openDrafts() });
 
   // A settled turn is saved by the chat; the list learns about it here.
   useEffect(() => {
@@ -196,7 +198,7 @@ export default function Advisor() {
         <div className="flex gap-4 text-body min-[1000px]:hidden">
           {tab('chat', 'Chat')}
           {tab('conversations', 'Conversations')}
-          {tab('changes', 'Changes')}
+          {tab('changes', waiting.length > 0 ? `Changes (${waiting.length} waiting)` : 'Changes')}
         </div>
       </div>
 
@@ -214,8 +216,16 @@ export default function Advisor() {
         </section>
 
         <aside className={`min-h-0 flex-col ${pane === 'changes' ? 'flex' : 'hidden'} min-[1000px]:flex`}>
-          <SectionLabel className="mb-2">What the AI has changed</SectionLabel>
           <div className="min-h-0 flex-1 overflow-y-auto pr-1">
+            {waiting.length > 0 && (
+              <div className="mb-6">
+                <SectionLabel className="mb-2">Waiting for you</SectionLabel>
+                <div className="grid gap-2.5">
+                  {waiting.map((draft) => <ProposalCard key={draft.id} proposal={draft} />)}
+                </div>
+              </div>
+            )}
+            <SectionLabel className="mb-2">What the AI has changed</SectionLabel>
             <AiActionsList />
           </div>
         </aside>

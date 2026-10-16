@@ -983,6 +983,7 @@ export const aiApi = {
       method: 'POST',
       body: JSON.stringify({ draft, confirm: true }),
     }),
+  openDrafts: () => apiFetch<AdvisorDraftAction[]>('/api/ai/drafts'),
   dismissDraft: (id: string) =>
     apiFetch<{ success: boolean }>(`/api/ai/drafts/${id}/dismiss`, {
       method: 'POST',
