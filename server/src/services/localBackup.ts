@@ -1,6 +1,6 @@
 import type Database from 'better-sqlite3';
 import { RETIRED_PREFERENCE_KEYS } from './preferences';
-import { ROW_REPAIR_MIGRATIONS, appliedMigrationNames, replayRowRepairs } from '../db/index';
+import { ROW_REPAIR_MIGRATIONS, appliedMigrationNames, migrationChangesRows, replayRowRepairs } from '../db/index';
 
 /**
  * Every table a full backup carries, ordered parents before children.
@@ -474,13 +474,12 @@ export function buildLocalBackupRestorePreview(
 
     const backupMigrations = new Set(parsed.backup.tables.schema_migrations.map((row) => String(row.name)));
     const notReplayed = [...appliedMigrationNames(db)]
-      .filter((name) => !backupMigrations.has(name) && !ROW_REPAIR_MIGRATIONS.includes(name))
+      .filter((name) => !backupMigrations.has(name) && !ROW_REPAIR_MIGRATIONS.includes(name) && migrationChangesRows(name))
       .sort();
     if (backupMigrations.size > 0 && notReplayed.length > 0) {
       warnings.push(
-        `This backup predates ${notReplayed.length} migration${notReplayed.length === 1 ? '' : 's'} ` +
-        `(${notReplayed[0]} to ${notReplayed[notReplayed.length - 1]}) whose data changes are not re-applied; ` +
-        'rows they repaired come back as the backup had them.'
+        `This backup predates ${notReplayed.join(', ')}, which changed stored rows; ` +
+        'restoring brings those rows back as the backup had them.'
       );
     }
   }

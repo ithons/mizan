@@ -100,26 +100,29 @@ export const ROW_REPAIR_MIGRATIONS: readonly string[] = [
   '065_transfer_source.sql',
 ];
 
-/** The row-level statements of a repair migration, read from the file so the replay cannot drift from it. */
-export function rowRepairStatements(file: string): string[] {
-  const sql = fs.readFileSync(path.join(MIGRATIONS_DIR, file), 'utf-8')
+function migrationStatements(file: string): string[] {
+  return fs.readFileSync(path.join(MIGRATIONS_DIR, file), 'utf-8')
     .split('\n')
     .filter((line) => !line.trim().startsWith('--'))
-    .join('\n');
-  return sql
+    .join('\n')
     .split(';')
     .map((statement) => statement.trim())
-    .filter((statement) => /^UPDATE transactions\s/.test(statement) || /^INSERT INTO transaction_field_revisions\s/.test(statement));
+    .filter(Boolean);
+}
+
+/** The row-level statements of a repair migration, read from the file so the replay cannot drift from it. */
+export function rowRepairStatements(file: string): string[] {
+  return migrationStatements(file).filter((statement) =>
+    /^UPDATE transactions\s/.test(statement) || /^INSERT INTO transaction_field_revisions\s/.test(statement));
+}
+
+/** Whether a migration rewrites stored rows, as opposed to only reshaping or copying them. */
+export function migrationChangesRows(file: string): boolean {
+  return migrationStatements(file).some((statement) =>
+    /^(UPDATE|DELETE FROM)\s/i.test(statement) || (/^INSERT\s/i.test(statement) && !/^INSERT INTO \w+_new\b/i.test(statement)));
 }
 
 /** Re-applies the row repairs of migrations 062 to 065 that this database has run and the restored rows predate. */
-export function appliedMigrationNames(db: Database.Database): Set<string> {
-  const hasNames = (db.prepare("SELECT name FROM pragma_table_info('schema_migrations')").all() as { name: string }[])
-    .some((column) => column.name === 'name');
-  if (!hasNames) return new Set();
-  return new Set((db.prepare('SELECT name FROM schema_migrations').all() as { name: string }[]).map((row) => row.name));
-}
-
 export function replayRowRepairs(db: Database.Database, appliedToRows: ReadonlySet<string>): string[] {
   const appliedHere = appliedMigrationNames(db);
   if (appliedHere.size === 0) return [];
@@ -132,6 +135,14 @@ export function replayRowRepairs(db: Database.Database, appliedToRows: ReadonlyS
   }
   return replayed;
 }
+
+export function appliedMigrationNames(db: Database.Database): Set<string> {
+  const hasNames = (db.prepare("SELECT name FROM pragma_table_info('schema_migrations')").all() as { name: string }[])
+    .some((column) => column.name === 'name');
+  if (!hasNames) return new Set();
+  return new Set((db.prepare('SELECT name FROM schema_migrations').all() as { name: string }[]).map((row) => row.name));
+}
+
 
 /**
  * Apply every pending migration to an arbitrary connection.
