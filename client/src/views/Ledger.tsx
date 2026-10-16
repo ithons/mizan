@@ -514,10 +514,12 @@ export function Ledger() {
         title="Ledger"
         sub={
           view === 'scheduled' ? (
-            <>
-              <span className="tabular-nums">{occurrences.filter((o) => o.adjustment_action !== 'skip').length}</span> on the
-              schedule
-            </>
+            forecastQ.isSuccess ? (
+              <>
+                <span className="tabular-nums">{occurrences.filter((o) => o.adjustment_action !== 'skip').length}</span> on the
+                schedule
+              </>
+            ) : null
           ) : (
             <>
               <span className="tabular-nums">{totalCount.toLocaleString()}</span> entr{totalCount === 1 ? 'y' : 'ies'} ·{' '}
@@ -707,7 +709,9 @@ export function Ledger() {
       )}
 
       {/* ── Ahead of the rule ──────────────────────────────────────────────── */}
-      {view === 'scheduled' && (
+      {view === 'scheduled' && forecastQ.isPending && <SkeletonRows rows={6} />}
+
+      {view === 'scheduled' && forecastQ.isSuccess && (
         <>
           <SectionLabel
             summary={
@@ -830,9 +834,13 @@ export function Ledger() {
 
         {!isLoading && spine.settled.length === 0 && (
           <p className="px-3 py-10 text-body-lg text-muted">
-            {debouncedSearch || accountFilter || categoryFilter || sourceFilter || filter !== 'all'
-              ? 'Nothing matches these filters.'
-              : 'No entries in this period. The ledger reaches back only as far as each account’s provider sends.'}
+            {folded.hiddenTrades > 0
+              ? 'Every entry here is a brokerage trade, which is hidden.'
+              : hasNextPage
+                ? 'Nothing on this page to show; more entries are below.'
+                : debouncedSearch || accountFilter || categoryFilter || sourceFilter || filter !== 'all'
+                  ? 'Nothing matches these filters.'
+                  : 'No entries in this period. The ledger reaches back only as far as each account’s provider sends.'}
           </p>
         )}
 

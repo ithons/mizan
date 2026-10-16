@@ -11,3 +11,13 @@ test('hiding brokerage trades drops the selection, so a bulk write cannot reach 
 test('switching between Entries and Scheduled drops the selection', () => {
   assert.match(source, /setSelectedIds\(new Set\(\)\);\s*\}, \[[^\]]*\bview\]\);/);
 });
+
+test('the Scheduled tab shows nothing it cannot back while the forecast loads or fails', () => {
+  assert.match(source, /view === 'scheduled' && forecastQ\.isPending && <SkeletonRows/);
+  assert.match(source, /view === 'scheduled' && forecastQ\.isSuccess && \(/);
+  assert.match(source, /forecastQ\.isSuccess \? \(\s*<>\s*<span className="tabular-nums">\{occurrences/);
+});
+
+test('an Entries page whose only rows are hidden trades says so instead of claiming nothing matches', () => {
+  assert.match(source, /folded\.hiddenTrades > 0\s*\?\s*'Every entry here is a brokerage trade, which is hidden\.'/);
+});
