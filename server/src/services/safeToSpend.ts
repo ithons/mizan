@@ -135,7 +135,7 @@ export function computeSafeToSpend(
   const cards = new Set((db.prepare('SELECT id FROM accounts WHERE is_liability = 1').all() as Array<{ id: string }>).map((row) => row.id));
   const { transfers: recurringTransfers, cardRelief, effects: transferEffects } = transfersAcrossPool(forecast.occurrences, pool, cards, owed);
   const estimatedUnbudgeted = unbudgetedPace(db, inputs.budgets ?? [], forecastDays);
-  const budgetAheadEffects = budgetsAfterThisMonth(inputs.budgets ?? [], forecastDays);
+  const budgetAheadEffects = budgetsAfterThisMonth(db, inputs.budgets ?? [], forecast.occurrences, forecastDays);
   const budgetsAhead = budgetAheadEffects.reduce((sum, item) => sum - item.cents, 0);
 
   // Clamped to what was actually budgeted. Now that refunds net a category's spend down,
@@ -292,27 +292,41 @@ function transfersAcrossPool(
 }
 
 /**
- * Each later month's budgets, for the days of that month the window reaches, spread evenly over
- * those days. Budgeted categories are left out of the unbudgeted pace, so without this their
+ * Each later month's budgets, less that month's forecast bills in the same category (already
+ * claimed as bills), for the days of that month the window reaches, spread evenly over those days. Budgeted categories are left out of the unbudgeted pace, so without this their
  * spending after this month ends would be claimed nowhere.
  */
 function budgetsAfterThisMonth(
-  budgets: ReadonlyArray<{ amount?: number | null }>,
+  db: Database.Database,
+  budgets: ReadonlyArray<{ category_id?: string | null; amount?: number | null }>,
+  occurrences: readonly RecurringForecastOccurrence[],
   forecastDays: number,
   today = new Date()
 ): ScheduledEffect[] {
-  const monthly = budgets.reduce((sum, budget) => sum + Math.max(0, budget.amount ?? 0), 0);
-  if (monthly <= 0) return [];
+  const parents = new Map((db.prepare('SELECT id, parent_id FROM categories').all() as Array<{ id: string; parent_id: string | null }>).map((row) => [row.id, row.parent_id]));
+  const covers = (budgetCategory: string | null | undefined, category: string | null) =>
+    !!budgetCategory && !!category && (category === budgetCategory || parents.get(category) === budgetCategory);
+  const monthKey = (date: Date) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+  const billsIn = (month: string, budgetCategory: string | null | undefined) => occurrences
+    .filter((o) => o.kind !== 'transfer' && o.adjustment_action !== 'skip' && o.amount < 0 && o.expected_date.startsWith(month) && covers(budgetCategory, o.category_id ?? null))
+    .reduce((sum, o) => sum - o.amount, 0);
   const effects: ScheduledEffect[] = [];
   const cursor = new Date(today.getFullYear(), today.getMonth() + 1, 1);
   const end = new Date(today.getFullYear(), today.getMonth(), today.getDate() + forecastDays);
   let carried = 0;
+  let month = '';
+  let monthly = 0;
   for (; cursor <= end; cursor.setDate(cursor.getDate() + 1)) {
+    if (monthKey(cursor) !== month) {
+      month = monthKey(cursor);
+      monthly = budgets.reduce((sum, budget) => sum + Math.max(0, (budget.amount ?? 0) - billsIn(month, budget.category_id)), 0);
+    }
+    if (monthly <= 0) continue;
     const daysInMonth = new Date(cursor.getFullYear(), cursor.getMonth() + 1, 0).getDate();
     const exact = monthly / daysInMonth + carried;
     const cents = Math.round(exact);
     carried = exact - cents;
-    const date = `${cursor.getFullYear()}-${String(cursor.getMonth() + 1).padStart(2, '0')}-${String(cursor.getDate()).padStart(2, '0')}`;
+    const date = `${month}-${String(cursor.getDate()).padStart(2, '0')}`;
     effects.push({ date, cents: -cents, kind: 'budget', label: 'Budgets', patternId: 'budgets' });
   }
   return effects;

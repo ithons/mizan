@@ -229,3 +229,24 @@ test('the daily allowance spends only what exists before the next pay, not the p
     _setDbForTesting(undefined as unknown as Database.Database);
   }
 });
+
+test('next month\'s budget does not claim a recurring bill the forecast already claims', () => {
+  const db = migratedTestDb();
+  _setDbForTesting(db);
+  try {
+    const chase = insertAccount(db, { account_name: 'Chase', type: 'checking', current_balance: 500000 });
+    for (const m of [5, 4, 3, 2, 1, 0]) {
+      const first = new Date(new Date().getFullYear(), new Date().getMonth() - m, 1);
+      insertTransaction(db, { account_id: chase, date: format(first, 'yyyy-MM-dd'), amount: -200000, merchant_name: 'Landlord', original_name: 'LANDLORD RENT', category_id: 'cat_home_rent' });
+    }
+    detectRecurring();
+    db.prepare("INSERT INTO budgets (id, category_id, amount, period, rollover, created_at, updated_at) VALUES ('b1', 'cat_home', 200000, 'monthly', 0, datetime(), datetime())").run();
+    const now = new Date();
+    const daysLeft = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate() - now.getDate();
+    const sheet = computeSafeToSpend(db, { budgets: getMonthlyBudgetsWithProjection(db, now.getFullYear(), now.getMonth() + 1), forecastDays: daysLeft + 10 });
+    assert.ok(sheet.upcomingBills >= 200000, 'next month\'s rent is a forecast bill');
+    assert.equal(sheet.budgetsAhead, 0, 'so the Home budget claims nothing more for it');
+  } finally {
+    _setDbForTesting(undefined as unknown as Database.Database);
+  }
+});
