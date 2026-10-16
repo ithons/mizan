@@ -676,7 +676,7 @@ export function backfillSnapshots(): void {
           // deposit isn't double-counted.)
           approxBalances[txn.account_id] += Math.abs(txn.amount);
         } else if (txn.is_internal_trade === 0
-          && (cat === 'cat_inv_transfer' || PAIRED_TRANSFER.has(txn.transfer_status))) {
+          && (cat === 'cat_inv_transfer' || (meta.type !== 'crypto_wallet' && PAIRED_TRANSFER.has(txn.transfer_status)))) {
           // Sign-aware external flow: a contribution (+) means value was lower before; a
           // withdrawal/correction (−) means it was higher. Undo by subtracting the amount.
           approxBalances[txn.account_id] -= txn.amount;

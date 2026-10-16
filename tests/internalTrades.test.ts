@@ -121,3 +121,24 @@ test('a trade leaving a brokerage is never half of a missing transfer', () => {
   }
   assert.deepEqual(findFlowConservationViolations(db), []);
 });
+
+test('an estimated wallet month undoes the buy, not also the paired deposit that funded it', () => {
+  const db = migratedTestDb();
+  _setDbForTesting(db);
+  try {
+    insertAccount(db, { id: 'cb', type: 'crypto_wallet', current_balance: 50000 });
+    insertTransaction(db, { account_id: 'cb', date: midMonth(4), amount: 0 });
+    const deposit = insertTransaction(db, { account_id: 'cb', date: midMonth(1), amount: 10000, category_id: 'cat_xfer_in' });
+    db.prepare("UPDATE transactions SET transfer_status = 'confirmed', transfer_pair_id = 'x' WHERE id = ?").run(deposit);
+    insertTransaction(db, { account_id: 'cb', date: midMonth(1), amount: -10000, category_id: 'cat_crypto_buy' });
+
+    backfillSnapshots();
+
+    const start = format(startOfMonth(subMonths(new Date(), 1)), 'yyyy-MM-dd');
+    const snap = db.prepare('SELECT breakdown FROM net_worth_snapshots WHERE date = ?').get(start) as { breakdown: string };
+    assert.equal(JSON.parse(snap.breakdown).cb, 40000);
+  } finally {
+    _setDbForTesting(undefined as unknown as Database.Database);
+    db.close();
+  }
+});
