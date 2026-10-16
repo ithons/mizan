@@ -386,6 +386,9 @@ function backupForeignKeyErrors(
   return errors;
 }
 
+/** Migrations whose row changes a restore already carries out: 062 to 065 by replay, 054 by skipping retired keys. */
+const HANDLED_ON_RESTORE: ReadonlySet<string> = new Set([...ROW_REPAIR_MIGRATIONS, '054_drop_dead_preferences.sql']);
+
 export function buildLocalBackupRestorePreview(
   db: Database.Database,
   value: unknown
@@ -474,12 +477,12 @@ export function buildLocalBackupRestorePreview(
 
     const backupMigrations = new Set(parsed.backup.tables.schema_migrations.map((row) => String(row.name)));
     const notReplayed = [...appliedMigrationNames(db)]
-      .filter((name) => !backupMigrations.has(name) && !ROW_REPAIR_MIGRATIONS.includes(name) && migrationChangesRows(name))
+      .filter((name) => !backupMigrations.has(name) && !HANDLED_ON_RESTORE.has(name) && migrationChangesRows(name))
       .sort();
     if (backupMigrations.size > 0 && notReplayed.length > 0) {
       warnings.push(
-        `This backup predates ${notReplayed.join(', ')}, which changed stored rows; ` +
-        'restoring brings those rows back as the backup had them.'
+        `This backup predates ${notReplayed.join(', ')}, which can rewrite stored rows and are not re-run on restore; ` +
+        'any rows they changed come back as the backup had them.'
       );
     }
   }

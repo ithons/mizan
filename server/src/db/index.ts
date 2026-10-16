@@ -116,7 +116,7 @@ export function rowRepairStatements(file: string): string[] {
     /^UPDATE transactions\s/.test(statement) || /^INSERT INTO transaction_field_revisions\s/.test(statement));
 }
 
-/** Whether a migration rewrites stored rows, as opposed to only reshaping or copying them. */
+/** Whether a migration contains a statement that can rewrite stored rows, as opposed to only reshaping or copying them. */
 export function migrationChangesRows(file: string): boolean {
   return migrationStatements(file).some((statement) =>
     /^(UPDATE|DELETE FROM)\s/i.test(statement) || (/^INSERT\s/i.test(statement) && !/^INSERT INTO \w+_new\b/i.test(statement)));

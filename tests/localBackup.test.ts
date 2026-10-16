@@ -643,7 +643,8 @@ test('restoring a backup older than repairs the replay does not cover says so be
 
   const preview = buildLocalBackupRestorePreview(target, wire);
   const warning = preview.warnings.find((w) => w.startsWith('This backup predates')) ?? '';
-  assert.match(warning, /^This backup predates 045_\S+\.sql, .*which changed stored rows/);
+  assert.match(warning, /^This backup predates 045_\S+\.sql, .*which can rewrite stored rows and are not re-run on restore/);
+  assert.doesNotMatch(warning, /054_/, 'restore already skips the keys 054 deleted');
   assert.doesNotMatch(warning, /06[2-5]_/, 'the replayed repairs are not listed as lost');
   assert.doesNotMatch(warning, /06[6-9]_|070_/, 'migrations that only add columns repaired nothing');
 });
@@ -660,7 +661,7 @@ test('HEALTHY: a backup behind only by migrations that add columns restores with
   assert.ok(!preview.warnings.some((w) => w.startsWith('This backup predates')), preview.warnings.join(' | '));
 });
 
-test('a migration counts as changing rows only when it rewrites them', () => {
+test('a migration counts as able to change rows only when it holds a statement that rewrites them', () => {
   assert.equal(migrationChangesRows('045_retire_ai_rules_contending_with_owner_rules.sql'), true);
   assert.equal(migrationChangesRows('063_internal_trades.sql'), true);
   for (const file of ['066_recurring_transfers.sql', '067_refund_links.sql', '069_card_statements.sql', '070_snapshot_taken_at.sql']) {
