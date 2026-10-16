@@ -2,6 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import type Database from 'better-sqlite3';
 import { listOpenDrafts, proposeChanges } from '../server/src/services/advisorProposals';
+import { describeDraftChanges } from '../server/src/services/draftDescriptions';
+import type { AdvisorDraftPayload } from '../shared/types';
 import { confirmAdvisorDraftsByIds } from '../server/src/services/advisorDrafts';
 import { ADVISOR_TOOLS, runAdvisorTool } from '../server/src/services/advisorChatTools';
 import { ADVISOR_SYSTEM_PROMPT } from '../server/src/services/aiContext';
@@ -193,8 +195,29 @@ test('every kind of change can be described from its payload', () => {
     { kind: 'delete_notification_rule', rule_id: 'nope' },
   ];
   for (const payload of payloads) {
-    const result = propose(db, payload);
-    assert.deepEqual(result.refused, [], String(payload.kind));
-    assert.ok(result.proposed[0].changes.length > 0, String(payload.kind));
+    const changes = describeDraftChanges(db, payload as unknown as AdvisorDraftPayload);
+    assert.ok(changes.length > 0, String(payload.kind));
   }
+  const refused = payloads.filter((payload) => propose(db, payload).refused.length > 0).map((payload) => payload.kind);
+  assert.deepEqual(refused.sort(), [
+    'confirm_recurring', 'create_recurring_adjustment', 'delete_budget', 'delete_notification_rule', 'dismiss_recurring',
+    'retire_merchant_rule', 'set_manual_cost_basis', 'set_sector_metadata', 'update_goal_target',
+  ], 'only proposals naming a row that is not there are refused');
+});
+
+test('a card for a row that has since gone says so instead of guessing its state', () => {
+  const db = migratedTestDb();
+  assert.deepEqual(describeDraftChanges(db, { kind: 'categorize_transaction', transaction_id: 'gone', category_id: 'cat_food' }), [{ field: 'Transaction', before: 'no longer exists', after: 'Food & Drink' }]);
+  assert.deepEqual(describeDraftChanges(db, { kind: 'update_account', account_id: 'gone', is_hidden: true }), [{ field: 'Account', before: 'no longer exists', after: 'unchanged' }]);
+  const rule = describeDraftChanges(db, { kind: 'set_notification_rule', rule_kind: 'low_balance', params: { account_id: null, threshold: 500 } });
+  assert.equal(rule[0].after, 'account: checking, savings and cash together; threshold: $500.00');
+});
+
+test('re-proposing the same change takes the new wording, so the card never says the opposite', () => {
+  const db = migratedTestDb();
+  const payload = { kind: 'update_budget', category_id: 'cat_food', amount: 400, period: 'monthly', rollover: false };
+  const first = proposeChanges(db, { changes: [{ label: 'Raise Food budget to $400', summary: 'Raises it.', payload }] }).proposed[0];
+  const second = proposeChanges(db, { changes: [{ label: 'Cut Food budget to $400', summary: 'Lowers it.', payload }] }).proposed[0];
+  assert.equal(first.id, second.id);
+  assert.equal(listOpenDrafts(db)[0].label, 'Cut Food budget to $400');
 });

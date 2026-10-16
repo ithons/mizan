@@ -26,7 +26,7 @@ export function describeDraftChanges(db: Database.Database, payload: AdvisorDraf
     }
     case 'delete_budget': {
       const current = db.prepare('SELECT amount FROM budgets WHERE category_id = ?').get(payload.category_id) as { amount: number } | undefined;
-      return [{ field: `${categoryName(db, payload.category_id)} budget`, before: current ? `${fromCents(current.amount)} a month` : 'none', after: 'removed' }];
+      return [{ field: `${categoryName(db, payload.category_id)} budget`, before: current ? `${fromCents(current.amount)} a month` : 'no budget set', after: current ? 'removed' : 'nothing to remove' }];
     }
     case 'create_goal':
       return [{ field: 'New goal', before: null, after: `${payload.name}: ${payload.type} ${money(payload.target_amount)}${payload.target_date ? ` by ${payload.target_date}` : ''}${payload.account_id ? `, linked to ${accountName(db, payload.account_id)}` : ''}` }];
@@ -36,7 +36,8 @@ export function describeDraftChanges(db: Database.Database, payload: AdvisorDraf
     }
     case 'categorize_transaction': {
       const row = db.prepare('SELECT date, amount, COALESCE(merchant_name, original_name) AS label, category_id FROM transactions WHERE id = ?').get(payload.transaction_id) as { date: string; amount: number; label: string; category_id: string | null } | undefined;
-      return [{ field: row ? `${row.label}, ${row.date}, ${fromCents(row.amount)}` : 'Transaction', before: row?.category_id ? categoryName(db, row.category_id) : 'uncategorized', after: categoryName(db, payload.category_id) }];
+      if (!row) return [{ field: 'Transaction', before: 'no longer exists', after: categoryName(db, payload.category_id) }];
+      return [{ field: `${row.label}, ${row.date}, ${fromCents(row.amount)}`, before: row.category_id ? categoryName(db, row.category_id) : 'uncategorized', after: categoryName(db, payload.category_id) }];
     }
     case 'create_merchant_rule':
       return [{ field: `Rule for "${payload.pattern}"`, before: null, after: `${categoryName(db, payload.category_id)}${payload.apply_existing ? ', including past transactions' : ', new transactions only'}` }];
@@ -58,7 +59,8 @@ export function describeDraftChanges(db: Database.Database, payload: AdvisorDraf
     }
     case 'update_account': {
       const account = db.prepare('SELECT account_name, is_hidden, current_balance, statement_balance, statement_due_date, credit_limit FROM accounts WHERE id = ?').get(payload.account_id) as Record<string, number | string | null> | undefined;
-      const label = (account?.account_name as string) ?? 'Account';
+      if (!account) return [{ field: 'Account', before: 'no longer exists', after: 'unchanged' }];
+      const label = account.account_name as string;
       const changes: AdvisorDraftChange[] = [];
       if (payload.account_name !== undefined) changes.push({ field: `${label} name`, before: label, after: payload.account_name });
       if (payload.is_hidden !== undefined) changes.push({ field: `${label} visibility`, before: account?.is_hidden ? 'hidden' : 'shown', after: payload.is_hidden ? 'hidden' : 'shown' });
@@ -75,7 +77,22 @@ export function describeDraftChanges(db: Database.Database, payload: AdvisorDraf
     case 'set_sector_metadata':
       return [{ field: 'Security sector', before: null, after: payload.sector ?? 'cleared' }];
     case 'set_notification_rule': {
-      const params = Object.entries(payload.params).map(([key, value]) => `${key.replace(/_/g, ' ')}: ${key === 'category_id' ? categoryName(db, value as string | null) : key === 'account_id' ? accountName(db, value as string | null) : Array.isArray(value) ? value.join(', ') : String(value)}`).join('; ');
+      const moneyFields = new Set(['min_amount', 'threshold']);
+      const nobody: Record<string, string> = {
+        category_id: payload.rule_kind === 'budget_threshold' ? 'any budget' : 'any top-level category',
+        account_id: payload.rule_kind === 'low_balance' ? 'checking, savings and cash together' : 'any account',
+        goal_id: 'any goal',
+      };
+      const show = (key: string, value: unknown): string => {
+        if (value === null && key in nobody) return nobody[key];
+        if (key === 'category_id') return categoryName(db, value as string);
+        if (key === 'account_id') return accountName(db, value as string);
+        if (key === 'goal_id') return name(db, 'SELECT name FROM goals WHERE id = ?', value as string, 'goal');
+        if (moneyFields.has(key) && typeof value === 'number') return money(value);
+        if (key === 'percent' || key === 'milestones') return `${Array.isArray(value) ? value.join('%, ') : String(value)}%`;
+        return Array.isArray(value) ? value.join(', ') : String(value);
+      };
+      const params = Object.entries(payload.params).map(([key, value]) => `${key.replace(/_id$/, '').replace(/_/g, ' ')}: ${show(key, value)}`).join('; ');
       return [{ field: payload.rule_id ? `Notification rule (${payload.rule_kind.replace(/_/g, ' ')})` : `New notification: ${payload.rule_kind.replace(/_/g, ' ')}`, before: null, after: `${params || 'default settings'}${payload.enabled === false ? ', off' : ''}` }];
     }
     case 'delete_notification_rule':
