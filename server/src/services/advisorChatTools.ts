@@ -545,9 +545,12 @@ function getNetWorthHistoryTool(db: Database.Database, input: ToolInput): unknow
   return {
     history: rows.map((r) => ({
       date: r.date,
-      net_worth: toDollars(settledNetWorthCents(db, r)),
+      net_worth: toDollars(r.net_worth),
       assets: toDollars(r.total_assets),
       liabilities: toDollars(r.total_liabilities),
+      // Balance shows net_worth plus money one bank had sent and the other had not yet shown.
+      in_transit: toDollars(settledNetWorthCents(db, r) - r.net_worth),
+      settled_net_worth: toDollars(settledNetWorthCents(db, r)),
       // A reconstruction, not a measurement. Without this the model narrates the join between the
       // estimated and measured segments as an observed event.
       estimated: r.is_estimated,

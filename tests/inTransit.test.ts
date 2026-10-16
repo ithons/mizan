@@ -114,13 +114,21 @@ test('money that arrived before its sending bank showed it leaving is counted on
   assert.equal(transit.byAccount.get('wf'), -200322);
 });
 
-test('the advisor reads net worth history the way Balance does, with money in flight counted', (t) => {
+test('the advisor reads net worth history that adds up, with the settled figure Balance shows stated beside it', (t) => {
   const db = migratedTestDb();
   t.after(() => { _setDbForTesting(null); db.close(); });
   _setDbForTesting(db);
   chaseToWealthfront(db);
-  const history = (runAdvisorTool(db, 'get_net_worth_history', { months: 60 }) as { history: Array<{ date: string; net_worth: number }> }).history;
-  assert.equal(history.find((row) => row.date === '2026-10-01')?.net_worth, (650016 + 321 + 500000) / 100);
+  type Row = { date: string; net_worth: number; assets: number; liabilities: number; in_transit: number; settled_net_worth: number };
+  const history = (runAdvisorTool(db, 'get_net_worth_history', { months: 60 }) as { history: Row[] }).history;
+  const row = history.find((r) => r.date === '2026-10-01');
+  assert.ok(row);
+  assert.equal(row.net_worth, row.assets - row.liabilities);
+  assert.equal(row.in_transit, 5000);
+  assert.equal(row.settled_net_worth, (650016 + 321 + 500000) / 100);
+  assert.equal(history.find((r) => r.date === '2026-10-15')?.in_transit, 0);
   const context = buildFinancialContext();
-  assert.match(context, /2026-10-01: \$11,503\.37/);
+  assert.match(context, /2026-10-01: \$6,503\.37 \(\$5,000\.00 had left one account and not yet reached the other; Balance shows \$11,503\.37\)/);
+  assert.match(context, /2026-10-15: \$10,843\.18/);
+  assert.doesNotMatch(context, /2026-10-15: [^\n]*Balance shows/, 'a sheet with nothing in flight carries no note');
 });

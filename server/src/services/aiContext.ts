@@ -982,7 +982,7 @@ export function buildFinancialContext(): string {
   const lastMonthSnapshot = readSnapshotBefore(db, thisMonthStart, { measuredOnly: true });
 
   // netWorth is dollars (from dollarized balances); the snapshot column is cents.
-  const nwDelta = lastMonthSnapshot ? netWorth - toDollars(settledNetWorthCents(db, lastMonthSnapshot)) : null;
+  const nwDelta = lastMonthSnapshot ? netWorth - toDollars(lastMonthSnapshot.net_worth) : null;
 
   lines.push('');
   lines.push(`### Net Worth: ${fmt(netWorth)}${nwDelta != null ? ` (${nwDelta >= 0 ? '+' : ''}${fmt(nwDelta)} vs last month)` : ''}`);
@@ -1512,7 +1512,11 @@ export function buildFinancialContext(): string {
       );
     }
     for (const snap of nwHistory) {
-      lines.push(`  ${snap.date}: ${fmt(toDollars(settledNetWorthCents(db, snap)))}${estimateNote(snap)}`);
+      const inFlight = settledNetWorthCents(db, snap) - snap.net_worth;
+      const settledNote = inFlight === 0
+        ? ''
+        : ` (${fmt(toDollars(Math.abs(inFlight)))} ${inFlight > 0 ? 'had left one account and not yet reached the other' : 'had reached one account before leaving the other'}; Balance shows ${fmt(toDollars(snap.net_worth + inFlight))})`;
+      lines.push(`  ${snap.date}: ${fmt(toDollars(snap.net_worth))}${settledNote}${estimateNote(snap)}`);
     }
   }
 
