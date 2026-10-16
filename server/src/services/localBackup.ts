@@ -1,5 +1,6 @@
 import type Database from 'better-sqlite3';
 import { RETIRED_PREFERENCE_KEYS } from './preferences';
+import { replayRowRepairs } from '../db/index';
 
 /**
  * Every table a full backup carries, ordered parents before children.
@@ -525,6 +526,7 @@ export function restoreLocalBackup(
     LOCAL_RESTORE_TABLES.map((table) => [table, new Set(tableColumns(db, table))])
   ) as Record<LocalRestoreTableName, Set<string>>;
 
+  let replayed: string[] = [];
   const restoreTransaction = db.transaction(() => {
     for (const table of [...LOCAL_RESTORE_TABLES].reverse()) {
       db.prepare(`DELETE FROM ${quoteIdentifier(table)}`).run();
@@ -541,6 +543,9 @@ export function restoreLocalBackup(
         restoredRows++;
       }
     }
+
+    const backupMigrations = new Set(backup.tables.schema_migrations.map((row) => String(row.name)));
+    replayed = replayRowRepairs(db, backupMigrations);
 
     const violations = db.prepare('PRAGMA foreign_key_check').all() as ForeignKeyViolationRow[];
     if (violations.length > 0) {
@@ -562,7 +567,9 @@ export function restoreLocalBackup(
       restored_tables: LOCAL_RESTORE_TABLES.length,
       restored_rows: restoredRows,
       skipped_tables: ['schema_migrations'],
-      warnings: preview.warnings,
+      warnings: replayed.length === 0
+        ? preview.warnings
+        : [...preview.warnings, `Re-applied the repairs this backup predates: ${replayed.join(', ')}.`],
     };
   } finally {
     db.pragma(`foreign_keys = ${foreignKeysEnabled ? 'ON' : 'OFF'}`);

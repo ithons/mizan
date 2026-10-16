@@ -11,6 +11,7 @@ import {
   type LocalBackup,
 } from '../server/src/services/localBackup';
 import { confirmAdvisorDraft, undoAdvisorAction } from '../server/src/services/advisorDrafts';
+import { rowRepairStatements } from '../server/src/db/index';
 import {
   migratedTestDb,
   insertAccount,
@@ -561,5 +562,71 @@ test('local backup restore rejects unsupported columns before mutation', (t) => 
   assert.deepEqual(
     db.prepare('SELECT * FROM accounts ORDER BY id').all(),
     [{ id: 'acct_1', value: 'Checking' }]
+  );
+});
+
+type WireRow = Record<string, unknown>;
+const PREDATED = ['062_wallet_merchant_names.sql', '063_internal_trades.sql', '064_brokerage_descriptor_signs.sql', '065_transfer_source.sql'];
+
+function brokerageLedger(db: Database.Database): void {
+  insertAccount(db, { id: 'chk', account_name: 'Chase Checking', type: 'checking' });
+  insertAccount(db, { id: 'fid', account_name: 'Fidelity Individual', type: 'brokerage' });
+  insertTransaction(db, { id: 'buy', account_id: 'fid', date: '2026-09-02', amount: -10000, original_name: 'YOU BOUGHT FIDELITY 500 INDEX FUND' });
+  insertTransaction(db, { id: 'out', account_id: 'chk', date: '2026-09-01', amount: -10000, original_name: 'FID BKG SVC LLC MONEYLINE' });
+  insertTransaction(db, { id: 'in', account_id: 'fid', date: '2026-09-01', amount: 10000, original_name: 'Electronic Funds Transfer Received' });
+  db.prepare("UPDATE transactions SET is_internal_trade = 1 WHERE id = 'buy'").run();
+  db.prepare(`
+    UPDATE transactions SET transfer_pair_id = 'pair1', transfer_status = 'confirmed', transfer_source = 'owner'
+    WHERE id IN ('out', 'in')
+  `).run();
+}
+
+test('restoring a backup taken before the trade and pair-source columns re-derives them', (t) => {
+  const source = migratedTestDb();
+  const target = migratedTestDb();
+  t.after(() => source.close());
+  t.after(() => target.close());
+  brokerageLedger(source);
+
+  const wire = overTheWire(buildLocalBackup(source)) as { tables: Record<string, WireRow[]> };
+  for (const row of wire.tables.transactions) {
+    delete row.is_internal_trade;
+    delete row.transfer_source;
+  }
+  wire.tables.schema_migrations = wire.tables.schema_migrations.filter((row) => !PREDATED.includes(String(row.name)));
+
+  const result = restoreLocalBackup(target, wire);
+  const rows = target.prepare('SELECT id, is_internal_trade, transfer_source FROM transactions ORDER BY id').all();
+  assert.deepEqual(rows, [
+    { id: 'buy', is_internal_trade: 1, transfer_source: null },
+    { id: 'in', is_internal_trade: 0, transfer_source: 'owner' },
+    { id: 'out', is_internal_trade: 0, transfer_source: 'owner' },
+  ]);
+  assert.ok(result.warnings.some((warning) => warning.includes('063_internal_trades.sql')));
+});
+
+test('HEALTHY: restoring a current backup replays no repair and changes no row', (t) => {
+  const source = migratedTestDb();
+  const target = migratedTestDb();
+  t.after(() => source.close());
+  t.after(() => target.close());
+  brokerageLedger(source);
+  const before = source.prepare('SELECT * FROM transactions ORDER BY id').all();
+
+  const result = restoreLocalBackup(target, overTheWire(buildLocalBackup(source)));
+  assert.ok(!result.warnings.some((warning) => warning.includes('Re-applied')));
+  assert.deepEqual(target.prepare('SELECT * FROM transactions ORDER BY id').all(), before);
+  assert.deepEqual(target.prepare('SELECT COUNT(*) AS n FROM transaction_field_revisions').get(), { n: 0 });
+});
+
+test('the replay takes only the row repairs from each migration file', () => {
+  assert.deepEqual(
+    PREDATED.map((file) => rowRepairStatements(file).map((statement) => statement.split(/\s+/).slice(0, 3).join(' '))),
+    [
+      ['INSERT INTO transaction_field_revisions', 'UPDATE transactions SET'],
+      ['UPDATE transactions SET'],
+      ['INSERT INTO transaction_field_revisions', 'UPDATE transactions SET'],
+      ['UPDATE transactions SET'],
+    ]
   );
 });

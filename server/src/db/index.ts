@@ -93,6 +93,43 @@ export function runMigrations(): void {
   runMigrationsOn(getDb());
 }
 
+const ROW_REPAIR_MIGRATIONS = [
+  '062_wallet_merchant_names.sql',
+  '063_internal_trades.sql',
+  '064_brokerage_descriptor_signs.sql',
+  '065_transfer_source.sql',
+] as const;
+
+/** The row-level statements of a repair migration, read from the file so the replay cannot drift from it. */
+export function rowRepairStatements(file: string): string[] {
+  const sql = fs.readFileSync(path.join(MIGRATIONS_DIR, file), 'utf-8')
+    .split('\n')
+    .filter((line) => !line.trim().startsWith('--'))
+    .join('\n');
+  return sql
+    .split(';')
+    .map((statement) => statement.trim())
+    .filter((statement) => /^UPDATE transactions\s/.test(statement) || /^INSERT INTO transaction_field_revisions\s/.test(statement));
+}
+
+/** Re-applies the row repairs this database has run and the restored rows predate. */
+export function replayRowRepairs(db: Database.Database, appliedToRows: ReadonlySet<string>): string[] {
+  const hasNames = (db.prepare("SELECT name FROM pragma_table_info('schema_migrations')").all() as { name: string }[])
+    .some((column) => column.name === 'name');
+  if (!hasNames) return [];
+  const appliedHere = new Set(
+    (db.prepare('SELECT name FROM schema_migrations').all() as { name: string }[]).map((row) => row.name)
+  );
+  registerMigrationFunctions(db);
+  const replayed: string[] = [];
+  for (const file of ROW_REPAIR_MIGRATIONS) {
+    if (!appliedHere.has(file) || appliedToRows.has(file)) continue;
+    for (const statement of rowRepairStatements(file)) db.exec(statement);
+    replayed.push(file);
+  }
+  return replayed;
+}
+
 /**
  * Apply every pending migration to an arbitrary connection.
  *
