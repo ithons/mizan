@@ -55,6 +55,48 @@ function adjustedEffects(effects: ScheduledEffect[], adjustments: ProjectionAdju
   return out;
 }
 
+export type AdjustmentCheck = { ok: true; adjustments: ProjectionAdjustment[] } | { ok: false; errors: string[] };
+
+/** Refuses anything that would silently change the answer: a missing amount, a date outside the window, an unknown pattern. */
+export function checkAdjustments(db: Database.Database, raw: unknown, days: number, today = new Date()): AdjustmentCheck {
+  if (raw === undefined) return { ok: true, adjustments: [] };
+  if (!Array.isArray(raw)) return { ok: false, errors: ['adjustments must be an array'] };
+  const first = ymd(today);
+  const last = ymd(addDays(today, days));
+  const errors: string[] = [];
+  const adjustments: ProjectionAdjustment[] = [];
+  const isDate = (value: unknown): value is string => typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value) && !Number.isNaN(parseISO(value).getTime());
+  raw.forEach((item, index) => {
+    const a = (item ?? {}) as Record<string, unknown>;
+    const amount = Number(a.amount);
+    switch (a.kind) {
+      case 'one_off':
+        if (!Number.isFinite(amount) || amount === 0) errors.push(`${index}: one_off needs a non-zero amount`);
+        else if (!isDate(a.date) || a.date < first || a.date > last) errors.push(`${index}: one_off date must fall between ${first} and ${last}`);
+        else adjustments.push({ kind: 'one_off', date: a.date, amount, label: typeof a.label === 'string' ? a.label : undefined });
+        return;
+      case 'monthly':
+        if (!Number.isFinite(amount) || amount === 0) errors.push(`${index}: monthly needs a non-zero amount`);
+        else if (a.start_date !== undefined && (!isDate(a.start_date) || a.start_date < first || a.start_date > last)) errors.push(`${index}: monthly start_date must fall between ${first} and ${last}`);
+        else adjustments.push({ kind: 'monthly', amount, start_date: a.start_date as string | undefined, label: typeof a.label === 'string' ? a.label : undefined });
+        return;
+      case 'cancel_recurring':
+        if (typeof a.pattern_id !== 'string' || !db.prepare('SELECT 1 FROM recurring_patterns WHERE id = ? AND is_active = 1').get(a.pattern_id)) errors.push(`${index}: no active recurring pattern with that pattern_id`);
+        else adjustments.push({ kind: 'cancel_recurring', pattern_id: a.pattern_id });
+        return;
+      case 'scale_unbudgeted': {
+        const percent = Number(a.percent);
+        if (!Number.isFinite(percent) || percent < -100) errors.push(`${index}: scale_unbudgeted needs a percent of -100 or more`);
+        else adjustments.push({ kind: 'scale_unbudgeted', percent });
+        return;
+      }
+      default:
+        errors.push(`${index}: unknown kind ${String(a.kind)}`);
+    }
+  });
+  return errors.length > 0 ? { ok: false, errors } : { ok: true, adjustments };
+}
+
 /**
  * What is free, day by day over the window, from the same inputs as the headline figure: claims
  * on the pool are taken on day 0, each scheduled item on its date, unbudgeted spending evenly.
@@ -79,7 +121,7 @@ export function projectFree(db: Database.Database, days: number, adjustments: Pr
     baseline: dollars(baseline),
     ...(adjustments.length > 0 ? { scenario: dollars(scenario), change_at_end: toDollars(scenario.end - baseline.end) } : {}),
     assumptions: [
-      'Card balances, budgets still unspent and goal earmarks are claimed on day 0.',
+      'Card balances, budgets still unspent and goal earmarks are claimed on day 0, so "short" means below those claims, not an overdrawn account.',
       'Scheduled income, bills and transfers land on their forecast dates.',
       `Spending outside budgets runs at its trailing ${sheet.unbudgetedBasisDays}-day pace, spread evenly.`,
     ],
@@ -88,6 +130,7 @@ export function projectFree(db: Database.Database, days: number, adjustments: Pr
 
 /** Months to clear a balance at a fixed payment with monthly compounding; null when it never clears. */
 export function debtPayoff(balance: number, aprPercent: number, monthlyPayment: number, today = new Date()) {
+  if (!(monthlyPayment > 0)) return { months: null, payoff_month: null, total_interest: null, note: 'A monthly payment above zero is needed.' };
   const rate = aprPercent / 100 / 12;
   let owed = balance;
   let interest = 0;
@@ -129,10 +172,11 @@ export function goalTimelineFor(db: Database.Database, goalId: string, monthlyCo
   `).get(goalId) as Parameters<typeof calculateGoalProgress>[0] | undefined;
   if (!goal) return { error: 'No goal with that id' };
   const progress = calculateGoalProgress(goal);
-  return { remaining: toDollars(progress.remaining_amount), ...goalTimeline(toDollars(progress.remaining_amount), 0, monthlyContribution, annualReturnPercent) };
+  const target = toDollars(progress.progress_amount + progress.remaining_amount);
+  return { remaining: toDollars(progress.remaining_amount), ...goalTimeline(target, toDollars(progress.progress_amount), monthlyContribution, annualReturnPercent) };
 }
 
-/** How many months the liquid pool covers at the average spending of the last complete months. */
+/** How many months the liquid pool, less what the cards owe, covers at the average spending of the last complete months. */
 export function cashRunway(db: Database.Database, months = 3, today = new Date()) {
   const sheet = computeSafeToSpend(db, {});
   const report = getCashflowReport(db, {
@@ -140,13 +184,20 @@ export function cashRunway(db: Database.Database, months = 3, today = new Date()
     endDate: ymd(endOfMonth(subMonths(today, 1))),
   });
   const spent = report.months.map((month) => Math.abs(month.expenses));
-  if (spent.length === 0) return { months: null, note: 'No complete month of spending to measure against.' };
+  if (spent.length === 0) return { months_covered: null, note: 'No complete month of spending to measure against.' };
   const average = spent.reduce((sum, value) => sum + value, 0) / spent.length;
+  const cover = sheet.liquid - sheet.cardBalances;
   return {
     liquid: toDollars(sheet.liquid),
+    cards_owed: toDollars(sheet.cardBalances),
     average_monthly_spending: toDollars(Math.round(average)),
-    months_covered: average > 0 ? Math.round((sheet.liquid / average) * 10) / 10 : null,
+    months_covered: average > 0 ? Math.round((cover / average) * 10) / 10 : null,
     measured_months: report.months.map((month) => month.month),
+    assumptions: [
+      'Card balances are paid from the liquid accounts first.',
+      'No income arrives, and spending runs at the average of the measured months.',
+      'Money earmarked for goals in those accounts is counted as available.',
+    ],
   };
 }
 

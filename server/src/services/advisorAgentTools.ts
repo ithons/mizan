@@ -5,7 +5,7 @@ import { readSafeToSpend } from './safeToSpend';
 import { getAnomalyInsights } from './anomalyInsights';
 import { createMemory, deleteMemory, listMemories } from './aiMemory';
 import { proposeChanges, MAX_PROPOSALS_PER_CALL } from './advisorProposals';
-import { cashRunway, compoundGrowth, debtPayoff, goalTimeline, goalTimelineFor, projectFree, type ProjectionAdjustment } from './simulations';
+import { cashRunway, checkAdjustments, compoundGrowth, debtPayoff, goalTimeline, goalTimelineFor, projectFree } from './simulations';
 
 type ToolInput = Record<string, unknown>;
 
@@ -104,7 +104,7 @@ export const AGENT_TOOLS: Anthropic.Tool[] = [
   {
     name: 'run_simulation',
     description:
-      'Estimates and what-ifs computed from the owner\'s real data. type "project": what is free day by day over `days` (default 30, max 120), its lowest point and the first day it goes short, built from the same inputs as free to spend; pass `adjustments` for a what-if: {kind:"one_off", date, amount (dollars, negative to spend)}, {kind:"monthly", amount, start_date?}, {kind:"cancel_recurring", pattern_id}, {kind:"scale_unbudgeted", percent (e.g. -20)}. Use it for "can I afford X", "what if I cut Y", "when do I run short". type "debt_payoff": {account_id or balance, apr, monthly_payment}. type "goal_timeline": {goal_id or target and current, monthly_contribution, annual_return?}. type "runway": {months?} months the liquid accounts cover at recent spending. type "growth": {principal, monthly_contribution, annual_return, years}. Every result states its assumptions; repeat them when you quote it.',
+      'Estimates and what-ifs computed from the owner\'s real data. type "project": what is free day by day over `days` (default 30, max 120), its lowest point and the first day it drops below the claims already on the money (not an overdraft), built from the same inputs as free to spend; pass `adjustments` for a what-if: {kind:"one_off", date, amount (dollars, negative to spend)}, {kind:"monthly", amount, start_date?}, {kind:"cancel_recurring", pattern_id}, {kind:"scale_unbudgeted", percent (e.g. -20)}. Use it for "can I afford X", "what if I cut Y", "when do I run short". type "debt_payoff": {account_id or balance, apr, monthly_payment}. type "goal_timeline": {goal_id or target and current, monthly_contribution, annual_return?}. type "runway": {months?} months the liquid accounts, less card balances, cover at recent spending. type "growth": {principal, monthly_contribution, annual_return, years}. Every result states its assumptions; repeat them when you quote it.',
     input_schema: {
       type: 'object',
       properties: {
@@ -205,8 +205,9 @@ function runSimulationTool(db: Database.Database, input: ToolInput): unknown {
   switch (input.type) {
     case 'project': {
       const days = Math.min(Math.max(Math.round(num(params.days, 30)), 1), 120);
-      const adjustments = Array.isArray(params.adjustments) ? (params.adjustments as ProjectionAdjustment[]) : [];
-      return projectFree(db, days, adjustments);
+      const checked = checkAdjustments(db, params.adjustments, days);
+      if (!checked.ok) return { error: 'Some adjustments were refused', details: checked.errors };
+      return projectFree(db, days, checked.adjustments);
     }
     case 'debt_payoff': {
       let balance = num(params.balance, NaN);
@@ -216,7 +217,9 @@ function runSimulationTool(db: Database.Database, input: ToolInput): unknown {
         balance = toDollars(row.current_balance);
       }
       if (!Number.isFinite(balance) || balance <= 0) return { error: 'Give a positive balance or the id of an account that owes one' };
-      return { balance, ...debtPayoff(balance, num(params.apr, 0), num(params.monthly_payment, 0)) };
+      const apr = num(params.apr, NaN);
+      if (!Number.isFinite(apr) || apr < 0) return { error: 'Give the card\'s APR; none is stored in mizan' };
+      return { balance, apr, ...debtPayoff(balance, apr, num(params.monthly_payment, 0)) };
     }
     case 'goal_timeline':
       if (typeof params.goal_id === 'string') {

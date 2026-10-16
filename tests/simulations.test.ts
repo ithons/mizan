@@ -4,7 +4,7 @@ import type Database from 'better-sqlite3';
 import { format, subDays } from 'date-fns';
 import { _setDbForTesting } from '../server/src/db/index';
 import { computeSafeToSpend } from '../server/src/services/safeToSpend';
-import { compoundGrowth, cashRunway, debtPayoff, goalTimeline, projectFree } from '../server/src/services/simulations';
+import { checkAdjustments, compoundGrowth, cashRunway, debtPayoff, goalTimeline, projectFree } from '../server/src/services/simulations';
 import { getMonthlyBudgetsWithProjection } from '../server/src/services/budgetProjection';
 import { detectRecurring } from '../server/src/services/recurring';
 import { refreshTransactionIntegrity } from '../server/src/services/transactionIntegrity';
@@ -80,5 +80,40 @@ test('payoff, goal and growth arithmetic hold on figures checkable by hand', () 
 
 test('runway with no spending history says it cannot measure rather than claiming a figure', () => {
   const db = migratedTestDb();
-  assert.equal(cashRunway(db).months, null);
+  assert.equal(cashRunway(db).months_covered, null);
+});
+
+test('a what-if that would silently change the answer is refused with its reasons', () => {
+  withLedger((db) => {
+    const today = new Date('2026-10-16T12:00:00');
+    const checked = checkAdjustments(db, [
+      { kind: 'monthly', amount: -50, start_date: '2026-01-01' },
+      { kind: 'one_off', date: '2027-06-01', amount: -100 },
+      { kind: 'one_off', date: '2026-10-20' },
+      { kind: 'cancel_recurring', pattern_id: 'no-such-pattern' },
+      { kind: 'teleport' },
+    ], 30, today);
+    assert.equal(checked.ok, false);
+    assert.equal(checked.ok === false && checked.errors.length, 5);
+    assert.deepEqual(checkAdjustments(db, [{ kind: 'one_off', date: '2026-10-20', amount: -100 }], 30, today).ok, true);
+  });
+});
+
+test('payoff refuses a missing payment instead of blaming the interest', () => {
+  assert.equal(debtPayoff(1000, 0, 0).months, null);
+  assert.match(debtPayoff(1000, 0, 0).note ?? '', /payment above zero/);
+});
+
+test('a goal timeline grows what is already saved, not only new contributions', () => {
+  const withoutGrowth = goalTimeline(10000, 9000, 10, 0).months!;
+  const withGrowth = goalTimeline(10000, 9000, 10, 6).months!;
+  assert.ok(withGrowth < withoutGrowth, `${withGrowth} < ${withoutGrowth}`);
+});
+
+test('runway is measured net of what the cards owe, and states its assumptions', () => {
+  withLedger((db) => {
+    const runway = cashRunway(db);
+    assert.ok('cards_owed' in runway && runway.cards_owed === 400);
+    assert.ok('assumptions' in runway && runway.assumptions!.length >= 2);
+  });
 });
