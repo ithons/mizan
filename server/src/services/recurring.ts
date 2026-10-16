@@ -235,9 +235,14 @@ function farFrom(level: number, value: number): -1 | 0 | 1 {
  */
 export function expectedAmount(recent: ReadonlyArray<{ amount: number; date: string }>): ExpectedAmount {
   const window = recent.slice(0, RECENT_AMOUNT_WINDOW);
-  const level = median(window.map((row) => row.amount));
-  const unchanged = { amount: Math.round(level), changedFrom: null, changedOn: null };
-  if (window.length < 4 || level === 0) return unchanged;
+  const unchanged = { amount: Math.round(median(window.map((row) => row.amount))), changedFrom: null, changedOn: null };
+  if (window.length < 4) return unchanged;
+
+  // The level the last two are measured against is what came before them, and it is an amount
+  // that was actually paid: the lower median, never a midpoint between two levels.
+  const before = window.slice(2).map((row) => row.amount).sort((a, b) => a - b);
+  const level = before[Math.floor((before.length - 1) / 2)];
+  if (level === 0) return unchanged;
 
   const [latest, previous] = window;
   const direction = farFrom(level, latest.amount);

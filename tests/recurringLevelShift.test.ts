@@ -71,3 +71,8 @@ test('the forecast quotes the new pay and says it changed', () => {
     db.close();
   }
 });
+
+test('once the new level has repeated, the old one is still named as it was paid', () => {
+  const paid = series([22878, 22878, 22878, 54418, 54418, 54418]);
+  assert.deepEqual(expectedAmount(paid).changedFrom, 54418);
+});
