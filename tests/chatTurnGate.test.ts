@@ -34,3 +34,9 @@ test('the chat hook clears streaming and adopts a new conversation only for the 
   const load = source.slice(source.indexOf('const loadConversation'), source.indexOf('const sendMessage'));
   assert.match(load, /await aiApi\.getConversation\(id\);\s*if \(!isCurrent\(\)\) return;/);
 });
+
+test('resuming the last conversation on load yields to anything the owner opened or sent first', () => {
+  const source = readFileSync(new URL('../client/src/hooks/useAiChat.ts', import.meta.url), 'utf8');
+  const resume = source.slice(source.indexOf('Resume the last conversation'), source.indexOf('const loadConversation'));
+  assert.match(resume, /const isCurrent = turns\.begin\(\);[\s\S]*if \(cancelled \|\| !isCurrent\(\)\) return;/);
+});

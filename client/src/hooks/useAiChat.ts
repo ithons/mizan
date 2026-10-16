@@ -65,10 +65,11 @@ export function useAiChat() {
     const active = localStorage.getItem(ACTIVE_KEY);
     if (!active) return;
     let cancelled = false;
+    const isCurrent = turns.begin();
     aiApi
       .getConversation(active)
       .then((conv) => {
-        if (cancelled) return;
+        if (cancelled || !isCurrent()) return;
         setConversationId(conv.id);
         setMessages(conv.messages.map((m) => ({ ...m, id: crypto.randomUUID() })));
       })
