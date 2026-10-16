@@ -4,6 +4,7 @@ import { AdvisorDraftPayloadSchema } from '../../../shared/schemas';
 import { SCHEDULED_ROUTE } from '../../../shared/routes';
 import type { AdvisorDraftAction, AdvisorDraftActionKind } from '../../../shared/types';
 import { isDraftStillActionable } from './advisorDrafts';
+import { describeDraftChanges } from './draftDescriptions';
 
 const ROUTE_FOR_KIND: Readonly<Record<AdvisorDraftActionKind, string>> = {
   categorize_transaction: '/ledger',
@@ -42,8 +43,9 @@ export function proposeChanges(db: Database.Database, input: { changes?: unknown
   const changes = Array.isArray(input.changes) ? input.changes.slice(0, MAX_PROPOSALS_PER_CALL) : [];
   const insert = db.prepare(`
     INSERT INTO advisor_drafts (id, kind, label, summary, route, payload, changes, citations, status, created_at, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, '[]', '[]', 'open', ?, ?)
+    VALUES (?, ?, ?, ?, ?, ?, ?, '[]', 'open', ?, ?)
   `);
+  const sameOpen = db.prepare("SELECT id, label, summary FROM advisor_drafts WHERE status = 'open' AND payload = ? LIMIT 1");
   const result: ProposalsResult = { proposed: [], refused: [] };
   const now = new Date().toISOString();
   changes.forEach((raw, index) => {
@@ -54,18 +56,21 @@ export function proposeChanges(db: Database.Database, input: { changes?: unknown
       return;
     }
     const payload = parsed.data;
+    const payloadJson = JSON.stringify(payload);
+    const changesOf = describeDraftChanges(db, payload);
+    const existing = sameOpen.get(payloadJson) as { id: string; label: string; summary: string } | undefined;
     const draft: AdvisorDraftAction = {
-      id: uuidv4(),
+      id: existing?.id ?? uuidv4(),
       kind: payload.kind,
-      label: text(change.label, payload.kind.replace(/_/g, ' '), 80),
-      summary: text(change.summary, '', 400),
+      label: existing?.label ?? text(change.label, payload.kind.replace(/_/g, ' '), 80),
+      summary: existing?.summary ?? text(change.summary, '', 400),
       route: ROUTE_FOR_KIND[payload.kind],
       payload,
-      changes: [],
+      changes: changesOf,
       citations: [],
       confirmation_required: true,
     };
-    insert.run(draft.id, draft.kind, draft.label, draft.summary, draft.route, JSON.stringify(payload), now, now);
+    if (!existing) insert.run(draft.id, draft.kind, draft.label, draft.summary, draft.route, payloadJson, JSON.stringify(changesOf), now, now);
     result.proposed.push(draft);
   });
   if (!Array.isArray(input.changes)) result.refused.push({ index: -1, reason: 'changes must be an array' });
@@ -82,7 +87,7 @@ export function listOpenDrafts(db: Database.Database, limit = 100): AdvisorDraft
   for (const row of rows) {
     const parsed = AdvisorDraftPayloadSchema.safeParse(JSON.parse(row.payload));
     if (!parsed.success || !isDraftStillActionable(db, parsed.data)) continue;
-    drafts.push({ id: row.id, kind: row.kind, label: row.label, summary: row.summary, route: row.route, payload: parsed.data, changes: [], citations: [], confirmation_required: true });
+    drafts.push({ id: row.id, kind: row.kind, label: row.label, summary: row.summary, route: row.route, payload: parsed.data, changes: describeDraftChanges(db, parsed.data), citations: [], confirmation_required: true });
   }
   return drafts;
 }

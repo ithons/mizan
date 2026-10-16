@@ -38,7 +38,20 @@ export function ProposalCard({ proposal }: { proposal: AdvisorDraftAction }) {
   return (
     <div className="rounded-lg border border-line-2 px-3.5 py-2.5">
       <div className="text-body-lg text-ink">{proposal.label}</div>
-      {proposal.summary && <div className="mt-0.5 text-note text-muted">{proposal.summary}</div>}
+      {proposal.changes.length > 0 && (
+        <dl className="mt-1.5 grid gap-0.5 text-body">
+          {proposal.changes.map((change, index) => (
+            <div key={index} className="flex flex-wrap gap-x-2">
+              <dt className="text-muted">{change.field}:</dt>
+              <dd className="text-ink tabular-nums">
+                {change.before !== null && <span className="text-muted">{String(change.before)} → </span>}
+                {String(change.after)}
+              </dd>
+            </div>
+          ))}
+        </dl>
+      )}
+      {proposal.summary && <div className="mt-1 text-note text-muted">{proposal.summary}</div>}
       <div className="mt-2 flex items-center gap-5 text-body">
         {state.kind === 'open' && (
           <>
