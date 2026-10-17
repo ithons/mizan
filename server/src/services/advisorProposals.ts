@@ -3,7 +3,8 @@ import { v4 as uuidv4 } from 'uuid';
 import { AdvisorDraftPayloadSchema } from '../../../shared/schemas';
 import { SCHEDULED_ROUTE } from '../../../shared/routes';
 import type { AdvisorDraftAction, AdvisorDraftActionKind, AdvisorDraftPayload } from '../../../shared/types';
-import { isDraftStillActionable } from './advisorDrafts';
+import { isDraftStillActionable, unpaidCardSentence } from './advisorDrafts';
+import { unpaidCardPayment } from './cardPayments';
 import { describeDraftChanges } from './draftDescriptions';
 
 const ROUTE_FOR_KIND: Readonly<Record<AdvisorDraftActionKind, string>> = {
@@ -46,8 +47,12 @@ function referenceProblem(db: Database.Database, payload: AdvisorDraftPayload): 
     case 'create_merchant_rule': return category(payload.category_id) ? null : 'no category has that category_id';
     case 'retire_merchant_rule': return exists(db, 'SELECT 1 FROM merchant_rules WHERE id = ? AND retired_at IS NULL', payload.rule_id) ? null : 'no live merchant rule has that rule_id';
     case 'confirm_recurring':
-    case 'dismiss_recurring':
-    case 'create_recurring_adjustment': return pattern(payload.recurring_id) ? null : 'no recurring pattern has that recurring_id';
+    case 'dismiss_recurring': return pattern(payload.recurring_id) ? null : 'no recurring pattern has that recurring_id';
+    case 'create_recurring_adjustment': {
+      if (!pattern(payload.recurring_id)) return 'no recurring pattern has that recurring_id';
+      const unpaid = payload.action === 'skip' ? unpaidCardPayment(db, payload.recurring_id) : null;
+      return unpaid ? unpaidCardSentence(unpaid) : null;
+    }
     case 'update_account': return account(payload.account_id) ? null : 'no account has that account_id';
     case 'set_manual_cost_basis': return exists(db, 'SELECT 1 FROM holdings WHERE id = ?', payload.holding_id) ? null : 'no holding has that holding_id';
     case 'set_sector_metadata': return exists(db, 'SELECT 1 FROM securities WHERE id = ?', payload.security_id) ? null : 'no security has that security_id';

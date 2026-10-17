@@ -26,6 +26,7 @@ import { computeSafeToSpend, type SafeToSpendBreakdown } from './safeToSpend';
 import { excludedFromTotalsSql, expenseSideSql, reportDateSql, spendAmountSql } from './transactionFilters';
 import { dollarizeFields, toCents } from './money';
 import { projectedShortfalls } from './accountCoverage';
+import { cardPaidSince } from './cardPayments';
 
 /** Money fields inside each kind's params, cents in the database and dollars over the API. */
 export const NOTIFICATION_PARAM_MONEY_FIELDS: Readonly<Record<NotificationRuleKind, readonly string[]>> = {
@@ -678,16 +679,11 @@ const cardPaymentMissing: Evaluator<'card_payment_missing'> = (ctx, params) => {
     WHERE rp.kind = 'transfer' AND rp.is_active = 1 AND rp.dismissed_at IS NULL AND rp.next_expected < ? AND card.current_balance > 0
   `).all(today) as Array<{ id: string; next_expected: string; last_seen: string; average_amount: number; card_id: string; card_name: string; owed: number; from_name: string | null }>;
   const adjustmentOf = ctx.db.prepare('SELECT action, adjusted_date FROM recurring_occurrence_adjustments WHERE recurring_id = ? AND original_date = ?');
-  const paidSince = ctx.db.prepare(`
-    SELECT 1 FROM transactions WHERE account_id = ? AND amount > 0 AND date > ?
-      AND (transfer_pair_id IS NOT NULL OR category_id IN (SELECT id FROM categories WHERE id = 'cat_xfer' OR parent_id = 'cat_xfer'))
-    LIMIT 1
-  `);
   return patterns.flatMap((pattern) => {
     const adjustment = adjustmentOf.get(pattern.id, pattern.next_expected) as { action: string; adjusted_date: string | null } | undefined;
     if (adjustment?.action === 'skip') return [];
     const expectedOn = adjustment?.adjusted_date ?? pattern.next_expected;
-    if (expectedOn >= today || paidSince.get(pattern.card_id, pattern.last_seen)) return [];
+    if (expectedOn >= today || cardPaidSince(ctx.db, pattern.card_id, pattern.last_seen)) return [];
     const usualStray = usualStrayDays(ctx.db, pattern.id) ?? 0;
     const daysLate = Math.round((parseISO(today).getTime() - parseISO(expectedOn).getTime()) / 86_400_000);
     if (daysLate <= Math.max(params.min_days_late, usualStray)) return [];

@@ -56,6 +56,7 @@ export type GuardRejectionReason =
   | 'owner_authored_rule'
   | 'rule_holds_transactions'
   | 'contradicts_direction'
+  | 'card_still_owed'
   /** The owner already declined this exact proposal; see `ownerDeclinedProposal` in advisorDrafts. */
   | 'owner_declined';
 

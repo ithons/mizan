@@ -221,3 +221,35 @@ test('re-proposing the same change takes the new wording, so the card never says
   assert.equal(first.id, second.id);
   assert.equal(listOpenDrafts(db)[0].label, 'Cut Food budget to $400');
 });
+
+function cardPaymentLedger(owed: number) {
+  const db = migratedTestDb();
+  const checking = insertAccount(db, { type: 'checking', current_balance: 500000 });
+  const card = insertAccount(db, { account_name: 'Sapphire', type: 'credit', is_liability: 1, current_balance: owed });
+  db.prepare(`INSERT INTO recurring_patterns (id, merchant_name, average_amount, frequency, last_seen, next_expected,
+      is_active, is_confirmed, transaction_count, created_at, updated_at, kind, account_id, counterparty_account_id)
+    VALUES ('rp_card', 'Checking to Sapphire', -278664, 'monthly', '2026-09-11', '2026-10-11', 1, 1, 3, '2026-07-01', '2026-07-01', 'transfer', ?, ?)`)
+    .run(checking, card);
+  return { db, card };
+}
+
+const skip = { kind: 'create_recurring_adjustment', recurring_id: 'rp_card', original_date: '2026-10-11', action: 'skip' };
+
+test('the advisor cannot skip a card payment while the card still owes and nothing has paid it', () => {
+  const { db } = cardPaymentLedger(311174);
+  const { proposed, refused } = propose(db, skip);
+  assert.equal(proposed.length, 0);
+  assert.match(refused[0].reason, /nothing has paid Sapphire since 2026-09-11 and it still owes \$3,111\.74/);
+
+  db.prepare(`INSERT INTO advisor_drafts (id, kind, label, summary, route, payload, changes, citations, status, created_at, updated_at)
+    VALUES ('d_skip', 'create_recurring_adjustment', 'Skip', 's', '/ledger', ?, '[]', '[]', 'open', '2026-10-17', '2026-10-17')`).run(JSON.stringify(skip));
+  assert.equal(confirmAdvisorDraftsByIds(db, ['d_skip']).outcomes[0].refused, 'card_still_owed');
+  assert.deepEqual(db.prepare('SELECT COUNT(*) AS n FROM recurring_occurrence_adjustments').get(), { n: 0 });
+});
+
+test('HEALTHY: skipping a card payment is allowed once the card was paid another way, or owes nothing', () => {
+  const paid = cardPaymentLedger(311174);
+  insertTransaction(paid.db, { account_id: paid.card, date: '2026-10-12', amount: 311174, category_id: 'cat_xfer_cc' });
+  assert.equal(confirmOne(paid.db, skip).status, 'applied');
+  assert.equal(confirmOne(cardPaymentLedger(0).db, skip).status, 'applied');
+});

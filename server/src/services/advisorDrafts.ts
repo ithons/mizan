@@ -17,6 +17,7 @@ import {
   upsertMerchantRule,
 } from './rules';
 import type { GuardRejectionReason, GuardResult } from './aiWriteGuards';
+import { unpaidCardPayment } from './cardPayments';
 import {
   DraftRefusedError,
   assertGuardPassed,
@@ -1027,6 +1028,11 @@ function confirmRecurring(db: Database.Database, payload: Extract<AdvisorDraftPa
   return { changed: result.changes, result: { recurring_id: payload.recurring_id } };
 }
 
+export function unpaidCardSentence(unpaid: { card: string; owed: number; lastSeen: string }): string {
+  const owed = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(toDollars(unpaid.owed));
+  return `nothing has paid ${unpaid.card} since ${unpaid.lastSeen} and it still owes ${owed}, so skipping this payment would hide a bill that is due.`;
+}
+
 function confirmRecurringAdjustment(
   db: Database.Database,
   payload: Extract<AdvisorDraftPayload, { kind: 'create_recurring_adjustment' }>
@@ -1034,6 +1040,8 @@ function confirmRecurringAdjustment(
   changed: number;
   result: unknown;
 } {
+  const unpaid = payload.action === 'skip' ? unpaidCardPayment(db, payload.recurring_id) : null;
+  if (unpaid) throw new DraftRefusedError('card_still_owed', unpaidCardSentence(unpaid));
   // `payload.adjusted_amount` is dollars, and it is passed on in dollars, because
   // `upsertRecurringAdjustment` is the thing that converts. That is the unit contract its other
   // caller, `routes/recurring.ts`, already holds: it hands `req.body` straight through.
