@@ -9,6 +9,7 @@ import { listNotificationRules, listNotifications, notificationRuleToDollars, no
 import { format, subMonths } from 'date-fns';
 import { explainMonth, fundingMix } from './monthStudies';
 import { accountCoverage } from './accountCoverage';
+import { retirementRoom } from './retirementRoom';
 import { cashRunway, checkAdjustments, compoundGrowth, emergencyFund, projectFreeBand, debtPayoff, goalTimeline, goalTimelineFor, projectFree } from './simulations';
 
 type ToolInput = Record<string, unknown>;
@@ -134,6 +135,11 @@ export const AGENT_TOOLS: Anthropic.Tool[] = [
     name: 'get_account_coverage',
     description: 'Each checking, savings and cash account walked forward through the scheduled income, bills and transfers that touch it (lowest point, first day below zero), and each card judged against the account its next scheduled payment comes from: covered, short, or unjudged when nothing schedules a payment. Use for "can I pay my cards", "will checking overdraw", "do I need to move money from savings".',
     input_schema: { type: 'object', properties: { days: { type: 'integer', description: 'Window, default 45, max 120.' } } },
+  },
+  {
+    name: 'get_retirement_room',
+    description: 'How much IRA room is left for a tax year: the annual limit capped at earned income so far, less deposits into IRA accounts this year, with the deadline. annual_limit must come from the owner (ask, or use what they told you and you remembered); never supply a limit yourself. Eligibility and residency are not checked; say so.',
+    input_schema: { type: 'object', properties: { annual_limit: { type: 'number', description: 'Dollars, as the owner stated it.' }, tax_year: { type: 'integer', description: 'Default: the current year.' } }, required: ['annual_limit'] },
   },
   {
     name: 'get_notifications',
@@ -308,6 +314,7 @@ export function runAgentTool(db: Database.Database, name: string, input: ToolInp
       return explainMonth(db, month);
     }
     case 'get_account_coverage': return accountCoverage(db, Math.min(Math.max(Math.round(num(input.days, 45)), 1), 120));
+    case 'get_retirement_room': return retirementRoom(db, num(input.annual_limit, 0), Math.round(num(input.tax_year, new Date().getFullYear())));
     case 'get_funding_mix': return fundingMix(db, Math.min(Math.max(Math.round(num(input.months, 6)), 1), 24));
     default: return undefined;
   }
