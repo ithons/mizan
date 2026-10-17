@@ -1488,6 +1488,8 @@ export interface SafeToSpend {
   /** Spending in unbudgeted categories at the pace of the last unbudgeted_basis_days. */
   estimated_unbudgeted: number;
   unbudgeted_basis_days: number;
+  /** Single large rows the pace leaves out rather than assume they repeat. */
+  unbudgeted_not_assumed_to_repeat?: Array<{ date: string; label: string; amount: number }>;
   allocated_budgets: number;
   allocated_goals: number;
   /** liquid + expected_inflows - every other line. */

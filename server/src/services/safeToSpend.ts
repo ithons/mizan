@@ -67,6 +67,8 @@ export interface SafeToSpendBreakdown {
   estimatedUnbudgeted: number;
   /** Days of history the unbudgeted pace is taken from. */
   unbudgetedBasisDays: number;
+  /** Single rows left out of the pace as too large a share of it to assume they repeat. */
+  unbudgetedLumps: UnbudgetedLump[];
   /** Budgeted-but-unspent allocations still expected to be drawn. */
   allocatedBudgets: number;
   /** Money already earmarked against savings goals. */
@@ -134,7 +136,7 @@ export function computeSafeToSpend(
   const owed = new Map(accounts.filter((account) => account.is_liability).map((account) => [account.id, account.current_balance]));
   const cards = new Set((db.prepare('SELECT id FROM accounts WHERE is_liability = 1').all() as Array<{ id: string }>).map((row) => row.id));
   const { transfers: recurringTransfers, cardRelief, effects: transferEffects } = transfersAcrossPool(forecast.occurrences, pool, cards, owed);
-  const estimatedUnbudgeted = unbudgetedPace(db, inputs.budgets ?? [], forecastDays);
+  const { cents: estimatedUnbudgeted, lumps: unbudgetedLumps } = unbudgetedPace(db, inputs.budgets ?? [], forecastDays);
   const budgetAheadEffects = budgetsAfterThisMonth(db, inputs.budgets ?? [], forecast.occurrences, forecastDays);
   const budgetsAhead = budgetAheadEffects.reduce((sum, item) => sum - item.cents, 0);
 
@@ -198,6 +200,7 @@ export function computeSafeToSpend(
     cardRelief,
     estimatedUnbudgeted,
     unbudgetedBasisDays: UNBUDGETED_BASIS_DAYS,
+    unbudgetedLumps,
     allocatedBudgets,
     allocatedGoals,
     budgetsAhead,
@@ -333,17 +336,26 @@ function budgetsAfterThisMonth(
 }
 
 export const UNBUDGETED_BASIS_DAYS = 90;
+const LUMP_MIN_CENTS = 50000;
+const LUMP_MIN_SHARE = 0.2;
+
+export interface UnbudgetedLump {
+  date: string;
+  label: string;
+  cents: number;
+}
 
 /**
  * What the categories without a budget have been costing, per day over the trailing window, times
  * the forecast window. Rows a recurring bill already forecasts are left out so they are not
- * claimed twice, and refunds net down the way they do in reports.
+ * claimed twice, and refunds net down the way they do in reports. A single row of at least $500
+ * and a fifth of the window is left out with its refunds, because a daily pace would repeat it.
  */
 function unbudgetedPace(
   db: Database.Database,
   budgets: ReadonlyArray<{ category_id?: string | null }>,
   forecastDays: number
-): number {
+): { cents: number; lumps: UnbudgetedLump[] } {
   const budgeted = budgets.map((budget) => budget.category_id).filter((id): id is string => Boolean(id));
   const end = new Date();
   end.setDate(end.getDate() - 1);
@@ -352,7 +364,7 @@ function unbudgetedPace(
   const iso = (date: Date) =>
     `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
 
-  const row = db.prepare(`
+  const rows = db.prepare(`
     WITH RECURSIVE out_of_scope(id) AS (
       SELECT id FROM categories WHERE id IN ('cat_xfer', 'cat_inv', 'cat_crypto')
       UNION ALL
@@ -363,7 +375,7 @@ function unbudgetedPace(
       UNION ALL
       SELECT c.id FROM categories c JOIN budgeted b ON c.parent_id = b.id
     )
-    SELECT COALESCE(SUM(${spendAmountSql('t')}), 0) AS spent
+    SELECT t.id, t.refund_of_id, t.date, COALESCE(t.merchant_name, t.original_name) AS label, ${spendAmountSql('t')} AS spent
     FROM transactions t
     LEFT JOIN categories c ON c.id = t.category_id
     WHERE t.pending = 0
@@ -376,9 +388,17 @@ function unbudgetedPace(
         SELECT 1 FROM recurring_patterns rp
         WHERE rp.id = t.recurring_id AND rp.is_active = 1 AND rp.kind = 'flow'
       )
-  `).get(...budgeted, iso(start), iso(end)) as { spent: number };
+  `).all(...budgeted, iso(start), iso(end)) as Array<{ id: string; refund_of_id: string | null; date: string; label: string; spent: number }>;
 
-  return Math.max(0, Math.round((row.spent / UNBUDGETED_BASIS_DAYS) * forecastDays));
+  const total = rows.reduce((sum, row) => sum + row.spent, 0);
+  const lumpRows = rows.filter((row) => row.spent >= LUMP_MIN_CENTS && row.spent >= LUMP_MIN_SHARE * total);
+  const lumpIds = new Set(lumpRows.map((row) => row.id));
+  const kept = rows.filter((row) => !lumpIds.has(row.id) && !(row.refund_of_id && lumpIds.has(row.refund_of_id)));
+  const spent = kept.reduce((sum, row) => sum + row.spent, 0);
+  return {
+    cents: Math.max(0, Math.round((spent / UNBUDGETED_BASIS_DAYS) * forecastDays)),
+    lumps: lumpRows.map((row) => ({ date: row.date, label: row.label, cents: row.spent })),
+  };
 }
 
 function earmarksFromPool(goal: GoalEarmarkRow): boolean {
@@ -402,6 +422,7 @@ export function readSafeToSpend(db: Database.Database, forecastDays?: number) {
     recurring_transfers: toDollars(breakdown.recurringTransfers),
     card_relief: toDollars(breakdown.cardRelief),
     estimated_unbudgeted: toDollars(breakdown.estimatedUnbudgeted),
+    unbudgeted_not_assumed_to_repeat: breakdown.unbudgetedLumps.map((lump) => ({ date: lump.date, label: lump.label, amount: toDollars(lump.cents) })),
     unbudgeted_basis_days: breakdown.unbudgetedBasisDays,
     allocated_budgets: toDollars(breakdown.allocatedBudgets),
     allocated_goals: toDollars(breakdown.allocatedGoals),

@@ -1,6 +1,7 @@
 import type { Budget, SafeToSpend } from '@shared/types';
 import { availableBudgetAmount } from '../../lib/budgetMath';
 import { readOwedTotal } from '../../lib/accountBalance';
+import { formatCurrency, formatDateShort } from '../../lib/formatters';
 
 /**
  * What the claim sheet says, with no React in the way.
@@ -106,7 +107,7 @@ export function claimLines(
       key: 'unbudgeted',
       label: 'Unbudgeted spending at its usual pace',
       delta: -sheet.estimated_unbudgeted,
-      note: `The last ${sheet.unbudgeted_basis_days} days of spending outside any budget, scaled to ${sheet.forecast_days}.`,
+      note: `The last ${sheet.unbudgeted_basis_days} days of spending outside any budget, scaled to ${sheet.forecast_days}.${lumpNote(sheet.unbudgeted_not_assumed_to_repeat ?? [])}`,
     }),
     {
       key: 'goals',
@@ -126,6 +127,12 @@ export function claimLines(
  * server reads, and the line's own number is the one the sheet is committed to; the sentence goes
  * rather than the figure.
  */
+function lumpNote(lumps: NonNullable<SafeToSpend['unbudgeted_not_assumed_to_repeat']>): string {
+  if (lumps.length === 0) return '';
+  const named = lumps.map((lump) => `${lump.label} ${formatCurrency(lump.amount)} on ${formatDateShort(lump.date)}`).join(', ');
+  return ` Left out as too large to assume it repeats: ${named}.`;
+}
+
 function emptyNote(count: MaybeCount, allocated: number, sentence: string): string | undefined {
   return count === 0 && allocated === 0 ? sentence : undefined;
 }
