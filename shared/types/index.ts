@@ -851,6 +851,7 @@ export type AdvisorDraftActionKind =
   | 'delete_budget'
   | 'create_goal'
   | 'dismiss_recurring'
+  | 'link_reimbursement'
   | 'update_account'
   | 'set_notification_rule'
   | 'delete_notification_rule';
@@ -933,6 +934,12 @@ export type AdvisorDraftPayload =
   | {
       kind: 'dismiss_recurring';
       recurring_id: string;
+    }
+  | {
+      /** Money someone paid back toward a purchase; it nets against that purchase and takes its category. */
+      kind: 'link_reimbursement';
+      reimbursement_id: string;
+      purchase_id: string;
     }
   | {
       /** Amounts in dollars. A balance can only be set on a manual account. */

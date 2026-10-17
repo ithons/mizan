@@ -9,6 +9,7 @@ import { describeDraftChanges } from './draftDescriptions';
 
 const ROUTE_FOR_KIND: Readonly<Record<AdvisorDraftActionKind, string>> = {
   categorize_transaction: '/ledger',
+  link_reimbursement: '/ledger',
   create_merchant_rule: '/settings',
   retire_merchant_rule: '/settings',
   update_budget: '/plan',
@@ -53,6 +54,10 @@ function referenceProblem(db: Database.Database, payload: AdvisorDraftPayload): 
       const unpaid = payload.action === 'skip' ? unpaidCardPayment(db, payload.recurring_id) : null;
       return unpaid ? unpaidCardSentence(unpaid) : null;
     }
+    case 'link_reimbursement':
+      return exists(db, 'SELECT 1 FROM transactions WHERE id = ? AND amount > 0', payload.reimbursement_id)
+        && exists(db, 'SELECT 1 FROM transactions WHERE id = ? AND amount < 0', payload.purchase_id)
+        ? null : 'reimbursement_id must name money in and purchase_id money out';
     case 'update_account': return account(payload.account_id) ? null : 'no account has that account_id';
     case 'set_manual_cost_basis': return exists(db, 'SELECT 1 FROM holdings WHERE id = ?', payload.holding_id) ? null : 'no holding has that holding_id';
     case 'set_sector_metadata': return exists(db, 'SELECT 1 FROM securities WHERE id = ?', payload.security_id) ? null : 'no security has that security_id';

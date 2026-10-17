@@ -19,6 +19,7 @@ import { countTransactionsHeldByAllRules } from './rules';
 import { format } from 'date-fns';
 import { AiWorkerDraftSchema } from '../../../shared/schemas';
 import { describeAutonomyForPrompt } from './draftAutonomy';
+import { findReimbursements } from './reimbursements';
 import type { ProviderUsage } from './aiProviders/types';
 import {
   AI_JOBS,
@@ -124,6 +125,10 @@ export const WORKER_DRAFTS_SCHEMA: Record<string, unknown> = {
               draftPayloadVariant('update_goal_target', {
                 goal_id: { type: 'string' },
                 target_amount: { type: 'number' },
+              }),
+              draftPayloadVariant('link_reimbursement', {
+                reimbursement_id: { type: 'string' },
+                purchase_id: { type: 'string' },
               }),
             ],
           },
@@ -277,6 +282,7 @@ const SECTION = {
   ownRules: 'Merchant rules you wrote yourself',
   recurring: 'Recurring occurrences that are overdue or that the user adjusted',
   goals: 'Goals',
+  reimbursements: 'Money a friend may have paid back',
   detections: 'System detections new since the last review pass',
 } as const;
 
@@ -287,7 +293,7 @@ const SECTION = {
  * contradiction rather than an emphasis, because the model cannot obey both.
  */
 const ID_RULE =
-  `THE ONE RULE ABOUT IDS. A 'categorize_transaction' payload's "transaction_id" MUST be copied exactly from the "id" field of a row listed under "${SECTION.uncategorized}" or under "${SECTION.refilable}" below. Those two lists together are every transaction you may name, and no other sentence here narrows that. Either list can be empty; an empty one reads "(none)", which means there are none, not that some were left out. Any payload's "category_id" MUST likewise be copied exactly from the "id" field of a row under "${SECTION.categories}"; a 'retire_merchant_rule' payload's "rule_id" from a row under "${SECTION.ownRules}"; a 'create_recurring_adjustment' payload's "recurring_id" and "original_date" both from one row under "${SECTION.recurring}"; and an 'update_goal_target' payload's "goal_id" from the "id" field of a row under "${SECTION.goals}". Never invent an id, and never put a display name where an id belongs: an id that does not match exactly will silently fail to apply.`;
+  `THE ONE RULE ABOUT IDS. A 'categorize_transaction' payload's "transaction_id" MUST be copied exactly from the "id" field of a row listed under "${SECTION.uncategorized}" or under "${SECTION.refilable}" below. Those two lists together are every transaction you may name, and no other sentence here narrows that. Either list can be empty; an empty one reads "(none)", which means there are none, not that some were left out. Any payload's "category_id" MUST likewise be copied exactly from the "id" field of a row under "${SECTION.categories}"; a 'retire_merchant_rule' payload's "rule_id" from a row under "${SECTION.ownRules}"; a 'create_recurring_adjustment' payload's "recurring_id" and "original_date" both from one row under "${SECTION.recurring}"; an 'update_goal_target' payload's "goal_id" from the "id" field of a row under "${SECTION.goals}"; and a 'link_reimbursement' payload's "reimbursement_id" from a row under "${SECTION.reimbursements}" and its "purchase_id" from that same row's candidates. Never invent an id, and never put a display name where an id belongs: an id that does not match exactly will silently fail to apply.`;
 
 /** A heading and its list, never a heading and a blank line. `note` carries its own leading space. */
 function section(heading: string, note: string, lines: readonly string[]): string {
@@ -364,7 +370,25 @@ export interface BackgroundReviewPromptInput {
   /** Overdue or owner-adjusted occurrences, each by the ids an adjustment needs. */
   recurring: readonly PromptOccurrence[];
   goals: readonly PromptGoal[];
+  /** Peer payments in with the purchases each could be paying back. */
+  reimbursements: readonly PromptReimbursement[];
   detections: readonly DetectedChange[];
+}
+
+export type PromptReimbursement = ReturnType<typeof findReimbursements>['inflows'][number];
+
+function reimbursementLine(r: PromptReimbursement): string {
+  const candidates = r.could_pay_back.map((p) => `id: "${p.id}", ${p.date}, $${p.amount.toFixed(2)} at "${p.label}" (${p.category ?? 'uncategorized'})`).join('; ');
+  return `- id: "${r.id}", ${r.date}, $${r.amount.toFixed(2)} "${r.label}"; could pay back: ${candidates}`;
+}
+
+/** Peer payments with a candidate purchase, less any the owner already declined a link for. */
+export function promptReimbursements(db: Database.Database): PromptReimbursement[] {
+  const declined = new Set((db.prepare(`
+    SELECT json_extract(payload, '$.reimbursement_id') AS id FROM advisor_drafts
+    WHERE kind = 'link_reimbursement' AND status = 'dismissed'
+  `).all() as Array<{ id: string }>).map((row) => row.id));
+  return findReimbursements(db, 60).inflows.filter((r) => r.could_pay_back.length > 0 && !declined.has(r.id));
 }
 
 function transactionLine(t: PromptTransaction): string {
@@ -425,6 +449,8 @@ ${section(SECTION.ownRules, ' (the only ones you may retire; the user\'s own rul
 ${section(SECTION.recurring, ' (an occurrence the user already adjusted is their decision; propose a different one only with a reason they would not already have):', input.recurring.map(occurrenceLine))}
 
 ${section(SECTION.goals, ':', input.goals.map(goalLine))}
+
+${section(SECTION.reimbursements, ' (propose a \'link_reimbursement\' only where the payment is plainly someone\'s share of one listed purchase, such as half or a third of a meal or a trip; never for a Venmo cashout, which bundles payments, or for money from the user\'s own account; one draft per payment, and none when unsure):', input.reimbursements.map(reimbursementLine))}
 
 Review Summary:
 ${input.uncategorizedTotal} total uncategorized transactions (${input.uncategorized.length} shown above).
@@ -768,11 +794,15 @@ export const collectBackgroundReview: AiJobCollect = async ({ db, assignment, ru
   //     -> completed 100, failed 6, running 1, skipped/already_running 1; no 'nothing_to_do'.
   // What was already shown is still listed whenever a pass does run; it just no longer buys one.
   const recurringNews = recurringChangedSince(db, [...overdueRecurring, ...adjustedRecurring], since);
+  const reimbursements = promptReimbursements(db);
+  const reimbursementNews = reimbursements.filter((r) =>
+    (db.prepare('SELECT created_at FROM transactions WHERE id = ?').get(r.id) as { created_at: string }).created_at > since);
   if (
     uncategorizedTransactions.length === 0
     && refilableEnteredSince(db, since) === 0
     && !(ownRules.length > 0 && rulesChangedSince(db, since))
     && recurringNews.length === 0
+    && reimbursementNews.length === 0
     && freshDetects.length === 0
   ) {
     return {
@@ -790,6 +820,7 @@ export const collectBackgroundReview: AiJobCollect = async ({ db, assignment, ru
     uncategorizedTotal: uncategorizedCount,
     recurring: [...overdueRecurring, ...adjustedRecurring.filter((o) => o.status !== 'overdue')].map(promptOccurrence),
     goals,
+    reimbursements,
     detections: freshDetects,
   });
 

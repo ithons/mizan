@@ -137,6 +137,7 @@ const AUTONOMY_PHRASE: Record<AdvisorDraftActionKind, string> = {
   delete_budget: 'removing a budget',
   create_goal: 'creating a goal',
   dismiss_recurring: 'dismissing a recurring item',
+  link_reimbursement: 'linking money paid back to the purchase it covers',
   update_account: 'renaming, hiding or setting the balance of an account',
   set_notification_rule: 'setting what you are notified about',
   delete_notification_rule: 'removing a notification rule',

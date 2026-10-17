@@ -174,6 +174,7 @@ const DRAFT_KIND_MOVES_REPORTS: Readonly<Record<AdvisorDraftActionKind, boolean>
   delete_budget: false,
   create_goal: false,
   dismiss_recurring: false,
+  link_reimbursement: false,
   update_account: false,
   set_notification_rule: false,
   delete_notification_rule: false,

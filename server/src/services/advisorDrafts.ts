@@ -18,6 +18,7 @@ import {
 } from './rules';
 import type { GuardRejectionReason, GuardResult } from './aiWriteGuards';
 import { unpaidCardPayment } from './cardPayments';
+import { setRefundLink, type RefundLinkError } from './refundLinks';
 import {
   DraftRefusedError,
   assertGuardPassed,
@@ -953,6 +954,22 @@ function confirmDismissRecurring(db: Database.Database, payload: Extract<Advisor
 } {
   if (!dismissRecurringPattern(db, payload.recurring_id).ok) throw new Error('Recurring pattern not found');
   return { changed: 1, result: { recurring_id: payload.recurring_id } };
+}
+
+const REFUND_LINK_REFUSAL: Record<RefundLinkError, string> = {
+  not_found: 'One of those transactions no longer exists',
+  not_a_refund: 'The reimbursement is not money in',
+  not_a_purchase: 'The purchase is not money out',
+  exceeds_purchase: 'That would pay back more than the purchase cost',
+};
+
+function confirmLinkReimbursement(db: Database.Database, payload: Extract<AdvisorDraftPayload, { kind: 'link_reimbursement' }>): {
+  changed: number;
+  result: unknown;
+} {
+  const linked = setRefundLink(db, payload.reimbursement_id, payload.purchase_id);
+  if (!linked.ok) throw new Error(REFUND_LINK_REFUSAL[linked.reason]);
+  return { changed: 1, result: { reimbursement_id: payload.reimbursement_id, purchase_id: payload.purchase_id } };
 }
 
 function confirmUpdateAccount(db: Database.Database, payload: Extract<AdvisorDraftPayload, { kind: 'update_account' }>): {
@@ -1925,6 +1942,8 @@ export function confirmAdvisorDraft(
         result = confirmCreateGoal(db, draftAction.payload); break;
       case 'dismiss_recurring':
         result = confirmDismissRecurring(db, draftAction.payload); break;
+      case 'link_reimbursement':
+        result = confirmLinkReimbursement(db, draftAction.payload); break;
       case 'update_account':
         result = confirmUpdateAccount(db, draftAction.payload); break;
       case 'set_notification_rule':

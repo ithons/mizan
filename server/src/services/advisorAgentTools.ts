@@ -10,6 +10,7 @@ import { format, subMonths } from 'date-fns';
 import { explainMonth, fundingMix } from './monthStudies';
 import { accountCoverage } from './accountCoverage';
 import { retirementRoom } from './retirementRoom';
+import { findReimbursements } from './reimbursements';
 import { cashRunway, checkAdjustments, compoundGrowth, emergencyFund, projectFreeBand, debtPayoff, goalTimeline, goalTimelineFor, projectFree } from './simulations';
 
 type ToolInput = Record<string, unknown>;
@@ -23,6 +24,7 @@ const PAYLOAD_GUIDE = [
   'create_merchant_rule {pattern, category_id, apply_existing:boolean}.',
   'retire_merchant_rule {rule_id}.',
   'confirm_recurring {recurring_id} / dismiss_recurring {recurring_id}.',
+  'link_reimbursement {reimbursement_id, purchase_id}: money someone paid the owner back for a purchase; ids from find_reimbursements.',
   'create_recurring_adjustment {recurring_id, original_date, action:"skip"|"snooze"|"adjust", adjusted_date?, adjusted_amount? (dollars), note?}.',
   'update_account {account_id, account_name?, is_hidden?, current_balance? (dollars, manual accounts only), statement_balance? (dollars owed), statement_due_date?, credit_limit? (dollars)}.',
   'set_manual_cost_basis {holding_id, manual_cost_basis (dollars) | null, note?}.',
@@ -140,6 +142,11 @@ export const AGENT_TOOLS: Anthropic.Tool[] = [
     name: 'get_retirement_room',
     description: 'How much IRA room is left for a tax year: the annual limit capped at earned income so far, less deposits into IRA accounts this year, with the deadline. annual_limit must come from the owner (ask, or use what they told you and you remembered); never supply a limit yourself. Eligibility and residency are not checked; say so.',
     input_schema: { type: 'object', properties: { annual_limit: { type: 'number', description: 'Dollars, as the owner stated it.' }, tax_year: { type: 'integer', description: 'Default: the current year.' } }, required: ['annual_limit'] },
+  },
+  {
+    name: 'find_reimbursements',
+    description: 'Zelle, Venmo, Cash App and PayPal money in that nothing pairs or links yet, each with the purchases from the two weeks before it that it could be paying back (a friend covering their share of dinner). Use to propose link_reimbursement drafts, one per inflow you are confident about; the linked money then nets against the purchase and takes its category. When unsure which purchase, or whether it is a reimbursement at all, ask the owner instead.',
+    input_schema: { type: 'object', properties: { days: { type: 'integer', description: 'How far back, default 120, max 365.' } } },
   },
   {
     name: 'get_notifications',
@@ -315,6 +322,7 @@ export function runAgentTool(db: Database.Database, name: string, input: ToolInp
     }
     case 'get_account_coverage': return accountCoverage(db, Math.min(Math.max(Math.round(num(input.days, 45)), 1), 120));
     case 'get_retirement_room': return retirementRoom(db, num(input.annual_limit, 0), Math.round(num(input.tax_year, new Date().getFullYear())));
+    case 'find_reimbursements': return findReimbursements(db, Math.min(Math.max(Math.round(num(input.days, 120)), 1), 365));
     case 'get_funding_mix': return fundingMix(db, Math.min(Math.max(Math.round(num(input.months, 6)), 1), 24));
     default: return undefined;
   }

@@ -50,6 +50,20 @@ export function describeDraftChanges(db: Database.Database, payload: AdvisorDraf
       const pattern = db.prepare('SELECT merchant_name, average_amount, frequency FROM recurring_patterns WHERE id = ?').get(payload.recurring_id) as { merchant_name: string; average_amount: number; frequency: string } | undefined;
       return [{ field: pattern ? `${pattern.merchant_name}, ${pattern.frequency}, ${fromCents(pattern.average_amount)}` : 'Recurring item', before: null, after: payload.kind === 'confirm_recurring' ? 'confirmed as recurring' : 'dismissed, not recurring' }];
     }
+    case 'link_reimbursement': {
+      const row = (id: string) => db.prepare(`
+        SELECT date, amount, COALESCE(merchant_name, original_name) AS label, category_id, manually_categorized, category_source
+        FROM transactions WHERE id = ?
+      `).get(id) as { date: string; amount: number; label: string; category_id: string | null; manually_categorized: number; category_source: string | null } | undefined;
+      const back = row(payload.reimbursement_id);
+      const purchase = row(payload.purchase_id);
+      if (!back || !purchase) return [{ field: 'Reimbursement', before: null, after: 'one of the transactions no longer exists' }];
+      const ownerChose = back.manually_categorized === 1 || back.category_source === 'human';
+      return [
+        { field: `${back.label} ${fromCents(back.amount)} on ${back.date}`, before: 'not linked', after: `pays back ${purchase.label} ${fromCents(-purchase.amount)} on ${purchase.date}` },
+        { field: 'Its category', before: categoryName(db, back.category_id), after: ownerChose ? `${categoryName(db, back.category_id)}, which you chose` : purchase.category_id ? categoryName(db, purchase.category_id) : 'unchanged' },
+      ];
+    }
     case 'create_recurring_adjustment': {
       const pattern = db.prepare('SELECT merchant_name FROM recurring_patterns WHERE id = ?').get(payload.recurring_id) as { merchant_name: string } | undefined;
       const after = payload.action === 'skip' ? 'skipped'

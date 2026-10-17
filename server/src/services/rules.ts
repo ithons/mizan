@@ -709,7 +709,7 @@ export function applyMerchantRulesToExistingTransactions(
   // pass can clear it wholesale; category_source (041) records provenance per write. On the
   // owner's ledger 62 rows carry both. Honor both, so a hand-made choice survives a full re-check
   // even if one marker has been wiped.
-  if (options.skipManual) clauses.push("manually_categorized = 0 AND COALESCE(category_source, '') <> 'human'");
+  if (options.skipManual) clauses.push("manually_categorized = 0 AND COALESCE(category_source, '') <> 'human' AND refund_of_id IS NULL");
   const conditions = clauses.length > 0 ? `WHERE ${clauses.join(' AND ')}` : '';
   const transactions = db.prepare(`
     SELECT id, merchant_name, original_name, category_id, amount
@@ -847,7 +847,7 @@ export function countMerchantRuleImpact(
   if (!normalizedPattern) return 0;
 
   const scanWhere = options.overwrite
-    ? "WHERE manually_categorized = 0 AND COALESCE(category_source, '') <> 'human'"
+    ? "WHERE manually_categorized = 0 AND COALESCE(category_source, '') <> 'human' AND refund_of_id IS NULL"
     : 'WHERE category_id IS NULL';
 
   const transactions = db.prepare(`
@@ -890,7 +890,7 @@ export function applyMerchantRuleToMatchingTransactions(
   // is checked alongside `manually_categorized` because a bulk re-categorization pass can clear
   // the older flag wholesale, and a hand-made choice has to survive that.
   const scanWhere = options.overwrite
-    ? "WHERE manually_categorized = 0 AND COALESCE(category_source, '') <> 'human'"
+    ? "WHERE manually_categorized = 0 AND COALESCE(category_source, '') <> 'human' AND refund_of_id IS NULL"
     : 'WHERE category_id IS NULL';
 
   const transactions = db.prepare(`
