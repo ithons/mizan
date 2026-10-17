@@ -265,6 +265,7 @@ export const AdvisorDraftPayloadSchema = z.discriminatedUnion('kind', [
     account_id: z.string().nullable().optional(),
   }),
   z.object({ kind: z.literal('dismiss_recurring'), recurring_id: id }),
+  z.object({ kind: z.literal('link_reimbursement'), reimbursement_id: id, purchase_id: id }),
   z.object({
     kind: z.literal('update_account'),
     account_id: id,

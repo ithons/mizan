@@ -194,6 +194,12 @@ export const DRAFT_KIND_AUTONOMY: Readonly<Record<AdvisorDraftActionKind, DraftA
     argument: 'Dismissal unlinks the pattern\'s rows and nothing records which rows to relink.',
   },
 
+  link_reimbursement: {
+    autonomy: 'proposal_only',
+    fails: ['observation', 'exact_inverse'],
+    argument: 'Whether money was paid back for a purchase is something only the owner knows, and unlinking does not restore the category it replaced.',
+  },
+
   update_account: {
     autonomy: 'proposal_only',
     ownerCarveOut: true,
