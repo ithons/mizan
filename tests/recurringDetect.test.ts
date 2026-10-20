@@ -764,7 +764,10 @@ test('HEALTHY: a checking-account pattern survives the sweep untouched', () => {
     assert.equal(before.is_active, 1);
 
     detectRecurring();
-    assert.deepEqual(patternFor(db, 'spotify'), before);
+    // Detection re-upserts an active pattern every pass, so updated_at moves on its own.
+    const { updated_at: _before, ...kept } = before;
+    const { updated_at: _after, ...now } = patternFor(db, 'spotify') ?? {};
+    assert.deepEqual(now, kept);
     assert.deepEqual(linkedTo(db, 'Spotify'), Array(6).fill(before.id));
   } finally {
     teardown(db);
