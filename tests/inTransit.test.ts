@@ -1,9 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import type Database from 'better-sqlite3';
-import { transfersInTransit } from '../server/src/services/inTransit';
+import { settledNetWorthCents, transfersInTransit } from '../server/src/services/inTransit';
 import { getNetWorthAttribution } from '../server/src/services/reporting';
-import { netWorthTimeline } from '../server/src/services/netWorthTimeline';
+import { netWorthNow, netWorthTimeline } from '../server/src/services/netWorthTimeline';
 import { _setDbForTesting } from '../server/src/db/index';
 import { runAdvisorTool } from '../server/src/services/advisorChatTools';
 import { buildFinancialContext } from '../server/src/services/aiContext';
@@ -116,4 +116,40 @@ test('the advisor reads the same net worth history the charts draw, which needs 
   const timeline = netWorthTimeline(db, { from: history[0].date, step: 'week' });
   assert.deepEqual(history.map((r) => [r.date, r.net_worth]), timeline.points.map((p) => [p.date, p.net_worth / 100]));
   assert.doesNotMatch(buildFinancialContext(), /Balance shows/);
+});
+
+function latestSheet(db: Database.Database) {
+  return db.prepare("SELECT date, taken_at, created_at, breakdown, net_worth FROM net_worth_snapshots ORDER BY date DESC LIMIT 1").get() as
+    { date: string; taken_at: string | null; created_at: string; breakdown: string; net_worth: number };
+}
+
+test('Balance, Accounts and the advisor headline print one net worth while a transfer was in flight at the last sheet', (t) => {
+  const db = migratedTestDb();
+  t.after(() => { _setDbForTesting(null); db.close(); });
+  _setDbForTesting(db);
+  const { chase, wealthfront } = chaseToWealthfront(db);
+  db.prepare("DELETE FROM net_worth_snapshots WHERE date = '2026-10-15'").run();
+  // Both legs have arrived since, each with its account's balance.
+  db.prepare('UPDATE accounts SET current_balance = ? WHERE id = ?').run(650016, chase);
+  db.prepare('UPDATE accounts SET current_balance = ? WHERE id = ?').run(500321, wealthfront);
+
+  const balance = settledNetWorthCents(db, latestSheet(db));
+  const now = netWorthNow(db);
+  assert.equal(balance - latestSheet(db).net_worth, 500000, 'the sheet was read between the legs');
+  assert.equal(now.net_worth, balance);
+  assert.match(buildFinancialContext(), /### Net Worth: \$11,503\.37/);
+});
+
+test('HEALTHY: with nothing in flight the sheet needs no adjustment and every headline agrees', (t) => {
+  const db = migratedTestDb();
+  t.after(() => { _setDbForTesting(null); db.close(); });
+  _setDbForTesting(db);
+  const { chase, wealthfront } = chaseToWealthfront(db);
+  db.prepare('UPDATE accounts SET current_balance = ? WHERE id = ?').run(583948, chase);
+  db.prepare('UPDATE accounts SET current_balance = ? WHERE id = ?').run(500370, wealthfront);
+
+  const sheet = latestSheet(db);
+  assert.equal(settledNetWorthCents(db, sheet), sheet.net_worth);
+  assert.equal(netWorthNow(db).net_worth, sheet.net_worth);
+  assert.doesNotMatch(buildFinancialContext(), /Adjusted by|Balance shows/);
 });

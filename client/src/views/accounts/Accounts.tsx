@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { Account, SyncHealthConnection } from '@shared/types';
 import { INVESTED_TYPES } from '@shared/accountTypes';
-import { accountsApi, syncApi } from '../../lib/api';
+import { accountsApi, networthApi, syncApi } from '../../lib/api';
 import { formatCompactRelative, formatWholeCurrency } from '../../lib/formatters';
 import { creditNote, isInCredit, signedAccountBalance } from '../../lib/accountBalance';
 import { ACCOUNT_TYPE_LABELS } from '../../lib/constants';
@@ -132,6 +132,7 @@ export function Accounts() {
 
   const accountsQ = useQuery({ queryKey: ['accounts'], queryFn: () => accountsApi.list() });
   const { data: accounts, isLoading } = accountsQ;
+  const currentQ = useQuery({ queryKey: ['networth', 'current'], queryFn: () => networthApi.current() });
   const { data: syncHealth } = useQuery({ queryKey: ['sync', 'health'], queryFn: () => syncApi.health(), retry: false });
   const healthByConnection = useMemo(() => {
     const map = new Map<string, SyncHealthConnection>();
@@ -158,12 +159,7 @@ export function Accounts() {
     }).filter((g) => g.rows.length > 0);
   }, [liveVisible]);
 
-  // Split by ROLE, the way snapshot.ts computes the same three figures on the server. Splitting by
-  // sign cannot survive a card in credit: that is a positive number belonging to a liability, and
-  // counting it as an asset would put this screen back at odds with the net worth it prints.
-  const assets = liveVisible.filter((a) => !a.is_liability).reduce((s, a) => s + a.current_balance, 0);
-  const owed = liveVisible.filter((a) => a.is_liability).reduce((s, a) => s + a.current_balance, 0);
-  const netWorth = assets - owed;
+  const current = currentQ.data;
 
   const selected = (accounts ?? []).find((a) => a.id === selectedId) ?? null;
 
@@ -300,21 +296,20 @@ export function Accounts() {
         className="mb-6"
       />
 
-      <QueryErrorBanner items={[{ query: accountsQ, label: 'your accounts' }]} className="mb-5" />
+      <QueryErrorBanner items={[{ query: accountsQ, label: 'your accounts' }, { query: currentQ, label: 'net worth' }]} className="mb-5" />
 
-      {/* Withheld when the accounts query failed: every figure here is a reduction over the list,
-          so a dead server would print three false zeros. */}
-      {!accountsQ.isError && (
+      {/* Withheld until the server's figure is in, so a dead request never prints three false zeros. */}
+      {current && (
         <div className="mb-8 flex-shrink-0">
-          <Figure scale="subject" label="Net worth">{formatWholeCurrency(netWorth)}</Figure>
+          <Figure scale="subject" label="Net worth">{formatWholeCurrency(current.net_worth)}</Figure>
           <p className="mt-2 text-body tabular-nums text-muted">
-            {formatWholeCurrency(assets)} held ·{' '}
-            {owed < 0 ? (
-              <span className="text-sage-deep">{formatWholeCurrency(Math.abs(owed))} card credit</span>
-            ) : owed === 0 ? (
+            {formatWholeCurrency(current.assets)} held ·{' '}
+            {current.liabilities < 0 ? (
+              <span className="text-sage-deep">{formatWholeCurrency(Math.abs(current.liabilities))} card credit</span>
+            ) : current.liabilities === 0 ? (
               'nothing owed'
             ) : (
-              <span className="text-clay">{formatWholeCurrency(owed)} owed</span>
+              <span className="text-clay">{formatWholeCurrency(current.liabilities)} owed</span>
             )}
           </p>
         </div>

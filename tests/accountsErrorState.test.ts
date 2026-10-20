@@ -29,8 +29,9 @@ test('the accounts screen renders its error state, not zeros', () => {
     /accountsQ\.isError/,
     'the screen never reads isError, so a failed request renders as an empty ledger'
   );
-  // The headline block and the empty state are both withheld on failure.
-  assert.match(src, /\{!accountsQ\.isError && \(\n\s*<div className="mb-8/, 'the money numerals are not withheld on failure');
+  // The headline is the server's figure, withheld until it is in; a failure there is named too.
+  assert.match(src, /\{current && \(\n\s*<div className="mb-8/, 'the money numerals are not withheld until they exist');
+  assert.match(src, /query: currentQ, label: 'net worth'/, 'a failed net worth request is not named');
   assert.match(src, /!accountsQ\.isError && liveVisible\.length === 0/, '"No accounts yet" is not withheld on failure');
 });
 

@@ -20,7 +20,7 @@ import { getSyncHealth } from './syncHealth';
 import { buildAdvisorReadTools } from './advisorTools';
 import { getPreference } from './preferences';
 import { readSnapshotBefore, readSnapshots } from './netWorthHistory';
-import { netWorthTimeline } from './netWorthTimeline';
+import { netWorthNow, netWorthTimeline } from './netWorthTimeline';
 import { reconcileAccounts } from './reconciliation';
 import { listMemories } from './aiMemory';
 import { MAX_PAIR_DAY_GAP, findFlowConservationViolations } from './flowConservation';
@@ -981,8 +981,7 @@ export function buildFinancialContext(): string {
     }
   }
 
-  const totalAssets = liquid + investments + crypto + otherAssets;
-  const netWorth = totalAssets - liabilities;
+  const netWorth = toDollars(netWorthNow(db).net_worth);
 
   // Net worth vs last month. Measured only: a delta against a reconstruction is a comparison
   // between a fact and a guess, and stating it as "+$X vs last month" presents it as a fact.

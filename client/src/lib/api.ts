@@ -576,6 +576,7 @@ export const reportsApi = {
 // ─── Net Worth ───────────────────────────────────────────────────────────────
 
 export const networthApi = {
+  current: () => apiFetch<{ net_worth: number; assets: number; liabilities: number; as_of: string }>('/api/networth/current'),
   // Null, not undefined, and not a zeroed sheet: the route returns null when no sheet has ever
   // been recorded, and a caller that cannot see the difference reports "nothing on either side of
   // the sheet" as a fact about the owner's finances.

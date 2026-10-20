@@ -4,7 +4,7 @@ import { getDb } from '../db/index';
 import { dollarizeFields, toDollars } from '../services/money';
 import type Database from 'better-sqlite3';
 import { parseBreakdown, transfersInTransit } from '../services/inTransit';
-import { netWorthTimeline, type TimelineStep } from '../services/netWorthTimeline';
+import { netWorthNow, netWorthTimeline, type TimelineStep } from '../services/netWorthTimeline';
 
 const router = Router();
 
@@ -74,6 +74,16 @@ router.get('/snapshot', (_req: Request, res: Response, next: NextFunction): void
     res.json({
       data: snapshot ? dollarizeSnapshotRow(withInTransit(db, snapshot as Record<string, unknown>)) : null,
     });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// GET /current - net worth now, the figure Accounts and the advisor headline print
+router.get('/current', (_req: Request, res: Response, next: NextFunction): void => {
+  try {
+    const now = netWorthNow(getDb());
+    res.json({ data: { ...dollarizeFields(now, ['net_worth', 'assets', 'liabilities'] as const) } });
   } catch (err) {
     next(err);
   }

@@ -191,4 +191,16 @@ export function netWorthTimeline(
   };
 }
 
+/**
+ * Net worth now, in cents: today's point of the timeline, which is every visible account's current
+ * balance. Accounts and the advisor's headline both read this. It needs no in-transit adjustment:
+ * a transfer pair forms only once both legs have arrived, and each leg arrives with its account's
+ * balance, so both live balances already count it. Only a past sheet, read between the two legs,
+ * can hold money in flight (inTransit.ts).
+ */
+export function netWorthNow(db: Database.Database, today = format(new Date(), 'yyyy-MM-dd')): { net_worth: number; assets: number; liabilities: number; as_of: string } {
+  const point = netWorthTimeline(db, { from: today, today }).points.at(-1);
+  return { net_worth: point?.net_worth ?? 0, assets: point?.assets ?? 0, liabilities: point?.liabilities ?? 0, as_of: today };
+}
+
 const METHOD = 'Checking, savings and cards are walked back day by day from today\'s balance through every posted transaction, so a day reads what the ledger holds for it now; that can differ from the balance recorded when a sync ran, where a transaction posted or arrived after that sync. Investment and crypto accounts are valued at each day\'s positions times that day\'s public closing price, where the ledger states every quantity and the recorded holdings agree with the balance the institution reported; a recorded balance or a statement overrides that on its own day. Days without known positions or prices replay only money moving in or out from the next known value, holding prices flat, and are estimates. An account that holds a balance only carries the value last recorded for it, and is unknown before the first. An account counts as zero before its first transaction when its walk opens at zero, and as unknown otherwise. A week or month step shows the last day of each period.';
