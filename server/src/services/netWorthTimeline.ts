@@ -47,6 +47,7 @@ function accountSeries(
   txns: TxnRow[],
   calendar: string[],
   anchors: Array<{ date: string; value: number }>,
+  today: string,
 ): { values: Array<number | null>; observed: boolean[]; first: string | null; opening: number | null } {
   const market = MARKET_DRIVEN_TYPES.has(account.type);
   const first = txns.length ? txns[0].date : null;
@@ -79,6 +80,11 @@ function accountSeries(
     const day = calendar[i];
     if (!first || day < first) {
       values[i] = 0;
+      observed[i] = true;
+      continue;
+    }
+    if (day === today) {
+      values[i] = account.current_balance;
       observed[i] = true;
       continue;
     }
@@ -128,7 +134,7 @@ export function netWorthTimeline(
 
   const calendar = days(from, to);
   const anchors = readMarketAnchors(db, accounts.filter((a) => MARKET_DRIVEN_TYPES.has(a.type)).map((a) => a.id));
-  const series = accounts.map((a) => ({ account: a, ...accountSeries(a, txnsByAccount.get(a.id) ?? [], calendar, anchors.get(a.id) ?? []) }));
+  const series = accounts.map((a) => ({ account: a, ...accountSeries(a, txnsByAccount.get(a.id) ?? [], calendar, anchors.get(a.id) ?? [], today) }));
 
   const points: TimelinePoint[] = calendar.map((date, i) => {
     const point: TimelinePoint = { date, net_worth: 0, assets: 0, liabilities: 0, liquid: 0, invested: 0, crypto: 0, estimated: false, estimated_accounts: [], coverage: 0, by_account: {} };
