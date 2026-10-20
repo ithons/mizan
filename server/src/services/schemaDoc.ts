@@ -168,7 +168,10 @@ export const TABLE_MEANINGS: Record<string, TableMeaning> = {
     purpose: 'Savings and debt targets the owner set.',
     columns: {
       target_amount: { unit: CENTS, note: 'A target the owner chose. Proposal-only for the AI: never write it directly.' },
-      current_amount: { unit: CENTS },
+      current_amount: {
+        unit: CENTS,
+        note: 'The saved amount only for a goal with no account_id. For a linked goal it is stale and is not what was saved: the saved amount is the linked account\'s balance (calculateGoalProgress, as get_goals reports it).',
+      },
       starting_amount: { unit: CENTS },
       target_date: { unit: 'local date, nullable' },
       is_archived: { unit: FLAG },

@@ -4,8 +4,8 @@ import { getDb } from '../db/index';
 import { validate } from '../middleware/validate';
 import { CreateGoalSchema, UpdateGoalSchema } from '../../../shared/schemas';
 import { calculateGoalProgress } from '../services/goalProgress';
-import { createGoal, type CreateGoalInput } from '../services/goals';
-import { toCents, toCentsOrNull, toDollars, toDollarsOrNull } from '../services/money';
+import { createGoal, updateGoal, type CreateGoalInput, type UpdateGoalInput } from '../services/goals';
+import { toDollars, toDollarsOrNull } from '../services/money';
 import type { Goal, GoalType } from '../../../shared/types';
 
 const router = Router();
@@ -41,14 +41,6 @@ function goalSelect(where: string): string {
     LEFT JOIN accounts a ON a.id = g.account_id
     ${where}
   `;
-}
-
-function accountExists(db: Database.Database, accountId: string): boolean {
-  return Boolean(db.prepare('SELECT id FROM accounts WHERE id = ?').get(accountId));
-}
-
-function normalizeAccountId(accountId: string | null | undefined): string | null {
-  return accountId && accountId.trim().length > 0 ? accountId : null;
 }
 
 function getParamId(value: string | string[] | undefined): string | null {
@@ -127,6 +119,15 @@ router.post(
   }
 );
 
+const UPDATE_REFUSALS = {
+  goal_not_found: { status: 404, error: 'Goal not found' },
+  account_not_found: { status: 404, error: 'Account not found' },
+  saved_amount_on_linked_goal: {
+    status: 400,
+    error: 'A linked goal has no saved amount of its own; its account balance is what it has saved. Unlink it to record one.',
+  },
+} as const;
+
 // PATCH /:id - update goal
 router.patch(
   '/:id',
@@ -139,55 +140,12 @@ router.patch(
         res.status(400).json({ error: 'Invalid goal id' });
         return;
       }
-
-      const existing = getGoal(db, id);
-      if (!existing) {
-        res.status(404).json({ error: 'Goal not found' });
+      const result = updateGoal(db, id, req.body as UpdateGoalInput);
+      if (!result.ok) {
+        const refusal = UPDATE_REFUSALS[result.reason];
+        res.status(refusal.status).json({ error: refusal.error });
         return;
       }
-
-      const body = req.body as {
-        name?: string;
-        type?: GoalType;
-        target_amount?: number;
-        current_amount?: number;
-        starting_amount?: number | null;
-        account_id?: string | null;
-        target_date?: string | null;
-        color?: string | null;
-        is_archived?: boolean;
-      };
-
-      const updates: string[] = [];
-      const values: unknown[] = [];
-      const addUpdate = (column: string, value: unknown): void => {
-        updates.push(`${column} = ?`);
-        values.push(value);
-      };
-
-      if (body.name !== undefined) addUpdate('name', body.name);
-      if (body.type !== undefined) addUpdate('type', body.type);
-      if (body.target_amount !== undefined) addUpdate('target_amount', toCents(body.target_amount));
-      if (body.current_amount !== undefined) addUpdate('current_amount', toCents(body.current_amount));
-      if (body.starting_amount !== undefined) addUpdate('starting_amount', toCentsOrNull(body.starting_amount));
-      if (body.account_id !== undefined) {
-        const accountId = normalizeAccountId(body.account_id);
-        if (accountId && !accountExists(db, accountId)) {
-          res.status(404).json({ error: 'Account not found' });
-          return;
-        }
-        addUpdate('account_id', accountId);
-      }
-      if (body.target_date !== undefined) addUpdate('target_date', body.target_date);
-      if (body.color !== undefined) addUpdate('color', body.color);
-      if (body.is_archived !== undefined) addUpdate('is_archived', body.is_archived ? 1 : 0);
-
-      if (updates.length > 0) {
-        addUpdate('updated_at', new Date().toISOString());
-        values.push(id);
-        db.prepare(`UPDATE goals SET ${updates.join(', ')} WHERE id = ?`).run(...values);
-      }
-
       res.json({ data: getGoal(db, id) });
     } catch (err) {
       next(err);

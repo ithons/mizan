@@ -437,7 +437,8 @@ function GoalModal({ open, onClose, editing }: { open: boolean; onClose: () => v
     setForm({
       name: editing?.name ?? '',
       target_amount: editing ? String(editing.target_amount) : '',
-      current_amount: editing ? String(editing.current_amount) : '',
+      // A linked goal's current_amount is its account balance, never a figure to edit or carry over.
+      current_amount: editing && !editing.account_id ? String(editing.current_amount) : '',
       target_date: editing?.target_date ?? '',
       account_id: editing?.account_id ?? '',
     });
@@ -451,13 +452,12 @@ function GoalModal({ open, onClose, editing }: { open: boolean; onClose: () => v
       const current = form.current_amount ? parseDecimalInput(form.current_amount) : 0;
       const body = {
         name: form.name.trim(),
-        type: 'savings' as const,
         target_amount: target,
-        current_amount: current ?? 0,
         target_date: form.target_date || null,
         account_id: form.account_id || null,
+        ...(form.account_id ? {} : { current_amount: current ?? 0 }),
       };
-      return editing ? goalsApi.update(editing.id, body) : goalsApi.create(body);
+      return editing ? goalsApi.update(editing.id, body) : goalsApi.create({ ...body, type: 'savings' });
     },
     onSuccess: () => {
       invalidateFinancialData(qc);
@@ -495,16 +495,18 @@ function GoalModal({ open, onClose, editing }: { open: boolean; onClose: () => v
               onChange={(e) => setForm({ ...form, target_amount: e.target.value })}
             />
           </div>
-          <div className="flex-1">
-            <label htmlFor="plan-saved-so-far" className="mz-label">Saved so far</label>
-            <input id="plan-saved-so-far"
-              type="number"
-              className="mz-field tabular-nums"
-              placeholder="0.00"
-              value={form.current_amount}
-              onChange={(e) => setForm({ ...form, current_amount: e.target.value })}
-            />
-          </div>
+          {!form.account_id && (
+            <div className="flex-1">
+              <label htmlFor="plan-saved-so-far" className="mz-label">Saved so far</label>
+              <input id="plan-saved-so-far"
+                type="number"
+                className="mz-field tabular-nums"
+                placeholder="0.00"
+                value={form.current_amount}
+                onChange={(e) => setForm({ ...form, current_amount: e.target.value })}
+              />
+            </div>
+          )}
         </div>
         <div className="flex gap-4">
           <div className="flex-1">
