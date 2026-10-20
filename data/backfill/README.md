@@ -29,7 +29,8 @@ backed up separately.
     tsx scripts/backfill/rebuild.ts
 
 Refreshes duplicate/transfer integrity, recurring detection and the estimated net-worth
-history. Settings > Data has the same history rebuild, and the next sync covers the rest.
+history. It calls `backfillSnapshots` directly and records no reconstruction mark; the
+rebuild in Settings > Data, and the next sync, go through `reconcileReconstructedHistory`.
 
 ## Scanned BofA checking and savings statements
 
