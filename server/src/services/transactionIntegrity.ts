@@ -27,6 +27,7 @@ interface TransferRow {
   id: string;
   account_id: string;
   account_name: string;
+  institution_name: string | null;
   account_type: string;
   is_liability: number;
   date: string;
@@ -305,6 +306,7 @@ function transferCandidateRows(db: Database.Database): TransferRow[] {
       t.id,
       t.account_id,
       a.account_name,
+      a.institution_name,
       a.type AS account_type,
       a.is_liability,
       t.date,
@@ -343,12 +345,18 @@ interface PairEdge {
   businessGap: number;
   calendarGap: number;
   sharedReference: boolean;
+  namesCounterparty: boolean;
 }
 
 const CONFIRMATION = /Conf(?:irmation)?#\s*([A-Za-z0-9]{6,})/gi;
 
 function confirmationNumbers(text: string): Set<string> {
   return new Set([...text.matchAll(CONFIRMATION)].map((m) => m[1].toUpperCase()));
+}
+
+function names(text: string, institution: string | null): boolean {
+  const word = institution?.split(/\s+/)[0] ?? '';
+  return word.length >= 5 && text.toLowerCase().includes(word.toLowerCase());
 }
 
 function edgeOrder(a: PairEdge, b: PairEdge): number {
@@ -380,6 +388,8 @@ function candidateEdges(rows: TransferRow[]): PairEdge[] {
           businessGap,
           calendarGap: Math.abs(dateToDay(outflow.date) - dateToDay(inflow.date)),
           sharedReference: [...confirmationNumbers(inflow.original_name)].some((ref) => outRefs.has(ref)),
+          namesCounterparty: outflow.institution_name !== inflow.institution_name
+            && (names(outflow.original_name, inflow.institution_name) || names(inflow.original_name, outflow.institution_name)),
         });
       }
     }
@@ -511,9 +521,13 @@ interface AssignedPair extends PairEdge {
   reviewOnly: boolean;
 }
 
-/** Two legs quoting the same confirmation number are one movement, whatever else is near them. */
-function settleSharedReferences(edges: PairEdge[]): { fixed: PairEdge[]; rest: PairEdge[] } {
-  const referenced = edges.filter((edge) => edge.sharedReference);
+/**
+ * Two legs quoting the same confirmation number are one movement, whatever else is near them; so is
+ * a leg naming the other's institution. Evidence settles an edge only when it is the sole such edge
+ * for both of its legs.
+ */
+function settleByEvidence(edges: PairEdge[], evidence: (edge: PairEdge) => boolean): { fixed: PairEdge[]; rest: PairEdge[] } {
+  const referenced = edges.filter(evidence);
   const count = new Map<string, number>();
   for (const edge of referenced) {
     for (const leg of [edge.outflow.id, edge.inflow.id]) count.set(leg, (count.get(leg) ?? 0) + 1);
@@ -524,9 +538,10 @@ function settleSharedReferences(edges: PairEdge[]): { fixed: PairEdge[]; rest: P
 }
 
 function assignPairs(edges: PairEdge[]): AssignedPair[] {
-  const referenced = settleSharedReferences(edges);
-  const { fixed: nearest, rest } = settleMutualNearest(referenced.rest);
-  const fixed = [...referenced.fixed, ...nearest];
+  const referenced = settleByEvidence(edges, (edge) => edge.sharedReference);
+  const named = settleByEvidence(referenced.rest, (edge) => edge.namesCounterparty);
+  const { fixed: nearest, rest } = settleMutualNearest(named.rest);
+  const fixed = [...referenced.fixed, ...named.fixed, ...nearest];
   const searched = groupsOf(rest).flatMap((group) =>
     group.length <= EXACT_GROUP_EDGES
       ? assignExactly(group).map((edge) => ({ ...edge, reviewOnly: false }))

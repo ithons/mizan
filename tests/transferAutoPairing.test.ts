@@ -364,3 +364,28 @@ test('HEALTHY: without a confirmation number the same ledger is matched exactly 
   assert.equal(partnerOf(db, out), brokerIn);
   assert.equal(partnerOf(db, brokerOut), into);
 });
+
+function twoSameDayDeposits(named: boolean) {
+  const db = migratedTestDb();
+  const checking = insertAccount(db, { account_name: 'Checking', type: 'checking', institution_name: 'Bank of America' });
+  const cash = insertAccount(db, { account_name: 'Cash', type: 'savings', institution_name: 'Wealthfront' });
+  const brokerage = insertAccount(db, { account_name: 'Brokerage', type: 'brokerage', institution_name: 'Fidelity Investments' });
+  const toCash = insertTransaction(db, { account_id: checking, date: '2026-02-23', amount: -100000, original_name: named ? 'Wealthfront DES:EDI PYMNTS' : 'ACH DEBIT 1' });
+  const toBroker = insertTransaction(db, { account_id: checking, date: '2026-02-23', amount: -100000, original_name: named ? 'FID BKG SVC LLC DES:MONEYLINE' : 'ACH DEBIT 2' });
+  const intoCash = insertTransaction(db, { account_id: cash, date: '2026-02-23', amount: 100000, original_name: 'Deposit' });
+  const intoBroker = insertTransaction(db, { account_id: brokerage, date: '2026-02-23', amount: 100000, original_name: 'Contribution' });
+  refreshTransferCandidates(db);
+  return { db, toCash, toBroker, intoCash, intoBroker };
+}
+
+test('of two same-day deposits of one amount, the one naming an institution pairs with that institution', () => {
+  const { db, toCash, toBroker, intoCash, intoBroker } = twoSameDayDeposits(true);
+  assert.equal(partnerOf(db, toCash), intoCash);
+  assert.equal(partnerOf(db, toBroker), intoBroker);
+});
+
+test('HEALTHY: when neither names an institution the two stay unpaired rather than guessed', () => {
+  const { db, toCash, toBroker } = twoSameDayDeposits(false);
+  assert.equal(partnerOf(db, toCash), null);
+  assert.equal(partnerOf(db, toBroker), null);
+});
