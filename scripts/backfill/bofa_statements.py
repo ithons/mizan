@@ -157,6 +157,11 @@ def problems(st, prev_end):
         out.append(f'begins at {s.get("begin")}, previous statement ended at {prev_end}')
     last_by_section = {}
     for r in st['rows']:
+        try:
+            date.fromisoformat(r['date'])
+        except ValueError:
+            out.append(f'{r["date"]} is not a date: {r["desc"][:50]}')
+            continue
         if not st['start'] <= r['date'] <= st['end']:
             out.append(f'{r["date"]} outside the period: {r["desc"][:50]}')
         if r['date'] < last_by_section.get(r['section'], ''):
@@ -179,7 +184,7 @@ CARD_MERCHANTS = [
 def classify(desc, cents_):
     """(merchant, category_id or None). Only structural identifications get a category."""
     d = desc
-    m = re.match(r'Zelle payment (to|from) (.*?)(?: for .*)? Conf#? ?\S+$', d)
+    m = re.match(r'Zelle payment (to|from) (.*?)(?: for .*)? Conf#? ?\S+(?: \S{1,4})?$', d)
     if m:
         who = title(m[2].strip())
         if LOCAL['owner'] and who.upper().startswith(' '.join(LOCAL['owner'].upper().split()[:2])):
