@@ -5,6 +5,7 @@ import type {
   AdvisorAutonomyEntry,
   AdvisorDraftActionKind,
   AdvisorProviderStatus,
+  AdvisorSettings,
   AiProviderId,
 } from '@shared/types';
 import {
@@ -29,7 +30,7 @@ import { RulesSection } from './RulesSection';
 import { NotificationRulesSection } from './NotificationRulesSection';
 import { DataSection } from './DataSection';
 import { AdvisorMemorySection } from './AdvisorMemorySection';
-import { AUTONOMY_QUERY, AiActionsList } from '../../components/AiActions';
+import { AUTONOMY_QUERY } from '../../components/AiActions';
 export {
   ACTIONS_PER_PAGE,
   AiActionRow,
@@ -47,7 +48,6 @@ type PanelId =
   | 'advisor_profile'
   | 'advisor_memory'
   | 'advisor_model'
-  | 'ai_actions'
   | 'ai_declined'
   | null;
 
@@ -161,36 +161,6 @@ export function describeAutonomyForOwner(entries: readonly AdvisorAutonomyEntry[
   if (applies.length === 0) return `Nothing without you. Waits for you: ${queues.join('; ')}.`;
   if (queues.length === 0) return `On its own: ${applies.join('; ')}. Nothing waits for you.`;
   return `On its own: ${applies.join('; ')}. Waits for you: ${queues.join('; ')}.`;
-}
-
-// The SDK accepts three credential forms, not just an env API key (services/anthropicClient.ts).
-// /api/ai/context already reported which one is in use; nothing displayed it.
-// The four ways a credential is found, matching AdvisorCredentialSource. `env` covers both
-// ANTHROPIC_API_KEY and ANTHROPIC_AUTH_TOKEN because the server does not report which, and
-// naming one would be a claim it did not check.
-const CREDENTIAL_SOURCE_LABEL: Record<string, string> = {
-  env: 'from the environment',
-  oauth_profile: 'signed in via `ant auth login`',
-  stored: 'stored, encrypted',
-  none: 'no credential found',
-};
-
-function AiActionsPanel({ open, onToggle }: { open: boolean; onToggle: () => void }) {
-  return (
-    <>
-      <SettingsRow
-        title="What the AI has done"
-        sub="Every action the AI applied to your data, and the ones you can put back"
-        trailing={<span className="text-muted">{open ? 'Hide' : 'Review'}</span>}
-        onClick={onToggle}
-      />
-      {open && (
-        <ExpandedPanel>
-          <AiActionsList enabled={open} />
-        </ExpandedPanel>
-      )}
-    </>
-  );
 }
 
 export type DeclinedProposalItem = Awaited<ReturnType<typeof aiApi.listDeclined>>[number];
@@ -425,6 +395,34 @@ function formatTokens(n: number): string {
   return String(n);
 }
 
+function credentialSourceLabel(status: AdvisorProviderStatus): string {
+  switch (status.credential_source) {
+    case 'env':
+      return `from ${PROVIDER_ENV_VAR[status.id]}`;
+    case 'oauth_profile':
+      return 'signed in via `ant auth login`';
+    case 'stored':
+      return 'stored, encrypted';
+    default:
+      return 'no credential found';
+  }
+}
+
+/**
+ * The Advisor row's sub-line, judged for the selected model's provider: a key held for another
+ * provider does not make this advisor answer, and a missing Anthropic key does not stop it.
+ */
+export function advisorKeyLine(settings: AdvisorSettings | undefined): string {
+  if (!settings) return 'Reading the advisor settings…';
+  const model = settings.available.models.find((m) => m.id === settings.model);
+  const status = model && settings.available.providers.find((p) => p.id === model.provider);
+  if (!model || !status) return `${settings.model} is not a model this server offers · pick one under Model & effort`;
+  if (!status.configured) {
+    return `No ${PROVIDER_LABEL[status.id]} key for ${model.label} · answers stay local until one is added under Model & effort`;
+  }
+  return `${PROVIDER_LABEL[status.id]} key ${credentialSourceLabel(status)} · model, memory and context`;
+}
+
 /**
  * One provider's key. Never renders a key back: the server does not return one, so this shows
  * where the credential came from and offers to replace or forget it.
@@ -454,14 +452,7 @@ function ProviderKeyRow({ status }: { status: AdvisorProviderStatus }) {
     onError: (err: Error) => addToast({ type: 'error', message: err.message }),
   });
 
-  const sourceLabel =
-    status.credential_source === 'env'
-      ? `from ${PROVIDER_ENV_VAR[status.id]}`
-      : status.credential_source === 'oauth_profile'
-        ? 'signed in via `ant auth login`'
-        : status.credential_source === 'stored'
-          ? 'stored, encrypted'
-          : 'no credential found';
+  const sourceLabel = credentialSourceLabel(status);
 
   return (
     <div className="rounded-lg border border-line-2 p-3">
@@ -503,7 +494,7 @@ function ProviderKeyRow({ status }: { status: AdvisorProviderStatus }) {
   );
 }
 
-function AdvisorModelPanel({ open, onToggle }: { open: boolean; onToggle: () => void }) {
+export function AdvisorModelPanel({ open, onToggle }: { open: boolean; onToggle: () => void }) {
   const qc = useQueryClient();
   const { addToast } = useAppStore();
   const { data: settings } = useQuery({ queryKey: ['ai-settings'], queryFn: () => aiApi.getSettings() });
@@ -678,7 +669,6 @@ export function Settings() {
     if (section === 'connections' || section === 'simplefin') setOpenPanel('simplefin');
     else if (section === 'coinbase') setOpenPanel('coinbase');
     else if (section === 'data' || section === 'import') setOpenPanel('import');
-    else if (section === 'ai_actions') setOpenPanel('ai_actions');
     else if (section === 'notifications') setOpenPanel('notifications');
     // The category delete refusal names this panel, so it has to be linkable by name.
     else if (section === 'ai_declined') setOpenPanel('ai_declined');
@@ -687,7 +677,7 @@ export function Settings() {
   const { data: credentials } = useQuery({ queryKey: ['credential-status'], queryFn: () => settingsApi.getCredentials() });
   const { data: simplefinConnection } = useQuery({ queryKey: ['simplefin-connection'], queryFn: () => simplefinApi.connection() });
   const { data: accounts } = useQuery({ queryKey: ['accounts'], queryFn: () => accountsApi.list() });
-  const { data: aiContext } = useQuery({ queryKey: ['ai-context'], queryFn: () => aiApi.getContext() });
+  const { data: advisorSettings } = useQuery({ queryKey: ['ai-settings'], queryFn: () => aiApi.getSettings() });
   const { data: categories } = useQuery({ queryKey: ['categories'], queryFn: () => categoriesApi.list() });
   const { data: rules } = useQuery({ queryKey: ['rules'], queryFn: () => rulesApi.list() });
   const { data: memories } = useQuery({ queryKey: ['ai-memory'], queryFn: () => aiApi.listMemory() });
@@ -801,37 +791,17 @@ export function Settings() {
           <SectionLabel className="mb-1.5">Advisor</SectionLabel>
           <SettingsRow
             title="Advisor"
-            sub={
-              aiContext?.configured
-                ? `Key ${CREDENTIAL_SOURCE_LABEL[aiContext.credential_source ?? 'none']} · model, memory, context and what it has done`
-                : 'No provider key yet · answers stay local until one is added'
-            }
+            sub={advisorKeyLine(advisorSettings)}
             trailing={<span className="text-muted">{advisorOpen ? 'Hide' : 'Open'}</span>}
             onClick={() => setAdvisorOpen((open) => !open)}
             last={!advisorOpen}
           />
           {advisorOpen && (
             <div className="ml-3 border-l border-line pl-3">
-            <SettingsRow
-              title="Anthropic API key"
-              sub={
-                aiContext?.configured
-                  ? `Conversational chat enabled · ${CREDENTIAL_SOURCE_LABEL[aiContext.credential_source ?? 'none']}`
-                  : 'Add a provider key under Model & effort, set ANTHROPIC_API_KEY, or sign in with `ant auth login` · optional'
-              }
-              trailing={
-                aiContext?.configured ? <span className="text-sage-deep">Set</span> : <span className="text-muted-2">Not set</span>
-              }
-            />
-            {aiContext?.configured && (
-              <AdvisorModelPanel open={openPanel === 'advisor_model'} onToggle={() => toggle('advisor_model')} />
-            )}
-            {aiContext?.configured && (
-              <AiActionsPanel open={openPanel === 'ai_actions'} onToggle={() => toggle('ai_actions')} />
-            )}
-            {/* Ungated on purpose, unlike the panel above it: a decline keeps standing after a key is
-                removed, and it is the only remedy for the delete blocker a declined proposal puts on
-                a category. */}
+            {/* Ungated: it is the only in-app place to add the key the advisor needs. */}
+            <AdvisorModelPanel open={openPanel === 'advisor_model'} onToggle={() => toggle('advisor_model')} />
+            {/* Ungated: a decline keeps standing after a key is removed, and it is the only remedy
+                for the delete blocker a declined proposal puts on a category. */}
             <DeclinedProposalsPanel
               open={openPanel === 'ai_declined'}
               onToggle={() => toggle('ai_declined')}
@@ -952,10 +922,9 @@ export function Settings() {
 /**
  * The context, verbatim, with its size stated.
  *
- * Fetched only while open: this is the largest payload the API serves (30,560 characters on the
- * live ledger, about 8,000 tokens) and it is rebuilt from the database on every request. The size
- * line is the point as much as the text is: "how much of my ledger leaves per call" has a number,
- * and this is where the owner reads it.
+ * Fetched only while open: it is the largest payload the API serves and it is rebuilt from the
+ * database on every request. The size line is the point as much as the text is: "how much of my
+ * ledger leaves per call" has a number, and this is where the owner reads it.
  */
 function AdvisorContextPanel() {
   const { data, isPending, isError, error } = useQuery({
