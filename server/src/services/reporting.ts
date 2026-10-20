@@ -297,6 +297,34 @@ function excludedFlowType(rootId: string): ReportExcludedFlowSummary['flow_type'
   return 'transfers';
 }
 
+export interface CompleteMonthsAverage {
+  startDate: string;
+  endDate: string;
+  /** Every month in the window, yyyy-MM, including any with no rows. */
+  months: string[];
+  /** How many of those months had any counted row. */
+  monthsWithRows: number;
+  /** Cents per month, signed, divided by the whole window: a refund-heavy month nets spending down and an empty month counts as zero. */
+  income: number;
+  expenses: number;
+}
+
+/** The last `count` complete months of cash flow, averaged over all of them. */
+export function averageOfCompleteMonths(db: Database.Database, count: number, today = new Date()): CompleteMonthsAverage {
+  const startDate = format(startOfMonth(subMonths(today, count)), 'yyyy-MM-dd');
+  const endDate = format(endOfMonth(subMonths(today, 1)), 'yyyy-MM-dd');
+  const report = getCashflowReport(db, { startDate, endDate });
+  const sum = (field: 'income' | 'expenses') => report.months.reduce((total, month) => total + month[field], 0);
+  return {
+    startDate,
+    endDate,
+    months: Array.from({ length: count }, (_, index) => format(subMonths(today, count - index), 'yyyy-MM')),
+    monthsWithRows: report.months.length,
+    income: sum('income') / count,
+    expenses: sum('expenses') / count,
+  };
+}
+
 export function getCashflowReport(
   db: Database.Database,
   range: ReportDateRange

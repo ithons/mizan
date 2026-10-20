@@ -2,7 +2,7 @@ import type Database from 'better-sqlite3';
 import { addDays, addMonths, format, parseISO, startOfMonth, subMonths, endOfMonth } from 'date-fns';
 import { computeSafeToSpend, overdueIncomeCounted, type ScheduledEffect } from './safeToSpend';
 import { getMonthlyBudgetsWithProjection } from './budgetProjection';
-import { getCashflowReport, getSpendingReport } from './reporting';
+import { averageOfCompleteMonths, getSpendingReport } from './reporting';
 import { calculateGoalProgress } from './goalProgress';
 import { toCents, toDollars } from './money';
 import { excludedFromTotalsSql, expenseSideSql, inReportScopeSql, reportDateSql, spendAmountSql } from './transactionFilters';
@@ -188,23 +188,19 @@ export function goalTimelineFor(db: Database.Database, goalId: string, monthlyCo
 /** How many months the liquid pool, less what the cards owe, covers at the average spending of the last complete months. */
 export function cashRunway(db: Database.Database, months = 3, today = new Date()) {
   const sheet = computeSafeToSpend(db, {});
-  const report = getCashflowReport(db, {
-    startDate: ymd(startOfMonth(subMonths(today, months))),
-    endDate: ymd(endOfMonth(subMonths(today, 1))),
-  });
-  const spent = report.months.map((month) => Math.abs(month.expenses));
-  if (spent.length === 0) return { months_covered: null, note: 'No complete month of spending to measure against.' };
-  const average = spent.reduce((sum, value) => sum + value, 0) / spent.length;
+  const window = averageOfCompleteMonths(db, months, today);
+  if (window.monthsWithRows === 0) return { months_covered: null, note: 'No complete month of spending to measure against.' };
+  const average = window.expenses;
   const cover = sheet.liquid - sheet.cardBalances;
   return {
     liquid: toDollars(sheet.liquid),
     cards_owed: toDollars(sheet.cardBalances),
     average_monthly_spending: toDollars(Math.round(average)),
     months_covered: average > 0 ? Math.round((cover / average) * 10) / 10 : null,
-    measured_months: report.months.map((month) => month.month),
+    measured_months: window.months,
     assumptions: [
       'Card balances are paid from the liquid accounts first.',
-      'No income arrives, and spending runs at the average of the measured months.',
+      'No income arrives, and spending runs at the average of the measured months, refunds netted and a month with no rows counted as zero.',
       'Money earmarked for goals in those accounts is counted as available.',
     ],
   };

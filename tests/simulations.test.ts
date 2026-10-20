@@ -6,6 +6,7 @@ import { _setDbForTesting } from '../server/src/db/index';
 import { computeSafeToSpend, readSafeToSpend } from '../server/src/services/safeToSpend';
 import { checkAdjustments, compoundGrowth, cashRunway, dailyDiscretionarySpend, debtPayoff, emergencyFund, goalTimeline, projectFree, projectFreeBand } from '../server/src/services/simulations';
 import { getSpendingReport } from '../server/src/services/reporting';
+import { buildFinancialContext } from '../server/src/services/aiContext';
 import { getMonthlyBudgetsWithProjection } from '../server/src/services/budgetProjection';
 import { detectRecurring } from '../server/src/services/recurring';
 import { refreshTransactionIntegrity } from '../server/src/services/transactionIntegrity';
@@ -322,4 +323,49 @@ test('HEALTHY: with no transfer rows the band and Reports already agree', () => 
   const result = bandHistoryAgainstReports(() => {});
   assert.equal(result.band, 40 * 2500);
   assert.equal(result.band, result.reports);
+});
+
+/** Runway and the advisor's Cash Flow average, read off one ledger. */
+function runwayAgainstContext(rows: Array<{ monthsBack: number; amount: number }>) {
+  const db = migratedTestDb();
+  _setDbForTesting(db);
+  try {
+    const account = insertAccount(db, { type: 'checking', current_balance: 600000 });
+    const now = new Date();
+    for (const row of rows) {
+      const date = format(new Date(now.getFullYear(), now.getMonth() - row.monthsBack, 10), 'yyyy-MM-dd');
+      insertTransaction(db, { account_id: account, date, amount: row.amount, category_id: 'cat_shop' });
+    }
+    const runway = cashRunway(db, 3, now) as { average_monthly_spending: number; months_covered: number | null; measured_months: string[] };
+    const expenses = /Expenses: \$([\d,.]+)\/mo/.exec(buildFinancialContext())?.[1];
+    return { runway, context: Number(expenses?.replace(/,/g, '')) };
+  } finally {
+    _setDbForTesting(undefined as unknown as Database.Database);
+    db.close();
+  }
+}
+
+test('runway nets a refund-heavy month and counts an empty month, the way the advisor averages', () => {
+  // Three months back $900 spent, two back nothing, last month $100 bought and $400 refunded.
+  const { runway, context } = runwayAgainstContext([
+    { monthsBack: 3, amount: -90000 },
+    { monthsBack: 1, amount: -10000 },
+    { monthsBack: 1, amount: 40000 },
+  ]);
+  assert.equal(runway.average_monthly_spending, 200, 'abs() read the refund month as $300 of spending and divided by two');
+  assert.equal(runway.average_monthly_spending, context);
+  assert.equal(runway.months_covered, 30);
+  assert.equal(runway.measured_months.length, 3);
+});
+
+test('runway claims no cover when refunds exceed spending across the window', () => {
+  const { runway } = runwayAgainstContext([{ monthsBack: 2, amount: -10000 }, { monthsBack: 1, amount: 30000 }]);
+  assert.equal(runway.months_covered, null);
+});
+
+test('HEALTHY: steady monthly spending reads the same average either way', () => {
+  const { runway, context } = runwayAgainstContext([1, 2, 3].map((monthsBack) => ({ monthsBack, amount: -30000 })));
+  assert.equal(runway.average_monthly_spending, 300);
+  assert.equal(runway.average_monthly_spending, context);
+  assert.equal(runway.months_covered, 20);
 });

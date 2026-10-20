@@ -14,7 +14,7 @@ import { toCents, toDollars, toDollarsOrNull } from './money';
 import { calculateGoalProgress } from './goalProgress';
 import { buildRecurringForecast } from './recurringForecast';
 import { getMonthlyBudgetsWithProjection } from './budgetProjection';
-import { getCashflowReport, getReportSummary, getSpendingReport } from './reporting';
+import { averageOfCompleteMonths, getCashflowReport, getReportSummary, getSpendingReport } from './reporting';
 import { getTransactionReviewSummary } from './transactionReview';
 import { getSyncHealth } from './syncHealth';
 import { buildAdvisorReadTools } from './advisorTools';
@@ -1021,19 +1021,11 @@ export function buildFinancialContext(): string {
   // by a whole number understates it roughly eightfold, which is the same class of error in the
   // opposite direction.
   const AVERAGE_MONTHS = 3;
-  const averageStart = format(startOfMonth(subMonths(today, AVERAGE_MONTHS)), 'yyyy-MM-dd');
-  const averageEnd = format(endOfMonth(subMonths(today, 1)), 'yyyy-MM-dd');
-  const cashflow = getCashflowReport(db, { startDate: averageStart, endDate: averageEnd });
-  const cashflowTotals = cashflow.months.reduce(
-    (totals, month) => ({
-      income: totals.income + month.income,
-      expenses: totals.expenses + month.expenses,
-    }),
-    { income: 0, expenses: 0 }
-  );
-
-  const avgIncome = cashflowTotals.income / AVERAGE_MONTHS;
-  const avgExpenses = cashflowTotals.expenses / AVERAGE_MONTHS;
+  const average = averageOfCompleteMonths(db, AVERAGE_MONTHS, today);
+  const averageStart = average.startDate;
+  const averageEnd = average.endDate;
+  const avgIncome = average.income;
+  const avgExpenses = average.expenses;
   const avgNet = avgIncome - avgExpenses;
 
   lines.push('');
