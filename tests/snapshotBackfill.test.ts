@@ -866,3 +866,33 @@ test('a transaction-free account is carried flat rather than excluded', () => {
     assert.equal(deep.covered_accounts, 2);
   });
 });
+
+test('a market-driven estimate replays back from the nearest statement valuation, not from today', () => {
+  withTestDb((db) => {
+    insertAccount(db, { id: 'acc_inv', type: 'brokerage', current_balance: 500000 });
+    anchorCoverage(db, 'acc_inv');
+    insertTransaction(db, { account_id: 'acc_inv', date: midMonth(2), amount: 10000, category_id: 'cat_inv_transfer' });
+    insertTransaction(db, { account_id: 'acc_inv', date: midMonth(1), amount: 30000, category_id: 'cat_inv_transfer' });
+    db.prepare(`INSERT INTO account_valuations (id, account_id, date, value_cents, source, created_at)
+      VALUES ('v1', 'acc_inv', ?, 118326, 'statement', '2026-01-01T00:00:00Z')`).run(monthStart(1));
+
+    backfillSnapshots();
+
+    assert.equal(snapshotAt(db, monthStart(1))?.investment_assets, 118326);
+    assert.equal(snapshotAt(db, monthStart(2))?.investment_assets, 118326 - 10000);
+  });
+});
+
+test('HEALTHY: without valuations or measured values a market-driven estimate is today minus contributions', () => {
+  withTestDb((db) => {
+    insertAccount(db, { id: 'acc_inv', type: 'brokerage', current_balance: 500000 });
+    anchorCoverage(db, 'acc_inv');
+    insertTransaction(db, { account_id: 'acc_inv', date: midMonth(2), amount: 10000, category_id: 'cat_inv_transfer' });
+    insertTransaction(db, { account_id: 'acc_inv', date: midMonth(1), amount: 30000, category_id: 'cat_inv_transfer' });
+
+    backfillSnapshots();
+
+    assert.equal(snapshotAt(db, monthStart(1))?.investment_assets, 500000 - 30000);
+    assert.equal(snapshotAt(db, monthStart(2))?.investment_assets, 500000 - 40000);
+  });
+});
