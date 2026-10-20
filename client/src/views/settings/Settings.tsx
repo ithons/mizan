@@ -876,7 +876,7 @@ export function Settings() {
           <SectionLabel className="mb-1.5">Data</SectionLabel>
           <SettingsRow
             title="Import, export and backup"
-            sub="CSV import and export, backup and restore, reconstructed history, data quality, sync activity, delete all data"
+            sub="CSV import and export, backup and restore, data quality, sync activity, delete all data"
             trailing={<span className="text-muted">{openPanel === 'import' ? 'Hide' : 'Open'}</span>}
             onClick={() => toggle('import')}
             last={openPanel !== 'import'}
