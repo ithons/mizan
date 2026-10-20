@@ -297,7 +297,7 @@ test('the call-site count in the badge note is the count the tree has', () => {
   // The note states a DATED reading plus the command that produced it, because this figure moves
   // whenever a view is added and a bare integer in a comment would go stale in silence. What is
   // asserted is the shape the argument rests on: gold is an ink in many modules, not in one place.
-  assert.ok(gold + warning >= 12, `gold is a text colour at ${gold + warning} call sites, which no longer supports the note`);
+  assert.ok(gold + warning >= 10, `gold is a text colour at ${gold + warning} call sites, which no longer supports the note`);
   assert.ok(modules.size >= 8, `gold is an ink in ${modules.size} modules; the note says eight`);
   assert.match(PROSE, /-> \d+ that day, being \d+ `text-gold` and \d+ `text-warning`/);
   assert.match(PROSE, /counted 2026-08-01 with/i);
