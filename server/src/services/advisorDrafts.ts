@@ -1434,6 +1434,8 @@ function premiseLiveness(
   const categoryExists = (id: string): boolean =>
     db.prepare('SELECT 1 FROM categories WHERE id = ?').get(id) !== undefined;
   const verdict = (live: boolean): DraftLiveness => (live ? 'live' : 'lapsed');
+  const rowExists = (table: string, column: string, value: string): boolean =>
+    db.prepare(`SELECT 1 FROM ${table} WHERE ${column} = ?`).get(value) !== undefined;
 
   switch (payload.kind) {
     case 'categorize_transaction': {
@@ -1483,12 +1485,30 @@ function premiseLiveness(
         db.prepare('SELECT 1 FROM goals WHERE id = ? AND is_archived = 0').get(payload.goal_id) !== undefined
       );
     case 'confirm_recurring':
+    case 'dismiss_recurring':
+    case 'create_recurring_adjustment':
+      return verdict(rowExists('recurring_patterns', 'id', payload.recurring_id));
+    case 'delete_budget':
+      return verdict(rowExists('budgets', 'category_id', payload.category_id));
+    case 'update_account':
+      return verdict(rowExists('accounts', 'id', payload.account_id));
+    case 'set_manual_cost_basis':
+      return verdict(rowExists('holdings', 'id', payload.holding_id));
+    case 'set_sector_metadata':
+      return verdict(rowExists('securities', 'id', payload.security_id));
+    case 'link_reimbursement':
       return verdict(
-        db.prepare('SELECT 1 FROM recurring_patterns WHERE id = ?').get(payload.recurring_id) !== undefined
+        db.prepare('SELECT 1 FROM transactions WHERE id = ? AND amount > 0').get(payload.reimbursement_id) !== undefined
+          && db.prepare('SELECT 1 FROM transactions WHERE id = ? AND amount < 0').get(payload.purchase_id) !== undefined
       );
-    default:
-      // No cheap premise to check for the budget-group, recurring-adjustment and investment-metadata
-      // kinds. Reported as unjudged rather than live, so a reader can tell the difference.
+    case 'delete_notification_rule':
+      return verdict(rowExists('notification_rules', 'id', payload.rule_id));
+    case 'set_notification_rule':
+      // Without a rule_id it creates a rule, and nothing on the ledger can make that moot.
+      return payload.rule_id === undefined ? 'not_judged' : verdict(rowExists('notification_rules', 'id', payload.rule_id));
+    case 'create_goal':
+      // A creation names nothing that could disappear. Reported as unjudged rather than live, so a
+      // reader can tell the difference.
       return 'not_judged';
   }
 }

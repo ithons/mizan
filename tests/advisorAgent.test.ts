@@ -149,8 +149,10 @@ test('the advisor can set a notification rule from dollars, and a bad one is ref
   assert.equal(JSON.parse(rule.params).min_amount, 25000);
   assert.equal(rule.enabled, 1);
 
-  const bad = confirmOne(db, { kind: 'set_notification_rule', rule_kind: 'budget_threshold', params: { percent: 'lots' } });
-  assert.equal(bad.status, 'skipped');
+  // Refused when proposed, so no card exists that could only fail on confirm.
+  const bad = propose(db, { kind: 'set_notification_rule', rule_kind: 'budget_threshold', params: { percent: 'lots' } });
+  assert.deepEqual(bad.proposed, []);
+  assert.match(bad.refused[0].reason, /percent/);
   assert.equal((db.prepare('SELECT COUNT(*) AS n FROM notification_rules').get() as { n: number }).n, before + 1);
 
   const id = (db.prepare("SELECT id FROM notification_rules WHERE created_by = 'advisor'").get() as { id: string }).id;

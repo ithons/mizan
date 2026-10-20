@@ -1,11 +1,12 @@
 import type Database from 'better-sqlite3';
 import { v4 as uuidv4 } from 'uuid';
-import { AdvisorDraftPayloadSchema } from '../../../shared/schemas';
+import { AdvisorDraftPayloadSchema, NotificationRuleParamsSchemas } from '../../../shared/schemas';
 import { SCHEDULED_ROUTE } from '../../../shared/routes';
 import type { AdvisorDraftAction, AdvisorDraftActionKind, AdvisorDraftPayload } from '../../../shared/types';
 import { isDraftStillActionable, unpaidCardSentence } from './advisorDrafts';
 import { unpaidCardPayment } from './cardPayments';
 import { describeDraftChanges } from './draftDescriptions';
+import { listNotificationRules, notificationParamsFromDollars } from './notifications';
 
 const ROUTE_FOR_KIND: Readonly<Record<AdvisorDraftActionKind, string>> = {
   categorize_transaction: '/ledger',
@@ -61,10 +62,28 @@ function referenceProblem(db: Database.Database, payload: AdvisorDraftPayload): 
     case 'update_account': return account(payload.account_id) ? null : 'no account has that account_id';
     case 'set_manual_cost_basis': return exists(db, 'SELECT 1 FROM holdings WHERE id = ?', payload.holding_id) ? null : 'no holding has that holding_id';
     case 'set_sector_metadata': return exists(db, 'SELECT 1 FROM securities WHERE id = ?', payload.security_id) ? null : 'no security has that security_id';
-    case 'set_notification_rule':
+    case 'set_notification_rule': return notificationRuleProblem(db, payload);
     case 'delete_notification_rule':
       return exists(db, 'SELECT 1 FROM notification_rules WHERE id = ?', payload.rule_id) ? null : 'no notification rule has that rule_id';
   }
+}
+
+// The same merge confirmSetNotificationRule makes, judged now, so a card that could only fail on
+// confirm is never stored.
+function notificationRuleProblem(
+  db: Database.Database,
+  payload: Extract<AdvisorDraftPayload, { kind: 'set_notification_rule' }>
+): string | null {
+  const existing = payload.rule_id ? listNotificationRules(db).find((rule) => rule.id === payload.rule_id) : undefined;
+  if (payload.rule_id && !existing) return 'no notification rule has that rule_id';
+  if (!Object.hasOwn(NotificationRuleParamsSchemas, payload.rule_kind)) {
+    return `rule_kind must be one of ${Object.keys(NotificationRuleParamsSchemas).join(', ')}`;
+  }
+  if (existing && existing.kind !== payload.rule_kind) return 'a rule\'s kind cannot change';
+  const kind = payload.rule_kind as keyof typeof NotificationRuleParamsSchemas;
+  const params = { ...(existing?.params ?? {}), ...notificationParamsFromDollars(kind, payload.params) };
+  const parsed = NotificationRuleParamsSchemas[kind].safeParse(params);
+  return parsed.success ? null : `params: ${parsed.error.issues.map((issue) => `${issue.path.join('.')}: ${issue.message}`).join('; ')}`;
 }
 
 export interface ProposalsResult {

@@ -228,7 +228,7 @@ test('dismissing a draft whose premise already lapsed is marked stale, not wrong
   assert.equal(feedback[0].stale, 1, 'the model was late here, not wrong about the merchant');
 });
 
-/** Live targets for the kinds `draftLiveness` has no premise to check. */
+/** Live targets for kinds whose only premise is that their target still exists. */
 function healthyTargets(db: Database.Database): { recurringId: string; holdingId: string; securityId: string } {
   const accountId = insertAccount(db);
   db.prepare(`
@@ -244,19 +244,15 @@ function healthyTargets(db: Database.Database): { recurringId: string; holdingId
   return { recurringId: 'rec_gym', holdingId: 'hold_vt', securityId: 'sec_vt' };
 }
 
-test('dismissing a kind no liveness check covers records stale unknown, not live', (t) => {
+test('dismissing a creation, which no liveness check covers, records stale unknown, not live', (t) => {
   const db = migratedTestDb();
   t.after(() => db.close());
 
-  // Every target below exists and is healthy, so a NULL here cannot be read as "the target was
-  // gone". It is the honest answer: `draftLiveness` has no premise to check for these three kinds,
-  // and migration 047 forbids defaulting an unasked question to 0.
-  const { recurringId, holdingId, securityId } = healthyTargets(db);
-
+  // A creation names nothing that could disappear, so `draftLiveness` has no premise to check, and
+  // migration 047 forbids defaulting an unasked question to 0.
   const unjudged: AdvisorDraftPayload[] = [
-    { kind: 'create_recurring_adjustment', recurring_id: recurringId, original_date: '2026-08-01', action: 'skip' },
-    { kind: 'set_manual_cost_basis', holding_id: holdingId, manual_cost_basis: 1200 },
-    { kind: 'set_sector_metadata', security_id: securityId, sector: 'Technology' },
+    { kind: 'create_goal', name: 'Trip', type: 'savings', target_amount: 900 },
+    { kind: 'set_notification_rule', rule_kind: 'income_late', params: { min_days_late: 4 } },
   ];
 
   for (const [index, payload] of unjudged.entries()) {
@@ -270,10 +266,25 @@ test('dismissing a kind no liveness check covers records stale unknown, not live
     assert.equal(row.stale, null, `${row.proposal_kind} was never judged, so it cannot record 0`);
     assert.equal(row.owner_choice, 'declined');
   }
-  assert.deepEqual(
-    new Set(feedback.map((row) => row.proposal_kind)),
-    new Set(unjudged.map((payload) => payload.kind))
-  );
+});
+
+test('dismissing a proposal whose target still exists records it as live, not late', (t) => {
+  const db = migratedTestDb();
+  t.after(() => db.close());
+
+  const { recurringId, holdingId, securityId } = healthyTargets(db);
+  const judged: AdvisorDraftPayload[] = [
+    { kind: 'create_recurring_adjustment', recurring_id: recurringId, original_date: '2026-08-01', action: 'skip' },
+    { kind: 'set_manual_cost_basis', holding_id: holdingId, manual_cost_basis: 1200 },
+    { kind: 'set_sector_metadata', security_id: securityId, sector: 'Technology' },
+  ];
+  for (const [index, payload] of judged.entries()) {
+    assert.equal(dismissAdvisorDraft(db, insertOpenDraft(db, `draft_judged_${index}`, payload)).changed, 1);
+  }
+
+  for (const row of listAiFeedback(db)) {
+    assert.equal(row.stale, 0, `${row.proposal_kind}'s target was there, so the owner declined a live proposal`);
+  }
 });
 
 test('a kind that IS judged still records the judgement it made', (t) => {
