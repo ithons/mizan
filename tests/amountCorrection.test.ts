@@ -468,13 +468,15 @@ test('both figures cross the API boundary in dollars', async () => {
 
     applySimplefinResponse(db, response(), TEST_NOW);
 
-    const res = await fetch(`${baseUrl}/api/transactions/${transactionId}`);
-    const body = (await res.json()) as { data: Record<string, unknown> };
+    const res = await fetch(`${baseUrl}/api/transactions`);
+    const body = (await res.json()) as { data: { data: Array<Record<string, unknown>> } };
+    const row = body.data.data.find((t) => t.id === transactionId);
+    assert.ok(row, 'the corrected row is missing from the ledger list');
     // 10000 cents -> 100, and -10000 -> -100. A screen that showed one in dollars and the other in
     // cents would be off by a hundred on exactly the comparison the field exists to make.
-    assert.equal(body.data.amount, 100);
-    assert.equal(body.data.provider_amount, -100);
-    assert.equal(body.data.amount_source, 'human');
+    assert.equal(row.amount, 100);
+    assert.equal(row.provider_amount, -100);
+    assert.equal(row.amount_source, 'human');
 
     const released = await fetch(`${baseUrl}/api/transactions/${transactionId}/amount/release`, {
       method: 'POST',

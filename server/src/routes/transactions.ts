@@ -16,7 +16,6 @@ import {
   bulkCategorizeTransactions,
   createManualTransaction,
   deleteTransaction,
-  getTransactionById,
   listTransactions,
   releaseAmountToProvider,
   setTransactionReviewStatus,
@@ -260,21 +259,6 @@ router.get('/review', (_req: Request, res: Response, next: NextFunction): void =
   try {
     const db = getDb();
     res.json({ data: getTransactionReviewSummary(db) });
-  } catch (err) {
-    next(err);
-  }
-});
-
-// GET /:id - single transaction
-router.get('/:id', (req: Request, res: Response, next: NextFunction): void => {
-  try {
-    const db = getDb();
-    const txn = getTransactionById(db, routeId(req.params.id));
-    if (!txn) {
-      res.status(404).json({ error: 'Transaction not found' });
-      return;
-    }
-    res.json({ data: transactionToDollars(txn) });
   } catch (err) {
     next(err);
   }

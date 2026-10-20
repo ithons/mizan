@@ -195,27 +195,4 @@ router.patch(
   }
 );
 
-// DELETE /:id - delete goal
-router.delete('/:id', (req: Request, res: Response, next: NextFunction): void => {
-  try {
-    const db = getDb();
-    const id = getParamId(req.params.id);
-    if (!id) {
-      res.status(400).json({ error: 'Invalid goal id' });
-      return;
-    }
-
-    const existing = db.prepare('SELECT id FROM goals WHERE id = ?').get(id);
-    if (!existing) {
-      res.status(404).json({ error: 'Goal not found' });
-      return;
-    }
-
-    db.prepare('DELETE FROM goals WHERE id = ?').run(id);
-    res.json({ data: { success: true } });
-  } catch (err) {
-    next(err);
-  }
-});
-
 export default router;

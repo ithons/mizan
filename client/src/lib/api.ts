@@ -31,7 +31,6 @@ import type {
   DataQualitySummary,
   Goal,
   Holding,
-  HoldingHistoryPoint,
   Insight,
   LocalBackupRestorePreview,
   LocalBackupRestoreResult,
@@ -167,7 +166,6 @@ export const transactionsApi = {
     return apiFetch<PaginatedResponse<Transaction>>(`/api/transactions?${q.toString()}`);
   },
   review: () => apiFetch<TransactionReviewSummary>('/api/transactions/review'),
-  get: (id: string) => apiFetch<Transaction>(`/api/transactions/${id}`),
   createManual: (body: Partial<Transaction>) =>
     apiFetch<Transaction>('/api/transactions/manual', {
       method: 'POST',
@@ -250,8 +248,6 @@ export const investmentsApi = {
   holdings: () => apiFetch<Holding[]>('/api/investments/holdings'),
   holdingsByAccount: (accountId: string) =>
     apiFetch<Holding[]>(`/api/investments/holdings/${accountId}`),
-  holdingHistory: (holdingId: string, days?: number) =>
-    apiFetch<HoldingHistoryPoint[]>(`/api/investments/holdings/${holdingId}/history${days ? `?days=${days}` : ''}`),
   updateHoldingCostBasis: (
     holdingId: string,
     body: { manual_cost_basis: number | null; manual_cost_basis_note?: string | null }
@@ -375,7 +371,6 @@ export const rulesApi = {
 // ─── Budgets ─────────────────────────────────────────────────────────────────
 
 export const budgetsApi = {
-  list: () => apiFetch<Budget[]>('/api/budgets'),
   getMonth: (month: string) => {
     const [year, m] = month.split('-');
     return apiFetch<Budget[]>(`/api/budgets/month/${year}/${parseInt(m, 10)}`);
@@ -452,8 +447,6 @@ export const goalsApi = {
       method: 'PATCH',
       body: JSON.stringify(body),
     }),
-  delete: (id: string) =>
-    apiFetch<void>(`/api/goals/${id}`, { method: 'DELETE' }),
 };
 
 // Insights

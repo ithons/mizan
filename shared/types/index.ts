@@ -251,14 +251,6 @@ export interface Holding {
   sector_source?: string | null;
 }
 
-export interface HoldingHistoryPoint {
-  date: string;
-  quantity: number;
-  institution_price: number;
-  institution_value: number;
-  cost_basis: number | null;
-}
-
 export interface Category {
   id: string;
   name: string;

@@ -75,27 +75,6 @@ function categoryIdsExist(db: ReturnType<typeof getDb>, ids: string[]): boolean 
   return rows.length === ids.length;
 }
 
-// GET / - all budgets JOIN categories
-router.get('/', (_req: Request, res: Response, next: NextFunction): void => {
-  try {
-    const db = getDb();
-    const budgets = (db.prepare(`
-      SELECT
-        b.*,
-        c.name AS category_name,
-        c.color AS category_color,
-        c.icon AS category_icon
-      FROM budgets b
-      JOIN categories c ON c.id = b.category_id
-      ORDER BY c.name ASC
-    `).all() as Record<string, unknown>[]).map((budget) => dollarizeFields(budget, BUDGET_MONEY_FIELDS));
-
-    res.json({ data: budgets });
-  } catch (err) {
-    next(err);
-  }
-});
-
 router.get('/rollover-ledger', (req: Request, res: Response, next: NextFunction): void => {
   try {
     const parsedMonth = req.query.month === undefined ? null : parseMonthQuery(req.query.month);

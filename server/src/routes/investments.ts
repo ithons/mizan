@@ -3,11 +3,9 @@ import { getDb } from '../db/index';
 import { validate } from '../middleware/validate';
 import { UpdateHoldingCostBasisSchema, UpdateSecurityMetadataSchema } from '../../../shared/schemas';
 import {
-  getHoldingHistory,
   listHoldingsWithMetadata,
   setManualCostBasis,
   setSecurityMetadata,
-  type HoldingHistoryPoint,
 } from '../services/investmentMetadata';
 import { dollarizeFields } from '../services/money';
 import type { Holding } from '../../../shared/types';
@@ -23,14 +21,9 @@ const HOLDING_MONEY_FIELDS = [
   'effective_cost_basis',
   'manual_cost_basis',
 ] as const;
-const HISTORY_MONEY_FIELDS = ['institution_value', 'cost_basis'] as const;
 
 function holdingToDollars(holding: Holding): Holding {
   return dollarizeFields(holding as unknown as Record<string, unknown>, HOLDING_MONEY_FIELDS) as unknown as Holding;
-}
-
-function historyPointToDollars(point: HoldingHistoryPoint): HoldingHistoryPoint {
-  return dollarizeFields(point as unknown as Record<string, unknown>, HISTORY_MONEY_FIELDS) as unknown as HoldingHistoryPoint;
 }
 
 function routeParam(value: string | string[] | undefined): string | null {
@@ -84,23 +77,6 @@ router.put(
     }
   }
 );
-
-// GET /holdings/:id/history - value-over-time series for a single holding
-router.get('/holdings/:id/history', (req: Request, res: Response, next: NextFunction): void => {
-  try {
-    const db = getDb();
-    const id = routeParam(req.params.id);
-    if (!id) {
-      res.status(400).json({ error: 'Invalid holding id' });
-      return;
-    }
-
-    const days = req.query.days ? parseInt(req.query.days as string, 10) : undefined;
-    res.json({ data: getHoldingHistory(db, id, days).map(historyPointToDollars) });
-  } catch (err) {
-    next(err);
-  }
-});
 
 // GET /holdings/:accountId - holdings for specific account
 router.get('/holdings/:accountId', (req: Request, res: Response, next: NextFunction): void => {
