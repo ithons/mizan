@@ -4,6 +4,7 @@ import type Database from 'better-sqlite3';
 import { getDb } from '../db/index';
 import { getPreference, setPreference } from './preferences';
 import { readPortfolioAccounts } from './netWorthHistory';
+import { pricedMarketValues } from './marketValuation';
 
 // Upper bound on reverse-replay estimation: a 50-year backstop so a stray ancient
 // transaction can't spin the loop for an absurd number of months. There is deliberately no
@@ -537,9 +538,10 @@ export function externalMarketFlow(
 }
 
 /**
- * Observed values of each market-driven account, earliest first: its value in every measured
- * snapshot and every statement valuation. An estimate replays flows back from the nearest of these
- * at or after its date instead of from today's balance, so it meets each observation exactly.
+ * Known values of each market-driven account, earliest first: positions times that day's close
+ * (marketValuation.ts), overridden by a statement valuation, overridden by a measured snapshot.
+ * An estimate replays flows back from the nearest of these at or after its date instead of from
+ * today's balance, so it meets each known value exactly.
  */
 export function readMarketAnchors(db: Database.Database, accountIds: readonly string[]): Map<string, Array<{ date: string; value: number }>> {
   const wanted = new Set(accountIds);
@@ -550,6 +552,9 @@ export function readMarketAnchors(db: Database.Database, accountIds: readonly st
     dates.set(date, value);
     byAccount.set(id, dates);
   };
+  for (const [id, values] of pricedMarketValues(db, accountIds)) {
+    for (const [date, value] of values) put(id, date, value);
+  }
   for (const row of db.prepare('SELECT account_id, date, value_cents FROM account_valuations').all() as Array<{ account_id: string; date: string; value_cents: number }>) {
     put(row.account_id, row.date, row.value_cents);
   }
