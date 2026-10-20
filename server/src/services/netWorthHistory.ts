@@ -122,42 +122,11 @@ export function readSnapshotBefore(
   return row ? hydrate(row) : null;
 }
 
-/*
- * `deriveAssetBuckets` stood here and was deleted 2026-08-01, with its `AssetBuckets` type,
- * LIQUID_TYPES and INVESTMENT_TYPES.
- *
- * It bucketed a snapshot's per-account breakdown into liquid / investment / crypto / other /
- * liabilities at READ time, and its argument was sound: `liquid_assets` and `investment_assets` are
- * frozen at write time from `accounts.type` as it stood then, so retyping an account silently
- * changes what the stored series means. That argument is not lost. It is what the block below,
- * migration 056 and `parseSnapshotPortfolio` are for, and they answer it by recording the set at
- * write time and labelling a reconstruction as reconstructed, rather than by re-deriving at read
- * time from an accounts table that postdates the row.
- *
- * It had no production caller. `/api/reports/investments` was the last one and left, because this
- * function's INVESTMENT_TYPES bucketed `crypto_wallet` separately while the Investments screen
- * totals it with the rest of the portfolio, so the two definitions of "investment assets" disagreed
- * by exactly the Coinbase wallet. Re-confirmed before deleting, on 2026-08-01:
- *   grep -rn deriveAssetBuckets server client shared scripts tests
- * returned this file, `tests/creditPosition.test.ts`, and two comments in `routes/reports.ts` and
- * `tests/investmentsPortfolio.test.ts` that record the defect in the past tense. No surface read it.
- *
- * A shared definition backing no surface is worse than no definition: nothing fails when it drifts,
- * and a later change cites it as authoritative because it is the only one written down. The single
- * assertion resting on it, that a card in credit carries as a NEGATIVE liability and not as debt of
- * the same size, moved onto `takeSnapshot` in tests/creditPosition.test.ts, which is the live path
- * that writes `total_liabilities` and the breakdown those buckets were derived from.
- */
-
-/* ── What the portfolio was, and when that was decided ─────────────────────── */
-
 /**
  * Accounts the Investments screen is about: anything holding a position now, or typed as one.
  *
- * One definition, imported by the writer (`services/snapshot.ts`, which freezes it onto each row)
- * and by the reader (`routes/reports.ts`, which resolves today's set for the headline). Migration
- * 056 pins the same list in SQL, deliberately, because a migration must reproduce on a clone in a
- * year regardless of where this constant has moved to by then.
+ * Migration 056 pins the same list in SQL, deliberately, because a migration must reproduce on a
+ * clone in a year regardless of where this constant has moved to by then.
  */
 export const PORTFOLIO_ACCOUNT_TYPES: readonly string[] = [...MARKET_DRIVEN_TYPES];
 
@@ -177,10 +146,6 @@ export interface PortfolioAccountRow {
  * disconnecting Coinbase (routes/coinbase.ts sets `is_hidden = 1` and leaves `current_balance`)
  * left $391.17 in the headline, out of the series, and standing in the delta as movement every day.
  *
- * The `EXISTS holdings` arm is why a type edit alone is not the reproduction of the freezing bug it
- * looks like: on the live ledger all three portfolio accounts hold positions, so retyping Fidelity
- * Individual to `savings` leaves it in the set and moves nothing. What moves history is an edit that
- * changes the set: retyping an account INTO a portfolio type, hiding one, or deleting one.
  */
 export function readPortfolioAccounts(db: Database.Database): PortfolioAccountRow[] {
   return db.prepare(`
@@ -196,60 +161,6 @@ export function readPortfolioAccounts(db: Database.Database): PortfolioAccountRo
            OR EXISTS (SELECT 1 FROM holdings h2 WHERE h2.account_id = a.id))
     ORDER BY a.id
   `).all(...PORTFOLIO_ACCOUNT_TYPES) as PortfolioAccountRow[];
-}
-
-/**
- * Whether a point's account set was written with it, or worked out afterwards.
- *
- * `recorded` means the code that wrote the row's balances wrote the set in the same statement.
- * `reconstructed` means it was derived later from an accounts table that postdates the row, which
- * is what migration 056 did to every row that already existed, and what this module does at read
- * time for a row carrying no set at all. A reconstruction is not a measurement, and this is the
- * only thing that can tell the two apart afterwards.
- */
-export type PortfolioMembershipSource = 'recorded' | 'reconstructed';
-
-export interface SnapshotPortfolioMembership {
-  accountIds: Set<string>;
-  source: PortfolioMembershipSource;
-}
-
-export interface SnapshotPortfolioColumns {
-  portfolio_accounts: string | null;
-  portfolio_accounts_source: string | null;
-}
-
-/**
- * The account set a stored snapshot was made of, falling back to today's portfolio when it has none.
- *
- * The fallback is the pre-056 behaviour and is labelled as what it is rather than hidden: a row with
- * no stored set is one nothing recorded a set for, and today's accounts table is the only evidence
- * left. It is reachable for a row written before 056 whose breakdown was unreadable, and for a row a
- * future writer inserts without filling the column in. `tests/investmentHistoryMembership.test.ts`
- * asserts neither writer in this repo does the latter, so the fallback is a floor, not a path.
- *
- * An unrecognised `portfolio_accounts_source` reads as `reconstructed`, never as `recorded`: an
- * unknown provenance must not be upgraded into a claim that the row was written with its own set.
- */
-export function parseSnapshotPortfolio(
-  row: SnapshotPortfolioColumns,
-  fallback: Set<string>
-): SnapshotPortfolioMembership {
-  if (row.portfolio_accounts === null) return { accountIds: fallback, source: 'reconstructed' };
-
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(row.portfolio_accounts);
-  } catch {
-    return { accountIds: fallback, source: 'reconstructed' };
-  }
-  if (!Array.isArray(parsed)) return { accountIds: fallback, source: 'reconstructed' };
-
-  const accountIds = new Set(parsed.filter((id): id is string => typeof id === 'string'));
-  return {
-    accountIds,
-    source: row.portfolio_accounts_source === 'recorded' ? 'recorded' : 'reconstructed',
-  };
 }
 
 /** Render an estimate as an estimate wherever a snapshot is turned into text for the model. */

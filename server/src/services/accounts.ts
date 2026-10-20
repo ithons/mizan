@@ -541,11 +541,8 @@ export function deleteAccount(db: Database.Database, id: string): DeleteAccountR
     // worth was in every earlier month. What the app must not do is guess about an id it can no
     // longer resolve. Treating an unknown breakdown id as a non-liability asset is what made a
     // removed credit card read as money the owner had, so a reader that walks breakdown entries
-    // must drop the ones it cannot resolve rather than default them. The rule used to name
-    // `deriveAssetBuckets` as the place it was enforced; that function is deleted (see the note in
-    // netWorthHistory.ts) and the rule now binds `portfolioInSnapshot` in routes/reports.ts, which
-    // is the one remaining reader that resolves breakdown ids and which skips what is not in the
-    // set it was given.
+    // must drop the ones it cannot resolve rather than default them. The net worth timeline reads
+    // breakdown entries only for accounts that exist.
     //
     // holdings and holdings_history cascade away with the account. That is correct HERE and wrong in
     // mergeAccounts, where the positions survive under the target: see the note there.

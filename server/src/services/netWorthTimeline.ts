@@ -87,10 +87,12 @@ function accountSeries(
   const flowsAfter = (from: string, upTo: string) =>
     txns.reduce((sum, txn) => (txn.date > from && txn.date <= upTo ? sum + externalMarketFlow(txn, account.type) : sum), 0);
   const anchorOn = new Map(anchors.map((a) => [a.date, a.value]));
+  // With no ledger the account starts at its first known value, and nothing says what it held before.
+  const known = first ?? anchors[0]?.date ?? today;
   for (let i = 0; i < calendar.length; i++) {
     const day = calendar[i];
-    if (!first || day < first) {
-      values[i] = 0;
+    if (day < known) {
+      if (first) values[i] = 0;
       observed[i] = true;
       continue;
     }
@@ -108,7 +110,7 @@ function accountSeries(
     const base = anchor ? anchor.value - flowsAfter(day, anchor.date) : account.current_balance - flowsAfter(day, '9999-12-31');
     values[i] = Math.max(0, base);
   }
-  return { values, observed, first, opening: null };
+  return { values, observed, first: known, opening: null };
 }
 
 /** Net worth on every day from `from` to `to`, built per account as METHOD says. Pure read. */
@@ -134,17 +136,20 @@ export function netWorthTimeline(
     list.push(txn);
     txnsByAccount.set(txn.account_id, list);
   }
-  const firstDates = accounts.map((a) => txnsByAccount.get(a.id)?.[0]?.date).filter((d): d is string => Boolean(d)).sort();
-  const from = options.from ?? firstDates[0] ?? today;
-  const to = options.to && options.to < today ? options.to : today;
-  if (from > to) return { from, to, step, accounts: [], points: [], method: METHOD };
-
-  const calendar = days(from, to);
   const anchors = readMarketAnchors(db, accounts.filter((a) => MARKET_DRIVEN_TYPES.has(a.type) && !a.balance_only).map((a) => a.id), today);
   const balanceOnly = accounts.filter((a) => a.balance_only).map((a) => a.id);
   for (const [id, dates] of readRecordedValues(db, new Set(balanceOnly))) {
     anchors.set(id, [...dates].filter(([date]) => date < today).map(([date, value]) => ({ date, value })).sort((a, b) => a.date.localeCompare(b.date)));
   }
+  const firstDates = accounts
+    .map((a) => txnsByAccount.get(a.id)?.[0]?.date ?? anchors.get(a.id)?.[0]?.date)
+    .filter((d): d is string => Boolean(d))
+    .sort();
+  const from = options.from ?? firstDates[0] ?? today;
+  const to = options.to && options.to < today ? options.to : today;
+  if (from > to) return { from, to, step, accounts: [], points: [], method: METHOD };
+
+  const calendar = days(from, to);
   const series = accounts.map((a) => ({ account: a, ...accountSeries(a, txnsByAccount.get(a.id) ?? [], calendar, anchors.get(a.id) ?? [], today) }));
 
   const points: TimelinePoint[] = calendar.map((date, i) => {

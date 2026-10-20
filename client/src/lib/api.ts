@@ -564,31 +564,12 @@ export const reportsApi = {
     // so the headline and the chart under it cannot mean different portfolios and the screen
     // filters its holdings list against that set rather than re-deriving membership.
     //
-    // Same accounts is not the same number, and the screen does not claim it is. `portfolio_value`
-    // is today's balances; the last point of `history` is the newest snapshot. They agree only
-    // when that snapshot was taken after the last balance change AND carries every account in the
-    // set, and when they do not agree the difference is movement the ledger has not recorded yet,
-    // which is exactly what the delta under the headline reports and names a date for. A window
-    // (`startDate`/`endDate`) cuts the series and never the headline, so a windowed chart ending
-    // below the headline is the window, not a disagreement.
-    //
-    // The three balance figures are deliberately separate. `portfolio_value` is the headline;
-    // `invested_balance` is the part of it sitting in accounts that hold a position, which is the
-    // only figure `holdings_value` can be reconciled against (an IRA funded and not yet invested
-    // is an ordinary account, not a discrepancy); `crypto_value` is the part of it in crypto
-    // wallets, which the screen prints because Cmd+K reports a crypto-free portfolio figure.
-    //
-    // `covered_accounts` per point is how many of those accounts that snapshot recorded. It is
-    // not always all of them: `takeSnapshot` writes a breakdown entry only for visible accounts,
-    // so a point taken before an account existed covers fewer, and a sum over a different set is
-    // a different quantity rather than a smaller portfolio.
-    //
-    // `membership` says whether the point's account set was written with it (`recorded`) or worked
-    // out afterwards from an accounts table that postdates it (`reconstructed`). Every row written
-    // before migration 056 is the latter, because the set it was summed over was never stored and
-    // the only evidence left is today's accounts. It is the same distinction `estimated` draws one
-    // level up: `estimated` is about the balances, this is about which accounts they belong to.
-    return apiFetch<{ portfolio_value: number; holdings_value: number; invested_balance: number; crypto_value: number; portfolio_account_ids: string[]; external_flows: Array<{ date: string; amount: number }>; history: Array<{ date: string; value: number; estimated: boolean; covered_accounts: number; membership: 'recorded' | 'reconstructed' }>; allocation: Array<{ security_type: string; total_value: number }>; holdings: unknown[] }>(`/api/reports/investments?${q.toString()}`);
+    // `portfolio_value` is today's balances and the last point of `history` is today's value of
+    // the same accounts in the net worth timeline. `invested_balance` is the part held by accounts
+    // that hold a position, the only figure `holdings_value` can be reconciled against;
+    // `crypto_value` is the part in crypto wallets. `covered_accounts` per point is how many of the
+    // accounts that day's value is known for, so a point covering fewer is a different quantity.
+    return apiFetch<{ portfolio_value: number; holdings_value: number; invested_balance: number; crypto_value: number; portfolio_account_ids: string[]; external_flows: Array<{ date: string; amount: number }>; history: Array<{ date: string; value: number; estimated: boolean; covered_accounts: number }>; allocation: Array<{ security_type: string; total_value: number }>; holdings: unknown[] }>(`/api/reports/investments?${q.toString()}`);
   },
 };
 

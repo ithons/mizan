@@ -4,7 +4,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 /**
- * The two conditional surfaces the amount-correction and snapshot-membership work added.
+ * The conditional surfaces the amount-correction work added.
  *
  * Both are gated on a state the code checked, and both were shipped without a test on either half.
  * Rule 3 applies to copy as much as to detectors: a sentence that appears on an ordinary healthy row
@@ -44,18 +44,4 @@ test('HEALTHY: with no provider disagreement there is nothing for the sheet to c
   // `providerAmount` is null unless the server found a rejection whose from_value is what the row
   // currently holds, so the sentence cannot render on a row nobody corrected.
   assert.match(modals, /providerAmount\s*!=+\s*null|providerAmount\s*&&/);
-});
-
-test('the reconstruction notice is gated on the baseline point being reconstructed', () => {
-  const investments = read('client', 'src', 'views', 'Investments.tsx');
-  assert.match(investments, /baselineMembership === 'reconstructed' &&/);
-  // It says what was reconstructed and why, rather than asserting the figure is wrong.
-  assert.match(investments, /reconstructed from your accounts as they are now/);
-});
-
-test('HEALTHY: a recorded baseline renders no reconstruction notice', () => {
-  const investments = read('client', 'src', 'views', 'Investments.tsx');
-  const gated = [...investments.matchAll(/baselineMembership === 'reconstructed'/g)];
-  assert.equal(gated.length, 1, 'the notice is rendered from exactly one gated site');
-  assert.doesNotMatch(investments, /baselineMembership !== 'recorded'/);
 });

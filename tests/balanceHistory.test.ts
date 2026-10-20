@@ -485,10 +485,10 @@ test('a market-driven account draws its own line of the net worth timeline, with
   db.close();
 });
 
-test('HEALTHY: a market-driven account with no transactions has no line rather than a flat one', () => {
+test('HEALTHY: a market-driven account with no transactions and nothing recorded draws today alone, not a flat history', () => {
   const db = migratedTestDb();
   const id = insertAccount(db, { account_name: 'Coinbase', type: 'crypto_wallet', current_balance: 0 });
-  assert.equal(getMarketBalanceHistory(db, id, { today: TODAY }).start_reason, 'no_ledger');
+  assert.deepEqual(getMarketBalanceHistory(db, id, { today: TODAY }).points.map((p) => p.date), [TODAY]);
   db.close();
 });
 

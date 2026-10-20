@@ -142,7 +142,8 @@ test('the crypto wallet moving shows up in the series, so the delta is not zero'
   const db = setupDb();
   try {
     const report = await getReport(db);
-    const [prior, newest] = report.history.slice(-2);
+    const prior = report.history.find((p) => p.date === '2026-07-30')!;
+    const newest = report.history.find((p) => p.date === '2026-07-31')!;
 
     // Only the wallet moved between the two snapshots: 40085c -> 39117c.
     assert.equal(prior.value, 2445.89);
@@ -183,10 +184,7 @@ test('an ordinary ledger says nothing it does not have to', async () => {
     assert.equal(notes.uninvested, null);
 
     // Every point covers the whole headline, so the delta is supportable on every one of them.
-    assert.deepEqual(
-      report.history.map((point) => point.covered_accounts),
-      [report.portfolio_account_ids.length, report.portfolio_account_ids.length]
-    );
+    assert.ok(report.history.every((point) => point.covered_accounts === report.portfolio_account_ids.length));
   } finally {
     db.close();
   }
@@ -291,7 +289,7 @@ test('a point that does not carry every portfolio account says so', async () => 
     const report = await getReport(db);
 
     assert.equal(report.portfolio_account_ids.length, 3);
-    assert.deepEqual(report.history.map((point) => point.covered_accounts), [2, 3]);
+    assert.deepEqual(report.history.slice(0, 2).map((point) => point.covered_accounts), [2, 3]);
   } finally {
     db.close();
   }
@@ -351,7 +349,7 @@ test('a snapshot whose breakdown cannot be read is dropped, not plotted as zero'
       VALUES ('s0','2026-07-29',1,0,1,'{not json',0,?)`).run(TEST_NOW);
     const report = await getReport(db);
 
-    assert.deepEqual(report.history.map((p) => p.date), ['2026-07-30', '2026-07-31']);
+    assert.equal(report.history[0].date, '2026-07-30');
     assert.equal(report.history.some((p) => p.value === 0), false);
   } finally {
     db.close();
@@ -361,10 +359,11 @@ test('a snapshot whose breakdown cannot be read is dropped, not plotted as zero'
 test('estimated travels with the point so the screen can say which baseline it used', async () => {
   const db = setupDb();
   try {
-    db.prepare('UPDATE net_worth_snapshots SET is_estimated = 1 WHERE date = ?').run('2026-07-30');
     const report = await getReport(db);
+    const on = (date: string) => report.history.find((p) => p.date === date)!;
 
-    assert.deepEqual(report.history.map((p) => p.estimated), [true, false]);
+    assert.deepEqual([on('2026-07-30').estimated, on('2026-07-31').estimated, on('2026-08-15').estimated], [false, false, true]);
+    assert.equal(report.history.at(-1)!.estimated, false);
   } finally {
     db.close();
   }
@@ -382,7 +381,7 @@ test('an empty portfolio is served as one, not as a SQL error', async () => {
     assert.equal(report.holdings_value, 0);
     assert.deepEqual(report.allocation, []);
     assert.deepEqual(report.holdings, []);
-    assert.deepEqual(report.history.map((point) => point.covered_accounts), [0, 0]);
+    assert.deepEqual(report.history, []);
   } finally {
     db.close();
   }

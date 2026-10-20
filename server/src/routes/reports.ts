@@ -19,65 +19,10 @@ import type {
   SpendingReport,
 } from '../../../shared/types';
 import { dollarizeFields, toDollars } from '../services/money';
-import {
-  parseSnapshotPortfolio,
-  readPortfolioAccounts,
-  type PortfolioMembershipSource,
-  type SnapshotPortfolioColumns,
-} from '../services/netWorthHistory';
+import { readPortfolioAccounts } from '../services/netWorthHistory';
+import { netWorthTimeline } from '../services/netWorthTimeline';
 
 const router = Router();
-
-interface SnapshotPortfolio {
-  /** Integer cents, summed over the portfolio accounts this breakdown carried a number for. */
-  value: number;
-  /** How many of them that was. Fewer than the whole set means the point is not the whole hero. */
-  covered: number;
-}
-
-/**
- * The portfolio's value inside one snapshot, or null when the row cannot be read.
- *
- * Null rather than 0: an unparseable breakdown is a snapshot this code could not read, and
- * plotting it as zero would draw a portfolio that emptied and refilled. The caller drops the
- * point instead, so the series only carries dates whose balances were actually recovered.
- *
- * `accountIds` is the set THIS snapshot recorded, not today's portfolio. Membership is frozen at
- * write time (migration 056) precisely so this function cannot be handed a set the row never knew
- * about, which is what made an account edit today rewrite every point in the series.
- *
- * `covered` is returned beside the value because a sum over a subset of the accounts is not a
- * smaller portfolio, it is a different quantity. `takeSnapshot` writes a breakdown entry only for
- * `is_hidden = 0` accounts, and an account can be created, hidden or unhidden between snapshots,
- * so a breakdown carrying four of five portfolio accounts is routine and the difference must not
- * be read as money moving. It is counted against the breakdown rather than taken as the size of
- * `accountIds`, so an id with no readable value beside it lowers the count instead of being
- * asserted into it.
- *
- * What a count still cannot see is two consecutive points whose sets are the same SIZE and
- * different MEMBERS: one account leaving as another arrives. TrendChart compares counts, so that
- * segment joins. The ids are on the row now, so it is answerable, but answering it means changing
- * what TrendChart consumes and is not claimed here.
- */
-function portfolioInSnapshot(breakdownJson: string, accountIds: Set<string>): SnapshotPortfolio | null {
-  let breakdown: unknown;
-  try {
-    breakdown = JSON.parse(breakdownJson);
-  } catch {
-    return null;
-  }
-  if (typeof breakdown !== 'object' || breakdown === null) return null;
-
-  let value = 0;
-  let covered = 0;
-  for (const [accountId, entry] of Object.entries(breakdown as Record<string, unknown>)) {
-    if (!accountIds.has(accountId)) continue;
-    if (typeof entry !== 'number' || !Number.isFinite(entry)) continue;
-    value += entry;
-    covered += 1;
-  }
-  return { value, covered };
-}
 
 // The reporting service returns every money total in integer cents. These helpers
 // dollarize the money fields of each report at this route boundary. Percentages
@@ -316,17 +261,9 @@ router.get('/investments', (req: Request, res: Response, next: NextFunction): vo
     // the headline moved. Crypto belongs in whichever total the holdings list shows, and this
     // list shows it, so `crypto_value` is served beside the headline and the screen prints the
     // split rather than leaving it to a source comment.
-    //
-    // This set decides nothing about a past snapshot any more, and that is the change migration 056
-    // exists for. It used to be applied to every breakdown ever written, so an account edit today
-    // silently rewrote the whole series: on a `.backup` copy of the live ledger taken 2026-08-01,
-    // retyping Wealthfront Cash to `brokerage` moved the 2026-07-30 point from $2,445.89 to
-    // $3,447.59, and hiding Coinbase moved the same point to $2,045.04, with no snapshot touched.
-    // Each point now carries the set it was written with, and this one is only the fallback for a
-    // row that carries none (see `parseSnapshotPortfolio`).
+
     const portfolioAccounts = readPortfolioAccounts(db);
     const portfolioAccountIds = portfolioAccounts.map((account) => account.id);
-    const portfolioAccountIdSet = new Set(portfolioAccountIds);
     const portfolioValue = portfolioAccounts.reduce((sum, account) => sum + account.current_balance, 0);
     // The balances of the accounts that actually hold something. This, not `portfolioValue`, is
     // what a position list can be reconciled against: an IRA funded and not yet invested makes
@@ -390,64 +327,17 @@ router.get('/investments', (req: Request, res: Response, next: NextFunction): vo
       `SELECT SUM(h.institution_value) AS total FROM holdings h WHERE ${inPortfolio}`
     ).get(...portfolioAccountIds) as { total: number | null }).total ?? 0;
 
-    // Portfolio value over time from net worth snapshots. Investment transaction
-    // volume is not portfolio value and should not drive a value-history chart.
-    const conditions: string[] = [];
-    const params: unknown[] = [];
-
-    if (startDate) {
-      conditions.push('date >= ?');
-      params.push(startDate);
-    }
-    if (endDate) {
-      conditions.push('date <= ?');
-      params.push(endDate);
-    }
-
-    const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
-
-    // is_estimated travels with the point. TrendChart already knows how to draw a reconstruction
-    // differently from a measurement; this endpoint was the one consumer that never told it.
-    //
-    // The value is derived from the breakdown rather than read from `investment_assets`, because
-    // that column was frozen from the account types in force when the row was written. Both Fidelity
-    // accounts were auto-typed `checking` before being corrected, so the stored column still says
-    // $0.00 for two days when the portfolio held $1,661.66. `portfolio_accounts` is the opposite
-    // case and is read, not recomputed: it is not a number, it is which accounts the number is a sum
-    // over, and that IS a fact about the day the row was written.
-    const snapshots = db.prepare(`
-      SELECT date, breakdown, is_estimated, portfolio_accounts, portfolio_accounts_source
-      FROM net_worth_snapshots
-      ${where}
-      ORDER BY date ASC
-    `).all(...params) as Array<
-      { date: string; breakdown: string; is_estimated: number } & SnapshotPortfolioColumns
-    >;
-
-    interface HistoryPoint {
-      date: string;
-      value: number;
-      estimated: boolean;
-      covered_accounts: number;
-      /** Whether this point's account set was written with it, or worked out afterwards. */
-      membership: PortfolioMembershipSource;
-    }
-
-    const history = snapshots
-      .map((snapshot): HistoryPoint | null => {
-        const membership = parseSnapshotPortfolio(snapshot, portfolioAccountIdSet);
-        const point = portfolioInSnapshot(snapshot.breakdown, membership.accountIds);
-        return point === null
-          ? null
-          : {
-            date: snapshot.date,
-            value: toDollars(point.value),
-            estimated: snapshot.is_estimated === 1,
-            covered_accounts: point.covered,
-            membership: membership.source,
-          };
-      })
-      .filter((point): point is HistoryPoint => point !== null);
+    // The portfolio's own lines in the net worth timeline, today's portfolio set over the whole
+    // span, so this chart and the Accounts chart value an account the same way on every day.
+    const timeline = portfolioAccountIds.length > 0
+      ? netWorthTimeline(db, { from: startDate || undefined, to: endDate || undefined, accountIds: portfolioAccountIds })
+      : null;
+    const history = (timeline?.points ?? []).map((point) => ({
+      date: point.date,
+      value: toDollars(point.net_worth),
+      estimated: point.estimated,
+      covered_accounts: point.coverage,
+    }));
 
     // `portfolio_account_ids` is served rather than a count so the screen filters its holdings
     // list against the same set instead of re-deriving membership from account types on the
