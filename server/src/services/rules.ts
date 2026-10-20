@@ -771,24 +771,7 @@ export function applyMerchantRulesToExistingTransactions(
 // (and prior rule/heuristic hits) are never overwritten.
 export function autoCategorizeTransactions(db: Database.Database): RuleApplicationResult {
   const ruleResult = applyMerchantRulesToExistingTransactions(db, { onlyUncategorized: true });
-
-  const remaining = db.prepare(`
-    SELECT id, merchant_name, original_name
-    FROM transactions
-    WHERE category_id IS NULL
-  `).all() as Array<{ id: string; merchant_name: string | null; original_name: string }>;
-
-  const now = new Date().toISOString();
-  const known = knownCategoryIds(db);
-  const writes: CategoryWrite[] = [];
-  for (const transaction of remaining) {
-    const categoryId = guessCategoryFromText(transaction.merchant_name, transaction.original_name);
-    if (!categoryId) continue;
-    if (!known.has(categoryId)) continue;
-    writes.push({ transactionId: transaction.id, categoryId, source: 'heuristic' });
-  }
-
-  return { updated: ruleResult.updated + writeTransactionCategories(db, writes, now) };
+  return { updated: ruleResult.updated + applyTextHeuristic(db, { skipManual: false }) };
 }
 
 // Full "re-check all transactions" pass: re-applies every merchant rule and then the
@@ -800,15 +783,19 @@ export function recategorizeAll(db: Database.Database): RuleApplicationResult {
     onlyUncategorized: false,
     skipManual: true,
   });
+  return { updated: ruleResult.updated + applyTextHeuristic(db, { skipManual: true }) };
+}
 
+function applyTextHeuristic(db: Database.Database, { skipManual }: { skipManual: boolean }): number {
+  const manualClause = skipManual
+    ? "AND manually_categorized = 0 AND COALESCE(category_source, '') <> 'human'"
+    : '';
   const remaining = db.prepare(`
     SELECT id, merchant_name, original_name
     FROM transactions
-    WHERE category_id IS NULL AND manually_categorized = 0
-      AND COALESCE(category_source, '') <> 'human'
+    WHERE category_id IS NULL ${manualClause}
   `).all() as Array<{ id: string; merchant_name: string | null; original_name: string }>;
 
-  const now = new Date().toISOString();
   const known = knownCategoryIds(db);
   const writes: CategoryWrite[] = [];
   for (const transaction of remaining) {
@@ -817,8 +804,7 @@ export function recategorizeAll(db: Database.Database): RuleApplicationResult {
     if (!known.has(categoryId)) continue;
     writes.push({ transactionId: transaction.id, categoryId, source: 'heuristic' });
   }
-
-  return { updated: ruleResult.updated + writeTransactionCategories(db, writes, now) };
+  return writeTransactionCategories(db, writes, new Date().toISOString());
 }
 
 /**

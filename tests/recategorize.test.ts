@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import http from 'node:http';
 import express from 'express';
 import Database from 'better-sqlite3';
-import { recategorizeAll, applyMerchantRuleToMatchingTransactions } from '../server/src/services/rules';
+import { recategorizeAll, autoCategorizeTransactions, applyMerchantRuleToMatchingTransactions } from '../server/src/services/rules';
 import { _setDbForTesting } from '../server/src/db/index';
 import rulesRouter from '../server/src/routes/rules';
 import { TEST_NOW, insertAccount, insertCategory, insertTransaction, migratedTestDb } from './helpers/schema';
@@ -45,6 +45,52 @@ test('recategorizeAll never overwrites a manually categorized row', (t) => {
   recategorizeAll(db);
   const t2 = db.prepare("SELECT category_id FROM transactions WHERE id = 't2'").get() as { category_id: string };
   assert.equal(t2.category_id, 'cat_travel'); // preserved despite matching the rule
+});
+
+function heuristicSetup(): Database.Database {
+  const db = migratedTestDb();
+  insertAccount(db, { id: 'acct' });
+  const ins = (id: string, overrides: { manually_categorized?: number; category_source?: string | null }) =>
+    insertTransaction(db, {
+      id,
+      account_id: 'acct',
+      merchant_name: null,
+      original_name: 'WHOLEFDS MKT #10245',
+      category_id: null,
+      ...overrides,
+    });
+  ins('plain', {});
+  ins('cleared', { category_source: 'human' });
+  ins('flagged', { manually_categorized: 1 });
+  return db;
+}
+
+const heuristicCategory = (db: Database.Database, id: string) =>
+  (db.prepare('SELECT category_id FROM transactions WHERE id = ?').get(id) as { category_id: string | null }).category_id;
+
+test('the full re-check heuristic fills an ordinary uncategorized row and leaves a hand-cleared one empty', (t) => {
+  const db = heuristicSetup();
+  t.after(() => db.close());
+  assert.equal(recategorizeAll(db).updated, 1);
+  assert.equal(heuristicCategory(db, 'plain'), 'cat_food_groceries');
+  assert.equal(heuristicCategory(db, 'cleared'), null);
+  assert.equal(heuristicCategory(db, 'flagged'), null);
+});
+
+test('the post-sync heuristic fills every uncategorized row', (t) => {
+  const db = heuristicSetup();
+  t.after(() => db.close());
+  assert.equal(autoCategorizeTransactions(db).updated, 3);
+  for (const id of ['plain', 'cleared', 'flagged']) assert.equal(heuristicCategory(db, id), 'cat_food_groceries');
+});
+
+test('the heuristic writes nothing when no uncategorized row matches it', (t) => {
+  const db = migratedTestDb();
+  t.after(() => db.close());
+  insertAccount(db, { id: 'acct' });
+  insertTransaction(db, { id: 'odd', account_id: 'acct', merchant_name: null, original_name: 'ZXQV 0001', category_id: null });
+  assert.equal(autoCategorizeTransactions(db).updated, 0);
+  assert.equal(recategorizeAll(db).updated, 0);
 });
 
 test('applyMerchantRuleToMatchingTransactions with overwrite re-labels past non-manual rows', (t) => {
