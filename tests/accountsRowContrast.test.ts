@@ -304,9 +304,8 @@ test('the call-site count in the badge note is the count the tree has', () => {
   assert.match(PROSE, /grep -rnE 'text-\(gold\|warning\)' client\/src \| grep -vE ':\[0-9\]\+: \\\*'/);
   assert.match(PROSE, /gold is an ink across eight modules/);
 
-  // index.css states the SAME reading from the SAME command, and its copy of it was wrong: it said
-  // 12 (7 and 5) where the tree has always had 13 (7 and 6). Two prose copies of one grep is one
-  // copy too many, so the second is pinned to the walk above rather than trusted.
+  // index.css states the SAME reading from the SAME command, and its copy was once wrong, so it is
+  // pinned to the walk above rather than trusted.
   const stated = /-> (\d+) on \d{4}-\d{2}-\d{2}, being (\d+) `text-gold` and (\d+) `text-warning`/.exec(CSS);
   assert.ok(stated, 'index.css no longer states the text-gold call-site reading');
   assert.deepEqual(

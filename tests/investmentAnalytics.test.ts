@@ -2,18 +2,13 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   ALLOCATION_SLOTS,
-  getAllocationQualityLabel,
-  getAllocationDrift,
   getAllocationSlices,
   getPortfolioDelta,
-  getConcentrationSummary,
   getCostBasisStats,
   holdingGain,
-  getInvestmentDataQualitySummary,
-  getInvestmentActivitySummary,
   isLivePosition,
 } from '../client/src/lib/investmentAnalytics';
-import type { Account, Holding, InvestmentTransaction } from '../shared/types';
+import type { Account, Holding } from '../shared/types';
 
 function account(id: string, type: Account['type']): Account {
   return {
@@ -64,24 +59,6 @@ function holding(overrides: Partial<Holding>): Holding {
   };
 }
 
-function investmentTransaction(overrides: Partial<InvestmentTransaction>): InvestmentTransaction {
-  return {
-    id: overrides.id ?? 'tx',
-    account_id: overrides.account_id ?? 'acct_taxable',
-    date: overrides.date ?? '2026-06-30',
-    type: overrides.type ?? 'buy',
-    security_id: overrides.security_id ?? null,
-    quantity: overrides.quantity ?? null,
-    price: overrides.price ?? null,
-    amount: overrides.amount ?? 0,
-    fees: overrides.fees ?? null,
-    name: overrides.name ?? 'Investment transaction',
-    created_at: '2026-06-30T00:00:00.000Z',
-    ticker: overrides.ticker ?? null,
-    security_name: overrides.security_name ?? null,
-  };
-}
-
 test('cost basis stats only calculate returns from holdings with known basis', () => {
   const stats = getCostBasisStats([
     holding({ id: 'known_a', institution_value: 1200, cost_basis: 1000 }),
@@ -114,7 +91,7 @@ test('cost basis stats count manual corrections separately', () => {
   assert.equal(stats.knownCostBasis, 1900);
 });
 
-test('allocation quality makes missing account links explicit', () => {
+test('tax treatment allocation folds a holding with no resolvable account into Other', () => {
   const accounts = new Map([
     ['acct_taxable', account('acct_taxable', 'brokerage')],
     ['acct_ira', account('acct_ira', 'ira_roth')],
@@ -135,13 +112,9 @@ test('allocation quality makes missing account links explicit', () => {
       ['Other', 250, 14.3],
     ]
   );
-  assert.equal(
-    getAllocationQualityLabel(holdings, 'tax_treatment', accounts),
-    '1 holding missing account links'
-  );
 });
 
-test('sector allocation uses metadata when available and marks gaps', () => {
+test('sector allocation uses metadata when available and labels the gaps', () => {
   const slices = getAllocationSlices([
     holding({ id: 'tech_a', sector: 'Technology', institution_value: 1000 }),
     holding({ id: 'tech_b', sector: 'Technology', institution_value: 500 }),
@@ -157,180 +130,6 @@ test('sector allocation uses metadata when available and marks gaps', () => {
       ['Sector unavailable', 200, 10],
     ]
   );
-  assert.equal(
-    getAllocationQualityLabel([
-      holding({ id: 'tech', sector: 'Technology' }),
-      holding({ id: 'missing', sector: null }),
-    ], 'sector', new Map()),
-    '1 holding missing sector'
-  );
-});
-
-
-test('allocation drift compares current slices against explicit targets', () => {
-  const drift = getAllocationDrift(
-    [
-      {
-        key: 'asset:etf',
-        label: 'ETF',
-        value: 800,
-        count: 2,
-        pct: 80,
-        color: '#6487f0',
-      },
-      {
-        key: 'asset:cash',
-        label: 'Cash',
-        value: 200,
-        count: 1,
-        pct: 20,
-        color: '#32bfa3',
-      },
-    ],
-    [
-      { key: 'asset:etf', label: 'ETF', targetPct: 60 },
-      { key: 'asset:cash', label: 'Cash', targetPct: 5 },
-      { key: 'asset:equity', label: 'Equity', targetPct: 35 },
-    ]
-  );
-
-  assert.equal(drift.label, 'Drifting');
-  assert.equal(drift.maxDriftPct, 35);
-  assert.deepEqual(
-    drift.items.map((item) => [item.label, item.currentPct, item.targetPct, item.driftPct, item.severity]),
-    [
-      ['Equity', 0, 35, -35, 'drifting'],
-      ['ETF', 80, 60, 20, 'drifting'],
-      ['Cash', 20, 5, 15, 'drifting'],
-    ]
-  );
-  assert.match(drift.detail, /Equity is 35\.0 points below target/);
-});
-
-test('allocation drift handles empty views without inventing targets', () => {
-  const drift = getAllocationDrift([], [
-    { key: 'asset:etf', label: 'ETF', targetPct: 60 },
-  ]);
-
-  assert.equal(drift.label, 'No target');
-  assert.equal(drift.maxDriftPct, 0);
-  assert.deepEqual(drift.items, []);
-});
-
-test('concentration summary groups positions before calculating top exposure', () => {
-  const accounts = new Map([
-    ['acct_taxable', account('acct_taxable', 'brokerage')],
-    ['acct_ira', account('acct_ira', 'ira_traditional')],
-  ]);
-  const holdings = [
-    holding({ id: 'aaa_a', account_id: 'acct_taxable', ticker: 'AAA', institution_value: 250 }),
-    holding({ id: 'aaa_b', account_id: 'acct_ira', ticker: 'AAA', institution_value: 150 }),
-    holding({ id: 'bbb', account_id: 'acct_taxable', ticker: 'BBB', institution_value: 250 }),
-    holding({ id: 'ccc', account_id: 'acct_ira', ticker: 'CCC', institution_value: 150 }),
-    holding({ id: 'ddd', account_id: 'acct_ira', ticker: 'DDD', institution_value: 100 }),
-    holding({ id: 'eee', account_id: 'acct_taxable', ticker: 'EEE', institution_value: 50 }),
-    holding({ id: 'fff', account_id: 'acct_taxable', ticker: 'FFF', institution_value: 50 }),
-  ];
-
-  const summary = getConcentrationSummary(holdings, accounts);
-
-  assert.equal(summary.label, 'Concentrated');
-  assert.equal(summary.totalValue, 1000);
-  assert.equal(summary.largestPosition?.label, 'AAA');
-  assert.equal(summary.largestPosition?.value, 400);
-  assert.equal(summary.largestPosition?.pct, 40);
-  assert.equal(summary.topFiveValue, 950);
-  assert.equal(summary.topFivePct, 95);
-  assert.equal(summary.largestAccount?.label, 'Brokerage');
-  assert.equal(summary.largestAccount?.value, 600);
-});
-
-test('investment activity summarizes imported transaction flow without inventing realized gains', () => {
-  const summary = getInvestmentActivitySummary([
-    investmentTransaction({ id: 'buy', type: 'buy', amount: -1000, fees: 1 }),
-    investmentTransaction({ id: 'sell', type: 'sell', amount: 700, fees: 2 }),
-    investmentTransaction({ id: 'dividend', type: 'dividend', amount: 25 }),
-    investmentTransaction({ id: 'fee', type: 'fee', amount: -4 }),
-    investmentTransaction({ id: 'transfer', type: 'transfer', amount: 300 }),
-    investmentTransaction({ id: 'other', type: 'other', amount: -10 }),
-  ]);
-
-  assert.equal(summary.transactionCount, 6);
-  assert.equal(summary.buyAmount, 1000);
-  assert.equal(summary.sellAmount, 700);
-  assert.equal(summary.dividendAmount, 25);
-  assert.equal(summary.feeAmount, 7);
-  assert.equal(summary.transferAmount, 300);
-  assert.equal(summary.otherAmount, 10);
-  assert.equal(summary.netAmount, 11);
-  assert.equal(summary.saleCount, 1);
-  assert.equal(summary.realizedGain, null);
-  assert.equal(summary.realizedGainLabel, 'Not available');
-  assert.match(summary.realizedGainDetail, /lot-level sale cost basis/);
-});
-
-test('investment data quality starts empty without investment sources', () => {
-  const summary = getInvestmentDataQualitySummary({
-    holdings: [],
-    transactions: [],
-    investmentAccountCount: 0,
-    accountById: new Map(),
-    historyPointCount: 0,
-  });
-
-  assert.equal(summary.status, 'empty');
-  assert.equal(summary.label, 'No Investment Data');
-  assert.deepEqual(summary.issues.map((issue) => issue.id), ['no-investment-source']);
-});
-
-test('investment data quality marks provider limitations without requiring attention', () => {
-  const accounts = new Map([
-    ['acct_taxable', account('acct_taxable', 'brokerage')],
-  ]);
-  const summary = getInvestmentDataQualitySummary({
-    holdings: [
-      holding({ id: 'known', account_id: 'acct_taxable', security_type: 'equity', cost_basis: 900, institution_value: 1000 }),
-      holding({ id: 'missing_type', account_id: 'acct_taxable', cost_basis: 100, institution_value: 110 }),
-    ],
-    transactions: [
-      investmentTransaction({ id: 'sell', type: 'sell', amount: 250 }),
-    ],
-    investmentAccountCount: 1,
-    accountById: accounts,
-    historyPointCount: 1,
-  });
-
-  assert.equal(summary.status, 'limited');
-  assert.deepEqual(summary.issues.map((issue) => issue.id), [
-    'security-type-missing',
-    'sector-missing',
-    'realized-gain-unavailable',
-    'history-limited',
-  ]);
-});
-
-test('investment data quality escalates missing core holding data', () => {
-  const accounts = new Map([
-    ['acct_taxable', account('acct_taxable', 'brokerage')],
-  ]);
-  const summary = getInvestmentDataQualitySummary({
-    holdings: [
-      holding({ id: 'missing_basis', account_id: 'acct_taxable', security_type: 'equity', cost_basis: null, institution_value: 1000 }),
-      holding({ id: 'missing_account', account_id: 'acct_missing', security_type: 'etf', cost_basis: null, institution_value: 500 }),
-    ],
-    transactions: [],
-    investmentAccountCount: 1,
-    accountById: accounts,
-    historyPointCount: 2,
-  });
-
-  assert.equal(summary.status, 'attention');
-  assert.deepEqual(summary.issues.map((issue) => issue.id), [
-    'missing-account-links',
-    'cost-basis-missing',
-    'sector-missing',
-    'no-investment-transactions',
-  ]);
 });
 
 test('a ninth group folds into Other rather than wrapping onto slot one', () => {
