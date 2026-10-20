@@ -414,10 +414,13 @@ function compareMatchings(a: PairEdge[], b: PairEdge[]): number {
   return gapsB.length - gapsA.length;
 }
 
+/** Two matchings make the same moves when every row in them meets a partner in the same account on the same date. */
 function moveSignature(matching: PairEdge[]): string {
   return matching
-    .map(({ outflow, inflow }) =>
-      [outflow.account_id, outflow.date, outflow.original_name, inflow.account_id, inflow.date, inflow.original_name].join('|'))
+    .flatMap(({ outflow, inflow }) => [
+      `${outflow.id}>${inflow.account_id}|${inflow.date}`,
+      `${inflow.id}<${outflow.account_id}|${outflow.date}`,
+    ])
     .sort()
     .join('\n');
 }
