@@ -18,7 +18,7 @@ const RULES: CategoryRule[] = [
   { categoryId: 'cat_inv_transfer', keywords: ['electronic funds transfer', 'cash contribution', 'fidelity brokerage'] },
 
   // Income
-  { categoryId: 'cat_income_paycheck', keywords: ['payroll', 'direct dep', 'salary', 'paycheck', 'mass inst'] },
+  { categoryId: 'cat_income_paycheck', keywords: ['payroll', 'direct dep', 'salary', 'paycheck'] },
   { categoryId: 'cat_inv_dividend', keywords: ['dividend received', 'dividend'] },
   { categoryId: 'cat_income_interest', keywords: ['interest payment', 'interest earned', 'interest paid', 'wealthfront interest'] },
 
