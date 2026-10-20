@@ -91,3 +91,12 @@ test('a day names only the accounts that are estimated on it, so a cash account 
   assert.ok(!day.estimated_accounts.includes(checking));
   assert.deepEqual(points.find((p) => p.date === '2026-01-20')!.estimated_accounts, []);
 });
+
+test('today is every account\'s current balance, even where an earlier observation exists today', () => {
+  const db = migratedTestDb();
+  const broker = insertAccount(db, { account_name: 'Broker', type: 'brokerage', current_balance: 130000 });
+  insertTransaction(db, { account_id: broker, date: '2026-01-05', amount: 100000, category_id: 'cat_inv_transfer' });
+  valuation(db, broker, TODAY, 129000);
+  const last = netWorthTimeline(db, { today: TODAY }).points.at(-1)!;
+  assert.deepEqual([last.date, last.net_worth, last.estimated], [TODAY, 130000, false]);
+});
