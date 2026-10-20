@@ -44,25 +44,20 @@ test('the cash-flow average divides complete months by the number of complete mo
   db.close();
 });
 
-test('estimated snapshots reach the model labelled as estimates', () => {
+test('a stored estimate never reaches the model, and the trend it reads is the timeline', () => {
   const db = migratedTestDb();
   _setDbForTesting(db);
   const account = insertAccount(db, { type: 'checking', current_balance: 100000 });
-  const insert = db.prepare(`
+  insertTransaction(db, { account_id: account, date: firstOfMonthsBack(5), amount: 100000 });
+  db.prepare(`
     INSERT INTO net_worth_snapshots
-      (id, date, total_assets, total_liabilities, net_worth, breakdown, is_estimated,
-       liquid_assets, investment_assets, crypto_assets, created_at)
-    VALUES (?, ?, ?, 0, ?, ?, ?, ?, 0, 0, '2026-07-30T00:00:00.000Z')
-  `);
-  const breakdown = JSON.stringify({ [account]: 100000 });
-  insert.run('e1', firstOfMonthsBack(3), 500000, 500000, breakdown, 1, 500000);
-  insert.run('m1', firstOfMonthsBack(1), 100000, 100000, breakdown, 0, 100000);
+      (id, date, total_assets, total_liabilities, net_worth, breakdown, is_estimated, created_at)
+    VALUES ('e1', ?, 523456, 0, 523456, ?, 1, '2026-07-30T00:00:00.000Z')
+  `).run(firstOfMonthsBack(3), JSON.stringify({ [account]: 523456 }));
 
   const context = buildFinancialContext();
-  // The system prompt tells the model to say plainly when data is only estimated. It was never
-  // given the flag it was being asked to use, so it narrated a reconstruction artifact as a
-  // +$5,549 recovery and a $2,800 collapse it had observed.
-  assert.match(context, /reconstructions, not measurements/);
-  assert.match(context, /estimated: reconstructed from later transactions/);
+  assert.match(context, /### Net Worth Trend/);
+  assert.doesNotMatch(context, /5,234\.56/);
+  assert.doesNotMatch(context, /\(estimated\)/, 'a cash account walked from its ledger is never an estimate');
   db.close();
 });

@@ -1,19 +1,13 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  estimateNote,
   readLatestSnapshot,
   readSnapshotBefore,
   readSnapshots,
 } from '../server/src/services/netWorthHistory';
 import { insertAccount, migratedTestDb } from './helpers/schema';
 
-/**
- * `is_estimated` distinguishes a measured balance sheet from one reconstructed by reverse-replaying
- * transactions off today's balances. The app had no mechanism for carrying it: `routes/networth.ts`
- * happened to `SELECT *`, and every reader with an explicit column list dropped it, which was four
- * of the five consumers including both AI paths.
- */
+/** Rows marked `is_estimated` were written by the monthly reconstruction the timeline replaced. */
 
 function seed(db: ReturnType<typeof migratedTestDb>, accountId: string) {
   const insert = db.prepare(`
@@ -29,39 +23,14 @@ function seed(db: ReturnType<typeof migratedTestDb>, accountId: string) {
   insert.run('s4', '2026-07-01', 200, 0, 200, breakdown(200), 0, 200, 0, 0);
 }
 
-test('every snapshot read carries is_estimated as a boolean', () => {
+test('a stored estimate never reaches a reader: every read is of measured sheets', () => {
   const db = migratedTestDb();
   const account = insertAccount(db);
   seed(db, account);
 
-  const rows = readSnapshots(db, { order: 'asc' });
-  assert.equal(rows.length, 4);
-  // A boolean, not the raw 0/1: a consumer that forgets to cast would render 0 as truthy.
-  assert.deepEqual(rows.map((r) => r.is_estimated), [true, true, false, false]);
-  for (const row of rows) assert.equal(typeof row.is_estimated, 'boolean');
-
+  assert.deepEqual(readSnapshots(db, { order: 'asc' }).map((row) => row.date), ['2026-06-30', '2026-07-01']);
   assert.equal(readLatestSnapshot(db)?.date, '2026-07-01');
+  assert.equal(readSnapshotBefore(db, '2026-06-15'), null);
+  assert.equal(readSnapshotBefore(db, '2026-07-01')?.date, '2026-06-30');
   db.close();
-});
-
-test('measuredOnly excludes reconstructions from a comparison', () => {
-  const db = migratedTestDb();
-  const account = insertAccount(db);
-  seed(db, account);
-
-  assert.equal(readSnapshots(db, { measuredOnly: true }).length, 2);
-
-  // "Net worth vs last month" against a reconstruction compares a fact to a guess and states the
-  // result as a fact. On the real ledger the nearest prior snapshot to 2026-07-01 was measured,
-  // but the two before it were not.
-  assert.equal(readSnapshotBefore(db, '2026-06-15')?.date, '2026-06-01');
-  assert.equal(readSnapshotBefore(db, '2026-06-15', { measuredOnly: true }), null);
-  assert.equal(readSnapshotBefore(db, '2026-07-01', { measuredOnly: true })?.date, '2026-06-30');
-  db.close();
-});
-
-test('an estimate is labelled as one wherever a snapshot becomes text for the model', () => {
-  assert.equal(estimateNote({ is_estimated: false }), '');
-  assert.match(estimateNote({ is_estimated: true }), /estimated/);
-  assert.match(estimateNote({ is_estimated: true }), /not a measured balance/);
 });

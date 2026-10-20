@@ -6,7 +6,7 @@ import type Anthropic from '@anthropic-ai/sdk';
 import { format, startOfMonth, subMonths } from 'date-fns';
 import { getTransactionById, listTransactions, type TransactionListFilters } from './transactions';
 import { getReadOnlyDbPath } from '../db/index';
-import { readSnapshots } from './netWorthHistory';
+import { netWorthTimeline } from './netWorthTimeline';
 import { dollarizeFields, toDollars, toDollarsOrNull } from './money';
 import { getCashflowReport, getSpendingReport } from './reporting';
 import { buildRecurringForecast } from './recurringForecast';
@@ -22,7 +22,6 @@ import { boundaryApplicableTo, reconcileAccounts, unreconciledResidual } from '.
 import { buildSchemaDoc, describeTables, getCategoryProvenance, transactionReportInclusion } from './schemaDoc';
 import type { AdvisorToolSpec } from './aiProviders/types';
 import type { AdvisorDraftAction, AdvisorDraftPayload } from '../../../shared/types';
-import { settledNetWorthCents } from './inTransit';
 import { AGENT_TOOLS, runAgentTool } from './advisorAgentTools';
 
 /** Stable id per payload, matching advisorDrafts' own scheme, so repeats collapse. */
@@ -122,7 +121,7 @@ export const ADVISOR_TOOLS: Anthropic.Tool[] = [
   {
     name: 'get_net_worth_history',
     description:
-      'Net worth, total assets, and total liabilities per snapshot over the last N months (default 12), oldest first. Amounts in dollars. estimated = true means the row was RECONSTRUCTED by replaying transactions backwards off current balances rather than measured, so say "estimated" when quoting one and never narrate the join between an estimated and a measured stretch as an event.',
+      'Net worth, total assets, and total liabilities over the last N months (default 12), oldest first: the same daily series the Balance and Accounts charts draw, one point per day for up to 3 months and per week beyond. Amounts in dollars. estimated = true means an investment or crypto value that day is an estimate between known values, so say "estimated" when quoting one and never narrate its movement as an observed event.',
     input_schema: {
       type: 'object',
       properties: {
@@ -542,20 +541,16 @@ function getNetWorthHistoryTool(db: Database.Database, input: ToolInput): unknow
   const months = Math.min(Math.max(Number(input.months) || 12, 1), 60);
   // date('now') is UTC and disagrees with the local month boundaries every other surface uses,
   // so the cutoff is computed in local time here rather than in SQLite.
-  const since = format(startOfMonth(subMonths(new Date(), months)), 'yyyy-MM-dd');
-  const rows = readSnapshots(db, { since, order: 'asc' });
+  const from = format(startOfMonth(subMonths(new Date(), months)), 'yyyy-MM-dd');
+  const timeline = netWorthTimeline(db, { from, step: months > 3 ? 'week' : 'day' });
   return {
-    history: rows.map((r) => ({
-      date: r.date,
-      net_worth: toDollars(r.net_worth),
-      assets: toDollars(r.total_assets),
-      liabilities: toDollars(r.total_liabilities),
-      // Balance shows net_worth plus money one bank had sent and the other had not yet shown.
-      in_transit: toDollars(settledNetWorthCents(db, r) - r.net_worth),
-      settled_net_worth: toDollars(settledNetWorthCents(db, r)),
-      // A reconstruction, not a measurement. Without this the model narrates the join between the
-      // estimated and measured segments as an observed event.
-      estimated: r.is_estimated,
+    step: timeline.step,
+    history: timeline.points.map((p) => ({
+      date: p.date,
+      net_worth: toDollars(p.net_worth),
+      assets: toDollars(p.assets),
+      liabilities: toDollars(p.liabilities),
+      estimated: p.estimated,
     })),
   };
 }

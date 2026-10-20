@@ -2,26 +2,10 @@ import type Database from 'better-sqlite3';
 import { MARKET_DRIVEN_TYPES } from '../../../shared/accountTypes';
 
 /**
- * The one place net-worth snapshots are read.
- *
- * `is_estimated` distinguishes a measured balance sheet from one reconstructed by reverse-replaying
- * transactions off today's balances. That distinction is the difference between a fact and an
- * arithmetic guess, and the app had no mechanism for carrying it: it had a column that survived by
- * accident. `routes/networth.ts` happened to `SELECT *`, so Reports and Accounts got the flag; every
- * reader that wrote an explicit column list silently dropped it, which was four of the five
- * consumers, including both AI paths.
- *
- * What that cost, on the live database: five of nineteen snapshots are estimates. The advisor's
- * "Net Worth Trend" listed them beside measured rows with nothing to tell them apart, so asked how
- * net worth had moved the model asserted a +$5,549 April recovery and a $2,800 June collapse as
- * observed history. Both are artifacts of `backfillSnapshots` clamping an unpaid liability at zero.
- * The system prompt instructs the model to say plainly when data is only estimated; it was never
- * given the flag it was being asked to use.
- *
- * `is_estimated` is non-optional and already a boolean on the row type, so a consumer cannot drop it
- * by forgetting a column, and cannot render `0` as truthy by forgetting a cast.
+ * The one place measured balance sheets are read. Rows marked `is_estimated` were written by a
+ * monthly reconstruction that no longer exists; the net worth timeline replaced it, and no reader
+ * here returns one.
  */
-
 export interface NetWorthSnapshotRow {
   id: string;
   date: string;
@@ -32,7 +16,6 @@ export interface NetWorthSnapshotRow {
   investment_assets: number | null;
   crypto_assets: number | null;
   breakdown: string;
-  is_estimated: boolean;
   created_at: string;
   taken_at: string | null;
 }
@@ -40,16 +23,8 @@ export interface NetWorthSnapshotRow {
 const COLUMNS = `
   id, date, total_assets, total_liabilities, net_worth,
   liquid_assets, investment_assets, crypto_assets,
-  breakdown, is_estimated, created_at, taken_at
+  breakdown, created_at, taken_at
 `;
-
-interface RawRow extends Omit<NetWorthSnapshotRow, 'is_estimated'> {
-  is_estimated: number;
-}
-
-function hydrate(row: RawRow): NetWorthSnapshotRow {
-  return { ...row, is_estimated: row.is_estimated === 1 };
-}
 
 export interface ReadSnapshotsOptions {
   /** Inclusive lower bound, `yyyy-MM-dd`. */
@@ -57,7 +32,6 @@ export interface ReadSnapshotsOptions {
   /** Inclusive upper bound, `yyyy-MM-dd`. */
   until?: string;
   /** Drop reconstructed rows. Use where a comparison must be measured-to-measured. */
-  measuredOnly?: boolean;
   order?: 'asc' | 'desc';
   limit?: number;
 }
@@ -66,7 +40,7 @@ export function readSnapshots(
   db: Database.Database,
   options: ReadSnapshotsOptions = {}
 ): NetWorthSnapshotRow[] {
-  const conditions: string[] = [];
+  const conditions: string[] = ['is_estimated = 0'];
   const params: unknown[] = [];
 
   if (options.since) {
@@ -77,11 +51,7 @@ export function readSnapshots(
     conditions.push('date <= ?');
     params.push(options.until);
   }
-  if (options.measuredOnly) {
-    conditions.push('is_estimated = 0');
-  }
-
-  const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+  const where = `WHERE ${conditions.join(' AND ')}`;
   const order = options.order === 'desc' ? 'DESC' : 'ASC';
   const limit = options.limit ? `LIMIT ${Math.max(1, Math.floor(options.limit))}` : '';
 
@@ -91,35 +61,25 @@ export function readSnapshots(
     ${where}
     ORDER BY date ${order}
     ${limit}
-  `).all(...params) as RawRow[];
+  `).all(...params) as NetWorthSnapshotRow[];
 
-  return rows.map(hydrate);
+  return rows;
 }
 
 export function readLatestSnapshot(db: Database.Database): NetWorthSnapshotRow | null {
   return readSnapshots(db, { order: 'desc', limit: 1 })[0] ?? null;
 }
 
-/**
- * The newest snapshot strictly before `date`.
- *
- * `measuredOnly` matters here: a "versus last month" delta computed against a reconstruction is a
- * comparison between a fact and a guess, presented as a fact.
- */
-export function readSnapshotBefore(
-  db: Database.Database,
-  date: string,
-  options: { measuredOnly?: boolean } = {}
-): NetWorthSnapshotRow | null {
-  const measured = options.measuredOnly ? 'AND is_estimated = 0' : '';
+/** The newest measured sheet strictly before `date`. */
+export function readSnapshotBefore(db: Database.Database, date: string): NetWorthSnapshotRow | null {
   const row = db.prepare(`
     SELECT ${COLUMNS}
     FROM net_worth_snapshots
-    WHERE date < ? ${measured}
+    WHERE date < ? AND is_estimated = 0
     ORDER BY date DESC
     LIMIT 1
-  `).get(date) as RawRow | undefined;
-  return row ? hydrate(row) : null;
+  `).get(date) as NetWorthSnapshotRow | undefined;
+  return row ?? null;
 }
 
 /**
@@ -161,11 +121,4 @@ export function readPortfolioAccounts(db: Database.Database): PortfolioAccountRo
            OR EXISTS (SELECT 1 FROM holdings h2 WHERE h2.account_id = a.id))
     ORDER BY a.id
   `).all(...PORTFOLIO_ACCOUNT_TYPES) as PortfolioAccountRow[];
-}
-
-/** Render an estimate as an estimate wherever a snapshot is turned into text for the model. */
-export function estimateNote(snapshot: { is_estimated: boolean }): string {
-  return snapshot.is_estimated
-    ? ' (estimated: reconstructed from later transactions, not a measured balance)'
-    : '';
 }

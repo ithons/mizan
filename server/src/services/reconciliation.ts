@@ -241,7 +241,7 @@ export function reconcileAccounts(
   db: Database.Database,
   options: { since?: string } = {}
 ): ReconciliationReport {
-  const snapshots = readSnapshots(db, { since: options.since, measuredOnly: true, order: 'asc' });
+  const snapshots = readSnapshots(db, { since: options.since, order: 'asc' });
   const accounts = db.prepare(
     'SELECT id, account_name, is_liability, type FROM accounts WHERE is_hidden = 0 AND balance_only = 0'
   ).all() as AccountRow[];

@@ -142,10 +142,11 @@
  *      dark, and what separates it from the page is the chroma, with nothing at the other end of a
  *      hue comparison to be near or far from. It is also dark enough on light to be read as text:
  *      L* 49.0, and `gold` on `paper` is 4.57:1, which clears AA.
- *      It is used as text at THIRTEEN call sites, not the five this line used to claim:
+ *      It is used as text at TWELVE call sites, not the five this line used to claim:
  *        grep -rnE 'text-(gold|warning)' client/src | grep -vE ':[0-9]+: \*'
- *        -> 13 on 2026-08-01, being 7 `text-gold` and 6 `text-warning` (the legacy alias, same
+ *        -> 12 on 2026-10-20, being 6 `text-gold` and 6 `text-warning` (the legacy alias, same
  *           triplet). The trailing grep drops prose in block comments, including this line.
+ *           It read 13 (7 and 6) on 2026-08-01, before the replayed-history panel was deleted.
  *           This line said 12 (7 and 5) and had never been run: re-running that command against
  *           the tree at the commit that introduced it returns 13 (7 and 6) as well.
  *      What it measured before the rebuild is not re-derivable from this file, because the old
@@ -221,14 +222,14 @@
  * only two tones is the sentence that used to sit here and it was false at nine call sites.
  * Re-counted by walking every `bg-rail` element under client/src and reading the tones inside it,
  * skipping descendants that declare a ground of their own:
- * 22 call sites on 2026-08-01, and 5 OF THEM are not certified clean by that walk.
- * Four set `gold` on a light rail (AdvisorMemorySection twice, through the legacy `text-warning`
- * alias, and DataSection twice); the fifth sets its colour through an inline `style` prop, where no
+ * 21 call sites on 2026-10-20, and 4 OF THEM are not certified clean by that walk.
+ * Three set `gold` on a light rail (AdvisorMemorySection twice, through the legacy `text-warning`
+ * alias, and DataSection once); the fourth sets its colour through an inline `style` prop, where no
  * class string can show it (SyncActivityPanel's selected run row, whose `statusTone` resolves to
  * muted, sage-deep, gold or clay, so it lands on the failing tone whenever a run ends partial).
- * tests/railGround.test.ts runs that same walk, names every one of the five with the tone it sets,
- * and fails both on a sixth and on an entry that has been fixed and not deleted. The total is a
- * dated reading and moves as views are added; the five is the number that is held.
+ * tests/railGround.test.ts runs that same walk, names every one of the four with the tone it sets,
+ * and fails both on a fifth and on an entry that has been fixed and not deleted. The total is a
+ * dated reading and moves as views are added; the four is the number that is held.
  *
  * That list was nine before the 2026-08-01 palette. `muted-2`, `sage-deep` and `clay` were all
  * sub-AA on a light rail then and none of them is now, so the four entries recording them were

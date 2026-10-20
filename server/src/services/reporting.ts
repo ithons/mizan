@@ -929,7 +929,7 @@ export function getReportNetWorthEvidence(
 
   const previousSnapshot = db.prepare(`
     SELECT * FROM net_worth_snapshots
-    WHERE date < ?
+    WHERE date < ? AND is_estimated = 0
     ORDER BY date DESC
     LIMIT 1
   `).get(snapshot.date) as NetWorthSnapshot | undefined;

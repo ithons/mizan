@@ -310,9 +310,9 @@ test('reconstructions are named as reconstructions', (t) => {
   const doc = docFor(db);
   const text = doc.reconstructions.join('\n');
 
-  assert.match(text, /is_estimated = 1 are RECONSTRUCTED/);
+  assert.match(text, /Net worth history \(get_net_worth_history\) is DERIVED/);
   assert.match(text, /balanceHistory/);
-  assert.match(column(db, 'net_worth_snapshots', 'is_estimated').note ?? '', /RECONSTRUCTION, not a measurement/);
+  assert.match(column(db, 'net_worth_snapshots', 'is_estimated').note ?? '', /not a measurement/);
 });
 
 // ─── Provenance summary ───

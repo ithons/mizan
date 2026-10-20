@@ -102,21 +102,18 @@ test('money that arrived before its sending bank showed it leaving is counted on
   assert.equal(transit.byAccount.get('wf'), -200322);
 });
 
-test('the advisor reads net worth history that adds up, with the settled figure Balance shows stated beside it', (t) => {
+test('the advisor reads the same net worth history the charts draw, which needs no in-transit note', (t) => {
   const db = migratedTestDb();
   t.after(() => { _setDbForTesting(null); db.close(); });
   _setDbForTesting(db);
-  chaseToWealthfront(db);
-  type Row = { date: string; net_worth: number; assets: number; liabilities: number; in_transit: number; settled_net_worth: number };
+  const { chase, wealthfront } = chaseToWealthfront(db);
+  insertTransaction(db, { account_id: chase, date: '2026-09-01', amount: 1083948 });
+  insertTransaction(db, { account_id: wealthfront, date: '2026-09-01', amount: 370 });
+  db.prepare('UPDATE accounts SET current_balance = ? WHERE id = ?').run(583948, chase);
+  db.prepare('UPDATE accounts SET current_balance = ? WHERE id = ?').run(500370, wealthfront);
+  type Row = { date: string; net_worth: number; assets: number; liabilities: number };
   const history = (runAdvisorTool(db, 'get_net_worth_history', { months: 60 }) as { history: Row[] }).history;
-  const row = history.find((r) => r.date === '2026-10-01');
-  assert.ok(row);
-  assert.equal(row.net_worth, row.assets - row.liabilities);
-  assert.equal(row.in_transit, 5000);
-  assert.equal(row.settled_net_worth, (650016 + 321 + 500000) / 100);
-  assert.equal(history.find((r) => r.date === '2026-10-15')?.in_transit, 0);
-  const context = buildFinancialContext();
-  assert.match(context, /2026-10-01: \$6,503\.37 \(\$5,000\.00 had left one account and not yet reached the other; Balance shows \$11,503\.37\)/);
-  assert.match(context, /2026-10-15: \$10,843\.18/);
-  assert.doesNotMatch(context, /2026-10-15: [^\n]*Balance shows/, 'a sheet with nothing in flight carries no note');
+  const timeline = netWorthTimeline(db, { from: history[0].date, step: 'week' });
+  assert.deepEqual(history.map((r) => [r.date, r.net_worth]), timeline.points.map((p) => [p.date, p.net_worth / 100]));
+  assert.doesNotMatch(buildFinancialContext(), /Balance shows/);
 });

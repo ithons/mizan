@@ -62,7 +62,7 @@ export function correctLiabilitySigns(db: Database.Database, now: string, option
   `).all() as LiabilityRow[];
 
   // Newest first: the shortest chain of transactions is the one that has to be trusted least far.
-  const snapshots = readSnapshots(db, { measuredOnly: true, order: 'desc' }).map((snapshot) => {
+  const snapshots = readSnapshots(db, { order: 'desc' }).map((snapshot) => {
     let breakdown: Record<string, unknown>;
     try {
       breakdown = JSON.parse(snapshot.breakdown) as Record<string, unknown>;

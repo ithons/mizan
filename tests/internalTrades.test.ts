@@ -1,13 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import type Database from 'better-sqlite3';
 import { addDays, format, startOfMonth, subMonths } from 'date-fns';
 import { isInternalTrade } from '../server/src/services/investmentTrades';
 import { applySimplefinResponse } from '../server/src/services/simplefin';
 import { getCashflowReport, getSpendingReport } from '../server/src/services/reporting';
-import { backfillSnapshots } from '../server/src/services/snapshot';
+import { netWorthTimeline } from '../server/src/services/netWorthTimeline';
 import { findFlowConservationViolations } from '../server/src/services/flowConservation';
-import { _setDbForTesting } from '../server/src/db/index';
 import { insertAccount, insertTransaction, migratedTestDb, TEST_NOW } from './helpers/schema';
 
 const TRADES = [
@@ -82,9 +80,8 @@ function midMonth(monthsBack: number): string {
   return format(addDays(startOfMonth(subMonths(new Date(), monthsBack)), 14), 'yyyy-MM-dd');
 }
 
-test('an estimated brokerage month holds trades flat and reverses only the money that arrived', () => {
+test('an estimated brokerage day holds trades flat and reverses only the money that arrived', () => {
   const db = migratedTestDb();
-  _setDbForTesting(db);
   try {
     insertAccount(db, { id: 'fid', type: 'brokerage', current_balance: 312883 });
     insertTransaction(db, { account_id: 'fid', date: midMonth(4), amount: 0 });
@@ -98,14 +95,10 @@ test('an estimated brokerage month holds trades flat and reverses only the money
       db.prepare('UPDATE transactions SET is_internal_trade = 1 WHERE id = ?').run(id);
     }
 
-    backfillSnapshots();
-
     const start = format(startOfMonth(subMonths(new Date(), 1)), 'yyyy-MM-dd');
-    const snap = db.prepare('SELECT breakdown FROM net_worth_snapshots WHERE date = ?').get(start) as
-      { breakdown: string };
-    assert.equal(JSON.parse(snap.breakdown).fid, 302883, 'only the $100 that arrived is undone');
+    const point = netWorthTimeline(db, { from: start, to: start }).points[0];
+    assert.equal(point.by_account.fid, 302883, 'only the $100 that arrived is undone');
   } finally {
-    _setDbForTesting(undefined as unknown as Database.Database);
     db.close();
   }
 });
@@ -122,9 +115,8 @@ test('a trade leaving a brokerage is never half of a missing transfer', () => {
   assert.deepEqual(findFlowConservationViolations(db), []);
 });
 
-test('an estimated wallet month undoes the buy, not also the paired deposit that funded it', () => {
+test('an estimated wallet day undoes the buy, not also the paired deposit that funded it', () => {
   const db = migratedTestDb();
-  _setDbForTesting(db);
   try {
     insertAccount(db, { id: 'cb', type: 'crypto_wallet', current_balance: 50000 });
     insertTransaction(db, { account_id: 'cb', date: midMonth(4), amount: 0 });
@@ -132,13 +124,10 @@ test('an estimated wallet month undoes the buy, not also the paired deposit that
     db.prepare("UPDATE transactions SET transfer_status = 'confirmed', transfer_pair_id = 'x' WHERE id = ?").run(deposit);
     insertTransaction(db, { account_id: 'cb', date: midMonth(1), amount: -10000, category_id: 'cat_crypto_buy' });
 
-    backfillSnapshots();
-
     const start = format(startOfMonth(subMonths(new Date(), 1)), 'yyyy-MM-dd');
-    const snap = db.prepare('SELECT breakdown FROM net_worth_snapshots WHERE date = ?').get(start) as { breakdown: string };
-    assert.equal(JSON.parse(snap.breakdown).cb, 40000);
+    const point = netWorthTimeline(db, { from: start, to: start }).points[0];
+    assert.equal(point.by_account.cb, 40000);
   } finally {
-    _setDbForTesting(undefined as unknown as Database.Database);
     db.close();
   }
 });

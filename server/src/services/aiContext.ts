@@ -1,5 +1,5 @@
 import type Database from 'better-sqlite3';
-import { endOfMonth, format, parseISO, startOfMonth, subMonths } from 'date-fns';
+import { endOfMonth, format, parseISO, startOfMonth, subDays, subMonths } from 'date-fns';
 import type {
   AdvisorAction,
   AdvisorContextResponse,
@@ -19,12 +19,12 @@ import { getTransactionReviewSummary } from './transactionReview';
 import { getSyncHealth } from './syncHealth';
 import { buildAdvisorReadTools } from './advisorTools';
 import { getPreference } from './preferences';
-import { estimateNote, readSnapshotBefore, readSnapshots } from './netWorthHistory';
+import { readSnapshotBefore, readSnapshots } from './netWorthHistory';
+import { netWorthTimeline } from './netWorthTimeline';
 import { reconcileAccounts } from './reconciliation';
 import { listMemories } from './aiMemory';
 import { MAX_PAIR_DAY_GAP, findFlowConservationViolations } from './flowConservation';
 import { SCHEDULED_ROUTE } from '../../../shared/routes';
-import { settledNetWorthCents } from './inTransit';
 import { INVESTED_TYPES, bucketOf } from '../../../shared/accountTypes';
 
 export const ADVISOR_PROFILE_PREFERENCE_KEY = 'advisor_user_profile';
@@ -267,8 +267,8 @@ function pushLedgerIntegrity(db: Database.Database, lines: string[]): void {
       `  Reconciliation compares measured balance sheets against the transactions between them, and needs two to run. The ledger holds ${plural(report.measured_snapshot_count, 'measured balance sheet')}, so the check has not run. That is an absence of evidence, not evidence that the ledger is complete.`
     );
   } else {
-    const oldest = readSnapshots(db, { measuredOnly: true, order: 'asc', limit: 1 })[0];
-    const newest = readSnapshots(db, { measuredOnly: true, order: 'desc', limit: 1 })[0];
+    const oldest = readSnapshots(db, { order: 'asc', limit: 1 })[0];
+    const newest = readSnapshots(db, { order: 'desc', limit: 1 })[0];
     const horizon = oldest && newest ? ` (${oldest.date} to ${newest.date})` : '';
     lines.push(
       `  Reconciliation checks each account's ${plural(report.measured_snapshot_count, 'measured balance sheet')}${horizon} against the transactions between them.`
@@ -986,7 +986,7 @@ export function buildFinancialContext(): string {
 
   // Net worth vs last month. Measured only: a delta against a reconstruction is a comparison
   // between a fact and a guess, and stating it as "+$X vs last month" presents it as a fact.
-  const lastMonthSnapshot = readSnapshotBefore(db, thisMonthStart, { measuredOnly: true });
+  const lastMonthSnapshot = readSnapshotBefore(db, thisMonthStart);
 
   // netWorth is dollars (from dollarized balances); the snapshot column is cents.
   const nwDelta = lastMonthSnapshot ? netWorth - toDollars(lastMonthSnapshot.net_worth) : null;
@@ -1485,45 +1485,19 @@ export function buildFinancialContext(): string {
     }
   }
 
-  // ── Net Worth Trend (the whole recorded series) ──────────────────────────
-  //
-  // Every point since RECENT_SNAPSHOT_MONTHS, and one point per month before that. Snapshots are
-  // written per sync day, so an unthinned "all history" section grows without bound: today's 19
-  // points become several hundred within a year, and the oldest ones would crowd out the recent
-  // ones they least inform. The thinning is stated whenever it drops anything, because a series
-  // presented at a resolution it does not have is a claim the data does not support.
-  const RECENT_SNAPSHOT_MONTHS = 3;
-  const dailyFrom = format(startOfMonth(subMonths(today, RECENT_SNAPSHOT_MONTHS)), 'yyyy-MM-dd');
-  const allSnapshots = readSnapshots(db, { order: 'asc' });
-  const lastOfMonth = new Map<string, string>();
-  for (const snap of allSnapshots) {
-    if (snap.date < dailyFrom) lastOfMonth.set(snap.date.slice(0, 7), snap.date);
-  }
-  const keptDates = new Set([...lastOfMonth.values()]);
-  const nwHistory = allSnapshots.filter((snap) => snap.date >= dailyFrom || keptDates.has(snap.date));
-
-  if (nwHistory.length >= 2) {
-    const estimatedCount = nwHistory.filter((snap) => snap.is_estimated).length;
+  // ── Net Worth Trend ──────────────────────────────────────────────────────
+  // The timeline every chart draws: weekly over the last few months, monthly before that.
+  const RECENT_TREND_MONTHS = 3;
+  const weeklyFrom = format(startOfMonth(subMonths(today, RECENT_TREND_MONTHS)), 'yyyy-MM-dd');
+  const monthly = netWorthTimeline(db, { to: format(subDays(parseISO(weeklyFrom), 1), 'yyyy-MM-dd'), step: 'month' }).points;
+  const weekly = netWorthTimeline(db, { from: weeklyFrom, step: 'week' }).points;
+  const trend = [...monthly.filter((p) => p.date < weeklyFrom), ...weekly];
+  if (trend.length >= 2) {
     lines.push('');
-    lines.push(
-      `### Net Worth Trend - ${nwHistory[0].date} to ${nwHistory[nwHistory.length - 1].date}`
-    );
-    if (allSnapshots.length > nwHistory.length) {
-      lines.push(
-        `  ${num(nwHistory.length)} of ${num(allSnapshots.length)} recorded balance sheets. Every point from ${dailyFrom} onward, and the last point of each month before that.`
-      );
-    }
-    if (estimatedCount > 0) {
-      lines.push(
-        `  ${estimatedCount} of these ${nwHistory.length} points are reconstructions, not measurements. Do not narrate movement between an estimate and a measurement as if it were an observed event.`
-      );
-    }
-    for (const snap of nwHistory) {
-      const inFlight = settledNetWorthCents(db, snap) - snap.net_worth;
-      const settledNote = inFlight === 0
-        ? ''
-        : ` (${fmt(toDollars(Math.abs(inFlight)))} ${inFlight > 0 ? 'had left one account and not yet reached the other' : 'had reached one account before leaving the other'}; Balance shows ${fmt(toDollars(snap.net_worth + inFlight))})`;
-      lines.push(`  ${snap.date}: ${fmt(toDollars(snap.net_worth))}${settledNote}${estimateNote(snap)}`);
+    lines.push(`### Net Worth Trend - ${trend[0].date} to ${trend[trend.length - 1].date}`);
+    lines.push(`  The last day of each month before ${weeklyFrom}, and of each week since. A point marked estimated carries an investment or crypto value between known values; do not narrate its movement as observed.`);
+    for (const point of trend) {
+      lines.push(`  ${point.date}: ${fmt(toDollars(point.net_worth))}${point.estimated ? ' (estimated)' : ''}`);
     }
   }
 

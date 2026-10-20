@@ -43,6 +43,7 @@ function latestSnapshot(db: Database.Database): SnapshotRow | null {
   return db.prepare(`
     SELECT id, date, breakdown
     FROM net_worth_snapshots
+    WHERE is_estimated = 0
     ORDER BY date DESC, created_at DESC
     LIMIT 1
   `).get() as SnapshotRow | undefined ?? null;

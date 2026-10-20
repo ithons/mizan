@@ -216,7 +216,7 @@ export const TABLE_MEANINGS: Record<string, TableMeaning> = {
     columns: { sector_source: { unit: 'text', note: 'Whether the sector was reported, inferred, or set by hand.' } },
   },
   net_worth_snapshots: {
-    purpose: 'Net worth over time. Some rows are measured, some are reconstructed, and the difference is load-bearing.',
+    purpose: 'Balance sheets measured at sync time: each account\'s balance as it was read. Net worth on any other day is the net worth timeline (get_net_worth_history), not a row here.',
     columns: {
       date: { unit: LOCAL_DATE },
       net_worth: { unit: CENTS, note: 'total_assets minus total_liabilities.' },
@@ -229,7 +229,7 @@ export const TABLE_MEANINGS: Record<string, TableMeaning> = {
       is_estimated: {
         unit: FLAG,
         note:
-          'A RECONSTRUCTION, not a measurement. 1 means the row was rebuilt by replaying transactions backwards off today\'s balances, so it cannot be evidence about the ledger it was derived from, and reconciliation deliberately ignores these rows. Say "estimated" when quoting one.',
+          '1 marks a row written by a monthly reconstruction that no longer runs. It is not a measurement and no screen or tool reads it; filter on is_estimated = 0.',
       },
       covered_accounts: { unit: 'count', note: 'How many accounts the row could see. A drop in coverage moves net worth without any money moving.' },
       total_accounts: { unit: 'count' },
@@ -915,7 +915,7 @@ export function buildSchemaDoc(db: Database.Database, now: Date = new Date()): S
         "SQLite's date('now') is UTC and DISAGREES with this app's local month boundaries, so it can put a transaction in the wrong month. Use the today_local literal above, and write date ranges as literals, instead of calling date('now').",
     },
     reconstructions: [
-      'net_worth_snapshots with is_estimated = 1 are RECONSTRUCTED by replaying transactions backwards off current balances. They are not measurements and cannot be evidence about the ledger they came from. Reconciliation ignores them for exactly that reason. Say "estimated" when you quote one.',
+      'Net worth history (get_net_worth_history) is DERIVED: cash and cards walked back from today\'s balance through posted transactions, investment and crypto accounts valued at recorded holdings and closing prices where those agree with the reported balance. A point marked estimated carries an investment value between known values. net_worth_snapshots rows with is_estimated = 1 are leftovers of an older reconstruction and are not measurements.',
       'The per-account daily balance series (services/balanceHistory.ts, GET /api/accounts/:id/balance-history) is DERIVED from the ledger the same way, except on the days that carry a recorded balance sheet. Where the derived line and a recorded balance disagree, the disagreement is the finding; neither side is automatically right.',
       'recurring_patterns.average_amount on a variable series is a median of past occurrences, and buildRecurringForecast marks those occurrences amount_varies. A forecast is not a fact.',
       'holdings.cost_basis is whatever the provider reported. NULL means unknown, and no cost basis is derived from the ledger in this app because the disposal history was never imported.',

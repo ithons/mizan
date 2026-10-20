@@ -11,6 +11,7 @@ import {
   runAdvisorTool,
 } from '../server/src/services/advisorChatTools';
 import { getMonthlyBudgetsWithProjection } from '../server/src/services/budgetProjection';
+import { netWorthTimeline } from '../server/src/services/netWorthTimeline';
 
 // The aggregate tools delegate to reporting.ts / budgetProjection.ts / recurringForecast.ts, so
 // this fixture carries the columns those services read: the exclusion flags
@@ -203,13 +204,13 @@ test('get_upcoming_bills lists bills due within the window', (t) => {
   assert.equal(r.scheduled_bills, 31.98);
 });
 
-test('get_net_worth_history returns dollarized snapshots', (t) => {
+test('get_net_worth_history returns the net worth timeline in dollars', (t) => {
   const db = setup();
   t.after(() => db.close());
-  const r = runAdvisorTool(db, 'get_net_worth_history', {}) as { history: Array<{ net_worth: number; assets: number; liabilities: number }> };
-  assert.equal(r.history[0].net_worth, 3000);
-  assert.equal(r.history[0].assets, 5000);
-  assert.equal(r.history[0].liabilities, 2000);
+  const r = runAdvisorTool(db, 'get_net_worth_history', {}) as { history: Array<{ date: string; net_worth: number; assets: number; liabilities: number }> };
+  const timeline = netWorthTimeline(db, { from: r.history[0].date, step: 'week' });
+  assert.equal(r.history.at(-1)!.net_worth, timeline.points.at(-1)!.net_worth / 100);
+  for (const row of r.history) assert.equal(Number((row.assets - row.liabilities).toFixed(2)), row.net_worth, row.date);
 });
 
 // ─────────────────────────────────────────────────────────────────────────────

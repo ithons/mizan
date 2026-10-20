@@ -238,7 +238,7 @@ const RECORDED_SUB_AA: Record<string, string[]> = {
   // error line. Their `text-muted-2` hint line was recorded here too and now measures 5.56 light,
   // so it is gone from this list.
   'views/settings/AdvisorMemorySection.tsx': ['warning'],
-  // The CSV preview grid and the backup preview grid, where gold marks a duplicate. `clay` and
+  // The CSV preview grid, where gold marks a duplicate. `clay` and
   // `sage-deep` were recorded here as well, for invalid and valid; both clear now and both are
   // gone from this list.
   'views/settings/DataSection.tsx': ['gold'],
@@ -404,13 +404,12 @@ test('index.css states the inventory it now claims, and no longer states the uni
     if (site.tones.some((t) => !allowedOnRail().includes(t)) || site.indirect) offenders.add(`${site.file}:${site.line}`);
   }
   // The total is a dated reading and a new `bg-rail text-ink` is not a defect, so only a floor is
-  // held on it. The five is the number the paragraph rests on, and it is exact: a sixth means the
+  // held on it. The four is the number the paragraph rests on, and it is exact: a fifth means the
   // sentence is wrong, and that is the failure this file exists to produce. It was nine until the
-  // 2026-08-01 palette; the four that cleared were deleted from RECORDED_SUB_AA, which is what
-  // stops a fixed entry from sitting here forever as an unactionable finding.
+  // 2026-08-01 palette and five until the replayed-history panel was deleted.
   assert.ok(sites.length >= 20, `only ${sites.length} bg-rail call sites; re-derive the dated figure in index.css`);
-  assert.equal(offenders.size, 5, 'the number of uncertified rail sites moved; re-derive the figure in index.css');
-  assert.match(CSS, /22 call\s*\n?\s*\*?\s*sites on 2026-08-01, and 5 OF THEM are not certified clean/);
+  assert.equal(offenders.size, 4, 'the number of uncertified rail sites moved; re-derive the figure in index.css');
+  assert.match(CSS, /21 call\s*\n?\s*\*?\s*sites on 2026-10-20, and 4 OF THEM are not certified clean/);
   assert.doesNotMatch(CSS, /only those\s*\n?\s*\*?\s*two may be set on it/);
   // `rail` was called a bar track; the bar track is its own token and always was.
   assert.doesNotMatch(CSS, /an input well and a bar track/);

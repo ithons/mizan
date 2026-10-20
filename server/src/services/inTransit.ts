@@ -79,9 +79,8 @@ export function transfersInTransit(db: Database.Database, snapshot: SnapshotMome
 /** A sheet's net worth with transfers caught between its balance reads counted, in cents. */
 export function settledNetWorthCents(
   db: Database.Database,
-  sheet: { date: string; taken_at: string | null; created_at: string; breakdown: string | null; is_estimated: unknown; net_worth: number }
+  sheet: { date: string; taken_at: string | null; created_at: string; breakdown: string | null; net_worth: number }
 ): number {
-  if (sheet.is_estimated) return sheet.net_worth;
   return sheet.net_worth + transfersInTransit(db, {
     date: sheet.date,
     taken_at: sheet.taken_at,
