@@ -10,6 +10,7 @@ import {
   writeTransactionCategory,
 } from './categoryWrites';
 import { refreshRefundLinks, type RefundLinkResult } from './refundLinks';
+import { contradictsTransferDirection } from './rules';
 
 interface DuplicateRow {
   id: string;
@@ -589,7 +590,7 @@ function existingTransferLegs(db: Database.Database): Map<string, CandidateState
 }
 
 function legCategory(row: TransferRow, side: 'out' | 'in', cardPayment: boolean): string | null {
-  if (row.is_transfer_category === 1) return row.category_id;
+  if (row.is_transfer_category === 1 && !contradictsTransferDirection(row.category_id ?? '', row.amount)) return row.category_id;
   if (cardPayment) return 'cat_xfer_cc';
   return side === 'out' ? 'cat_xfer_out' : 'cat_xfer_in';
 }
@@ -871,10 +872,34 @@ export function dismissTransferPair(db: Database.Database, pairId: string): numb
   return legs.length;
 }
 
+/**
+ * A machine-written Transfer In on money leaving an account, or Transfer Out on money arriving, is
+ * wrong whatever wrote it, and the write guards only stop new ones. A leg of a pair takes its side's
+ * transfer category. Any other row goes back to the review queue uncategorized rather than to the
+ * opposite side: interest arriving under Transfer Out is income, not Transfer In.
+ */
+export function settleDirectionContradictions(db: Database.Database, now = new Date().toISOString()): number {
+  const rows = db.prepare(`
+    SELECT id, amount, transfer_status
+    FROM transactions
+    WHERE ((category_id = 'cat_xfer_in' AND amount < 0) OR (category_id = 'cat_xfer_out' AND amount > 0))
+      AND manually_categorized = 0 AND COALESCE(category_source, '') <> 'human'
+  `).all() as Array<{ id: string; amount: number; transfer_status: string }>;
+  let changed = 0;
+  for (const row of rows) {
+    const paired = row.transfer_status === 'confirmed' || row.transfer_status === 'candidate';
+    changed += writeTransactionCategory(db, paired
+      ? { transactionId: row.id, categoryId: row.amount > 0 ? 'cat_xfer_in' : 'cat_xfer_out', source: 'heuristic' }
+      : { transactionId: row.id, categoryId: null, source: null, reviewStatus: 'open' }, now);
+  }
+  return changed;
+}
+
 export function refreshTransactionIntegrity(db: Database.Database): TransactionIntegrityResult {
   const refresh = db.transaction(() => {
     const duplicates = refreshDuplicateCandidates(db);
     const transfers = refreshTransferCandidates(db);
+    settleDirectionContradictions(db);
     // After pairing, so a leg that just became a transfer is never taken for a refund.
     const refunds = refreshRefundLinks(db);
     return { duplicates, transfers, refunds };
