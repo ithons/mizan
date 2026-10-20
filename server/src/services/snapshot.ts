@@ -516,6 +516,27 @@ export function reconcileReconstructedHistory(options: { force?: boolean } = {})
 const PAIRED_TRANSFER = new Set(['candidate', 'confirmed']);
 
 /**
+ * What a row on a market-driven account added to its value from outside, in cents, or 0. Only
+ * external money is knowable: a buy funded from a bank raises value by its magnitude, a crypto
+ * sell leg is the mirror of a buy (so a convert nets to zero), and a contribution or withdrawal
+ * moves it by its signed amount. Buys with cash already inside, sells, dividends and the core
+ * sweep are market-neutral here, because the ledger cannot see prices.
+ */
+export function externalMarketFlow(
+  txn: { amount: number; category_id: string | null; transfer_status: string | null; is_internal_trade: number },
+  accountType: string
+): number {
+  const cat = txn.category_id ?? '';
+  if (cat === 'cat_inv_buy' || cat === 'cat_crypto_buy') return Math.abs(txn.amount);
+  if (cat === 'cat_crypto_sell') return -Math.abs(txn.amount);
+  if (txn.is_internal_trade === 0
+    && (cat === 'cat_inv_transfer' || (accountType !== 'crypto_wallet' && PAIRED_TRANSFER.has(txn.transfer_status ?? '')))) {
+    return txn.amount;
+  }
+  return 0;
+}
+
+/**
  * Observed values of each market-driven account, earliest first: its value in every measured
  * snapshot and every statement valuation. An estimate replays flows back from the nearest of these
  * at or after its date instead of from today's balance, so it meets each observation exactly.
@@ -695,28 +716,7 @@ export function backfillSnapshots(): void {
       const meta = accountMap[txn.account_id];
       // Transaction sign: negative = money out (expense), positive = money in (income).
       if (meta && marketValueTypes.has(meta.type)) {
-        // Market-driven account: only external money moving in/out changes value in a way we
-        // can reconstruct; internal buys-with-existing-cash, sells, and dividends leave the
-        // estimate flat (market moves are unknowable from transactions).
-        const cat = txn.category_id ?? '';
-        if (cat === 'cat_inv_buy' || cat === 'cat_crypto_buy') {
-          // Money spent to acquire assets (negative cash) RAISES value by its magnitude, so
-          // pre-purchase value was lower. Undo by subtracting the magnitude.
-          approxBalances[txn.account_id] -= Math.abs(txn.amount);
-        } else if (cat === 'cat_crypto_sell') {
-          // A crypto SELL leg is the mirror of a buy leg. Undo by ADDING back its magnitude.
-          // This makes a Coinbase convert (a matched crypto_sell + crypto_buy of equal USD) net
-          // to zero in the estimate, instead of the buy leg being counted as a phantom external
-          // contribution. (A real crypto→cash sell is treated as an outflow, a fair approximation.
-          // Fiat deposits/withdrawals into the wallet are left flat, so a buy funded by a separate
-          // deposit isn't double-counted.)
-          approxBalances[txn.account_id] += Math.abs(txn.amount);
-        } else if (txn.is_internal_trade === 0
-          && (cat === 'cat_inv_transfer' || (meta.type !== 'crypto_wallet' && PAIRED_TRANSFER.has(txn.transfer_status)))) {
-          // Sign-aware external flow: a contribution (+) means value was lower before; a
-          // withdrawal/correction (−) means it was higher. Undo by subtracting the amount.
-          approxBalances[txn.account_id] -= txn.amount;
-        }
+        approxBalances[txn.account_id] -= externalMarketFlow(txn, meta.type);
       } else if (meta?.is_liability) {
         // Liability balances are stored as positive "amount owed" and move OPPOSITE the
         // sign: a purchase (negative amount) raises what's owed, so undo by adding.

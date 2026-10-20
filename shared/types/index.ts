@@ -560,6 +560,44 @@ export interface CoinbaseConnection {
   created_at: string;
 }
 
+export type NetWorthTimelineStep = 'day' | 'week' | 'month';
+
+export type NetWorthTimelineAccount = {
+  id: string;
+  name: string;
+  type: string;
+  is_liability: boolean;
+  market_driven: boolean;
+  first_date: string | null;
+  /** What the ledger walk lands on just before the first row; null for a market-driven account. */
+  opening_balance: number | null;
+};
+
+export type NetWorthTimelinePoint = {
+  date: string;
+  net_worth: number;
+  assets: number;
+  liabilities: number;
+  liquid: number;
+  invested: number;
+  crypto: number;
+  /** True when any included market-driven account is between observations on this day. */
+  estimated: boolean;
+  /** Accounts whose value this day is known; one that opened away from zero is unknown before its first row. */
+  coverage: number;
+  /** Each included account's value, signed as an asset (a card owed is negative). */
+  by_account: Record<string, number>;
+};
+
+export type NetWorthTimeline = {
+  from: string;
+  to: string;
+  step: NetWorthTimelineStep;
+  accounts: NetWorthTimelineAccount[];
+  points: NetWorthTimelinePoint[];
+  method: string;
+};
+
 export interface NetWorthSnapshot {
   id: string;
   date: string;

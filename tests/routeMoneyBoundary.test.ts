@@ -3,9 +3,10 @@ import assert from 'node:assert/strict';
 import http from 'node:http';
 import express from 'express';
 import Database from 'better-sqlite3';
-import { migratedTestDb } from './helpers/schema';
+import { localDaysFromToday, migratedTestDb } from './helpers/schema';
 import { _setDbForTesting } from '../server/src/db/index';
 import accountsRouter from '../server/src/routes/accounts';
+import networthRouter from '../server/src/routes/networth';
 
 // The rest of the suite calls services directly and asserts in the cents domain, so the
 // cents<->dollars conversion that actually happens at the ROUTE boundary (migrations 018/022
@@ -62,4 +63,28 @@ test('GET /api/accounts returns balances in dollars, not the stored cents', asyn
     assert.equal(byId.acc_card.is_liability, true);
     assert.equal(byId.acc_check.currency, 'USD');
   });
+});
+
+test('GET /api/networth/timeline returns totals and per-account values in dollars, and refuses a bad step', async () => {
+  const db = setupDb();
+  db.prepare(`INSERT INTO transactions (id, account_id, date, amount, merchant_name, original_name, pending, is_manual, source_type, created_at, updated_at)
+    VALUES ('t1', 'acc_check', ?, 430719, 'Deposit', 'Deposit', 0, 1, 'manual', '2026-07-01T00:00:00Z', '2026-07-01T00:00:00Z')`).run(localDaysFromToday(-3));
+  _setDbForTesting(db);
+  const app = express();
+  app.use('/api/networth', networthRouter);
+  const server = http.createServer(app);
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+  try {
+    const addr = server.address();
+    if (!addr || typeof addr === 'string') throw new Error('no server address');
+    const base = `http://127.0.0.1:${addr.port}/api/networth/timeline`;
+    const body = (await (await fetch(`${base}?accounts=acc_check`)).json()) as { data: { points: Array<{ net_worth: number; by_account: Record<string, number> }> } };
+    const last = body.data.points.at(-1)!;
+    assert.equal(last.net_worth, 4307.19);
+    assert.equal(last.by_account.acc_check, 4307.19);
+    assert.equal((await fetch(`${base}?step=hour`)).status, 400);
+  } finally {
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+    db.close();
+  }
 });

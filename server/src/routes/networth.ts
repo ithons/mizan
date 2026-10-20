@@ -4,6 +4,7 @@ import { getDb } from '../db/index';
 import { dollarizeFields, toDollars } from '../services/money';
 import type Database from 'better-sqlite3';
 import { parseBreakdown, transfersInTransit } from '../services/inTransit';
+import { netWorthTimeline, type TimelineStep } from '../services/netWorthTimeline';
 import {
   readReconstructionFrontier,
   reconcileReconstructedHistory,
@@ -85,6 +86,38 @@ router.get('/snapshot', (_req: Request, res: Response, next: NextFunction): void
 });
 
 // GET /history?startDate&endDate&months
+const TIMELINE_MONEY_FIELDS = ['net_worth', 'assets', 'liabilities', 'liquid', 'invested', 'crypto'] as const;
+const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
+const STEPS: readonly TimelineStep[] = ['day', 'week', 'month'];
+
+router.get('/timeline', (req: Request, res: Response, next: NextFunction): void => {
+  try {
+    const { from, to, step, accounts } = req.query as Record<string, string | undefined>;
+    if ((from && !ISO_DATE.test(from)) || (to && !ISO_DATE.test(to))) {
+      res.status(400).json({ error: 'from and to must be yyyy-MM-dd' });
+      return;
+    }
+    if (step && !STEPS.includes(step as TimelineStep)) {
+      res.status(400).json({ error: `step must be one of ${STEPS.join(', ')}` });
+      return;
+    }
+    const accountIds = accounts ? accounts.split(',').filter(Boolean) : undefined;
+    const timeline = netWorthTimeline(getDb(), { from, to, step: step as TimelineStep | undefined, accountIds });
+    res.json({
+      data: {
+        ...timeline,
+        accounts: timeline.accounts.map((a) => ({ ...a, opening_balance: a.opening_balance === null ? null : toDollars(a.opening_balance) })),
+        points: timeline.points.map((p) => ({
+          ...dollarizeFields(p, TIMELINE_MONEY_FIELDS),
+          by_account: Object.fromEntries(Object.entries(p.by_account).map(([id, cents]) => [id, toDollars(cents)])),
+        })),
+      },
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
 router.get('/history', (req: Request, res: Response, next: NextFunction): void => {
   try {
     const db = getDb();
