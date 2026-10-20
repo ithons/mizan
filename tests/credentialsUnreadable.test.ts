@@ -15,6 +15,15 @@ import path from 'node:path';
 const SCRATCH = fs.mkdtempSync(path.join(os.tmpdir(), 'mizan-creds-'));
 process.env.MIZAN_DIR_OVERRIDE = SCRATCH;
 
+// The owner's real keychain entry is not this test's to read or create.
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+const { Entry } = require('@napi-rs/keyring') as typeof import('@napi-rs/keyring');
+let keychainValue: string | null = null;
+Entry.prototype.getPassword = () => keychainValue;
+Entry.prototype.setPassword = (value: string) => {
+  keychainValue = value;
+};
+
 // Imported through require rather than a top-level `await import` so the env assignment above
 // still runs first under the tests' CommonJS target.
 // eslint-disable-next-line @typescript-eslint/no-var-requires

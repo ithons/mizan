@@ -70,65 +70,83 @@ export function _resetCredentialsCacheForTesting(): void {
   _unreadable = null;
 }
 
+const HEX_KEY = /^[0-9a-f]{64}$/i;
+
+function keyFault(message: string): Error {
+  console.error(`[credentials] ${message}`);
+  return new Error(message);
+}
+
+function readKeychainKey(entry: Entry): Buffer | null {
+  let hexKey: string | null;
+  try {
+    hexKey = entry.getPassword();
+  } catch (err) {
+    throw keyFault(`Could not read the encryption key from the OS keychain: ${(err as Error).message}`);
+  }
+  if (hexKey === null) return null;
+  if (!HEX_KEY.test(hexKey)) {
+    // Not ours to overwrite: if it is a damaged copy of the real key, it is the only copy.
+    throw keyFault(
+      `The keychain entry mizan/encryption_key is not a 64-character hex key (length ${hexKey.length})`
+    );
+  }
+  return Buffer.from(hexKey, 'hex');
+}
+
+function migrateLegacyKeyFile(entry: Entry): Buffer {
+  console.log('[credentials] Migrating encryption key to native keychain...');
+  const key = fs.readFileSync(KEY_PATH);
+  const hexKey = key.toString('hex');
+  try {
+    entry.setPassword(hexKey);
+    if (entry.getPassword() === hexKey) {
+      fs.unlinkSync(KEY_PATH);
+      console.log('[credentials] Migration successful, removed legacy key file.');
+    } else {
+      console.warn('[credentials] Keychain verification failed. Legacy key file retained.');
+    }
+  } catch (err) {
+    console.error('[credentials] Failed to migrate key to keychain:', (err as Error).message);
+  }
+  return key;
+}
+
+/**
+ * A key is generated only when nothing can need the old one: no keychain entry, no legacy key
+ * file, and no credentials file. A key generated beside an existing credentials.json can never
+ * decrypt it, and storing it would replace the only key that could. Every other failure throws,
+ * which loadCredentials records as unreadable, so writes stay refused until the owner resolves it.
+ */
 function getDerivedKey(): Buffer {
   if (_key) return _key;
 
-  const service = 'mizan';
-  const account = 'encryption_key';
-  
-  let entry: Entry | null = null;
+  let entry: Entry;
   try {
-    entry = new Entry(service, account);
-    const hexKey = entry.getPassword();
-    if (hexKey && hexKey.length === 64) {
-      _key = Buffer.from(hexKey, 'hex');
-      return _key;
-    }
+    entry = new Entry('mizan', 'encryption_key');
   } catch (err) {
-    // If not found or keychain inaccessible, proceed to fallback/generation
+    throw keyFault(`Could not open the OS keychain: ${(err as Error).message}`);
+  }
+  const stored = readKeychainKey(entry);
+  if (stored) return (_key = stored);
+
+  if (fs.existsSync(KEY_PATH)) return (_key = migrateLegacyKeyFile(entry));
+
+  if (fs.existsSync(CREDENTIALS_PATH)) {
+    throw keyFault(
+      'The keychain holds no encryption key for the existing credentials file, and a new one could ' +
+        'never decrypt it. Restore the keychain entry from the machine that wrote the file'
+    );
   }
 
-  // Fallback to legacy file if it exists, to migrate gracefully
-  if (fs.existsSync(KEY_PATH)) {
-    console.log('[credentials] Migrating encryption key to native keychain...');
-    _key = fs.readFileSync(KEY_PATH);
-    const hexKey = _key.toString('hex');
-    
-    if (entry) {
-      try {
-        entry.setPassword(hexKey);
-        
-        // Verify write before deleting the fallback
-        const readBack = entry.getPassword();
-        if (readBack === hexKey) {
-          fs.unlinkSync(KEY_PATH);
-          console.log('[credentials] Migration successful, removed legacy key file.');
-        } else {
-          console.warn('[credentials] Keychain verification failed. Legacy key file retained.');
-        }
-        return _key;
-      } catch (err) {
-        console.error('[credentials] Failed to migrate key to keychain:', (err as Error).message);
-        return _key;
-      }
-    }
-    return _key;
+  const key = crypto.randomBytes(32);
+  try {
+    entry.setPassword(key.toString('hex'));
+  } catch (err) {
+    console.error('[credentials] Failed to store key in keychain, falling back to file:', (err as Error).message);
+    fs.writeFileSync(KEY_PATH, key, { mode: 0o600 });
   }
-
-  // Generate new key
-  _key = crypto.randomBytes(32);
-  if (entry) {
-    try {
-      entry.setPassword(_key.toString('hex'));
-    } catch (err) {
-      console.error('[credentials] Failed to store key in keychain, falling back to file:', (err as Error).message);
-      fs.writeFileSync(KEY_PATH, _key, { mode: 0o600 });
-    }
-  } else {
-    fs.writeFileSync(KEY_PATH, _key, { mode: 0o600 });
-  }
-
-  return _key;
+  return (_key = key);
 }
 
 function encrypt(plaintext: string): EncryptedFile {

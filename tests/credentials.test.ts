@@ -44,8 +44,9 @@ test('Credentials migration logic with verify-then-delete', async (t) => {
 
     // Mock Entry to simulate a broken keychain that accepts writes but returns wrong data
     let storedPass: string | null = null;
+    // Empty before the write, so the migration runs; a malformed entry on first read is refused.
     Entry.prototype.setPassword = function (pass: string) { storedPass = pass; };
-    Entry.prototype.getPassword = function () { return "wrong_data_read_back"; };
+    Entry.prototype.getPassword = function () { return storedPass === null ? null : "wrong_data_read_back"; };
 
     // Dynamic import to avoid caching issues if we can, but we'll use a hack to reset module cache or just rely on it
     // Because Node ESM doesn't easily reset module cache, we'll append a query string
