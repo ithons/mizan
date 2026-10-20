@@ -28,6 +28,7 @@ export const LOCAL_BACKUP_TABLES = [
   'accounts',
   'categories',
   'securities',
+  'security_prices',
   'transactions',
   'transaction_category_revisions',
   'transaction_field_revisions',

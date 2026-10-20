@@ -188,13 +188,27 @@ export const TABLE_MEANINGS: Record<string, TableMeaning> = {
     },
   },
   holdings_history: {
-    purpose: 'One row per holding per day, written by the sync.',
+    purpose: 'One row per holding per day: written by the sync, plus statement month-end positions.',
     columns: {
       date: { unit: LOCAL_DATE },
       quantity: { unit: 'REAL unit count, NOT money' },
       institution_price: { unit: 'REAL DOLLARS PER UNIT, not cents', note: 'Same exception as holdings.institution_price.' },
       institution_value: { unit: CENTS },
       cost_basis: { unit: CENTS, note: 'NULL means unknown.' },
+    },
+  },
+  account_valuations: {
+    purpose: 'An account value an institution stated, such as a statement ending value.',
+    columns: {
+      date: { unit: LOCAL_DATE },
+      value_cents: { unit: CENTS },
+    },
+  },
+  security_prices: {
+    purpose: 'Public daily closing prices of held securities.',
+    columns: {
+      date: { unit: LOCAL_DATE, note: 'Crypto closes are UTC days.' },
+      close: { unit: 'REAL DOLLARS PER UNIT, not cents' },
     },
   },
   securities: {

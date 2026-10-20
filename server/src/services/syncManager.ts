@@ -33,6 +33,7 @@ import { toCents, toDollars } from './money';
 import { triggerAfterSyncAiJobs } from './aiScheduler';
 import { withRetry } from './retry';
 import { evaluateNotifications } from './notifications';
+import { refreshSecurityPricesDaily } from './priceHistory';
 import type { NotificationEvaluationSummary } from '../../../shared/types';
 
 // SSE clients registry
@@ -788,6 +789,33 @@ async function _runFullSyncInternal(): Promise<void> {
     );
     const integrity = postSync.integrity;
     deferredError = postSync.deferredError;
+
+    // Public daily closes for held securities, once a day. Best effort: a quote source being down
+    // costs only computed investment values for days the app did not record, so it is reported
+    // as its own item and never fails the run.
+    try {
+      const prices = await refreshSecurityPricesDaily(db);
+      const failed = prices?.filter((p) => p.error) ?? [];
+      if (prices && failed.length) {
+        recordSyncRunItem(db, run.id, {
+          provider: 'system',
+          connection_id: 'security-prices',
+          institution_name: 'Daily security prices',
+          status: 'failed',
+          error_message: failed.map((p) => `${p.ticker}: ${p.error}`).join('; '),
+          recovery_action: 'Nothing to do; the next day\'s sync tries again.',
+        });
+      }
+    } catch (err) {
+      recordSyncRunItem(db, run.id, {
+        provider: 'system',
+        connection_id: 'security-prices',
+        institution_name: 'Daily security prices',
+        status: 'failed',
+        error_message: (err as Error).message || 'Price refresh failed',
+        recovery_action: 'Nothing to do; the next day\'s sync tries again.',
+      });
+    }
 
     // Reconstructed net-worth history. Conditional, so it lives here rather than in
     // `runPostSyncStages` alongside the stages that run every time, the same way the rollover
