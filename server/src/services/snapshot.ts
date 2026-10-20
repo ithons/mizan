@@ -515,6 +515,37 @@ export function reconcileReconstructedHistory(options: { force?: boolean } = {})
 
 const PAIRED_TRANSFER = new Set(['candidate', 'confirmed']);
 
+/**
+ * Observed values of each market-driven account, earliest first: its value in every measured
+ * snapshot and every statement valuation. An estimate replays flows back from the nearest of these
+ * at or after its date instead of from today's balance, so it meets each observation exactly.
+ */
+export function readMarketAnchors(db: Database.Database, accountIds: readonly string[]): Map<string, Array<{ date: string; value: number }>> {
+  const wanted = new Set(accountIds);
+  const byAccount = new Map<string, Map<string, number>>();
+  const put = (id: string, date: string, value: number) => {
+    if (!wanted.has(id)) return;
+    const dates = byAccount.get(id) ?? new Map<string, number>();
+    dates.set(date, value);
+    byAccount.set(id, dates);
+  };
+  for (const row of db.prepare('SELECT account_id, date, value_cents FROM account_valuations').all() as Array<{ account_id: string; date: string; value_cents: number }>) {
+    put(row.account_id, row.date, row.value_cents);
+  }
+  for (const row of db.prepare('SELECT date, breakdown FROM net_worth_snapshots WHERE is_estimated = 0').all() as Array<{ date: string; breakdown: string }>) {
+    let breakdown: Record<string, unknown>;
+    try {
+      breakdown = JSON.parse(row.breakdown) as Record<string, unknown>;
+    } catch {
+      continue;
+    }
+    for (const [id, value] of Object.entries(breakdown)) {
+      if (typeof value === 'number' && Number.isInteger(value)) put(id, row.date, value);
+    }
+  }
+  return new Map([...byAccount].map(([id, dates]) => [id, [...dates].map(([date, value]) => ({ date, value })).sort((a, b) => a.date.localeCompare(b.date))]));
+}
+
 export function backfillSnapshots(): void {
   const db = getDb();
   const now = new Date();
@@ -612,6 +643,7 @@ export function backfillSnapshots(): void {
   // Result: past value ≈ "what you'd contributed by then", a flagged estimate, not the
   // reverse-every-trade nonsense.
   const marketValueTypes = new Set(['brokerage', 'ira_traditional', 'ira_roth', 'crypto_wallet']);
+  const anchors = readMarketAnchors(db, accounts.filter((a) => marketValueTypes.has(a.type)).map((a) => a.id));
 
   // Walk backwards month by month across the full history.
   for (let monthsBack = 1; monthsBack <= monthsBackLimit; monthsBack++) {
@@ -646,16 +678,20 @@ export function backfillSnapshots(): void {
     // is omitted rather than carried back at today's balance, because carrying it back would put
     // a card that did not exist yet onto the balance sheet.
     const approxBalances: Record<string, number> = {};
+    const anchoredAt: Record<string, string> = {};
     for (const account of accounts) {
       const floor = floors.get(account.id);
       if (floor !== undefined && floor > targetStr) continue;
-      approxBalances[account.id] = account.current_balance;
+      const anchor = anchors.get(account.id)?.find((a) => a.date >= targetStr);
+      approxBalances[account.id] = anchor ? anchor.value : account.current_balance;
+      if (anchor) anchoredAt[account.id] = anchor.date;
     }
     const coveredAccounts = Object.keys(approxBalances).length;
 
     // Compute approximate balances at start of target month by reversing later transactions.
     for (const txn of laterTransactions) {
       if (approxBalances[txn.account_id] === undefined) continue;
+      if (anchoredAt[txn.account_id] !== undefined && txn.date > anchoredAt[txn.account_id]) continue;
       const meta = accountMap[txn.account_id];
       // Transaction sign: negative = money out (expense), positive = money in (income).
       if (meta && marketValueTypes.has(meta.type)) {
