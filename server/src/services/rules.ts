@@ -109,7 +109,7 @@ function transactionMerchantName(row: {
   return row.merchant_name || row.original_name;
 }
 
-function normalizeMerchantMatchValue(value: string | null | undefined): string {
+export function normalizeMerchantMatchValue(value: string | null | undefined): string {
   return (value ?? '')
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, ' ')
@@ -528,6 +528,25 @@ function loadOrderedMerchantRules(db: Database.Database): MerchantRule[] {
     WHERE retired_at IS NULL
   `).all() as MerchantRule[];
   return rules.sort((a, b) => compareRulePrecedence(precedenceOf(a), precedenceOf(b)));
+}
+
+/** The rule the whole-ledger rule pass resolves for each transaction, null where none matches. */
+export function resolveRulesByTransaction(db: Database.Database): Map<string, { ruleId: string; categoryId: string } | null> {
+  const rules = loadOrderedMerchantRules(db).map((rule) => ({
+    resolved: { ruleId: rule.id, categoryId: rule.category_id },
+    value: normalizeMerchantMatchValue(rule.pattern),
+  }));
+  const byName = new Map<string, { ruleId: string; categoryId: string } | null>();
+  const result = new Map<string, { ruleId: string; categoryId: string } | null>();
+  const rows = db.prepare('SELECT id, merchant_name, original_name FROM transactions').all() as Array<{
+    id: string; merchant_name: string | null; original_name: string;
+  }>;
+  for (const row of rows) {
+    const name = normalizeMerchantMatchValue(transactionMerchantName(row));
+    if (!byName.has(name)) byName.set(name, rules.find((rule) => normalizedMatch(name, rule.value))?.resolved ?? null);
+    result.set(row.id, byName.get(name) ?? null);
+  }
+  return result;
 }
 
 /**
