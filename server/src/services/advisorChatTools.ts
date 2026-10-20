@@ -68,7 +68,7 @@ export const ADVISOR_TOOLS: Anthropic.Tool[] = [
   {
     name: 'spending_by_category',
     description:
-      'Net spending grouped by top-level category over an optional date range, largest first. Amounts are dollars and are SIGNED: a category whose refunds and credits exceeded its purchases in the window is negative, and `total` is the signed sum of them all. percent_of_total is null whenever any category is negative or the total is not positive, because a share of a signed total does not add to 100; read share_note for which of those it was. Matches the Reports page exactly: transfers, investment and crypto flows, pending rows, and transactions the user resolved as duplicates are all excluded.',
+      'Net spending grouped by top-level category over an optional date range, largest first. Amounts are dollars and are SIGNED: a category whose refunds and credits exceeded its purchases in the window is negative, and `total` is the signed sum of them all. percent_of_total is null whenever any category is negative or the total is not positive, because a share of a signed total does not add to 100; read share_note for which of those it was. Matches the spending figures on the Balance screen exactly (both are getSpendingReport): transfers, investment and crypto flows, pending rows, and transactions the user resolved as duplicates are all excluded.',
     input_schema: {
       type: 'object',
       properties: {
@@ -81,7 +81,7 @@ export const ADVISOR_TOOLS: Anthropic.Tool[] = [
   {
     name: 'monthly_cashflow',
     description:
-      'Income, expenses, and net per calendar month for the last N months (default 6), newest first. Amounts in dollars. Matches the Cash flow page exactly: transfers, investment and crypto flows, pending rows, and resolved duplicates are excluded. Months are local calendar months.',
+      'Income, expenses, and net per calendar month for the last N months (default 6), newest first. Amounts in dollars. Matches the cash flow figures on the Balance screen exactly (both are getCashflowReport): transfers, investment and crypto flows, pending rows, and resolved duplicates are excluded. Months are local calendar months.',
     input_schema: {
       type: 'object',
       properties: {
@@ -151,7 +151,7 @@ export const ADVISOR_TOOLS: Anthropic.Tool[] = [
   {
     name: 'get_transaction_full',
     description:
-      'Every stored field of one transaction, including the flags that decide whether it counts: transfer_status, duplicate_status, pending, category_source and the AI action that last set the category. Amount is in dollars and negative means money left the account; quantity, when present, is a count of units of a security and is not money. reading.counts_toward_reports answers ONE question, "do the Reports and Cash flow pages include this row", evaluated with the predicates those pages use, and lists the reason whenever they do not. It does not answer it for budgets or reconciliation, which scope rows differently. Use this before making a claim about a specific row.',
+      'Every stored field of one transaction, including the flags that decide whether it counts: transfer_status, duplicate_status, pending, category_source and the AI action that last set the category. Amount is in dollars and negative means money left the account; quantity, when present, is a count of units of a security and is not money. reading.counts_toward_reports answers ONE question, "do the spending and cash flow reports include this row", evaluated with the predicates they use, and lists the reason whenever they do not. It does not answer it for budgets or reconciliation, which scope rows differently. Use this before making a claim about a specific row.',
     input_schema: {
       type: 'object',
       properties: { transaction_id: { type: 'string', description: 'Transaction id, from list_transactions.' } },
@@ -244,7 +244,7 @@ export const ADVISOR_TOOLS: Anthropic.Tool[] = [
   {
     name: 'describe_schema',
     description:
-      'What the columns MEAN, not just what they are called. Call it with NO arguments first: that returns every table with its purpose and its column names, full per-column units and notes for transactions, accounts and categories, the exact predicate text every spend or income query must apply (generated from the shared filter functions, so it is what the Reports page uses), the meaning of each enum value alongside its live distribution, the sign and unit rules, and which series are reconstructions rather than measurements. Call it AGAIN with tables: ["holdings"] to get the column meanings of any other table; that second form returns only those tables, not the whole dictionary again. A table marked detail = "names_only" has had its notes withheld to keep the answer small, which is NOT a statement that none exist, so expand a table before writing SQL against it. Paste the predicates rather than paraphrasing them. It also supplies today\'s LOCAL date, which SQLite\'s date(\'now\') does not agree with.',
+      'What the columns MEAN, not just what they are called. Call it with NO arguments first: that returns every table with its purpose and its column names, full per-column units and notes for transactions, accounts and categories, the exact predicate text every spend or income query must apply (generated from the shared filter functions, so it is what the spending and cash flow reports use), the meaning of each enum value alongside its live distribution, the sign and unit rules, and which series are reconstructions rather than measurements. Call it AGAIN with tables: ["holdings"] to get the column meanings of any other table; that second form returns only those tables, not the whole dictionary again. A table marked detail = "names_only" has had its notes withheld to keep the answer small, which is NOT a statement that none exist, so expand a table before writing SQL against it. Paste the predicates rather than paraphrasing them. It also supplies today\'s LOCAL date, which SQLite\'s date(\'now\') does not agree with.',
     input_schema: {
       type: 'object',
       properties: {
@@ -650,7 +650,7 @@ function getProvenanceSummaryTool(db: Database.Database): unknown {
 // (budgetProjection.ts), and reconciliation applies pending = 0 and nothing else
 // (reconciliation.ts), so a row can legitimately count on one screen and not another.
 const COUNTS_TOWARD_REPORTS_DEFINITION =
-  'Whether getSpendingReport (the Reports page) and getCashflowReport count this row: it must survive excluded_from_totals, sit outside the cat_xfer / cat_inv / cat_crypto category trees, have pending = 0, and land on the income or expense side. Evaluated with the same predicate strings describe_schema publishes, so it agrees with those two pages and with nothing else: budgets and reconciliation scope rows differently.';
+  'Whether getSpendingReport and getCashflowReport (the spending and cash flow figures on the Balance screen) count this row: it must survive excluded_from_totals, sit outside the cat_xfer / cat_inv / cat_crypto category trees, have pending = 0, and land on the income or expense side. Evaluated with the same predicate strings describe_schema publishes, so it agrees with those two reports and with nothing else: budgets and reconciliation scope rows differently.';
 
 function getTransactionFullTool(db: Database.Database, input: ToolInput): unknown {
   const id = str(input.transaction_id);

@@ -891,7 +891,7 @@ export function buildSchemaDoc(db: Database.Database, now: Date = new Date()): S
     ],
     predicates: {
       usage:
-        'EVERY query that sums transactions as spend or income must apply excluded_from_totals, must decide the side with income_side / expense_side rather than by the sign of the amount, and must carry report_scope_cte plus report_scope_condition so the transfer, investment and crypto category trees stay out. The first four strings are generated from services/transactionFilters.ts, so they are exactly what the Reports page uses. Paste them; do not paraphrase them. Skipping them is how the advisor once reported $1,695.00 of spending against Reports\' $75.00 on the same data. When a figure simply has to match the Reports page, prefer the spending_by_category and monthly_cashflow tools over writing it yourself.',
+        'EVERY query that sums transactions as spend or income must apply excluded_from_totals, must decide the side with income_side / expense_side rather than by the sign of the amount, and must carry report_scope_cte plus report_scope_condition so the transfer, investment and crypto category trees stay out. The first four strings are generated from services/transactionFilters.ts, so they are exactly what getSpendingReport and getCashflowReport use. Paste them; do not paraphrase them. Skipping them is how the advisor once reported $1,695.00 of spending against the spending report\'s $75.00 on the same data. When a figure simply has to match those reports, prefer the spending_by_category and monthly_cashflow tools over writing it yourself.',
       excluded_from_totals: excludedFromTotalsSql('t'),
       income_side: incomeSideSql('t', 'c'),
       expense_side: expenseSideSql('t', 'c'),
