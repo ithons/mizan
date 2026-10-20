@@ -2,18 +2,12 @@ import { Router, Request, Response, NextFunction } from 'express';
 import { getDb } from '../db/index';
 import { validate } from '../middleware/validate';
 import {
-  CoinbaseCredentialsSchema,
   CsvImportMappingSchema,
   DeleteDataSchema,
   BackupRestorePreviewSchema,
   BackupRestoreSchema,
-  SetPreferenceSchema,
 } from '../../../shared/schemas';
-import {
-  getCredentials,
-  getEnvCredentials,
-  updateCoinbaseCredentials,
-} from '../services/credentials';
+import { getCredentials, getEnvCredentials } from '../services/credentials';
 import { takeSnapshot } from '../services/snapshot';
 import { detectRecurring } from '../services/recurring';
 import { refreshTransactionIntegrity } from '../services/transactionIntegrity';
@@ -27,7 +21,6 @@ import {
 } from '../services/localBackup';
 import { buildCsvImportPreview, commitCsvImport } from '../services/csvImport';
 import { listDataImportRuns, recordDataImportRun } from '../services/importRuns';
-import { getPreference, setPreference } from '../services/preferences';
 import {
   buildTransactionsCsv,
   transactionCsvFilename,
@@ -43,10 +36,6 @@ const router = Router();
  * rebuilding the database.
  */
 const FACTORY_RESET_PRESERVED: ReadonlySet<LocalRestoreTableName> = new Set(['categories']);
-
-function routeParam(value: string | string[] | undefined): string | null {
-  return typeof value === 'string' && value.length > 0 ? value : null;
-}
 
 // GET /credentials
 router.get('/credentials', (_req: Request, res: Response, next: NextFunction): void => {
@@ -64,22 +53,6 @@ router.get('/credentials', (_req: Request, res: Response, next: NextFunction): v
     next(err);
   }
 });
-
-
-
-// POST /credentials/coinbase
-router.post(
-  '/credentials/coinbase',
-  validate(CoinbaseCredentialsSchema),
-  (req: Request, res: Response, next: NextFunction): void => {
-    try {
-      updateCoinbaseCredentials(req.body as { keyName: string; privateKey: string });
-      res.json({ data: { success: true } });
-    } catch (err) {
-      next(err);
-    }
-  }
-);
 
 // GET /export-csv
 router.get('/export-csv', (req: Request, res: Response, next: NextFunction): void => {
@@ -130,38 +103,6 @@ router.get('/backup-json', (_req: Request, res: Response, next: NextFunction): v
     next(err);
   }
 });
-
-router.get('/preferences/:key', (req: Request, res: Response, next: NextFunction): void => {
-  try {
-    const key = routeParam(req.params.key);
-    if (!key) {
-      res.status(400).json({ error: 'Invalid preference key' });
-      return;
-    }
-
-    res.json({ data: getPreference(getDb(), key) });
-  } catch (err) {
-    next(err);
-  }
-});
-
-router.put(
-  '/preferences/:key',
-  validate(SetPreferenceSchema),
-  (req: Request, res: Response, next: NextFunction): void => {
-    try {
-      const key = routeParam(req.params.key);
-      if (!key) {
-        res.status(400).json({ error: 'Invalid preference key' });
-        return;
-      }
-
-      res.json({ data: setPreference(getDb(), key, req.body.value) });
-    } catch (err) {
-      next(err);
-    }
-  }
-);
 
 router.get('/import-runs', (req: Request, res: Response, next: NextFunction): void => {
   try {

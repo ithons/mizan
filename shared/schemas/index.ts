@@ -202,10 +202,6 @@ export const BackupRestoreSchema = BackupRestorePreviewSchema.extend({
   confirm: z.literal('restore'),
 });
 
-export const SetPreferenceSchema = z.object({
-  value: z.unknown(),
-});
-
 export const CsvImportMappingSchema = z.object({
   date: z.string(),
   amount: z.string(),

@@ -19,7 +19,6 @@ import type {
   AiMemoryRevision,
   AiStreamEvent,
   AppNotification,
-  AppPreference,
   Budget,
   BudgetRolloverLedgerEntry,
   CashflowReport,
@@ -642,20 +641,8 @@ export const coinbaseApi = {
 
 export const settingsApi = {
   getCredentials: () => apiFetch<CredentialStatus>('/api/settings/credentials'),
-  getPreference: <T = unknown>(key: string) =>
-    apiFetch<AppPreference<T> | null>(`/api/settings/preferences/${encodeURIComponent(key)}`),
-  setPreference: <T = unknown>(key: string, value: T) =>
-    apiFetch<AppPreference<T>>(`/api/settings/preferences/${encodeURIComponent(key)}`, {
-      method: 'PUT',
-      body: JSON.stringify({ value }),
-    }),
   importRuns: (limit = 20) =>
     apiFetch<DataImportRun[]>(`/api/settings/import-runs?limit=${limit}`),
-  saveCoinbaseCredentials: (body: { keyName: string; privateKey: string }) =>
-    apiFetch<void>('/api/settings/credentials/coinbase', {
-      method: 'POST',
-      body: JSON.stringify(body),
-    }),
   exportCsv: async (format: 'mizan' | 'monarch' = 'mizan') => {
     const query = format === 'monarch' ? '?format=monarch' : '';
     const res = await fetch(`/api/settings/export-csv${query}`);
