@@ -33,7 +33,6 @@ export interface TransactionListFilters {
   pending?: boolean;
   recurring?: boolean;
   uncategorized?: boolean;
-  reviewStatus?: string;
   type?: 'income' | 'expense';
   /**
    * Exactly these rows. The one predicate the ledger cannot write as a column comparison: which
@@ -172,7 +171,6 @@ function foldable(filters: TransactionListFilters): boolean {
     && filters.uncategorized === undefined
     && filters.duplicateStatus === undefined
     && filters.transferStatus === undefined
-    && filters.reviewStatus === undefined
     && filters.type === undefined
     && filters.minAmount === undefined
     && filters.maxAmount === undefined;
@@ -235,10 +233,6 @@ export function listTransactions(db: Database.Database, filters: TransactionList
   }
   if (filters.uncategorized !== undefined) {
     conditions.push(filters.uncategorized ? 't.category_id IS NULL' : 't.category_id IS NOT NULL');
-  }
-  if (filters.reviewStatus !== undefined) {
-    conditions.push('t.review_status = ?');
-    params.push(filters.reviewStatus);
   }
   if (filters.type === 'income') {
     conditions.push('t.amount > 0');

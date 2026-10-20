@@ -155,7 +155,6 @@ export const transactionsApi = {
     if (params.pending != null) q.set('pending', String(params.pending));
     if (params.recurring != null) q.set('recurring', String(params.recurring));
     if (params.uncategorized != null) q.set('uncategorized', String(params.uncategorized));
-    if (params.reviewStatus) q.set('reviewStatus', params.reviewStatus);
     if (params.type) q.set('type', params.type);
     if (params.duplicateStatus) q.set('duplicateStatus', params.duplicateStatus);
     if (params.transferStatus) q.set('transferStatus', params.transferStatus);

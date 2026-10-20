@@ -196,14 +196,6 @@ router.get('/', (req: Request, res: Response, next: NextFunction): void => {
       }
       filters.uncategorized = uncategorized;
     }
-    if (query.reviewStatus !== undefined) {
-      const reviewStatus = Array.isArray(query.reviewStatus) ? query.reviewStatus[0] : query.reviewStatus;
-      if (!['open', 'reviewed', 'dismissed'].includes(reviewStatus)) {
-        res.status(400).json({ error: 'Invalid reviewStatus filter' });
-        return;
-      }
-      filters.reviewStatus = reviewStatus;
-    }
     if (query.type !== undefined) {
       const type = Array.isArray(query.type) ? query.type[0] : query.type;
       if (type === 'income' || type === 'expense') {

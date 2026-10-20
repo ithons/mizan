@@ -1241,7 +1241,6 @@ export interface TransactionFilters {
   pending?: boolean;
   recurring?: boolean;
   uncategorized?: boolean;
-  reviewStatus?: 'open' | 'reviewed' | 'dismissed';
   type?: string;
   /** Exactly these rows. Capped by the server; see MAX_ID_FILTER in routes/transactions.ts. */
   ids?: string[];
