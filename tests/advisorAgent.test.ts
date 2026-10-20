@@ -8,6 +8,7 @@ import { confirmAdvisorDraftsByIds } from '../server/src/services/advisorDrafts'
 import { ADVISOR_TOOLS, runAdvisorTool } from '../server/src/services/advisorChatTools';
 import { ADVISOR_SYSTEM_PROMPT } from '../server/src/services/aiContext';
 import { createMemory } from '../server/src/services/aiMemory';
+import { CARVE_OUT_WRITES_WITHOUT_A_DRAFT_KIND, DRAFT_KIND_AUTONOMY } from '../server/src/services/draftAutonomy';
 import { insertAccount, insertTransaction, migratedTestDb } from './helpers/schema';
 
 function propose(db: Database.Database, payload: Record<string, unknown>) {
@@ -101,6 +102,31 @@ test('every new ability is registered as a tool and named in the prompt', () => 
   }
   assert.match(ADVISOR_SYSTEM_PROMPT, /propose_changes/);
   assert.match(ADVISOR_SYSTEM_PROMPT, /remember/);
+});
+
+test('every name the prompt uses is a real tool or draft kind, and no write it promises lacks a kind', () => {
+  const tools = new Set(ADVISOR_TOOLS.map((tool) => tool.name));
+  const kinds = new Set(Object.keys(DRAFT_KIND_AUTONOMY));
+  for (const token of ADVISOR_SYSTEM_PROMPT.match(/\b[a-z]+(?:_[a-z]+)+\b/g) ?? []) {
+    assert.ok(tools.has(token) || kinds.has(token), `the prompt names ${token}, which is neither a tool nor a draft kind`);
+  }
+  for (const write of CARVE_OUT_WRITES_WITHOUT_A_DRAFT_KIND) {
+    assert.doesNotMatch(ADVISOR_SYSTEM_PROMPT, new RegExp(write));
+  }
+
+  const promised = /update something \(([^)]*)\), use propose_changes/.exec(ADVISOR_SYSTEM_PROMPT);
+  assert.ok(promised, 'the propose_changes list moved; re-point this test at it');
+  const kindFor: Record<string, string> = {
+    'a budget': 'update_budget',
+    'a goal': 'update_goal_target',
+    'an account balance such as the cash in their wallet': 'update_account',
+    'a recurring bill': 'confirm_recurring',
+    'a notification rule': 'set_notification_rule',
+  };
+  for (const noun of promised[1].split(', ')) {
+    assert.ok(kindFor[noun], `the prompt promises to change "${noun}" and no draft kind is mapped to it`);
+    assert.ok(kinds.has(kindFor[noun]), `${kindFor[noun]} is not a draft kind`);
+  }
 });
 
 test('the waiting list holds open proposals only, newest first', () => {
