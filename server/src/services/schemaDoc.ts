@@ -150,7 +150,7 @@ export const TABLE_MEANINGS: Record<string, TableMeaning> = {
     purpose: 'One monthly limit per category. Set by the owner, so never overwrite one without asking.',
     columns: {
       amount: { unit: CENTS, note: 'The current limit. A closed month is judged against the amount that was in force then, held in budget_rollover_ledger.' },
-      rollover_balance: { unit: CENTS, note: 'Unused: written as 0 when a budget is created and never updated or read. It is NOT the carry. The carry is derived from spending on every read, and get_budgets reports it.' },
+      rollover_balance: { unit: CENTS, note: 'Unused: written as 0 when a budget is created, never updated, and no figure is derived from it. It is NOT the carry. The carry is derived from spending on every read, and get_budgets reports it.' },
       rollover: { unit: FLAG },
     },
   },
