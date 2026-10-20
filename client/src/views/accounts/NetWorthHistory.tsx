@@ -60,7 +60,7 @@ export function NetWorthHistory({ accounts }: { accounts: Account[] }) {
     setParams(next, { replace: true });
   };
 
-  const eligible = useMemo(() => accounts.filter((a) => !a.is_hidden && !a.balance_only), [accounts]);
+  const eligible = useMemo(() => accounts.filter((a) => !a.is_hidden), [accounts]);
   const included = eligible.filter((a) => !excluded.has(a.id)).map((a) => a.id);
   const years = RANGES.find((r) => r.id === range)!.years;
   const from = range === 'Custom' ? params.get('hfrom') ?? undefined : years ? format(subYears(new Date(), years), 'yyyy-MM-dd') : undefined;

@@ -142,7 +142,8 @@ export function pricedMarketValues(
   return out;
 }
 
-function readReportedValues(db: Database.Database, wanted: ReadonlySet<string>): Map<string, Map<string, number>> {
+/** Values recorded for these accounts by day: statement valuations, overridden by measured sheets. In cents, as stored. */
+export function readRecordedValues(db: Database.Database, wanted: ReadonlySet<string>): Map<string, Map<string, number>> {
   const byAccount = new Map<string, Map<string, number>>();
   const put = (id: string, date: string, value: number) => {
     if (!wanted.has(id)) return;
@@ -179,7 +180,7 @@ export function readMarketAnchors(
   today = format(new Date(), 'yyyy-MM-dd'),
 ): Map<string, Array<{ date: string; value: number }>> {
   const wanted = new Set(accountIds);
-  const reported = readReportedValues(db, wanted);
+  const reported = readRecordedValues(db, wanted);
   const checkedAgainst = new Map([...reported].map(([id, dates]) => [id, new Map(dates)]));
   for (const row of db.prepare(`SELECT id, current_balance FROM accounts WHERE id IN (${accountIds.map(() => '?').join(',')})`).all(...accountIds) as Array<{ id: string; current_balance: number }>) {
     const dates = checkedAgainst.get(row.id) ?? new Map<string, number>();

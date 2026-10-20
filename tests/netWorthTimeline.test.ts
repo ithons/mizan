@@ -100,3 +100,43 @@ test('today is every account\'s current balance, even where an earlier observati
   const last = netWorthTimeline(db, { today: TODAY }).points.at(-1)!;
   assert.deepEqual([last.date, last.net_worth, last.estimated], [TODAY, 130000, false]);
 });
+
+function sheet(db: Database.Database, date: string, breakdown: Record<string, number>) {
+  const netWorth = Object.values(breakdown).reduce((sum, value) => sum + value, 0);
+  db.prepare(`INSERT INTO net_worth_snapshots (id, date, total_assets, total_liabilities, net_worth, breakdown, is_estimated, created_at)
+    VALUES (?, ?, ?, 0, ?, ?, 0, ?)`).run(`sheet_${date}`, date, netWorth, netWorth, JSON.stringify(breakdown), `${date}T20:00:00Z`);
+}
+
+test('an account that holds a balance only carries each recorded value until the next, and is unknown before the first', () => {
+  const { db } = cashAndCard();
+  const wallet = insertAccount(db, { account_name: 'Wallet', type: 'cash', current_balance: 0 });
+  db.prepare('UPDATE accounts SET balance_only = 1 WHERE id = ?').run(wallet);
+  sheet(db, '2026-02-10', { [wallet]: 38000 });
+  sheet(db, '2026-03-05', { [wallet]: 30000 });
+
+  const { points } = netWorthTimeline(db, { today: TODAY });
+  const on = (date: string) => points.find((p) => p.date === date)!;
+  assert.equal(on('2026-02-09').by_account[wallet], undefined);
+  assert.equal(on('2026-02-10').by_account[wallet], 38000);
+  assert.equal(on('2026-03-04').by_account[wallet], 38000);
+  assert.equal(on('2026-03-30').by_account[wallet], 30000);
+  assert.equal(on(TODAY).by_account[wallet], 0);
+  assert.ok(points.every((p) => !p.estimated_accounts.includes(wallet)));
+});
+
+test('naming a hidden account draws it, while the whole-book series leaves it out', () => {
+  const { db } = cashAndCard();
+  const hidden = insertAccount(db, { account_name: 'Old savings', type: 'savings', current_balance: 1200, is_hidden: 1 });
+  insertTransaction(db, { account_id: hidden, date: '2026-02-01', amount: 1200 });
+  assert.equal(netWorthTimeline(db, { today: TODAY }).points.at(-1)!.by_account[hidden], undefined);
+  assert.equal(netWorthTimeline(db, { today: TODAY, accountIds: [hidden] }).points.at(-1)!.by_account[hidden], 1200);
+});
+
+test('HEALTHY: with nothing arriving after a sheet was read, the timeline lands on that sheet to the cent', () => {
+  const { db, checking, card } = cashAndCard();
+  sheet(db, '2026-02-03', { [checking]: 70000, [card]: 0 });
+  sheet(db, '2026-02-20', { [checking]: 70000, [card]: 2500 });
+  const { points } = netWorthTimeline(db, { today: TODAY });
+  assert.equal(points.find((p) => p.date === '2026-02-03')!.net_worth, 70000);
+  assert.equal(points.find((p) => p.date === '2026-02-20')!.net_worth, 70000 - 2500);
+});

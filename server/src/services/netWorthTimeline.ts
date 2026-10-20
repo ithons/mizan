@@ -1,7 +1,7 @@
 import type Database from 'better-sqlite3';
 import { addDays, format, parseISO } from 'date-fns';
 import { MARKET_DRIVEN_TYPES, bucketOf } from '../../../shared/accountTypes';
-import { readMarketAnchors } from './marketValuation';
+import { readMarketAnchors, readRecordedValues } from './marketValuation';
 import { externalMarketFlow } from './portfolioFlows';
 import type { NetWorthTimelineAccount, NetWorthTimelinePoint, NetWorthTimelineStep } from '../../../shared/types';
 
@@ -15,6 +15,7 @@ interface AccountRow {
   type: string;
   is_liability: number;
   current_balance: number;
+  balance_only: number;
 }
 
 interface TxnRow {
@@ -51,6 +52,18 @@ function accountSeries(
   const first = txns.length ? txns[0].date : null;
   const values: Array<number | null> = new Array(calendar.length).fill(null);
   const observed: boolean[] = new Array(calendar.length).fill(!market);
+
+  if (account.balance_only) {
+    // Every change to such a balance is an edit, and every edit writes a sheet, so the value last
+    // recorded is the value the app held until the next one.
+    const sign = account.is_liability ? -1 : 1;
+    const recorded = [...anchors, { date: today, value: account.current_balance }];
+    for (let i = 0, r = -1; i < calendar.length; i++) {
+      while (r + 1 < recorded.length && recorded[r + 1].date <= calendar[i]) r++;
+      if (r >= 0) values[i] = sign * recorded[r].value;
+    }
+    return { values, observed, first: recorded[0].date, opening: null };
+  }
 
   if (!market) {
     // A liability's balance is owed and moves against the sign; negate both so the walk is one rule.
@@ -98,23 +111,19 @@ function accountSeries(
   return { values, observed, first, opening: null };
 }
 
-/**
- * Net worth on every day from `from` to `to`, built per account: cash and cards by walking their
- * ledger back from today's balance (exact), investment and crypto accounts from their observed
- * values (measured snapshots and statement valuations) with only external money replayed between
- * observations. Pure read.
- */
+/** Net worth on every day from `from` to `to`, built per account as METHOD says. Pure read. */
 export function netWorthTimeline(
   db: Database.Database,
   options: { from?: string; to?: string; accountIds?: readonly string[]; step?: TimelineStep; today?: string } = {},
 ) {
   const today = options.today ?? format(new Date(), 'yyyy-MM-dd');
   const step = options.step ?? 'day';
-  const all = db.prepare(`
-    SELECT id, account_name, type, is_liability, current_balance FROM accounts
-    WHERE is_hidden = 0 AND balance_only = 0
-  `).all() as AccountRow[];
   const wanted = options.accountIds?.length ? new Set(options.accountIds) : null;
+  // Naming an account asks for it, so a hidden one is drawn on its own page.
+  const all = db.prepare(`
+    SELECT id, account_name, type, is_liability, current_balance, balance_only FROM accounts
+    ${wanted ? '' : 'WHERE is_hidden = 0'}
+  `).all() as AccountRow[];
   const accounts = wanted ? all.filter((a) => wanted.has(a.id)) : all;
   const txnsByAccount = new Map<string, TxnRow[]>();
   for (const txn of db.prepare(`
@@ -131,7 +140,11 @@ export function netWorthTimeline(
   if (from > to) return { from, to, step, accounts: [], points: [], method: METHOD };
 
   const calendar = days(from, to);
-  const anchors = readMarketAnchors(db, accounts.filter((a) => MARKET_DRIVEN_TYPES.has(a.type)).map((a) => a.id), today);
+  const anchors = readMarketAnchors(db, accounts.filter((a) => MARKET_DRIVEN_TYPES.has(a.type) && !a.balance_only).map((a) => a.id), today);
+  const balanceOnly = accounts.filter((a) => a.balance_only).map((a) => a.id);
+  for (const [id, dates] of readRecordedValues(db, new Set(balanceOnly))) {
+    anchors.set(id, [...dates].filter(([date]) => date < today).map(([date, value]) => ({ date, value })).sort((a, b) => a.date.localeCompare(b.date)));
+  }
   const series = accounts.map((a) => ({ account: a, ...accountSeries(a, txnsByAccount.get(a.id) ?? [], calendar, anchors.get(a.id) ?? [], today) }));
 
   const points: TimelinePoint[] = calendar.map((date, i) => {
@@ -173,4 +186,4 @@ export function netWorthTimeline(
   };
 }
 
-const METHOD = 'Checking, savings and cards are walked back day by day from today\'s balance through every posted transaction, which reproduces each imported statement to the cent. Investment and crypto accounts are valued at each day\'s positions times that day\'s public closing price, where the ledger states every quantity; a recorded balance or a statement overrides that on its own day. Days without known positions or prices replay only money moving in or out from the next known value, holding prices flat, and are estimates. An account counts as zero before its first transaction when its walk opens at zero, and as unknown otherwise. A week or month step shows the last day of each period. Balance-only accounts carry no history and are left out.';
+const METHOD = 'Checking, savings and cards are walked back day by day from today\'s balance through every posted transaction, so a day reads what the ledger holds for it now; that can differ from the balance recorded when a sync ran, where a transaction posted or arrived after that sync. Investment and crypto accounts are valued at each day\'s positions times that day\'s public closing price, where the ledger states every quantity and the recorded holdings agree with the balance the institution reported; a recorded balance or a statement overrides that on its own day. Days without known positions or prices replay only money moving in or out from the next known value, holding prices flat, and are estimates. An account that holds a balance only carries the value last recorded for it, and is unknown before the first. An account counts as zero before its first transaction when its walk opens at zero, and as unknown otherwise. A week or month step shows the last day of each period.';
