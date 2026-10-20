@@ -887,10 +887,6 @@ export function Settings() {
             </ExpandedPanel>
           )}
         </div>
-
-        <div className="mt-8 text-note leading-relaxed text-muted-2">
-          Mizān v1.0 · data stored in <span className="font-mono text-note">.mizan/</span> · MIT licensed
-        </div>
       </div>
     </Screen>
   );

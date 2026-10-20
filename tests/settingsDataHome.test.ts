@@ -27,3 +27,9 @@ test('HEALTHY: DataSection still offers every export, restore and the reset', ()
   assert.match(data, /Restore Backup/);
   assert.match(data, /Delete All Data/);
 });
+
+test('Settings states no version number or data path that nothing reads', () => {
+  const settings = read('client/src/views/settings/Settings.tsx');
+  assert.doesNotMatch(settings, /v\d+\.\d+/);
+  assert.doesNotMatch(settings, /data stored in/);
+});
