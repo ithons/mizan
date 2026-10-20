@@ -8,10 +8,9 @@ import type {
   Goal,
   SafeToSpend,
 } from '@shared/types';
-import { accountsApi, budgetsApi, categoriesApi, goalsApi, insightsApi, recurringApi } from '../lib/api';
+import { accountsApi, budgetsApi, categoriesApi, goalsApi, insightsApi } from '../lib/api';
 import { formatCurrency, formatWholeCurrency } from '../lib/formatters';
 import { availableBudgetAmount, budgetActualSpend, buildBudgetRowMeta } from '../lib/budgetMath';
-import { buildGoalForecastSummary, type GoalForecastInsight } from '../lib/goalForecast';
 import { invalidateFinancialData } from '../lib/queryInvalidation';
 import { parseDecimalInput } from '../lib/numberInput';
 import { useAppStore } from '../store';
@@ -278,32 +277,14 @@ function BudgetLine({
 }
 
 /**
- * What a goal says beyond its own two numbers.
- *
- * The target date is what the owner ASKED for and the projection is what the contribution rate
- * actually buys, so they are labelled separately: rendering the target as "full by <date>" claimed
- * the goal would be funded by then even when the forecast said otherwise.
+ * What a goal says beyond its own two numbers. No projected date or monthly rate: nothing measures
+ * what the owner will put toward a goal, and the advisor's goal timeline takes it as an input.
  */
-function goalNote(goal: Goal, insight?: GoalForecastInsight): string {
-  const projectedMonthly = insight?.projected_monthly_contribution ?? 0;
+function goalNote(goal: Goal): string {
   const parts: string[] = [];
-
-  if (projectedMonthly > 0 && goal.remaining_amount > 0) {
-    parts.push(`about ${formatWholeCurrency(projectedMonthly)} a month`);
-  }
-
-  if (goal.remaining_amount <= 0) {
-    parts.push('complete');
-  } else {
-    if (goal.target_date) parts.push(`target ${format(parseISO(goal.target_date), 'MMM yyyy')}`);
-    if (insight?.projected_completion_date) {
-      parts.push(`projected ${format(parseISO(insight.projected_completion_date), 'MMM yyyy')}`);
-    } else if (insight?.status === 'blocked') {
-      parts.push('no projected date at this rate');
-    } else if (!goal.target_date && goal.progress_amount <= 0) {
-      parts.push('just started');
-    }
-  }
+  if (goal.remaining_amount <= 0) parts.push('complete');
+  else if (goal.target_date) parts.push(`target ${format(parseISO(goal.target_date), 'MMM yyyy')}`);
+  else if (goal.progress_amount <= 0) parts.push('just started');
 
   if (parts.length === 0) {
     return goal.account_name ? `funded from ${goal.account_name}` : 'no target date set';
@@ -311,15 +292,7 @@ function goalNote(goal: Goal, insight?: GoalForecastInsight): string {
   return goal.account_name ? `${parts.join(' · ')} · from ${goal.account_name}` : parts.join(' · ');
 }
 
-function GoalLine({
-  goal,
-  insight,
-  onEdit,
-}: {
-  goal: Goal;
-  insight?: GoalForecastInsight;
-  onEdit: () => void;
-}) {
+function GoalLine({ goal, onEdit }: { goal: Goal; onEdit: () => void }) {
   const fraction = goal.target_amount > 0 ? goal.progress_amount / goal.target_amount : 0;
   const pct = Math.round(Math.min(100, Math.max(0, fraction * 100)));
 
@@ -341,7 +314,7 @@ function GoalLine({
       <ProgressBar fraction={fraction} tone="sage" height={8} />
       <div className="mt-2 flex flex-wrap items-baseline gap-x-4 gap-y-1 text-note">
         <span className="tabular-nums text-muted">{pct}% funded</span>
-        <span className="text-muted-2">{goalNote(goal, insight)}</span>
+        <span className="text-muted-2">{goalNote(goal)}</span>
       </div>
     </div>
   );
@@ -590,7 +563,6 @@ export function Plan() {
   });
   const categoriesQ = useQuery({ queryKey: ['categories'], queryFn: () => categoriesApi.list() });
   const goalsQ = useQuery({ queryKey: ['goals', 'all'], queryFn: () => goalsApi.list({ includeArchived: true }) });
-  const forecastQ = useQuery({ queryKey: ['recurring', 'forecast', 30], queryFn: () => recurringApi.forecast(30) });
 
   // A failed request used to render as an empty section, indistinguishable from no data.
   const failableQueries = [
@@ -601,7 +573,6 @@ export function Plan() {
     ...(viewingPastMonth ? [{ query: openMonthBudgetsQ, label: "this month's budgets" }] : []),
     { query: categoriesQ, label: 'categories' },
     { query: goalsQ, label: 'goals' },
-    { query: forecastQ, label: 'the recurring forecast' },
   ];
 
   const budgets = budgetsQ.data ?? [];
@@ -609,14 +580,6 @@ export function Plan() {
   const active = useMemo(() => goals.filter((g) => !g.is_archived), [goals]);
   const archived = useMemo(() => goals.filter((g) => g.is_archived), [goals]);
 
-  const forecastSummary = useMemo(
-    () => buildGoalForecastSummary({ goals: active, forecast: forecastQ.data ?? undefined }),
-    [active, forecastQ.data]
-  );
-  const insightByGoal = useMemo(
-    () => new Map(forecastSummary.insights.map((i) => [i.goal_id, i])),
-    [forecastSummary]
-  );
   const spendScale = useMemo(() => signedBarScale(budgets.map(budgetActualSpend)), [budgets]);
 
   const restore = useMutation({
@@ -716,7 +679,6 @@ export function Plan() {
               <GoalLine
                 key={goal.id}
                 goal={goal}
-                insight={insightByGoal.get(goal.id)}
                 onEdit={() => setGoalModal({ open: true, editing: goal })}
               />
             ))}
