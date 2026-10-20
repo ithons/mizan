@@ -181,39 +181,21 @@ test('HEALTHY: an active, freshly synced connection raises nothing about sync', 
   db.close();
 });
 
-// ─── A retired rule is not a live one ─────────────────────────────────────────
+// ─── A clean ledger earns no categorization card ──────────────────────────────
 
-test('"Categorization is clean" counts only rules that still run', async () => {
+test('HEALTHY: a fully categorized ledger shows no categorization insight, and a set-aside row does not make it claim one', async () => {
   const db = migratedTestDb();
   const account = insertAccount(db, { type: 'checking', current_balance: 100000 });
   insertTransaction(db, { account_id: account, date: dayThisMonth(2), amount: -1000, category_id: 'cat_food' });
-
-  const rule = db.prepare(`
-    INSERT INTO merchant_rules (id, pattern, category_id, created_at, source, retired_at)
-    VALUES (?, ?, 'cat_food', ?, 'human', ?)
-  `);
-  rule.run('r_live_1', 'Alpha', TEST_NOW, null);
-  rule.run('r_live_2', 'Beta', TEST_NOW, null);
-  rule.run('r_retired', 'Gamma', TEST_NOW, TEST_NOW);
-
-  const row = (await insights(db)).find((r) => r.id === 'rules-working');
-  assert.ok(row);
-  assert.equal(row.message, 'All posted transactions are categorized and 2 merchant rules are live.');
-
-  db.close();
-});
-
-test('one live rule reads with a singular verb', async () => {
-  const db = migratedTestDb();
-  const account = insertAccount(db, { type: 'checking', current_balance: 100000 });
-  insertTransaction(db, { account_id: account, date: dayThisMonth(2), amount: -1000, category_id: 'cat_food' });
+  insertTransaction(db, { account_id: account, date: dayThisMonth(3), amount: -500, category_id: null, review_status: 'dismissed' });
   db.prepare(`
     INSERT INTO merchant_rules (id, pattern, category_id, created_at, source, retired_at)
-    VALUES ('r_only', 'Alpha', 'cat_food', ?, 'human', NULL)
+    VALUES ('r_live', 'Alpha', 'cat_food', ?, 'human', NULL)
   `).run(TEST_NOW);
 
-  const row = (await insights(db)).find((r) => r.id === 'rules-working');
-  assert.match(row?.message ?? '', /1 merchant rule is live\.$/);
+  const ids = (await insights(db)).map((row) => row.id);
+  assert.ok(!ids.includes('uncategorized-transactions'));
+  assert.ok(!ids.some((id) => /categoriz|rules/.test(id)), ids.join(', '));
 
   db.close();
 });

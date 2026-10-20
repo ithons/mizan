@@ -29,7 +29,6 @@ interface AccountSummary {
 interface ReviewQueueRow {
   posted_transactions: number;
   uncategorized_transactions: number;
-  live_merchant_rules: number;
   detected_recurring: number;
 }
 
@@ -251,10 +250,6 @@ router.get('/', (_req: Request, res: Response, next: NextFunction): void => {
         -- Must match the uncategorized predicate in services/transactionReview.ts getCounts(),
         -- or this insight and the review badge disagree about the same number.
         (SELECT COUNT(*) FROM transactions WHERE pending = 0 AND category_id IS NULL AND review_status <> 'dismissed') AS uncategorized_transactions,
-        -- retired_at IS NULL is the whole difference between "rules that exist" and "rules that
-        -- run". Migration 045 retired two AI rules that contended with the owner's, and this count
-        -- kept reporting them: the row read "236 merchant rules are active" where 234 were.
-        (SELECT COUNT(*) FROM merchant_rules WHERE retired_at IS NULL) AS live_merchant_rules,
         (
           SELECT COUNT(*)
           FROM recurring_patterns
@@ -275,16 +270,6 @@ router.get('/', (_req: Request, res: Response, next: NextFunction): void => {
         metric: percent(ratio),
         action_label: 'Review',
         action_route: '/ledger',
-      });
-    } else if (reviewQueue.posted_transactions > 0 && reviewQueue.live_merchant_rules > 0) {
-      addInsight(insights, {
-        id: 'rules-working',
-        severity: 'positive',
-        rank: 70,
-        title: 'Categorization is clean',
-        message: `All posted transactions are categorized and ${reviewQueue.live_merchant_rules} merchant rule${reviewQueue.live_merchant_rules === 1 ? ' is' : 's are'} live.`,
-        action_label: 'Rules',
-        action_route: '/settings',
       });
     }
 
