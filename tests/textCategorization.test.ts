@@ -56,3 +56,9 @@ test('is case-insensitive and punctuation-tolerant', () => {
   assert.equal(guessCategoryFromText(null, "trader joe's #512"), 'cat_food_groceries');
   assert.equal(guessCategoryFromText(null, 'CVS/PHARMACY #01234'), 'cat_health_pharmacy');
 });
+
+test('an employer reimbursement is not pay, while the same employer payroll still is', () => {
+  assert.equal(guessCategoryFromText('MIT reimbursement', 'MASS. INST. OF T DES:ECHECKPAY ID:00000000 INDN:Owner CO ID:1000000001 CCD'), null);
+  assert.equal(guessCategoryFromText('Mass Inst Payroll', 'MASS INST DES:PAYROLL ID:0000000000000Y3 INDN:OWNER CO ID:9000000001 PPD'), 'cat_income_paycheck');
+  assert.equal(guessCategoryFromText(null, 'MASS INST DES:DIRECT DEP ID:0000000000000Y3 INDN:OWNER CO ID:9000000001 PPD'), 'cat_income_paycheck');
+});
