@@ -13,6 +13,7 @@ import {
 import { getDb } from '../db/index';
 import { compareTwoStrings } from "string-similarity";
 import { toCents } from './money';
+import { US_STATES } from './merchantNames';
 import { excludedFromTotalsSql } from './transactionFilters';
 import { MARKET_DRIVEN_TYPES } from '../../../shared/accountTypes';
 
@@ -72,12 +73,6 @@ export function createRecurringPattern(db: Database.Database, input: CreateRecur
 }
 
 
-const US_STATES = new Set([
-  'AL','AK','AZ','AR','CA','CO','CT','DE','FL','GA','HI','ID','IL','IN','IA',
-  'KS','KY','LA','ME','MD','MA','MI','MN','MS','MO','MT','NE','NV','NH','NJ',
-  'NM','NY','NC','ND','OH','OK','OR','PA','RI','SC','SD','TN','TX','UT','VT',
-  'VA','WA','WV','WI','WY','DC',
-]);
 
 const STRIP_SUFFIXES = /\b(llc|inc|corp|co|ltd)\b/gi;
 const STRIP_TRAILING_DIGITS = /\s+\d+$/;

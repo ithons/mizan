@@ -7,6 +7,7 @@ import type { CsvImportMappingSchema } from '../../../shared/schemas';
 import { adjustManualAccountBalance } from './manualAccountBalance';
 import { toCents } from './money';
 import { isInternalTrade } from './investmentTrades';
+import { merchantFromImportedDescriptor } from './merchantNames';
 
 export type CsvImportMapping = z.infer<typeof CsvImportMappingSchema>;
 
@@ -201,8 +202,9 @@ function normalizeCsvRow(
     issues.push(rowIssue(rowNumber, 'warning', `Category "${rawRow[mapping.category]}" was not found`, mapping.category));
   }
 
-  const merchantName = mapping.merchant ? (rawRow[mapping.merchant] || null) : null;
-  const originalName = merchantName || 'Imported transaction';
+  const descriptor = mapping.merchant ? (rawRow[mapping.merchant] || null) : null;
+  const merchantName = descriptor ? merchantFromImportedDescriptor(descriptor) : null;
+  const originalName = descriptor || 'Imported transaction';
   const notes = mapping.notes ? (rawRow[mapping.notes] || null) : null;
 
   const previewRow: CsvImportPreviewRow = {

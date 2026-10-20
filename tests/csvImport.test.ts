@@ -194,3 +194,17 @@ test('an exact account name imports cleanly, closed accounts included, and the p
   assert.deepEqual({ imported: result.imported, errors: result.errors }, { imported: 1, errors: [] });
   assert.equal(balanceOf(db, 'acct_cash'), 10000);
 });
+
+test('an imported descriptor is stored as the merchant it names, and the raw text stays as the original', (t) => {
+  const db = setupCsvImportDb();
+  t.after(() => db.close());
+  const row = (merchant: string) => ({ date: '2026-06-28', amount: '-12.40', merchant, category: '', account: 'Cash', notes: '' });
+
+  commitCsvImport(db, { rows: [row('10078 CAVA KENDALL SQR CAMBRIDGE MA'), row('7-ELEVEN')], mapping }, '2026-06-30T12:00:00.000Z');
+
+  const stored = db.prepare("SELECT merchant_name, original_name FROM transactions WHERE date = '2026-06-28' ORDER BY original_name").all();
+  assert.deepEqual(stored, [
+    { merchant_name: 'CAVA', original_name: '10078 CAVA KENDALL SQR CAMBRIDGE MA' },
+    { merchant_name: '7-ELEVEN', original_name: '7-ELEVEN' },
+  ]);
+});

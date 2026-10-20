@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import type Database from 'better-sqlite3';
 import {
   cleanProviderMerchant,
+  merchantFromImportedDescriptor,
   merchantFromWalletDescriptor,
 } from '../server/src/services/merchantNames';
 import { applySimplefinResponse } from '../server/src/services/simplefin';
@@ -151,4 +152,38 @@ test('the repair renames only provider-authored wallet payees and records each r
   const count = db.prepare("SELECT COUNT(*) AS n FROM transaction_field_revisions WHERE origin = 'import_rule'")
     .get() as { n: number };
   assert.equal(count.n, 1, 'a second pass over a repaired ledger writes nothing');
+});
+
+const IMPORTED_CASES: Array<[descriptor: string, expected: string]> = [
+  ['10078 CAVA KENDALL SQR CAMBRIDGE MA', 'CAVA'],
+  ['10078D CAVA KENDALL SQ 617-202-9396, MD', 'CAVA'],
+  ['MBTA-550034792089 BOSTON MA', 'MBTA'],
+  ['MBTA-550035316375-3388', 'MBTA'],
+  ['CVS/PHARMACY #11242 CAMBRIDGE MA', 'CVS/PHARMACY'],
+  ['SPOTIFY 877-778-1161, NY', 'SPOTIFY'],
+  ['GAP ONLINE 800-4277895, OH', 'GAP ONLINE'],
+  ['VENMO CASHOUT PPD ID: 1000000007', 'VENMO CASHOUT'],
+  ['UBER   *TRIP HELP.UBER.COM, CA', 'UBER *TRIP'],
+  ['MTA*NYCT PAYGO NEW YORK, NY', 'MTA*NYCT PAYGO'],
+  ['TARGET        00018986 DORCHESTER, MA', 'TARGET'],
+];
+
+test('an imported descriptor loses its store number, phone, ACH id and city', () => {
+  for (const [descriptor, expected] of IMPORTED_CASES) {
+    assert.equal(merchantFromImportedDescriptor(descriptor), expected, descriptor);
+  }
+});
+
+test('HEALTHY: a name whose digits or words are the name passes through unchanged', () => {
+  for (const name of [
+    '7-ELEVEN', '76', '1-800-FLOWERS', 'MINT MOBILE', 'Cava', 'H&M', 'WAWA 55', 'BOSTON MA',
+    'BOLT.EUO2501030929 Tallinn', 'Zelle payment from A FRIEND BACq7m2k9z4w',
+  ]) {
+    assert.equal(merchantFromImportedDescriptor(name), name);
+  }
+});
+
+test('a full-width name glued to its city keeps the whole name rather than lose part of it', () => {
+  assert.equal(merchantFromImportedDescriptor('MONTAGUE STREET BAGELSBROOKLYN, NY'), 'MONTAGUE STREET BAGELSBROOKLYN, NY');
+  assert.equal(merchantFromImportedDescriptor('NATIONAL ENTERTAINMENLOWELL, MA'), 'NATIONAL ENTERTAINMENLOWELL, MA');
 });

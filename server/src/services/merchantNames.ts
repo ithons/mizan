@@ -7,6 +7,16 @@ const MULTI_WORD_CITY_LEAD = new Set([
   'GRAND', 'BATON', 'CORPUS', 'COLORADO', 'KANSAS', 'OKLAHOMA', 'JERSEY', 'VIRGINIA', 'BEVERLY',
 ]);
 const SQUARE_SUFFIX = /\s+\S+\s+(?:SQ|SQR|SQU|SQUARE)\.?$/i;
+export const US_STATES: ReadonlySet<string> = new Set([
+  'AL','AK','AZ','AR','CA','CO','CT','DE','FL','GA','HI','ID','IL','IN','IA',
+  'KS','KY','LA','ME','MD','MA','MI','MN','MS','MO','MT','NE','NV','NH','NJ',
+  'NM','NY','NC','ND','OH','OK','OR','PA','RI','SC','SD','TN','TX','UT','VT',
+  'VA','WA','WV','WI','WY','DC',
+]);
+const ACH_ID_TAIL = /\s+(?:PPD|WEB|CCD)\s+ID\b.*$/i;
+const PHONE_TOKEN = /^\d{3}[-.]?\d{3}[-.]?\d{4},?$/;
+const STORE_NUMBER_TOKEN = /^(?:#\d+|\d{3,}[A-Z]?),?$/i;
+const STORE_NUMBER_TAIL = /^([A-Z][A-Z&.']*)-\d{5,}(?:-\d+)*$/i;
 const ACRONYMS = new Set([
   'MIT', 'CVS', 'USA', 'UPS', 'USPS', 'MBTA', 'NYC', 'KFC', 'IHOP', 'AMC', 'REI', 'DSW', 'BJS',
   'TJ', 'BU', 'MGH', 'HSBC', 'LLC', 'BBQ', 'NYU', 'UCLA', 'MOMA', 'IKEA', 'H&M',
@@ -70,4 +80,32 @@ export function merchantFromWalletDescriptor(description: string): string | null
 export function cleanProviderMerchant(payee: string | null, description: string): string | null {
   if (payee && !payeeHasWalletTail(payee)) return payee;
   return merchantFromWalletDescriptor(description) ?? payee;
+}
+
+// The card network gives the city 13 characters. A longer token, or one where an upper-case run
+// runs into a capitalised word ("SANDWNew"), is a full-width name glued to the city, and dropping
+// it would take part of the name with it.
+function withoutCityAndState(tokens: string[]): string[] {
+  if (tokens.length < 3 || !US_STATES.has(tokens[tokens.length - 1])) return tokens;
+  const { kept, city } = dropCity(tokens.slice(0, -1));
+  const glued = (city ?? '').split(' ').some((word) => word.replace(/,$/, '').length > 13 || /[A-Z]{2}[a-z]/.test(word));
+  return glued ? tokens : kept;
+}
+
+/**
+ * The merchant an imported bank descriptor names: "10078 CAVA KENDALL SQR CAMBRIDGE MA" is Cava.
+ *
+ * Drops only noise the backfill evidenced: a trailing city and state, a phone number, a store number
+ * of three or more digits, an ACH ID segment, and a square suffix. A name whose digits are the name
+ * ("7-ELEVEN", "76", "1-800-FLOWERS") passes through, and so does anything that would come out with
+ * no letters left. The raw descriptor stays in `original_name`.
+ */
+export function merchantFromImportedDescriptor(descriptor: string): string {
+  const raw = descriptor.replace(/\s+/g, ' ').trim();
+  let tokens = raw.replace(ACH_ID_TAIL, '').split(' ').filter(Boolean);
+  tokens = withoutCityAndState(tokens)
+    .filter((token) => !PHONE_TOKEN.test(token) && !STORE_NUMBER_TOKEN.test(token))
+    .map((token) => STORE_NUMBER_TAIL.exec(token)?.[1] ?? token);
+  const name = tokens.join(' ').replace(SQUARE_SUFFIX, '').replace(/[\s,\-*/]+$/, '').replace(/^[\s,\-]+/, '');
+  return /[A-Z]/i.test(name) ? name : raw;
 }
