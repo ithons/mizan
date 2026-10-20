@@ -57,7 +57,6 @@ import type {
   SimplefinRelinkDismissResponse,
   SimplefinRelinkPendingResponse,
   SpendingReport,
-  SubscriptionInsights,
   SyncHealth,
   SyncRun,
   SyncRunDetail,
@@ -413,14 +412,8 @@ export const recurringApi = {
     next_expected: string;
     category_id?: string | null;
   }) => apiFetch<RecurringPattern>('/api/recurring', { method: 'POST', body: JSON.stringify(body) }),
-  upcoming: (days?: number) =>
-    apiFetch<RecurringPattern[]>(`/api/recurring/upcoming${days ? `?days=${days}` : ''}`),
   forecast: (days?: number) =>
     apiFetch<RecurringForecast>(`/api/recurring/forecast${days ? `?days=${days}` : ''}`),
-  subscriptions: (days?: number) =>
-    apiFetch<SubscriptionInsights>(`/api/recurring/subscriptions${days ? `?days=${days}` : ''}`),
-  adjustments: (id: string) =>
-    apiFetch<RecurringOccurrenceAdjustment[]>(`/api/recurring/${id}/adjustments`),
   upsertAdjustment: (
     id: string,
     body: {
@@ -443,11 +436,6 @@ export const recurringApi = {
     apiFetch<RecurringPattern>(`/api/recurring/${id}/confirm`, { method: 'POST' }),
   dismiss: (id: string) =>
     apiFetch<void>(`/api/recurring/${id}/dismiss`, { method: 'POST' }),
-  update: (id: string, body: Partial<RecurringPattern>) =>
-    apiFetch<RecurringPattern>(`/api/recurring/${id}`, {
-      method: 'PATCH',
-      body: JSON.stringify(body),
-    }),
 };
 
 // ─── Goals ──────────────────────────────────────────────────────────────────

@@ -1,13 +1,11 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import { getDb } from '../db/index';
 import { validate } from '../middleware/validate';
-import { CreateRecurringSchema, UpdateRecurringSchema, UpsertRecurringAdjustmentSchema } from '../../../shared/schemas';
+import { CreateRecurringSchema, UpsertRecurringAdjustmentSchema } from '../../../shared/schemas';
 import { createRecurringPattern } from '../services/recurring';
 import { buildRecurringForecast } from '../services/recurringForecast';
-import { buildSubscriptionInsights } from '../services/subscriptionInsights';
 import {
   deleteRecurringAdjustment,
-  listRecurringAdjustments,
   upsertRecurringAdjustment,
 } from '../services/recurringAdjustments';
 import { dollarizeFields, toDollars, toDollarsOrNull } from '../services/money';
@@ -15,10 +13,7 @@ import type {
   RecurringForecast,
   RecurringForecastOccurrence,
   RecurringOccurrenceAdjustment,
-  SubscriptionInsightItem,
-  SubscriptionInsights,
 } from '../../../shared/types';
-import { format, addDays } from 'date-fns';
 import { dismissRecurringPattern } from '../services/recurring';
 
 const router = Router();
@@ -58,33 +53,6 @@ function forecastToDollars(forecast: RecurringForecast): RecurringForecast {
     uncertain_income: toDollars(forecast.uncertain_income),
     uncertain_bills: toDollars(forecast.uncertain_bills),
     occurrences: forecast.occurrences.map(occurrenceToDollars),
-  };
-}
-
-function subscriptionItemToDollars(item: SubscriptionInsightItem): SubscriptionInsightItem {
-  return {
-    ...item,
-    average_amount: toDollars(item.average_amount),
-    monthly_amount: toDollars(item.monthly_amount),
-    upcoming_amount: toDollars(item.upcoming_amount),
-    latest_amount: toDollarsOrNull(item.latest_amount),
-    previous_amount: toDollarsOrNull(item.previous_amount),
-    increase_amount: toDollarsOrNull(item.increase_amount),
-    // increase_percent is a ratio, not money.
-  };
-}
-
-function subscriptionInsightsToDollars(insights: SubscriptionInsights): SubscriptionInsights {
-  return {
-    ...insights,
-    total_monthly_amount: toDollars(insights.total_monthly_amount),
-    total_upcoming_amount: toDollars(insights.total_upcoming_amount),
-    confirmed_monthly_amount: toDollars(insights.confirmed_monthly_amount),
-    unconfirmed_monthly_amount: toDollars(insights.unconfirmed_monthly_amount),
-    subscriptions: insights.subscriptions.map(subscriptionItemToDollars),
-    increases: insights.increases.map(subscriptionItemToDollars),
-    unconfirmed: insights.unconfirmed.map(subscriptionItemToDollars),
-    upcoming: insights.upcoming.map(subscriptionItemToDollars),
   };
 }
 
@@ -149,37 +117,6 @@ router.post('/', validate(CreateRecurringSchema), (req: Request, res: Response, 
   }
 });
 
-// GET /upcoming?days=30
-router.get('/upcoming', (req: Request, res: Response, next: NextFunction): void => {
-  try {
-    const db = getDb();
-    const days = parseDays(req.query.days);
-    if (days === null) {
-      res.status(400).json({ error: 'Invalid days filter' });
-      return;
-    }
-
-    const endDate = format(addDays(new Date(), days), 'yyyy-MM-dd');
-
-    const patterns = db.prepare(`
-      SELECT
-        rp.*,
-        c.name AS category_name,
-        c.color AS category_color
-      FROM recurring_patterns rp
-      LEFT JOIN categories c ON c.id = rp.category_id
-      WHERE rp.is_active = 1
-        AND rp.next_expected <= ?
-        AND (rp.is_confirmed = 1 OR rp.transaction_count >= 3)
-      ORDER BY rp.next_expected ASC
-    `).all(endDate) as Record<string, unknown>[];
-
-    res.json({ data: patterns.map(patternToDollars) });
-  } catch (err) {
-    next(err);
-  }
-});
-
 // GET /forecast?days=60 - recurring income and bills expanded into dates
 router.get('/forecast', (req: Request, res: Response, next: NextFunction): void => {
   try {
@@ -191,36 +128,6 @@ router.get('/forecast', (req: Request, res: Response, next: NextFunction): void 
     }
 
     res.json({ data: forecastToDollars(buildRecurringForecast(db, days)) });
-  } catch (err) {
-    next(err);
-  }
-});
-
-router.get('/subscriptions', (req: Request, res: Response, next: NextFunction): void => {
-  try {
-    const db = getDb();
-    const days = parseDays(req.query.days ?? '60');
-    if (days === null) {
-      res.status(400).json({ error: 'Invalid days filter' });
-      return;
-    }
-
-    res.json({ data: subscriptionInsightsToDollars(buildSubscriptionInsights(db, days)) });
-  } catch (err) {
-    next(err);
-  }
-});
-
-router.get('/:id/adjustments', (req: Request, res: Response, next: NextFunction): void => {
-  try {
-    const db = getDb();
-    const id = routeParam(req.params.id);
-    if (!id) {
-      res.status(400).json({ error: 'Invalid recurring pattern id' });
-      return;
-    }
-
-    res.json({ data: listRecurringAdjustments(db, id).map(adjustmentToDollars) });
   } catch (err) {
     next(err);
   }
@@ -306,42 +213,5 @@ router.post('/:id/dismiss', (req: Request, res: Response, next: NextFunction): v
     next(err);
   }
 });
-
-// PATCH /:id - update category_id
-router.patch(
-  '/:id',
-  validate(UpdateRecurringSchema),
-  (req: Request, res: Response, next: NextFunction): void => {
-    try {
-      const db = getDb();
-      const { id } = req.params;
-      const body = req.body as { category_id?: string | null };
-      const categoryId = body.category_id || null;
-
-      const pattern = db.prepare('SELECT id FROM recurring_patterns WHERE id = ?').get(id);
-      if (!pattern) {
-        res.status(404).json({ error: 'Recurring pattern not found' });
-        return;
-      }
-
-      if (categoryId) {
-        const category = db.prepare('SELECT id FROM categories WHERE id = ?').get(categoryId);
-        if (!category) {
-          res.status(404).json({ error: 'Category not found' });
-          return;
-        }
-      }
-
-      db.prepare(
-        'UPDATE recurring_patterns SET category_id = ?, updated_at = ? WHERE id = ?'
-      ).run(categoryId, new Date().toISOString(), id);
-
-      const updated = db.prepare('SELECT * FROM recurring_patterns WHERE id = ?').get(id) as Record<string, unknown>;
-      res.json({ data: patternToDollars(updated) });
-    } catch (err) {
-      next(err);
-    }
-  }
-);
 
 export default router;

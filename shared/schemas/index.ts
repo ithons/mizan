@@ -96,10 +96,6 @@ export const UpsertBudgetSchema = z.object({
   rollover: z.boolean().default(false),
 });
 
-export const UpdateRecurringSchema = z.object({
-  category_id: z.string().nullable().optional(),
-});
-
 export const CreateRecurringSchema = z.object({
   merchant_name: z.string().min(1),
   frequency: z.enum(['weekly', 'biweekly', 'monthly', 'quarterly', 'annual']),
