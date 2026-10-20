@@ -6,7 +6,7 @@ import { getDataQualitySummary } from '../services/dataQuality';
 import { buildRecurringForecast } from '../services/recurringForecast';
 import { suggestMerchantRules } from '../services/rules';
 import { getAnomalyInsights } from '../services/anomalyInsights';
-import { computeSafeToSpend, readSafeToSpend } from '../services/safeToSpend';
+import { readSafeToSpend } from '../services/safeToSpend';
 import { reconcileAccounts, unreconciledResidual } from '../services/reconciliation';
 import { findFlowConservationViolations } from '../services/flowConservation';
 import { getMonthlyBudgetsWithProjection } from '../services/budgetProjection';
