@@ -29,7 +29,6 @@ import { RulesSection } from './RulesSection';
 import { NotificationRulesSection } from './NotificationRulesSection';
 import { DataSection } from './DataSection';
 import { AdvisorMemorySection } from './AdvisorMemorySection';
-import { SetupSection, useSetupPlan } from './SetupSection';
 import { AUTONOMY_QUERY, AiActionsList } from '../../components/AiActions';
 export {
   ACTIONS_PER_PAGE,
@@ -40,7 +39,6 @@ export {
 
 type PanelId =
   | 'advisor_context'
-  | 'setup'
   | 'simplefin'
   | 'coinbase'
   | 'import'
@@ -678,8 +676,7 @@ export function Settings() {
 
   useEffect(() => {
     const section = searchParams.get('section');
-    if (section === 'setup') setOpenPanel('setup');
-    else if (section === 'connections' || section === 'simplefin') setOpenPanel('simplefin');
+    if (section === 'connections' || section === 'simplefin') setOpenPanel('simplefin');
     else if (section === 'coinbase') setOpenPanel('coinbase');
     else if (section === 'data' || section === 'import') setOpenPanel('import');
     else if (section === 'ai_actions') setOpenPanel('ai_actions');
@@ -695,7 +692,6 @@ export function Settings() {
   const { data: categories } = useQuery({ queryKey: ['categories'], queryFn: () => categoriesApi.list() });
   const { data: rules } = useQuery({ queryKey: ['rules'], queryFn: () => rulesApi.list() });
   const { data: memories } = useQuery({ queryKey: ['ai-memory'], queryFn: () => aiApi.listMemory() });
-  const setupPlan = useSetupPlan();
   const autonomyQuery = useQuery(AUTONOMY_QUERY);
   const autonomySentence = autonomyQuery.data ? describeAutonomyForOwner(autonomyQuery.data.kinds) : null;
   const autonomyStatus = autonomyQuery.isError
@@ -751,29 +747,6 @@ export function Settings() {
         {/* Connections */}
         <div className="mb-7">
           <SectionLabel className="mb-1.5">Connections</SectionLabel>
-          {/* The old `/onboarding` screen, as a row. Its sub-line is the plan's own sentence for
-              whatever step is open, so it says what is actually missing rather than a count. */}
-          <SettingsRow
-            title="Setup"
-            sub={
-              setupPlan
-                ? setupPlan.completedCount === setupPlan.totalCount
-                  ? 'Credentials, a source, a sync and the review queue are all done.'
-                  : setupPlan.currentStep.detail
-                : 'Reading what is set up…'
-            }
-            trailing={
-              <span className="text-muted tabular-nums">
-                {setupPlan ? `${setupPlan.completedCount} of ${setupPlan.totalCount}` : '-'}
-              </span>
-            }
-            onClick={() => toggle('setup')}
-          />
-          {openPanel === 'setup' && (
-            <ExpandedPanel>
-              <SetupSection />
-            </ExpandedPanel>
-          )}
           <SettingsRow
             title="SimpleFIN"
             sub={

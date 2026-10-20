@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useMemo, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { Account, SyncHealthConnection } from '@shared/types';
 import { accountsApi, syncApi } from '../../lib/api';
@@ -120,8 +120,6 @@ export function Accounts() {
   const navigate = useNavigate();
   const qc = useQueryClient();
   const { addToast } = useAppStore();
-  const [searchParams] = useSearchParams();
-  const handledSetupActionRef = useRef(false);
 
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [showHidden, setShowHidden] = useState(false);
@@ -139,21 +137,6 @@ export function Accounts() {
     for (const c of syncHealth?.connections ?? []) map.set(c.id, c);
     return map;
   }, [syncHealth]);
-
-  // Handle onboarding deep links: ?connect=bank routes to connections, ?manual=1 opens the add modal.
-  useEffect(() => {
-    if (handledSetupActionRef.current) return;
-    const connect = searchParams.get('connect');
-    const manual = searchParams.get('manual');
-    if (connect !== 'bank' && manual !== '1') return;
-    handledSetupActionRef.current = true;
-    navigate('/accounts', { replace: true });
-    if (connect === 'bank') {
-      navigate('/settings?section=connections');
-      return;
-    }
-    setShowAddModal(true);
-  }, [navigate, searchParams]);
 
   const visible = useMemo(() => (accounts ?? []).filter((a) => !a.is_hidden), [accounts]);
   const hidden = useMemo(() => (accounts ?? []).filter((a) => a.is_hidden), [accounts]);

@@ -19,11 +19,7 @@
  *                           a live deep link and `Ledger` still answers it.
  *   /budget, /goals         one claim sheet: a budget claims money for a month, a goal claims it
  *                           toward a target
- *   /onboarding             folded into Settings as a Setup row, which is where the connections it
- *                           walks you through already live. Nothing ever linked to the screen, and
- *                           an always-logged-in single-owner app has no moment where a welcome is
- *                           the thing to show. What it read is a status, not a welcome, and a
- *                           status is asked more than once: a connection can lapse in month six.
+ *   /onboarding             removed; the connections it walked through live in Settings.
  */
 /** Where the forecast, overdue items and recurring patterns are worked on. */
 export const SCHEDULED_ROUTE = '/ledger?view=scheduled';
@@ -44,7 +40,7 @@ export const LEGACY_TARGETS: readonly LegacyTarget[] = [
   { from: '/review', to: '/ledger?uncategorized=1' },
   { from: '/budget', to: '/plan' },
   { from: '/goals', to: '/plan' },
-  { from: '/onboarding', to: '/settings?section=setup' },
+  { from: '/onboarding', to: '/settings' },
 ];
 
 /**
