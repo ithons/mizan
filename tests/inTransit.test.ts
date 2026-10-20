@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import type Database from 'better-sqlite3';
 import { transfersInTransit } from '../server/src/services/inTransit';
 import { getNetWorthAttribution } from '../server/src/services/reporting';
+import { netWorthTimeline } from '../server/src/services/netWorthTimeline';
 import { _setDbForTesting } from '../server/src/db/index';
 import { runAdvisorTool } from '../server/src/services/advisorChatTools';
 import { buildFinancialContext } from '../server/src/services/aiContext';
@@ -34,33 +35,20 @@ function chaseToWealthfront(db: Database.Database) {
   return { chase, wealthfront };
 }
 
-test('a transfer one bank had sent and the other had not shown is money in flight, not a loss', () => {
+test('what moved net worth is read off the timeline, where a transfer moves both accounts on its own date', () => {
   const db = migratedTestDb();
-  chaseToWealthfront(db);
-  const attribution = getNetWorthAttribution(db, { startDate: '2026-09-30', endDate: '2026-10-01' });
+  const { chase, wealthfront } = chaseToWealthfront(db);
+  db.prepare('UPDATE accounts SET current_balance = ? WHERE id = ?').run(583948, chase);
+  db.prepare('UPDATE accounts SET current_balance = ? WHERE id = ?').run(500370, wealthfront);
+  insertTransaction(db, { account_id: chase, date: '2026-09-01', amount: 1083948 });
+  insertTransaction(db, { account_id: wealthfront, date: '2026-09-01', amount: 370 });
+  const attribution = getNetWorthAttribution(db, { startDate: '2026-09-29', endDate: '2026-10-01' });
   assert.ok(attribution);
-  assert.equal(attribution.end_in_transit, 500000);
-  assert.equal(attribution.delta, (650016 + 321 + 500000) - (1104728 + 321));
-});
-
-test('the money stays in flight for every sheet read before it arrived, however long that took', () => {
-  const db = migratedTestDb();
-  chaseToWealthfront(db);
-  snapshot(db, '2026-10-10', '2026-10-10T15:00:00.000Z', { chase: 650016, wf: 321 });
-  const attribution = getNetWorthAttribution(db, { startDate: '2026-10-01', endDate: '2026-10-10' });
-  assert.ok(attribution);
-  assert.deepEqual([attribution.start_in_transit, attribution.end_in_transit], [500000, 500000]);
-  assert.equal(attribution.delta, 0);
-});
-
-test('and its arrival two weeks later is not growth', () => {
-  const db = migratedTestDb();
-  chaseToWealthfront(db);
-  const attribution = getNetWorthAttribution(db, { startDate: '2026-10-01', endDate: '2026-10-15' });
-  assert.ok(attribution);
-  assert.deepEqual([attribution.start_in_transit, attribution.end_in_transit], [500000, 0]);
-  const wealthfront = attribution.accounts.find((a) => a.account_id === 'wf');
-  assert.equal(wealthfront?.delta ?? 0, 49, 'only its interest moved it');
+  const timeline = netWorthTimeline(db, { from: '2026-09-29', to: '2026-10-01' });
+  assert.equal(attribution.end_net_worth, timeline.points.at(-1)!.net_worth);
+  assert.equal(attribution.start_net_worth, timeline.points[0].net_worth);
+  assert.equal(attribution.delta, 0, 'money that left one account and reached the other is no movement');
+  assert.deepEqual(attribution.accounts.map((a) => [a.account_id, a.delta]), [[chase, -500000], [wealthfront, 500000]]);
 });
 
 test('a transfer both banks had shown, or neither, is not in flight', () => {

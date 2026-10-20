@@ -1410,12 +1410,11 @@ export interface NetWorthAttributionAccount {
 export interface NetWorthAttribution {
   start_date: string;
   end_date: string;
-  /** Settled: a transfer in flight when the sheet was read is counted as landed. */
   start_net_worth: number;
   end_net_worth: number;
-  /** What was in flight between the owner's accounts when each end was read. */
-  start_in_transit: number;
-  end_in_transit: number;
+  /** Whether an investment or crypto value at that end is an estimate between known values. */
+  start_estimated: boolean;
+  end_estimated: boolean;
   delta: number;
   /** Non-zero movers only, largest absolute move first. */
   accounts: NetWorthAttributionAccount[];

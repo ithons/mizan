@@ -422,6 +422,11 @@ export function Instrument() {
   /* The window. Every one of these carries the range in its key, or a tab left open across a month
      boundary serves the old window under the new label. */
   const historyQ = useQuery({
+    queryKey: ['networth', 'timeline', range.startDate, range.endDate, 'day'],
+    queryFn: () => networthApi.timeline({ from: range.startDate, to: range.endDate, step: 'day' }),
+    retry: false,
+  });
+  const sheetsQ = useQuery({
     queryKey: ['networth', 'history', range],
     queryFn: () => networthApi.historyBetween(range.startDate, range.endDate),
     retry: false,
@@ -512,6 +517,7 @@ export function Instrument() {
     { query: reviewQ, label: 'review queue' },
     { query: recentQ, label: 'recent balance sheets' },
     { query: historyQ, label: 'net worth history' },
+    { query: sheetsQ, label: 'recorded balance sheets' },
     { query: summaryQ, label: 'this window' },
     { query: cashflowQ, label: 'cash flow' },
     { query: spendingQ, label: 'spending by category' },
@@ -652,14 +658,13 @@ export function Instrument() {
   const movers = (attribution?.accounts ?? []).filter((a) => Math.abs(a.delta) >= 0.5);
   const moverScale = signedBarScale(movers.map((a) => a.delta));
 
-  const trendPoints = (historyQ.data ?? []).map((s) => ({
-    date: s.date,
-    value: settledNetWorth(s),
-    estimated: Boolean(s.is_estimated),
-    // NULL on rows written before migration 044, and undefined there rather than zero: the chart
-    // draws a coverage change only where it has two counts to compare.
-    coverage: s.covered_accounts ?? undefined,
+  const trendPoints = (historyQ.data?.points ?? []).map((p) => ({
+    date: p.date,
+    value: p.net_worth,
+    estimated: p.estimated,
+    coverage: p.coverage,
   }));
+  const trendMarks = (sheetsQ.data ?? []).map((s) => ({ date: s.date, value: settledNetWorth(s) }));
 
   return (
     <Screen size="wide">
@@ -1068,19 +1073,16 @@ export function Instrument() {
               label="net worth history"
             >
               {trendPoints.length >= 2 ? (
-                <TrendChart history={trendPoints} height={150} label="Net worth" />
+                <TrendChart history={trendPoints} marks={trendMarks} height={150} label="Net worth" />
               ) : (
                 <p className="text-body text-muted-2">
-                  This window holds {trendPoints.length === 1 ? 'one recorded sheet' : 'no recorded sheets'}; a trend
-                  needs two. They accrue as you sync.
+                  This window holds {trendPoints.length === 1 ? 'one day' : 'no days'} of history; a trend needs two.
                 </p>
               )}
             </QueryState>
           </section>
 
-          {/* What moved net worth, account by account. The chart above says the line went there;
-              this says which balances took it. Rendered only where the report had two sheets to
-              difference, which is the same condition it returns null under. */}
+          {/* What moved net worth, account by account, read off the same series the chart draws. */}
           {attribution && movers.length > 0 && (
             <section>
               <SectionLabel
@@ -1089,19 +1091,18 @@ export function Instrument() {
                 explain={
                   <>
               <p>
-                Two recorded balance sheets differenced account by account,{' '}
-                {format(parseISO(attribution.start_date), 'MMM d')} to{' '}
-                {format(parseISO(attribution.end_date), 'MMM d')}, not the window's own edges: only
-                measured sheets are used as endpoints, so a reconstruction is never one end of this
-                subtraction. Each figure is the account's effect on net worth, so a card whose
-                balance grew reads negative. Accounts that did not move are not listed.
+                Each account's value in the chart above,{' '}
+                {format(parseISO(attribution.start_date), 'MMM d')} against{' '}
+                {format(parseISO(attribution.end_date), 'MMM d')}. Each figure is the account's effect
+                on net worth, so a card whose balance grew reads negative. Accounts that did not move
+                are not listed.
               </p>
-              {(attribution.start_in_transit !== 0 || attribution.end_in_transit !== 0) && (
+              {(attribution.start_estimated || attribution.end_estimated) && (
                 <p>
-                    Both ends are adjusted for transfers between your own accounts that one side had shown and the
-                    other had not yet: {formatCurrency(attribution.start_in_transit, { showSign: true })} at the start,{' '}
-                    {formatCurrency(attribution.end_in_transit, { showSign: true })} at the end.
-                  </p>
+                  An investment or crypto value at {attribution.start_estimated && attribution.end_estimated
+                    ? 'both ends'
+                    : attribution.start_estimated ? 'the start' : 'the end'} is an estimate between known values.
+                </p>
               )}
                   </>
                 }

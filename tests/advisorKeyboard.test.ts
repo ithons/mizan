@@ -9,7 +9,7 @@ test('Rename and Delete appear when the conversation row takes focus, so Tab can
   assert.doesNotMatch(actions, /(^|\s)focus-within:flex/);
 });
 
-test('the window chart plots the same settled net worth the headline states', () => {
+test('the window chart plots the net worth timeline, the series the Accounts chart draws', () => {
   const source = readFileSync(new URL('../client/src/views/Instrument.tsx', import.meta.url), 'utf8');
-  assert.match(source, /const trendPoints = [^;]*value: settledNetWorth\(s\)/s);
+  assert.match(source, /const trendPoints = \(historyQ\.data\?\.points[^;]*value: p\.net_worth/s);
 });

@@ -36,6 +36,7 @@ import type {
   NetWorthAttribution,
   TopMerchantsReport,
 } from '../../../shared/types';
+import { netWorthTimeline } from './netWorthTimeline';
 
 // Every report object this module returns keeps money TOTALS in integer cents.
 // Dollarization happens exclusively at the route boundary (routes/reports.ts) or,
@@ -1124,97 +1125,35 @@ export function getTopMerchantsReport(
 }
 
 // ── Net-worth attribution ─────────────────────────────────────────────────────
-// "What moved net worth over this window." Diffs the per-account `breakdown` map of the first and
-// last snapshot in the window. An account missing from one side is treated as 0 there, so accounts
-// opened or closed mid-window show their full balance as the delta rather than being dropped.
+// "What moved net worth over this window": each account's line in the net worth timeline at the
+// window's first and last day, so the movers and the chart above them are one computation.
 export function getNetWorthAttribution(
   db: Database.Database,
   options: { startDate?: string; endDate?: string } = {}
 ): NetWorthAttribution | null {
-  const conditions: string[] = [];
-  const params: unknown[] = [];
-  if (options.startDate) { conditions.push('date >= ?'); params.push(options.startDate); }
-  if (options.endDate) { conditions.push('date <= ?'); params.push(options.endDate); }
-  const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+  const timeline = netWorthTimeline(db, { from: options.startDate, to: options.endDate });
+  const start = timeline.points[0];
+  const end = timeline.points.at(-1);
+  // One day is a point, not a movement. There is nothing to attribute.
+  if (!start || !end || start === end) return null;
 
-  // Measured endpoints only. Baselining on a reconstruction attributes the difference between a
-  // guess and a fact to individual accounts and renders it with no marker: on the live database
-  // Reports' fixed 6-month window picked the estimated 2026-02-01 row, whose breakdown asserts
-  // Chase Checking held $0.00, and printed "Net worth rose $3,070.54" with per-account bars to
-  // match, while the chart directly above it drew that same point as an estimate.
-  const measuredWhere = conditions.length > 0
-    ? `WHERE ${conditions.join(' AND ')} AND is_estimated = 0`
-    : 'WHERE is_estimated = 0';
-
-  const bounds = db.prepare(`
-    SELECT MIN(date) AS first_date, MAX(date) AS last_date, COUNT(*) AS count
-    FROM net_worth_snapshots ${measuredWhere}
-  `).get(...params) as { first_date: string | null; last_date: string | null; count: number };
-
-  // One snapshot is a point, not a movement. There is nothing to attribute.
-  if (bounds.count < 2 || !bounds.first_date || !bounds.last_date) return null;
-
-  const snapshotAt = (date: string) => db.prepare(`
-    SELECT date, net_worth, breakdown, taken_at, created_at FROM net_worth_snapshots
-    WHERE date = ? AND is_estimated = 0 ORDER BY date LIMIT 1
-  `).get(date) as
-    | { date: string; net_worth: number; breakdown: string | null; taken_at: string | null; created_at: string }
-    | undefined;
-
-  const start = snapshotAt(bounds.first_date);
-  const end = snapshotAt(bounds.last_date);
-  if (!start || !end) return null;
-
-  // Both ends are read as settled: a transfer one institution had sent and the other had not yet
-  // shown is counted as landed, so money in flight is neither a loss at one end nor growth later.
-  const settle = (snapshot: NonNullable<ReturnType<typeof snapshotAt>>) => {
-    const recorded = parseBreakdown(snapshot.breakdown);
-    const transit = transfersInTransit(db, { ...snapshot, breakdown: recorded });
-    const balances = { ...recorded };
-    for (const [accountId, adjustment] of transit.byAccount) balances[accountId] += adjustment;
-    return { balances, inTransit: transit.total, netWorth: snapshot.net_worth + transit.total };
-  };
-  const settledStart = settle(start);
-  const settledEnd = settle(end);
-  const startBalances = settledStart.balances;
-  const endBalances = settledEnd.balances;
-
-  const accountRows = db.prepare(
-    'SELECT id, account_name, institution_name, type, is_liability FROM accounts'
-  ).all() as Array<{
-    id: string;
-    account_name: string | null;
-    institution_name: string | null;
-    type: string | null;
-    is_liability: number | null;
-  }>;
-  const accountsById = new Map(accountRows.map((row) => [row.id, row]));
-
-  const accounts = Array.from(new Set([...Object.keys(startBalances), ...Object.keys(endBalances)]))
-    .map((accountId) => {
-      const account = accountsById.get(accountId);
-      // An account that no longer exists cannot be classified, and guessing "asset" made a deleted
-      // credit card's balance read as money the owner had. Its movement is still reported, with a
-      // null is_liability so the caller can show it as unattributable rather than as a gain.
-      const isLiability = account ? account.is_liability === 1 : false;
-      const resolved = account !== undefined;
-      const startBalance = startBalances[accountId] ?? 0;
-      const endBalance = endBalances[accountId] ?? 0;
-      const balanceDelta = endBalance - startBalance;
+  const institutions = new Map((db.prepare('SELECT id, institution_name FROM accounts').all() as Array<{ id: string; institution_name: string | null }>)
+    .map((row) => [row.id, row.institution_name]));
+  // Stored terms at the ends (a card's balance is what it owes), net-worth terms in the delta.
+  const accounts = timeline.accounts
+    .map((account) => {
+      const startValue = start.by_account[account.id] ?? 0;
+      const endValue = end.by_account[account.id] ?? 0;
+      const stored = (value: number) => (account.is_liability ? -value : value) || 0;
       return {
-        account_id: accountId,
-        account_name: account?.account_name ?? null,
-        institution_name: account?.institution_name ?? null,
-        type: account?.type ?? null,
-        is_liability: account ? account.is_liability === 1 : null,
-        start_balance: startBalance,
-        end_balance: endBalance,
-        // Contribution to NET WORTH, not the raw balance change. `breakdown` stores a liability as
-        // a positive amount owed, so a credit-card balance growing by $100 moves net worth DOWN by
-        // $100. Negating here is what makes these deltas sum to the headline net-worth delta.
-        // Without it a rising card balance rendered as a green gain.
-        delta: resolved ? (isLiability ? -balanceDelta : balanceDelta) : balanceDelta,
-        resolved,
+        account_id: account.id,
+        account_name: account.name,
+        institution_name: institutions.get(account.id) ?? null,
+        type: account.type,
+        is_liability: account.is_liability,
+        start_balance: stored(startValue),
+        end_balance: stored(endValue),
+        delta: endValue - startValue,
       };
     })
     .filter((account) => account.delta !== 0)
@@ -1223,11 +1162,11 @@ export function getNetWorthAttribution(
   return {
     start_date: start.date,
     end_date: end.date,
-    start_net_worth: settledStart.netWorth,
-    end_net_worth: settledEnd.netWorth,
-    start_in_transit: settledStart.inTransit,
-    end_in_transit: settledEnd.inTransit,
-    delta: settledEnd.netWorth - settledStart.netWorth,
+    start_net_worth: start.net_worth,
+    end_net_worth: end.net_worth,
+    start_estimated: start.estimated,
+    end_estimated: end.estimated,
+    delta: end.net_worth - start.net_worth,
     accounts,
   };
 }

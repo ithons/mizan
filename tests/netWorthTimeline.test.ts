@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import type Database from 'better-sqlite3';
 import { netWorthTimeline } from '../server/src/services/netWorthTimeline';
+import { getNetWorthAttribution } from '../server/src/services/reporting';
 import { insertAccount, insertTransaction, migratedTestDb } from './helpers/schema';
 
 const TODAY = '2026-03-31';
@@ -139,4 +140,21 @@ test('HEALTHY: with nothing arriving after a sheet was read, the timeline lands 
   const { points } = netWorthTimeline(db, { today: TODAY });
   assert.equal(points.find((p) => p.date === '2026-02-03')!.net_worth, 70000);
   assert.equal(points.find((p) => p.date === '2026-02-20')!.net_worth, 70000 - 2500);
+});
+
+test('the Balance window, the Accounts chart and what moved it read one value for a day, even where a row arrived after that day\'s sheet', () => {
+  const { db, checking, card } = cashAndCard();
+  const wallet = insertAccount(db, { account_name: 'Wallet', type: 'cash', current_balance: 3000 });
+  db.prepare('UPDATE accounts SET balance_only = 1 WHERE id = ?').run(wallet);
+  // The sheet for 02-01 was read before the -30000 dated 02-01 arrived, so it recorded 100000.
+  sheet(db, '2026-02-01', { [checking]: 100000, [card]: 0, [wallet]: 3000 });
+  db.prepare("UPDATE transactions SET created_at = '2026-02-02T15:00:00Z' WHERE account_id = ? AND date = '2026-02-01'").run(checking);
+
+  const window = netWorthTimeline(db, { from: '2026-01-15', to: '2026-02-01', today: TODAY }).points.at(-1)!;
+  const accountsChart = netWorthTimeline(db, { from: '2026-01-15', to: '2026-02-01', today: TODAY, accountIds: [checking, card, wallet] }).points.at(-1)!;
+  assert.equal(window.net_worth, 70000 + 3000);
+  assert.equal(accountsChart.net_worth, window.net_worth);
+  assert.deepEqual(accountsChart.by_account, window.by_account);
+  const attribution = getNetWorthAttribution(db, { startDate: '2026-01-15', endDate: '2026-02-01' });
+  assert.equal(attribution?.end_net_worth, window.net_worth);
 });

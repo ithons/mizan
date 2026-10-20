@@ -230,8 +230,8 @@ export const ATTRIBUTION: NetWorthAttribution = {
   end_date: '2026-07-31',
   start_net_worth: 1079.39,
   end_net_worth: 4193.18,
-  start_in_transit: 0,
-  end_in_transit: 0,
+  start_estimated: false,
+  end_estimated: false,
   delta: 3113.79,
   accounts: [
     {
@@ -398,6 +398,16 @@ export function render(windowId: WindowId, overrides: Overrides = {}): string {
   client.setQueryData(['ai-actions'], []);
   client.setQueryData(['networth', 'history', 12], overrides.recent ?? RECENT_SHEETS);
   client.setQueryData(['networth', 'history', range], snapshot ? [snapshot] : []);
+  client.setQueryData(['networth', 'timeline', range.startDate, range.endDate, 'day'], {
+    from: range.startDate,
+    to: range.endDate,
+    step: 'day',
+    accounts: [],
+    points: snapshot
+      ? [{ date: snapshot.date, net_worth: snapshot.net_worth, assets: snapshot.total_assets, liabilities: snapshot.total_liabilities, liquid: 0, invested: 0, crypto: 0, estimated: false, estimated_accounts: [], coverage: 0, by_account: {} }]
+      : [],
+    method: '',
+  });
   client.setQueryData(['reports', 'summary', range, 'prior_period'], overrides.summary ?? SUMMARY);
   client.setQueryData(['reports', 'cashflow', range], CASHFLOW);
   client.setQueryData(['reports', 'spending', range], overrides.spending ?? SPENDING);

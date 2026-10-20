@@ -195,9 +195,8 @@ test('what moved net worth is attributed to accounts, with the liability sign ex
   assert.match(body, /Chase Checking/);
   assert.match(body, /−\$1,324/);
   assert.match(body, /a card whose balance grew reads negative/);
-  // The endpoints are the two measured sheets the service used, not the window's own edges.
-  assert.match(body, /Jul 1 to Jul 31/);
-  assert.match(body, /only\s+measured sheets are used as endpoints/);
+  assert.match(body, /Jul 1 against Jul 31/);
+  assert.match(body, /value in the chart above/);
 });
 
 test('a window with nothing to attribute says nothing rather than printing a zero move', () => {

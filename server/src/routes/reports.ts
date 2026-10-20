@@ -284,8 +284,6 @@ router.get('/networth-attribution', (req: Request, res: Response, next: NextFunc
         ...report,
         start_net_worth: toDollars(report.start_net_worth),
         end_net_worth: toDollars(report.end_net_worth),
-        start_in_transit: toDollars(report.start_in_transit),
-        end_in_transit: toDollars(report.end_in_transit),
         delta: toDollars(report.delta),
         accounts: report.accounts.map((a) => ({
           ...a,

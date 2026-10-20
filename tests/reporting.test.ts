@@ -3,7 +3,8 @@ import assert from 'node:assert/strict';
 import http from 'node:http';
 import express from 'express';
 import Database from 'better-sqlite3';
-import { migratedTestDb, insertAccount } from './helpers/schema';
+import { migratedTestDb, insertAccount, insertTransaction } from './helpers/schema';
+import { netWorthTimeline } from '../server/src/services/netWorthTimeline';
 import {
   getCashflowReport,
   getIncomeReport,
@@ -492,66 +493,46 @@ test('top merchants honors the limit and orders by spend', (t) => {
   assert.equal(report.total, 130);
 });
 
-test('net worth attribution diffs per-account balances between the window snapshots', (t) => {
-  const db = setupReportingDb();
+function attributionLedger() {
+  const db = migratedTestDb();
+  const checking = insertAccount(db, { id: 'acct_checking', account_name: 'Everyday Checking', type: 'checking', current_balance: 1200 });
+  const card = insertAccount(db, { id: 'acct_credit', account_name: 'Card', type: 'credit', is_liability: 1, current_balance: 200 });
+  insertTransaction(db, { account_id: checking, date: '2026-05-01', amount: 1000 });
+  insertTransaction(db, { account_id: card, date: '2026-05-02', amount: -300 });
+  insertTransaction(db, { account_id: checking, date: '2026-06-10', amount: 200 });
+  insertTransaction(db, { account_id: card, date: '2026-06-12', amount: 100 });
+  return db;
+}
+
+test('net worth attribution reads each account at the window\'s two ends of the timeline, and the parts sum to the move', (t) => {
+  const db = attributionLedger();
   t.after(() => db.close());
 
-  const attribution = getNetWorthAttribution(db, {});
+  const attribution = getNetWorthAttribution(db, { startDate: '2026-05-31', endDate: '2026-06-30' });
   assert.ok(attribution);
   assert.equal(attribution.start_date, '2026-05-31');
   assert.equal(attribution.end_date, '2026-06-30');
   assert.equal(attribution.delta, 300);
+  const timeline = netWorthTimeline(db, { from: '2026-05-31', to: '2026-06-30' });
+  assert.equal(attribution.end_net_worth, timeline.points.at(-1)!.net_worth);
 
   const byId = new Map(attribution.accounts.map((a) => [a.account_id, a]));
   assert.equal(byId.get('acct_checking')?.delta, 200);
-  assert.equal(byId.get('acct_checking')?.account_name, 'Everyday Checking');
-
-  // The card's balance fell 300 -> 200. `breakdown` stores debt as a positive amount owed, so
-  // paying it down is a POSITIVE contribution to net worth, not a -100 "loss".
+  // The card fell 300 -> 200 owed. Paying it down is a POSITIVE contribution to net worth.
   const card = byId.get('acct_credit');
-  assert.equal(card?.is_liability, true);
-  assert.equal(card?.start_balance, 300);
-  assert.equal(card?.end_balance, 200);
-  assert.equal(card?.delta, 100);
-
-  // The whole point of attribution: the parts must add up to the headline move.
-  const summed = attribution.accounts.reduce((total, a) => total + a.delta, 0);
-  assert.equal(summed, attribution.delta);
-
-  // Largest absolute mover first, regardless of sign.
+  assert.deepEqual([card?.is_liability, card?.start_balance, card?.end_balance, card?.delta], [true, 300, 200, 100]);
+  assert.equal(attribution.accounts.reduce((total, a) => total + a.delta, 0), attribution.delta);
   assert.equal(attribution.accounts[0]?.account_id, 'acct_checking');
 });
 
-test('net worth attribution needs two snapshots and survives a malformed breakdown', (t) => {
-  const db = setupReportingDb();
+test('HEALTHY: a window in which nothing moved lists no movers, and one day is not a movement', (t) => {
+  const db = attributionLedger();
   t.after(() => db.close());
 
-  // A single-snapshot window is a point, not a movement.
-  assert.equal(getNetWorthAttribution(db, { startDate: '2026-06-01', endDate: '2026-06-30' }), null);
-
-  db.prepare(`UPDATE net_worth_snapshots SET breakdown = 'not json' WHERE id = 'nw_jun'`).run();
-  const degraded = getNetWorthAttribution(db, {});
-  assert.ok(degraded);
-  // Net worth still moved; the per-account attribution just reads as a drop to zero rather than 500ing.
-  assert.equal(degraded.delta, 300);
-  assert.equal(degraded.accounts.every((a) => a.end_balance === 0), true);
-});
-
-test('an account that appears only in the later snapshot counts its full balance as the move', (t) => {
-  const db = setupReportingDb();
-  t.after(() => db.close());
-
-  db.prepare(`
-    UPDATE net_worth_snapshots
-    SET breakdown = '{"acct_checking":1200,"acct_credit":200,"acct_new":400}'
-    WHERE id = 'nw_jun'
-  `).run();
-
-  const attribution = getNetWorthAttribution(db, {});
-  const added = attribution?.accounts.find((a) => a.account_id === 'acct_new');
-  assert.equal(added?.start_balance, 0);
-  assert.equal(added?.delta, 400);
-  assert.equal(added?.account_name, null); // unknown to the accounts table, still attributed
+  const still = getNetWorthAttribution(db, { startDate: '2026-06-13', endDate: '2026-06-30' });
+  assert.ok(still);
+  assert.deepEqual([still.delta, still.accounts, still.start_estimated, still.end_estimated], [0, [], false, false]);
+  assert.equal(getNetWorthAttribution(db, { startDate: '2026-06-30', endDate: '2026-06-30' }), null);
 });
 
 // With no window there is nothing before it to compare against: an empty range means all time,
