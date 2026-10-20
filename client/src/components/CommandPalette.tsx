@@ -18,6 +18,7 @@ import type {
   AiDigestRevertResult,
   AiDigestRow,
 } from '@shared/types';
+import { ADD_ENTRY_ROUTE } from '../views/ledgerLinks';
 
 interface Command {
   id: string;
@@ -496,8 +497,7 @@ export function CommandPalette() {
         hint: 'manual entry',
         run: () => {
           setOpen(false);
-          navigate('/ledger');
-          setTimeout(() => window.dispatchEvent(new Event('mizan:add-transaction')), 120);
+          navigate(ADD_ENTRY_ROUTE);
         },
       },
       {

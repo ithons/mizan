@@ -32,6 +32,7 @@ import {
   useDisclosure,
 } from '../components/balance';
 import { AddEntryModal, AddScheduledModal, EditEntryModal } from './ledger/modals';
+import { ADD_ENTRY_PARAM, takeAddEntryRequest } from './ledgerLinks';
 import { LedgerColumnHeader, LedgerRow, ScheduledRow } from './ledger/rows';
 import {
   MAX_BATCH_CONFIRM,
@@ -175,11 +176,15 @@ export function Ledger() {
     setSelectedIds(new Set());
   }, [range, debouncedSearch, accountFilter, categoryFilter, sourceFilter, filter, view]);
 
+  // A URL rather than a window event: the event fired before a lazily loaded Ledger had mounted
+  // a listener, and the request was lost. Its own effect so it cannot re-apply the deep-link filters.
+  const addRequested = searchParams.get(ADD_ENTRY_PARAM) === '1';
   useEffect(() => {
-    const open = () => setShowAddEntry(true);
-    window.addEventListener('mizan:add-transaction', open);
-    return () => window.removeEventListener('mizan:add-transaction', open);
-  }, []);
+    const remaining = takeAddEntryRequest(searchParams);
+    if (!remaining) return;
+    setShowAddEntry(true);
+    setSearchParams(remaining, { replace: true });
+  }, [addRequested]);
 
   const reviewQ = useQuery({ queryKey: ['transactions', 'review'], queryFn: () => transactionsApi.review() });
   const forecastQ = useQuery({ queryKey: ['recurring', 'forecast', 30], queryFn: () => recurringApi.forecast(30) });
