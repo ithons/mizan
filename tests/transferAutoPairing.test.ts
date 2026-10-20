@@ -337,3 +337,30 @@ test('identical moves split across two destination accounts still pair past the 
   refreshTransferCandidates(db);
   for (const id of ['o0', 'o1', 'o2', 'o3', 'i0', 'i1', 'i2', 'iJ']) assert.notEqual(leg(db, id).transfer_pair_id, null, id);
 });
+
+function sharedConfirmationLedger(withReference: boolean) {
+  const db = migratedTestDb();
+  const savings = insertAccount(db, { account_name: 'Savings', type: 'savings' });
+  const checking = insertAccount(db, { account_name: 'Checking', type: 'checking' });
+  const brokerage = insertAccount(db, { account_name: 'Brokerage', type: 'brokerage' });
+  const conf = withReference ? ' Confirmation# 1234509876' : '';
+  const out = insertTransaction(db, { account_id: savings, date: '2026-02-04', amount: -90000, original_name: `Online Banking transfer to CHK 1111${conf}` });
+  const into = insertTransaction(db, { account_id: checking, date: '2026-02-04', amount: 90000, original_name: `Online Banking transfer from SAV 2222${conf}` });
+  const brokerIn = insertTransaction(db, { account_id: brokerage, date: '2026-02-02', amount: 90000, original_name: 'Fidelity contribution' });
+  const brokerOut = insertTransaction(db, { account_id: brokerage, date: '2026-02-04', amount: -90000, original_name: 'Fidelity contribution' });
+  refreshTransferCandidates(db);
+  return { db, out, into, brokerIn, brokerOut };
+}
+
+test('two legs quoting the same confirmation number pair with each other, not with nearer-looking legs elsewhere', () => {
+  const { db, out, into, brokerIn, brokerOut } = sharedConfirmationLedger(true);
+  assert.equal(partnerOf(db, out), into);
+  assert.equal(partnerOf(db, brokerIn), null);
+  assert.equal(partnerOf(db, brokerOut), null);
+});
+
+test('HEALTHY: without a confirmation number the same ledger is matched exactly as before', () => {
+  const { db, out, into, brokerIn, brokerOut } = sharedConfirmationLedger(false);
+  assert.equal(partnerOf(db, out), brokerIn);
+  assert.equal(partnerOf(db, brokerOut), into);
+});
