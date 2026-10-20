@@ -6,7 +6,7 @@ import { SCHEDULED_ROUTE } from '../../../shared/routes';
 import {
   NOTIFICATION_RULE_KINDS,
   type AppNotification,
-  type Budget,
+  type ProjectedBudget,
   type NotificationEvaluationError,
   type NotificationEvaluationSummary,
   type NotificationRule,
@@ -309,7 +309,7 @@ function shortDate(date: string): string {
 /** Shared figures, each computed at most once per evaluation and only when a rule asks. */
 class EvaluationContext {
   readonly month: string;
-  private budgetsMemo: Budget[] | null = null;
+  private budgetsMemo: ProjectedBudget[] | null = null;
   private safeToSpendMemo: SafeToSpendBreakdown | null = null;
   private forecasts = new Map<number, RecurringForecast>();
 
@@ -317,7 +317,7 @@ class EvaluationContext {
     this.month = format(now, 'yyyy-MM');
   }
 
-  budgets(): Budget[] {
+  budgets(): ProjectedBudget[] {
     this.budgetsMemo ??= getMonthlyBudgetsWithProjection(this.db, this.now.getFullYear(), this.now.getMonth() + 1, this.now);
     return this.budgetsMemo;
   }
@@ -345,7 +345,7 @@ type Evaluator<K extends NotificationRuleKind> = (
 const budgetThreshold: Evaluator<'budget_threshold'> = (ctx, params) =>
   ctx.budgets().flatMap((budget) => {
     if (params.category_id && budget.category_id !== params.category_id) return [];
-    const available = budget.amount + (budget.rollover_balance ?? 0);
+    const available = budget.available_amount;
     const spent = budget.spent ?? 0;
     if (available <= 0) return [];
     const percentSpent = (spent / available) * 100;

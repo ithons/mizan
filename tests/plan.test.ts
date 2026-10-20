@@ -15,7 +15,7 @@ import {
   text,
 } from './helpers/planHarness';
 import { lateIncomeAllowanceNote } from '../client/src/views/instrumentReadings';
-import type { Budget } from '../shared/types';
+import type { ProjectedBudget } from '../shared/types';
 
 /**
  * `/plan`: the claim sheet, the budget bars, and the grounds this screen puts money on.
@@ -110,7 +110,7 @@ describe('the claim sheet reads the month it was computed for', () => {
 });
 
 describe('the diverging bar stays a measurement when the refunds get large', () => {
-  const returned = (id: string, spent: number): Budget =>
+  const returned = (id: string, spent: number): ProjectedBudget =>
     shoppingBudget({ id, spent, projected_remaining: 500 - spent });
 
   test('two returned months of different size draw different bars', () => {

@@ -79,7 +79,7 @@ test('unbudgeted spending is claimed at its trailing pace; budgeted, recurring a
 
     const sheet = computeSafeToSpend(db, {
       forecastDays: 30,
-      budgets: [{ category_id: 'cat_food_groceries', amount: 60000, projected_remaining: 10000, rollover_balance: 0 }],
+      budgets: [{ category_id: 'cat_food_groceries', amount: 60000, projected_remaining: 10000, available_amount: 60000 }],
     });
     assert.equal(sheet.estimatedUnbudgeted, Math.round((18000 / UNBUDGETED_BASIS_DAYS) * 30));
     assert.equal(sheet.unbudgetedBasisDays, UNBUDGETED_BASIS_DAYS);

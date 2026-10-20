@@ -1215,7 +1215,7 @@ export function buildFinancialContext(): string {
       let budgetStr = '';
       if (budget) {
         const spent = toDollars(budget.spent ?? 0);
-        const available = toDollars(budget.amount + (budget.rollover ? budget.rollover_balance : 0));
+        const available = toDollars(budget.available_amount);
         const percent = available > 0 ? ` (${Math.round((spent / available) * 100)}%)` : '';
         budgetStr = ` | budget on this category: ${fmt(spent)} spent of ${fmt(available)}${percent}`;
       }

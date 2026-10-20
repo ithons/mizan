@@ -1,21 +1,13 @@
-import type { Budget } from '@shared/types';
+import type { Budget, ProjectedBudget } from '@shared/types';
 
 type BudgetProjectionInput = Pick<
-  Budget,
-  | 'amount'
-  | 'rollover'
+  ProjectedBudget,
+  | 'available_amount'
   | 'rollover_balance'
   | 'spent'
   | 'projected_spend'
   | 'projected_remaining'
-  | 'projected_percent'
 >;
-
-export function availableBudgetAmount(
-  budget: Pick<Budget, 'amount' | 'rollover' | 'rollover_balance'>
-): number {
-  return budget.amount + (budget.rollover ? budget.rollover_balance : 0);
-}
 
 export function budgetActualSpend(budget: Pick<Budget, 'spent'>): number {
   return budget.spent ?? 0;
@@ -26,12 +18,7 @@ export function budgetProjectedSpend(budget: Pick<Budget, 'spent' | 'projected_s
 }
 
 export function budgetProjectedRemaining(budget: BudgetProjectionInput): number {
-  return budget.projected_remaining ?? availableBudgetAmount(budget) - budgetProjectedSpend(budget);
-}
-
-export function budgetProjectedPercent(budget: BudgetProjectionInput): number {
-  const available = availableBudgetAmount(budget);
-  return budget.projected_percent ?? (available > 0 ? (budgetProjectedSpend(budget) / available) * 100 : 0);
+  return budget.projected_remaining ?? budget.available_amount - budgetProjectedSpend(budget);
 }
 
 export interface BudgetRowMeta {
@@ -61,7 +48,7 @@ export interface BudgetRowMeta {
 export function buildBudgetRowMeta(
   budget: BudgetProjectionInput & Pick<Budget, 'expected_recurring' | 'forecast_confidence'>
 ): BudgetRowMeta {
-  const carried = budget.rollover ? budget.rollover_balance : 0;
+  const carried = budget.rollover_balance;
   const expectedRecurring = budget.expected_recurring ?? 0;
   const projectedSpend = budgetProjectedSpend(budget);
   const actualSpend = budgetActualSpend(budget);

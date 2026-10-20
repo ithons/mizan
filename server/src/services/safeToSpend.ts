@@ -98,7 +98,7 @@ export interface SafeToSpendInputs {
     category_id?: string | null;
     projected_remaining?: number | null;
     amount?: number | null;
-    rollover_balance?: number | null;
+    available_amount: number;
   }>;
   forecastDays?: number;
   today?: Date;
@@ -151,7 +151,7 @@ export function computeSafeToSpend(
   // and a false one about intent, and this metric is about intent. You never earmarked $1,703.63
   // for Shopping.
   const allocatedBudgets = (inputs.budgets ?? []).reduce((sum, budget) => {
-    const ceiling = (budget.amount ?? 0) + (budget.rollover_balance ?? 0);
+    const ceiling = budget.available_amount;
     const remaining = Math.max(0, budget.projected_remaining ?? 0);
     return sum + (ceiling > 0 ? Math.min(remaining, ceiling) : remaining);
   }, 0);

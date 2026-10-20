@@ -5,7 +5,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { format } from 'date-fns';
 import { ClaimSheet, Plan } from '../../client/src/views/Plan';
 import type {
-  Budget,
+  ProjectedBudget,
   BudgetRolloverLedgerEntry,
   Goal,
   RecurringForecast,
@@ -57,7 +57,7 @@ export const SHEET: SafeToSpend = {
 // SELECT actual_spend FROM budget_rollover_ledger WHERE month = '2026-07';  -> -120363 cents
 export const SHOPPING_BUDGET_ID = '68d53019-04d6-45c2-899e-097985358382';
 
-export function shoppingBudget(overrides: Partial<Budget> = {}): Budget {
+export function shoppingBudget(overrides: Partial<ProjectedBudget> = {}): ProjectedBudget {
   const spent = overrides.spent ?? -1203.63;
   const amount = overrides.amount ?? 500;
   return {
@@ -67,6 +67,7 @@ export function shoppingBudget(overrides: Partial<Budget> = {}): Budget {
     period: 'monthly',
     rollover: false,
     rollover_balance: 0,
+    available_amount: overrides.available_amount ?? amount,
     created_at: '2026-07-09T22:50:37.383Z',
     updated_at: '2026-07-09T22:50:37.383Z',
     category_name: 'Shopping',
@@ -134,7 +135,7 @@ export interface Seed {
   sheet?: SafeToSpend;
   goals?: Goal[];
   /** Keyed by `yyyy-MM`, so a test can give the open month and the stepped month different lists. */
-  budgetsByMonth?: Record<string, Budget[]>;
+  budgetsByMonth?: Record<string, ProjectedBudget[]>;
   ledger?: BudgetRolloverLedgerEntry[];
 }
 
@@ -199,7 +200,7 @@ export function barWidths(html: string): number[] {
  */
 export function renderClaimSheet(
   sheet: SafeToSpend,
-  budgets: Budget[] | undefined,
+  budgets: ProjectedBudget[] | undefined,
   goalCount: number | null
 ): string {
   return renderToString(createElement(ClaimSheet, { sheet, budgets, goalCount }));

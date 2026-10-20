@@ -71,10 +71,6 @@ function toDollarsOpt(cents: number | null | undefined): number | undefined {
   return cents == null ? undefined : toDollars(cents);
 }
 
-function availableBudgetAmount(budget: { amount: number; rollover: boolean; rollover_balance: number }): number {
-  return budget.amount + (budget.rollover ? budget.rollover_balance : 0);
-}
-
 function count(db: Database.Database, sql: string, ...params: unknown[]): number {
   const row = db.prepare(sql).get(...params) as CountRow | undefined;
   return row?.count ?? 0;
@@ -287,8 +283,7 @@ function analyzeBudget(
       : 'No configured category is projected over budget right now.',
     watched
       .map((budget) => {
-        const availableAmount = availableBudgetAmount(budget);
-        return `${budget.category_name ?? 'Uncategorized'}: projected ${fmt(toDollarsOpt(budget.projected_spend))} of ${fmt(toDollars(availableAmount))}, ${fmt(toDollarsOpt(budget.projected_remaining))} remaining.`;
+        return `${budget.category_name ?? 'Uncategorized'}: projected ${fmt(toDollarsOpt(budget.projected_spend))} of ${fmt(toDollars(budget.available_amount))}, ${fmt(toDollarsOpt(budget.projected_remaining))} remaining.`;
       })
       .join('\n'),
   ];

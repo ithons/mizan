@@ -410,10 +410,7 @@ function getBudgetsTool(db: Database.Database): unknown {
       category: budget.category_name ?? 'Unknown category',
       budget: toDollars(budget.amount),
       spent: toDollars(budget.spent ?? 0),
-      // The ceiling /plan and the system prompt both use: the limit plus what rolled over into
-      // this month. `getMonthlyBudgetsWithProjection` already zeroes rollover_balance when rollover
-      // is off, so a plain budget reads limit minus spent exactly as before.
-      remaining: toDollars(budget.amount + budget.rollover_balance - (budget.spent ?? 0)),
+      remaining: toDollars(budget.available_amount - (budget.spent ?? 0)),
       // Spend already committed for the rest of the month via detected recurring items.
       expected_recurring: toDollars(budget.expected_recurring ?? 0),
       projected_spend: toDollars(budget.projected_spend ?? 0),

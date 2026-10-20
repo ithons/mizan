@@ -20,6 +20,7 @@ import type {
   AiStreamEvent,
   AppNotification,
   Budget,
+  ProjectedBudget,
   BudgetRolloverLedgerEntry,
   CashflowReport,
   Category,
@@ -368,7 +369,7 @@ export const rulesApi = {
 export const budgetsApi = {
   getMonth: (month: string) => {
     const [year, m] = month.split('-');
-    return apiFetch<Budget[]>(`/api/budgets/month/${year}/${parseInt(m, 10)}`);
+    return apiFetch<ProjectedBudget[]>(`/api/budgets/month/${year}/${parseInt(m, 10)}`);
   },
   rolloverLedger: (params: { budgetId?: string; month?: string; months?: number } = {}) => {
     const q = new URLSearchParams();

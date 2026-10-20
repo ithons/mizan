@@ -9,7 +9,7 @@ import {
   recordBudgetRolloverLedger,
 } from '../services/budgetProjection';
 import { toCents, dollarizeFields } from '../services/money';
-import type { Budget, BudgetRolloverLedgerEntry } from '../../../shared/types';
+import type { BudgetRolloverLedgerEntry, ProjectedBudget } from '../../../shared/types';
 import { deleteBudget } from '../services/budgets';
 
 const router = Router();
@@ -21,6 +21,7 @@ const BUDGET_MONEY_FIELDS = ['amount', 'rollover_balance'] as const;
 const PROJECTION_MONEY_FIELDS = [
   'amount',
   'rollover_balance',
+  'available_amount',
   'spent',
   'expected_recurring',
   'projected_spend',
@@ -33,8 +34,8 @@ const LEDGER_MONEY_FIELDS = [
   'ending_rollover',
 ] as const;
 
-function projectionToDollars(budget: Budget): Budget {
-  return dollarizeFields(budget as unknown as Record<string, unknown>, PROJECTION_MONEY_FIELDS) as unknown as Budget;
+function projectionToDollars(budget: ProjectedBudget): ProjectedBudget {
+  return dollarizeFields(budget as unknown as Record<string, unknown>, PROJECTION_MONEY_FIELDS) as unknown as ProjectedBudget;
 }
 
 function ledgerEntryToDollars(entry: BudgetRolloverLedgerEntry): BudgetRolloverLedgerEntry {

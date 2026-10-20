@@ -286,6 +286,12 @@ export interface Budget {
   forecast_confidence?: 'none' | 'confirmed' | 'likely' | 'uncertain';
 }
 
+/** A budget row as the month projection returns it, with its ceiling for the month. */
+export interface ProjectedBudget extends Budget {
+  /** amount plus the carry into this month; rollover_balance is already 0 when rollover is off. */
+  available_amount: number;
+}
+
 export interface BudgetRolloverLedgerEntry {
   id: string;
   budget_id: string;

@@ -68,6 +68,7 @@ test('monthly budgets include future recurring bills in current month projection
   const food = budgets.find((budget) => budget.category_id === 'cat_food');
 
   assert.equal(home?.spent, 400);
+  assert.equal(home?.available_amount, 1200, 'HEALTHY: no rollover, so the ceiling is the limit');
   assert.equal(home?.expected_recurring, 800);
   assert.equal(home?.projected_spend, 1200);
   assert.equal(home?.projected_remaining, 0);
@@ -125,6 +126,7 @@ test('rollover budgets use prior posted spending as current month carryover', (t
 
   assert.equal(food?.rollover, true);
   assert.equal(food?.rollover_balance, 250);
+  assert.equal(food?.available_amount, 750, 'the ceiling every consumer reads is the limit plus the carry');
   assert.equal(food?.spent, 100);
   assert.equal(food?.projected_spend, 100);
   assert.equal(food?.projected_remaining, 650);

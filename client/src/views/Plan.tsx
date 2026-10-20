@@ -6,11 +6,12 @@ import type {
   BudgetRolloverLedgerEntry,
   Category,
   Goal,
+  ProjectedBudget,
   SafeToSpend,
 } from '@shared/types';
 import { accountsApi, budgetsApi, categoriesApi, goalsApi, insightsApi } from '../lib/api';
 import { formatCurrency, formatWholeCurrency } from '../lib/formatters';
-import { availableBudgetAmount, budgetActualSpend, buildBudgetRowMeta } from '../lib/budgetMath';
+import { budgetActualSpend, buildBudgetRowMeta } from '../lib/budgetMath';
 import { invalidateFinancialData } from '../lib/queryInvalidation';
 import { parseDecimalInput } from '../lib/numberInput';
 import { useAppStore } from '../store';
@@ -66,7 +67,7 @@ export function ClaimSheet({
   goalCount,
 }: {
   sheet: SafeToSpend;
-  budgets: BudgetType[] | undefined;
+  budgets: ProjectedBudget[] | undefined;
   goalCount: number | null;
 }) {
   const lines = claimLines(sheet, budgets ? budgets.length : null, goalCount);
@@ -193,12 +194,12 @@ function BudgetLine({
   scale,
   onEdit,
 }: {
-  budget: BudgetType;
+  budget: ProjectedBudget;
   /** The whole list's scale. Never this row's own; see the bar below. */
   scale: SignedBarScale;
   onEdit: () => void;
 }) {
-  const available = availableBudgetAmount(budget);
+  const available = budget.available_amount;
   const spent = budgetActualSpend(budget);
   const meta = buildBudgetRowMeta(budget);
   const returned = spent < 0;

@@ -136,8 +136,8 @@ test('get_budgets returns budget vs this-month actual, dollarized', (t) => {
   assert.equal((food as { rollover_balance?: number } | undefined)?.rollover_balance, 0);
 });
 
-// /plan prints "left" as amount + rollover carried in, minus spent (Plan.tsx through
-// `availableBudgetAmount`), and the system prompt uses the same ceiling. The tool used to drop the
+// /plan prints "left" as amount + rollover carried in, minus spent (Plan.tsx reads the
+// projection's `available_amount`), and the system prompt uses the same ceiling. The tool used to drop the
 // carryover, so a rollover budget read $612.52 left here and $4,224.18 on /plan for one budget.
 test('get_budgets remaining includes rollover carried in, matching /plan', (t) => {
   const db = setup();

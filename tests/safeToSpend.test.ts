@@ -61,7 +61,7 @@ test('a budget allocation is capped at what was actually budgeted', () => {
   // Shopping budget is $500 with -$1,203.63 of spend, giving $1,703.63 "remaining". That is a true
   // statement about headroom and a false one about intent.
   const result = computeSafeToSpend(db, {
-    budgets: [{ amount: 50000, rollover_balance: 0, projected_remaining: 170363 }],
+    budgets: [{ amount: 50000, available_amount: 50000, projected_remaining: 170363 }],
   });
   assert.equal(result.allocatedBudgets, 50000);
   assert.equal(result.free, 100000 - 50000 - result.budgetsAhead);
@@ -73,7 +73,7 @@ test('an overspent budget allocates nothing rather than a negative', () => {
   insertAccount(db, { type: 'checking', current_balance: 100000 });
 
   const result = computeSafeToSpend(db, {
-    budgets: [{ amount: 50000, rollover_balance: 0, projected_remaining: -20000 }],
+    budgets: [{ amount: 50000, available_amount: 50000, projected_remaining: -20000 }],
   });
   assert.equal(result.allocatedBudgets, 0);
   db.close();

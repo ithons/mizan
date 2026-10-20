@@ -7,6 +7,7 @@ import { localDaysFromToday, migratedTestDb } from './helpers/schema';
 import { _setDbForTesting } from '../server/src/db/index';
 import accountsRouter from '../server/src/routes/accounts';
 import networthRouter from '../server/src/routes/networth';
+import budgetsRouter from '../server/src/routes/budgets';
 
 // The rest of the suite calls services directly and asserts in the cents domain, so the
 // cents<->dollars conversion that actually happens at the ROUTE boundary (migrations 018/022
@@ -83,6 +84,26 @@ test('GET /api/networth/timeline returns totals and per-account values in dollar
     assert.equal(last.net_worth, 4307.19);
     assert.equal(last.by_account.acc_check, 4307.19);
     assert.equal((await fetch(`${base}?step=hour`)).status, 400);
+  } finally {
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+    db.close();
+  }
+});
+
+test('GET /api/budgets/month returns each budget ceiling in dollars', async () => {
+  const db = setupDb();
+  db.prepare(`INSERT INTO budgets (id, category_id, amount, period, rollover, rollover_balance, created_at, updated_at)
+    VALUES ('bud_food', 'cat_food', 50000, 'monthly', 0, 0, '2026-01-01T12:00:00Z', '2026-01-01T12:00:00Z')`).run();
+  _setDbForTesting(db);
+  const app = express();
+  app.use('/api/budgets', budgetsRouter);
+  const server = http.createServer(app);
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+  try {
+    const addr = server.address();
+    if (!addr || typeof addr === 'string') throw new Error('no server address');
+    const body = (await (await fetch(`http://127.0.0.1:${addr.port}/api/budgets/month/2026/7`)).json()) as { data: Array<{ amount: number; available_amount: number }> };
+    assert.deepEqual(body.data.map((b) => [b.amount, b.available_amount]), [[500, 500]]);
   } finally {
     await new Promise<void>((resolve) => server.close(() => resolve()));
     db.close();

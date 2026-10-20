@@ -1,5 +1,4 @@
-import type { Budget, SafeToSpend } from '@shared/types';
-import { availableBudgetAmount } from '../../lib/budgetMath';
+import type { ProjectedBudget, SafeToSpend } from '@shared/types';
 import { readOwedTotal } from '../../lib/accountBalance';
 import { formatCurrency, formatDateShort } from '../../lib/formatters';
 
@@ -157,9 +156,9 @@ function emptyNote(count: MaybeCount, allocated: number, sentence: string): stri
  * identical July sheet reported different uncounted headroom depending on which month the list
  * below happened to be showing.
  */
-export function uncountedHeadroom(budgets: Budget[]): number {
+export function uncountedHeadroom(budgets: ProjectedBudget[]): number {
   return budgets.reduce((sum, budget) => {
-    const ceiling = availableBudgetAmount(budget);
+    const ceiling = budget.available_amount;
     const remaining = Math.max(0, budget.projected_remaining ?? 0);
     return sum + (ceiling > 0 ? Math.max(0, remaining - ceiling) : 0);
   }, 0);

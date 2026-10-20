@@ -125,9 +125,9 @@ test('a window reaching into next month claims that month\'s budgets for the day
   const next = new Date(today.getFullYear(), today.getMonth() + 1, 1);
   const daysInNext = new Date(next.getFullYear(), next.getMonth() + 1, 0).getDate();
   const into = 15;
-  const sheet = computeSafeToSpend(db, { budgets: [{ category_id: 'cat_food', amount: 30000, projected_remaining: 0 }], forecastDays: daysLeft + into });
+  const sheet = computeSafeToSpend(db, { budgets: [{ category_id: 'cat_food', amount: 30000, available_amount: 30000, projected_remaining: 0 }], forecastDays: daysLeft + into });
   assert.equal(sheet.budgetsAhead, Math.round((30000 * into) / daysInNext));
-  const none = computeSafeToSpend(db, { budgets: [{ category_id: 'cat_food', amount: 30000, projected_remaining: 0 }], forecastDays: daysLeft });
+  const none = computeSafeToSpend(db, { budgets: [{ category_id: 'cat_food', amount: 30000, available_amount: 30000, projected_remaining: 0 }], forecastDays: daysLeft });
   assert.equal(none.budgetsAhead, 0, 'a window ending this month claims nothing ahead');
 });
 

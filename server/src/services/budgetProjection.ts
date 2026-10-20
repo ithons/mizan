@@ -3,7 +3,7 @@ import { excludedFromTotalsSql, reportDateSql } from './transactionFilters';
 import { addMonths, format, isBefore, parseISO, subMonths  } from 'date-fns';
 import { occurrenceDate, recentSignedAmounts } from './recurring';
 import { getRecurringAdjustmentMap } from './recurringAdjustments';
-import type { Budget, BudgetRolloverLedgerEntry, RecurringPattern } from '../../../shared/types';
+import type { Budget, BudgetRolloverLedgerEntry, ProjectedBudget, RecurringPattern } from '../../../shared/types';
 
 type Frequency = RecurringPattern['frequency'];
 type ForecastConfidence = NonNullable<Budget['forecast_confidence']>;
@@ -234,7 +234,7 @@ export function getMonthlyBudgetsWithProjection(
   year: number,
   month: number,
   now = new Date()
-): Budget[] {
+): ProjectedBudget[] {
   const monthPart = String(month).padStart(2, '0');
   const startDate = `${year}-${monthPart}-01`;
   const lastDay = new Date(year, month, 0).getDate();
@@ -310,6 +310,7 @@ export function getMonthlyBudgetsWithProjection(
       ...budget,
       rollover: Boolean(budget.rollover),
       rollover_balance: rolloverBalance,
+      available_amount: availableAmount,
       expected_recurring: expectedRecurring,
       projected_spend: projectedSpend,
       projected_remaining: projectedRemaining,
