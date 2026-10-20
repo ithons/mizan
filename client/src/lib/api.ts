@@ -350,11 +350,6 @@ export const rulesApi = {
         apply_existing_overwrite: body.apply_existing_overwrite ?? false,
       }),
     }),
-  update: (id: string, body: Partial<MerchantRule>) =>
-    apiFetch<MerchantRule>(`/api/rules/${id}`, {
-      method: 'PATCH',
-      body: JSON.stringify(body),
-    }),
   apply: (body: { only_uncategorized?: boolean } = {}) =>
     apiFetch<{ updated: number }>('/api/rules/apply', {
       method: 'POST',

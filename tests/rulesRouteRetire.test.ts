@@ -77,24 +77,31 @@ test('HEALTHY: deleting an unknown rule is still a 404 and writes nothing', asyn
 });
 
 /**
- * PATCH moved a rule's category with a bare UPDATE: no revision, no updated_at, and an AI rule
- * kept claiming its action, so undo could revert the owner's edit and the revision log said nothing.
+ * Settings has no rule editor: re-adding a pattern with a different category is how the owner
+ * changes one, so the create route must move the existing rule in place rather than mint a second.
+ * It keeps the rule's id and created_at, which the resolution comparator sorts on.
  */
-test('PATCH /api/rules/:id records the recategorize as the owner\'s revision', async () => {
+async function postRule(base: string, body: unknown): Promise<Response> {
+  return fetch(`${base}/api/rules`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+}
+
+test('re-adding a pattern with a new category recategorizes that rule as the owner\'s revision', async () => {
   const db = migratedTestDb();
   const from = insertCategory(db, { name: 'Coffee' });
   const to = insertCategory(db, { name: 'Groceries' });
   const ruleId = upsertMerchantRule(db, 'Blue Bottle', from, '2026-01-01T00:00:00.000Z', { source: 'ai', actionId: 'act_1' }).ruleId;
 
   await withServer(db, async (base) => {
-    const res = await fetch(`${base}/api/rules/${ruleId}`, {
-      method: 'PATCH',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ category_id: to }),
-    });
-    assert.equal(res.status, 200);
-    const rule = db.prepare('SELECT category_id, source, action_id FROM merchant_rules WHERE id = ?').get(ruleId);
-    assert.deepEqual(rule, { category_id: to, source: 'human', action_id: null });
+    const res = await postRule(base, { pattern: 'blue bottle', category_id: to });
+    assert.equal(res.status, 201);
+    const rules = db.prepare('SELECT id, category_id, source, action_id, created_at FROM merchant_rules').all();
+    assert.deepEqual(rules, [
+      { id: ruleId, category_id: to, source: 'human', action_id: null, created_at: '2026-01-01T00:00:00.000Z' },
+    ]);
     const revision = db.prepare(
       "SELECT from_category_id, to_category_id, source FROM merchant_rule_revisions WHERE rule_id = ? AND operation = 'recategorize'"
     ).all(ruleId);
@@ -102,46 +109,16 @@ test('PATCH /api/rules/:id records the recategorize as the owner\'s revision', a
   });
 });
 
-test('HEALTHY: a PATCH that changes nothing writes no revision and leaves provenance alone', async () => {
+test('HEALTHY: re-adding a pattern with its current category writes no revision and leaves provenance alone', async () => {
   const db = migratedTestDb();
   const cat = insertCategory(db, { name: 'Coffee' });
   const ruleId = upsertMerchantRule(db, 'Blue Bottle', cat, '2026-01-01T00:00:00.000Z', { source: 'ai', actionId: 'act_1' }).ruleId;
   const before = (db.prepare('SELECT COUNT(*) AS n FROM merchant_rule_revisions').get() as { n: number }).n;
 
   await withServer(db, async (base) => {
-    const res = await fetch(`${base}/api/rules/${ruleId}`, {
-      method: 'PATCH',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ category_id: cat, pattern: 'Blue Bottle' }),
-    });
-    assert.equal(res.status, 200);
+    const res = await postRule(base, { pattern: 'Blue Bottle', category_id: cat });
+    assert.equal(res.status, 201);
     assert.equal((db.prepare('SELECT COUNT(*) AS n FROM merchant_rule_revisions').get() as { n: number }).n, before);
     assert.deepEqual(db.prepare('SELECT source, action_id FROM merchant_rules WHERE id = ?').get(ruleId), { source: 'ai', action_id: 'act_1' });
-  });
-});
-
-/** The id of a rule the call created or matched; a null here means the fixture itself is wrong. */
-function ruleIdOf(result: { ruleId: string | null }): string {
-  if (!result.ruleId) throw new Error('upsertMerchantRule returned no rule id');
-  return result.ruleId;
-}
-
-test('PATCH refuses a retired rule and a pattern another live rule holds, instead of a 500', async () => {
-  const db = migratedTestDb();
-  const cat = insertCategory(db, { name: 'Coffee' });
-  const a = ruleIdOf(upsertMerchantRule(db, 'Blue Bottle', cat, '2026-01-01T00:00:00.000Z', { source: 'human' }));
-  const b = ruleIdOf(upsertMerchantRule(db, 'Starbucks', cat, '2026-01-01T00:00:00.000Z', { source: 'human' }));
-  db.prepare("UPDATE merchant_rules SET retired_at = '2026-02-01T00:00:00.000Z' WHERE id = ?").run(a);
-
-  await withServer(db, async (base) => {
-    const patch = (id: string, body: unknown) => fetch(`${base}/api/rules/${id}`, {
-      method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body),
-    });
-    assert.equal((await patch(a, { pattern: 'Blue Bottle Coffee' })).status, 409);
-    const c = ruleIdOf(upsertMerchantRule(db, 'Peets', cat, '2026-01-01T00:00:00.000Z', { source: 'human' }));
-    const collide = await patch(c, { pattern: 'starbucks' });
-    assert.equal(collide.status, 409);
-    assert.match(((await collide.json()) as { error: string }).error, /Another rule already matches/);
-    assert.equal((db.prepare('SELECT pattern FROM merchant_rules WHERE id = ?').get(b) as { pattern: string }).pattern, 'Starbucks');
   });
 });

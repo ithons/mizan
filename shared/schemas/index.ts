@@ -136,11 +136,6 @@ export const CreateMerchantRuleSchema = z.object({
   apply_existing_overwrite: z.boolean().default(false),
 });
 
-export const UpdateMerchantRuleSchema = z.object({
-  pattern: z.string().min(1).optional(),
-  category_id: z.string().min(1).optional(),
-});
-
 export const ApplyMerchantRulesSchema = z.object({
   only_uncategorized: z.boolean().default(true),
 });
