@@ -537,6 +537,8 @@ export function refilableTransactions(db: Database.Database, since?: string): Pr
   //     would hand the model 2,412 rows it has no evidence about; excluding it leaves 19.
   //     `SELECT COUNT(*) FROM transactions WHERE category_id IS NULL` is 0 on that same copy, which
   //     is why this widening exists at all: the uncategorized pool above is empty today.
+  //   'import' is excluded         Coinbase or an importer filed it from the source itself, and
+  //     nothing says it was wrong.
   //   'ai' is excluded            the model's own settled answer. Re-proposing it every hour is how
   //     the rule path moved Spotify twice in two hours before `allowRecategorize: false`.
   //   'human' and manually_categorized  never, on either marker, since either can be cleared alone.

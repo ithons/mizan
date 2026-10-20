@@ -35,9 +35,9 @@ function main(): void {
     const known = db.prepare('SELECT 1 FROM transactions WHERE account_id = ? AND notes = ?');
     const insert = db.prepare(`
       INSERT INTO transactions
-        (id, account_id, date, amount, merchant_name, original_name, category_id, review_status, pending, notes,
+        (id, account_id, date, amount, merchant_name, original_name, category_id, category_source, review_status, pending, notes,
          is_manual, source_type, source_detail, is_internal_trade, quantity, security_id, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, 'reviewed', 0, ?, 0, 'import', 'coinbase-csv', 0, ?, ?, ?, ?)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'reviewed', 0, ?, 0, 'import', 'coinbase-csv', 0, ?, ?, ?, ?)
     `);
     const now = new Date().toISOString();
     let added = 0;
@@ -46,7 +46,7 @@ function main(): void {
       if (known.get(accountId, row.notes)) continue;
       const ticker = /^NEW:(\w+)/.exec(row.security_id ?? '')?.[1];
       const securityId = ticker ? resolveCryptoSecurityId(db, ticker) : row.security_id;
-      insert.run(uuidv4(), accountId, row.date, row.amount, row.merchant_name, row.original_name, row.category_id,
+      insert.run(uuidv4(), accountId, row.date, row.amount, row.merchant_name, row.original_name, row.category_id, row.category_id ? 'import' : null,
         row.notes, row.quantity, securityId, now, now);
       added++;
     }

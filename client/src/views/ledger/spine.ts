@@ -43,7 +43,7 @@ import type {
  * with `SELECT manually_categorized, category_source IS NULL, COUNT(*) ... GROUP BY 1,2`), which
  * is agreement rather than redundancy being unnecessary.
  */
-export type ProvenanceMark = 'you' | 'model' | 'rule' | 'match';
+export type ProvenanceMark = 'you' | 'model' | 'rule' | 'match' | 'import';
 
 export type ProvenanceView = Pick<Transaction, 'category_source' | 'manually_categorized'>;
 
@@ -56,6 +56,8 @@ export function readProvenance(t: ProvenanceView): ProvenanceMark | null {
       return 'rule';
     case 'heuristic':
       return 'match';
+    case 'import':
+      return 'import';
     default:
       return null;
   }
@@ -67,6 +69,7 @@ export const PROVENANCE_LABEL: Record<ProvenanceMark, string> = {
   model: 'model',
   rule: 'rule',
   match: 'match',
+  import: 'import',
 };
 
 /** The `categorySource` values the server accepts, as the owner reads them. */
@@ -77,6 +80,7 @@ export const PROVENANCE_FILTER_OPTIONS: Array<{ value: ProvenanceFilter; label: 
   { value: 'ai', label: 'The model set it' },
   { value: 'rule', label: 'A merchant rule set it' },
   { value: 'heuristic', label: 'A match set it' },
+  { value: 'import', label: 'It came with the import' },
   { value: 'none', label: 'Not recorded' },
 ];
 

@@ -10,6 +10,7 @@ import {
   type CoinbaseFilledOrder,
   type CoinbaseV2Transaction,
 } from '../server/src/services/coinbase';
+import { refilableTransactions } from '../server/src/services/aiWorker';
 
 /**
  * Migration 046 exists so Coinbase's unit counts stop being parsed and discarded. Nothing consumes
@@ -275,4 +276,27 @@ test('healthy: an owner-set manual basis is the only basis anything writes', (t)
   };
   assert.equal(row.cost_basis, null);
   assert.equal(row.manual_cost_basis, 12345);
+});
+
+test('a Coinbase row records that its category came with it, and stays out of the pool the model may refile', (t) => {
+  const db = migratedTestDb();
+  t.after(() => db.close());
+
+  upsertCoinbaseTransaction(db, {
+    coinbaseTransactionId: 'order_import',
+    accountId: cryptoAccount(db),
+    date: '2026-02-01',
+    amountCents: -25145,
+    originalName: 'Buy BTC',
+    categoryId: 'cat_crypto_buy',
+    units: null,
+    now: TEST_NOW,
+  });
+
+  const row = db.prepare('SELECT id, category_source FROM transactions WHERE coinbase_transaction_id = ?').get('order_import') as {
+    id: string;
+    category_source: string | null;
+  };
+  assert.equal(row.category_source, 'import');
+  assert.ok(!refilableTransactions(db).some((candidate) => candidate.id === row.id));
 });

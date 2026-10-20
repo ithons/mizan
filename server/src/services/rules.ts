@@ -20,12 +20,13 @@ export interface RuleApplicationResult {
  * 'rule'      a merchant rule matched
  * 'heuristic' the local text classifier guessed it
  * 'ai'        a model-authored draft, carrying the advisor_actions id that applied it
+ * 'import'    it came with the row: Coinbase's own classification, or a statement or CSV import
  *
  * The audit trail in Settings answers "what has the AI done". This answers the question the
  * user actually asks while looking at a number: "why is THIS row in THIS category", and it is
  * what makes an AI action reversible.
  */
-export type CategorySource = 'human' | 'rule' | 'heuristic' | 'ai';
+export type CategorySource = 'human' | 'rule' | 'heuristic' | 'ai' | 'import';
 
 export interface CategoryProvenance {
   source: CategorySource;

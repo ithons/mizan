@@ -479,8 +479,8 @@ test('a manual transaction with no category claims no author', (t) => {
  *
  * `category_source = 'human'` and `manually_categorized = 1` are read by four other queries as "the
  * owner adjudicated THIS ROW", and writing them here cost a detector: see the transfer test below.
- * Where an imported row came from is recorded by the columns that mean it, `source_type` and
- * `is_manual`, and `review_status` records the one thing about the owner's attention this path can
+ * Where an imported row came from is recorded by the columns that mean it, `source_type`,
+ * `is_manual` and `category_source = 'import'`, and `review_status` records the one thing about the owner's attention this path can
  * honestly claim: they previewed the file and confirmed it.
  */
 test('a mapped CSV column is not recorded as the owner authoring each row', (t) => {
@@ -517,7 +517,7 @@ test('a mapped CSV column is not recorded as the owner authoring each row', (t) 
     {
       merchant_name: 'Blue Bottle',
       filed: 1,
-      category_source: null,
+      category_source: 'import',
       manually_categorized: 0,
       review_status: 'reviewed',
       source_type: 'import',

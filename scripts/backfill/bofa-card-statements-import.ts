@@ -80,13 +80,14 @@ function main(): void {
       const now = new Date().toISOString();
       const insert = db.prepare(`
         INSERT INTO transactions
-          (id, account_id, date, amount, merchant_name, original_name, category_id, review_status,
+          (id, account_id, date, amount, merchant_name, original_name, category_id, category_source, review_status,
            pending, notes, is_manual, source_type, source_detail, is_internal_trade, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, 'reviewed', 0, ?, 1, 'import', ?, 0, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'reviewed', 0, ?, 1, 'import', ?, 0, ?, ?)
       `);
       for (const row of missing) {
         const { merchant, category } = merchantFor(row);
         insert.run(uuidv4(), account.id, row.date, row.cents, merchant, row.reference ? `${row.desc} REF ${row.reference}` : row.desc, category,
+          category ? 'import' : null,
           `BofA card statement ${row.statement.start} to ${row.statement.close}, ref ${row.reference ?? 'none'}, transaction date ${row.transaction_date}`,
           SOURCE_DETAIL, now, now);
       }

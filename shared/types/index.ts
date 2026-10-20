@@ -137,7 +137,7 @@ export interface Transaction {
    * Who decided this row's category (migration 041). NULL means the category was set before
    * provenance was tracked, which is most of the ledger and is not the same as "nobody".
    */
-  category_source?: 'human' | 'rule' | 'heuristic' | 'ai' | null;
+  category_source?: 'human' | 'rule' | 'heuristic' | 'ai' | 'import' | null;
   /** The other half of the same question. Read with `category_source`, never instead of it. */
   manually_categorized?: boolean;
   /**
@@ -1213,8 +1213,8 @@ export interface TransactionFilters {
   type?: string;
   /** Exactly these rows. Capped by the server; see MAX_ID_FILTER in routes/transactions.ts. */
   ids?: string[];
-  /** `category_source` values to keep. 'none' selects the rows recorded before provenance was. */
-  categorySource?: Array<'human' | 'rule' | 'heuristic' | 'ai' | 'none'>;
+  /** `category_source` values to keep. 'none' selects the rows whose author was not recorded. */
+  categorySource?: Array<'human' | 'rule' | 'heuristic' | 'ai' | 'import' | 'none'>;
   duplicateStatus?: 'none' | 'candidate' | 'dismissed';
   transferStatus?: 'none' | 'candidate' | 'confirmed' | 'dismissed';
 }

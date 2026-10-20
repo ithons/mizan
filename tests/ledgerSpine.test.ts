@@ -83,6 +83,7 @@ test('provenance: every recorded author gets a word, and an unrecorded one gets 
   assert.equal(readProvenance(txn({ category_source: 'ai' })), 'model');
   assert.equal(readProvenance(txn({ category_source: 'rule' })), 'rule');
   assert.equal(readProvenance(txn({ category_source: 'heuristic' })), 'match');
+  assert.equal(readProvenance(txn({ category_source: 'import' })), 'import');
 
   // The majority case on the real ledger. Migration 041 records NULL as "set before provenance was
   // tracked", so the row says nothing rather than claiming nobody chose it. Re-measured on a fresh

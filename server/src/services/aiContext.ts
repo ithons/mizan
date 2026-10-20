@@ -554,6 +554,7 @@ function pushProvenance(db: Database.Database, lines: string[]): void {
     ['ai', 'Set by you, the AI advisor'],
     ['rule', 'Set by a merchant rule'],
     ['heuristic', 'Set by the local heuristic'],
+    ['import', 'Came with the row from Coinbase or an import'],
   ];
 
   lines.push('');
@@ -567,7 +568,7 @@ function pushProvenance(db: Database.Database, lines: string[]): void {
   if (unrecorded !== undefined) {
     lines.push(`  No provenance recorded: ${num(unrecorded)}`);
     lines.push(
-      '  An unrecorded source is not a decision and not a vacancy. It means the row was written before per-row provenance existed, or by a path that does not record it. It does not mean uncategorized, and it does not mean the category is unclaimed.'
+      '  An unrecorded source is not a decision and not a vacancy. It means nothing recorded who set it. It does not mean uncategorized, and it does not mean the category is unclaimed.'
     );
   }
   lines.push(`  Rows with no category at all: ${num(uncategorized)}`);

@@ -680,7 +680,7 @@ function getTransactionFullTool(db: Database.Database, input: ToolInput): unknow
       },
       category_source:
         row.category_source == null
-          ? 'NULL: categorized before provenance was recorded. Nobody knows who chose it.'
+          ? 'NULL: the author was not recorded. Nobody knows who chose it.'
           : `Set by: ${String(row.category_source)}.`,
     },
   };

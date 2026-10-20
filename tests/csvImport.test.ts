@@ -105,6 +105,13 @@ test('csv import commit imports valid rows and reports invalid row errors', (t) 
 
   const account = db.prepare('SELECT current_balance FROM accounts WHERE id = ?').get('acct_cash') as { current_balance: number };
   assert.equal(account.current_balance, 8350);
+
+  // A category the file carried came with the row; a row the file left blank has no author at all.
+  const imported = db.prepare("SELECT merchant_name, category_source FROM transactions WHERE source_type = 'import' ORDER BY merchant_name").all();
+  assert.deepEqual(imported, [
+    { merchant_name: 'Coffee', category_source: 'import' },
+    { merchant_name: 'Lunch', category_source: null },
+  ]);
 });
 
 test('csv import duplicate detection compares exact cents, not a float epsilon', (t) => {

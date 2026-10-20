@@ -54,15 +54,15 @@ function insertAll(db: Database.Database, folder: Folder, statements: Statement[
 
   const insert = db.prepare(`
     INSERT INTO transactions
-      (id, account_id, date, amount, merchant_name, original_name, category_id, review_status,
+      (id, account_id, date, amount, merchant_name, original_name, category_id, category_source, review_status,
        pending, notes, is_manual, source_type, source_detail, is_internal_trade, created_at, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, 1, 'import', ?, ?, ?, ?)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, 1, 'import', ?, ?, ?, ?)
   `);
   let n = 0;
   for (const s of statements) {
     for (const r of s.rows) {
       insert.run(uuidv4(), account.id, r.date, r.cents, r.merchant, r.desc, r.category_id,
-        r.category_id ? 'reviewed' : 'open', `BofA statement ${s.start} to ${s.end}, ${r.page}`,
+        r.category_id ? 'import' : null, r.category_id ? 'reviewed' : 'open', `BofA statement ${s.start} to ${s.end}, ${r.page}`,
         SOURCE_DETAIL, isInternalTrade(r.desc) ? 1 : 0, now, now);
       n++;
     }

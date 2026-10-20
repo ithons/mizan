@@ -387,9 +387,10 @@ export const ENUM_MEANINGS: Record<string, EnumMeaning> = {
       rule: 'A merchant rule matched.',
       heuristic: 'The local text classifier guessed it, with no model call.',
       ai: 'A model-authored draft applied it, carrying its advisor_actions id.',
+      import: 'It came with the row: Coinbase classified it, or a statement or CSV import assigned it.',
     },
     note:
-      'NULL is the fifth state and the most common one: categorized before provenance existed (migration 041), with no record of who chose. NULL is not zero and does not mean the machine did it.',
+      'NULL means the author was not recorded. NULL is not zero and does not mean the machine did it.',
   },
   connection_type: {
     table: 'accounts',
@@ -770,7 +771,7 @@ export function getCategoryProvenance(db: Database.Database): ProvenanceSummary 
     source: row.source,
     meaning:
       row.source === NULL_KEY
-        ? 'Categorized before provenance existed (migration 041). Nothing recorded who chose. NOT zero, and NOT the machine.'
+        ? 'Author not recorded. NOT zero, and NOT the machine.'
         : meanings[row.source] ?? 'Undocumented value; see services/schemaDoc.ts.',
     transactions: row.n,
   }));

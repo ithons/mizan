@@ -360,9 +360,9 @@ export function upsertCoinbaseTransaction(
   db.prepare(`
     INSERT INTO transactions
       (id, coinbase_transaction_id, account_id, date, amount, merchant_name,
-       original_name, category_id, quantity, security_id, pending, is_manual, source_type,
+       original_name, category_id, category_source, quantity, security_id, pending, is_manual, source_type,
        created_at, updated_at)
-    VALUES (?, ?, ?, ?, ?, 'Coinbase', ?, ?, ?, ?, 0, 0, 'coinbase', ?, ?)
+    VALUES (?, ?, ?, ?, ?, 'Coinbase', ?, ?, 'import', ?, ?, 0, 0, 'coinbase', ?, ?)
   `).run(
     uuidv4(),
     write.coinbaseTransactionId,

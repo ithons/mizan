@@ -47,9 +47,9 @@ function main(): void {
     const security = db.prepare('SELECT id FROM securities WHERE ticker = ? LIMIT 1');
     const insert = db.prepare(`
       INSERT INTO transactions
-        (id, account_id, date, amount, merchant_name, original_name, category_id, review_status, pending, notes,
+        (id, account_id, date, amount, merchant_name, original_name, category_id, category_source, review_status, pending, notes,
          is_manual, source_type, source_detail, is_internal_trade, quantity, security_id, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, 'reviewed', 0, ?, 1, 'import', ?, ?, ?, ?, ?, ?)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'reviewed', 0, ?, 1, 'import', ?, ?, ?, ?, ?, ?)
     `);
     const now = new Date().toISOString();
     for (const [name, { missing_from_db }] of Object.entries(parsed.db_comparison)) {
@@ -64,7 +64,7 @@ function main(): void {
         const amount = directedAmount(row.amount_cents, words.text);
         const quantity = row.quantity == null ? null : Math.sign(-amount || 1) * Math.abs(row.quantity);
         const securityId = row.symbol ? (security.get(row.symbol) as { id: string } | undefined)?.id ?? null : null;
-        insert.run(uuidv4(), account.id, row.date, amount, words.merchant, words.text, words.category,
+        insert.run(uuidv4(), account.id, row.date, amount, words.merchant, words.text, words.category, words.category ? 'import' : null,
           `Fidelity statement ${row.statement}`, SOURCE_DETAIL, isInternalTrade(words.text) ? 1 : 0, quantity, securityId, now, now);
         added++;
       }

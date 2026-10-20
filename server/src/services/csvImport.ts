@@ -285,9 +285,9 @@ export function commitCsvImport(
         db.prepare(`
           INSERT INTO transactions
             (id, account_id, date, amount, merchant_name, original_name,
-             category_id, review_status,
+             category_id, category_source, review_status,
              pending, notes, is_manual, source_type, is_internal_trade, created_at, updated_at)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, 1, 'import', ?, ?, ?)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, 1, 'import', ?, ?, ?)
         `).run(
           uuidv4(),
           accountId,
@@ -296,6 +296,7 @@ export function commitCsvImport(
           row.merchant_name,
           originalName,
           row.category_id,
+          row.category_id ? 'import' : null,
           row.category_id ? 'reviewed' : 'open',
           row.notes,
           isInternalTrade(originalName) ? 1 : 0,

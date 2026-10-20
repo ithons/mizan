@@ -116,7 +116,7 @@ function routeId(value: string | string[] | undefined): string {
  */
 const MAX_ID_FILTER = 200;
 
-const CATEGORY_SOURCE_VALUES = new Set(['human', 'ai', 'rule', 'heuristic', 'none']);
+const CATEGORY_SOURCE_VALUES = new Set(['human', 'ai', 'rule', 'heuristic', 'import', 'none']);
 const DUPLICATE_STATUS_VALUES = new Set(['none', 'candidate', 'dismissed']);
 const TRANSFER_STATUS_VALUES = new Set(['none', 'candidate', 'confirmed', 'dismissed']);
 
