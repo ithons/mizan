@@ -102,6 +102,16 @@ function importRunSourceLabel(source: DataImportRun['source']): string {
   return source === 'csv' ? 'CSV import' : 'Backup restore';
 }
 
+/** The owner's name for each table a factory reset keeps (`FACTORY_RESET_PRESERVED` on the server). */
+export const FACTORY_RESET_KEPT: Readonly<Record<string, string>> = { categories: 'the category list' };
+
+export const FACTORY_RESET_COPY =
+  'Permanently delete everything in the database: accounts, transactions, holdings and prices, ' +
+  'budgets, goals, bills, rules, snapshots, sync and import history, the advisor’s conversations, ' +
+  'memory, drafts and change log, notification rules and notifications, and every setting and ' +
+  `preference. Only ${Object.values(FACTORY_RESET_KEPT).join(' and ')} and the encrypted provider ` +
+  'credentials are kept.';
+
 export function DataSection() {
   const { addToast } = useAppStore();
   const qc = useQueryClient();
@@ -626,7 +636,7 @@ export function DataSection() {
         <div className="flex items-center justify-between py-2 border-b border-line">
           <div>
             <p className="text-body-lg text-ink">Clear All Data</p>
-            <p className="text-note text-muted">Permanently delete accounts, transactions, budgets, goals, rules, snapshots, and sync history. Encrypted credentials stay on disk.</p>
+            <p className="text-note text-muted">{FACTORY_RESET_COPY}</p>
           </div>
           <button
             className="rounded-md border border-pill-border px-3 py-1.5 text-note text-clay transition-colors hover:bg-well"
@@ -647,7 +657,7 @@ export function DataSection() {
           <div className="flex items-start gap-2 rounded-lg border border-pill-border bg-rail p-3">
             <AlertTriangle size={14} className="text-clay mt-0.5 flex-shrink-0" />
             <p className="text-note text-muted">
-              This permanently deletes local finance data from the database. Encrypted provider credentials are not deleted, so disconnect providers separately if needed.
+              {FACTORY_RESET_COPY} Disconnect providers separately to remove their credentials too.
             </p>
           </div>
           <div>

@@ -35,7 +35,7 @@ const router = Router();
  * deleting it leaves an install with nowhere to file a transaction and no way back short of
  * rebuilding the database.
  */
-const FACTORY_RESET_PRESERVED: ReadonlySet<LocalRestoreTableName> = new Set(['categories']);
+export const FACTORY_RESET_PRESERVED: ReadonlySet<LocalRestoreTableName> = new Set(['categories']);
 
 // GET /credentials
 router.get('/credentials', (_req: Request, res: Response, next: NextFunction): void => {
