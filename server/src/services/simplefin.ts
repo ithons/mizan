@@ -997,10 +997,7 @@ export function applySimplefinResponse(
       // before commit 9ac0220 reversed the rule and left the comment behind.
       const date = epochSecondsToLocalDate(txn.posted);
 
-      if (isBelowBackfillFloor(date, backfillFloor)) {
-        skipped++;
-        continue;
-      }
+      if (isBelowBackfillFloor(date, backfillFloor)) continue;
 
       let amount: number; // cents, already negative for expenses
       try {
