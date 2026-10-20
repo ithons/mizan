@@ -205,8 +205,6 @@ export function Ledger() {
     };
     switch (filter) {
       case 'uncategorized':
-        // No reviewStatus gate. Adding one hid the entire imported backlog, because categorization
-        // side effects set review_status = 'reviewed'.
         return { ...base, uncategorized: true };
       case 'suggested':
         return { ...base, ids: drafts.transactionIds.slice(0, MAX_SUGGESTED_IDS) };

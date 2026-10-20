@@ -338,11 +338,11 @@ export const ENUM_MEANINGS: Record<string, EnumMeaning> = {
     table: 'transactions',
     column: 'review_status',
     values: {
-      open: 'Not yet reviewed by the owner.',
-      reviewed: 'The owner has looked at it.',
+      open: 'Not yet filed or cleared, or restored by the owner.',
+      reviewed: 'Filed by the owner, a rule or the AI, or resolved as a duplicate or transfer. NOT proof the owner saw it; category_source says who filed.',
       dismissed: 'The owner cleared it from the review queue.',
     },
-    note: 'Review state says nothing about whether the row counts. It never affects a total.',
+    note: 'Only dismissed is owner intent. Review state never affects a total.',
   },
   source_type: {
     table: 'transactions',

@@ -17,6 +17,7 @@ import {
   spendAmountSql,
 } from '../server/src/services/transactionFilters';
 import { getCashflowReport, getSpendingReport } from '../server/src/services/reporting';
+import { applyMerchantRuleToMatchingTransactions } from '../server/src/services/rules';
 
 // Every test that reads a date-derived field pins `now`, so the suite says the same thing in
 // August as it does today. The doc derives its worked example from this date.
@@ -274,6 +275,25 @@ test('a healthy ledger reports no undocumented enum values anywhere', (t) => {
   for (const [key, meaning] of Object.entries(doc.enums)) {
     assert.deepEqual(meaning.undocumented_values, [], `${key} reported an undocumented value on healthy data`);
   }
+});
+
+test('review_status reviewed does not claim owner attention, because a merchant rule sets it unattended', (t) => {
+  const db = migratedTestDb();
+  t.after(() => db.close());
+  const account = insertAccount(db);
+  const id = insertTransaction(db, { account_id: account, merchant_name: 'Corner Cafe', category_id: null, review_status: 'open' });
+
+  applyMerchantRuleToMatchingTransactions(db, 'Corner Cafe', 'cat_food');
+
+  const row = db.prepare('SELECT review_status, category_source FROM transactions WHERE id = ?').get(id) as {
+    review_status: string;
+    category_source: string;
+  };
+  assert.deepEqual(row, { review_status: 'reviewed', category_source: 'rule' });
+  const reviewed = ENUM_MEANINGS.review_status.values.reviewed;
+  assert.doesNotMatch(reviewed, /owner has looked/i);
+  assert.match(reviewed, /NOT proof the owner saw/);
+  assert.match(reviewed, /category_source/);
 });
 
 test('an empty database produces no enum noise at all', (t) => {
