@@ -5,6 +5,7 @@ import { getDb } from '../db/index';
 import { getPreference, setPreference } from './preferences';
 import { readPortfolioAccounts } from './netWorthHistory';
 import { readMarketAnchors } from './marketValuation';
+import { liabilitiesInDoubt } from './liabilitySign';
 import { externalMarketFlow } from './portfolioFlows';
 import { MARKET_DRIVEN_TYPES, bucketOf } from '../../../shared/accountTypes';
 
@@ -162,14 +163,21 @@ function frozenPortfolio(portfolioIds: string[], coveredIds?: Set<string>): stri
   return JSON.stringify(ids);
 }
 
+/**
+ * A card whose direction the sign check cannot settle is left out of the sheet and counted as
+ * uncovered: its stored sign is the provider's, which for these cards carries no information, and
+ * a measured row is never re-examined.
+ */
 export function takeSnapshot(): void {
   const db = getDb();
 
-  const accounts = db.prepare(`
+  const visible = db.prepare(`
     SELECT id, current_balance, is_liability, type
     FROM accounts
     WHERE is_hidden = 0
   `).all() as Array<{ id: string; current_balance: number; is_liability: number; type: string }>;
+  const inDoubt = liabilitiesInDoubt(db);
+  const accounts = visible.filter((account) => !(account.is_liability && inDoubt.has(account.id)));
 
   let total_assets = 0;
   let total_liabilities = 0;
@@ -199,10 +207,8 @@ export function takeSnapshot(): void {
     'SELECT id FROM net_worth_snapshots WHERE date = ?'
   ).get(today) as { id: string } | undefined;
 
-  // A measurement covers every account it lists, by construction: it observed all of them. The
-  // columns are still written so the series carries one meaning end to end and a consumer never
-  // has to read NULL as "probably complete".
   const coveredAccounts = accounts.length;
+  const totalAccounts = visible.length;
 
   // Which of those accounts were the portfolio, decided here rather than by whoever reads the row
   // later. `/api/reports/investments` used to intersect every historical breakdown with today's
@@ -222,7 +228,7 @@ export function takeSnapshot(): void {
       WHERE id = ?
     `).run(total_assets, total_liabilities, net_worth, JSON.stringify(breakdown),
            liquid_assets, investment_assets, crypto_assets,
-           coveredAccounts, coveredAccounts, portfolioAccounts, now, existing.id);
+           coveredAccounts, totalAccounts, portfolioAccounts, now, existing.id);
   } else {
     db.prepare(`
       INSERT INTO net_worth_snapshots
@@ -231,7 +237,7 @@ export function takeSnapshot(): void {
          created_at, portfolio_accounts, portfolio_accounts_source, taken_at)
       VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, 'recorded', ?)
     `).run(uuidv4(), today, total_assets, total_liabilities, net_worth, JSON.stringify(breakdown),
-           liquid_assets, investment_assets, crypto_assets, coveredAccounts, coveredAccounts, now,
+           liquid_assets, investment_assets, crypto_assets, coveredAccounts, totalAccounts, now,
            portfolioAccounts, now);
   }
 

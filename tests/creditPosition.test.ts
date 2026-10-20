@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { _setDbForTesting } from '../server/src/db/index';
 import { buildFinancialContext } from '../server/src/services/aiContext';
 import { takeSnapshot } from '../server/src/services/snapshot';
+import { correctLiabilitySigns } from '../server/src/services/liabilitySign';
 import { insertAccount, migratedTestDb } from './helpers/schema';
 
 /**
@@ -121,5 +122,51 @@ test('a snapshot still subtracts a card that is ordinarily in debt', () => {
   assert.equal(row.total_liabilities, 120411);
   assert.equal(row.total_assets, 500000);
   assert.equal(row.net_worth, 379589);
+  db.close();
+});
+
+function settledSheet(db: ReturnType<typeof migratedTestDb>, date: string, breakdown: Record<string, number>): void {
+  db.prepare(`INSERT INTO net_worth_snapshots (id, date, total_assets, total_liabilities, net_worth, breakdown, is_estimated, created_at)
+    VALUES (?, ?, 0, 0, 0, ?, 0, ?)`).run(`sheet_${date}`, date, JSON.stringify(breakdown), `${date}T12:00:00Z`);
+}
+
+function todaySheet(db: ReturnType<typeof migratedTestDb>) {
+  return db.prepare(`SELECT net_worth, breakdown, covered_accounts, total_accounts FROM net_worth_snapshots
+    WHERE date > '2026-08-05'`).get() as { net_worth: number; breakdown: string; covered_accounts: number; total_accounts: number };
+}
+
+test('a card whose sign the check could neither correct nor confirm is left out of the sheet, not recorded as owed', () => {
+  const db = migratedTestDb();
+  _setDbForTesting(db);
+  const checking = insertAccount(db, { type: 'checking', current_balance: 500000 });
+  // Sync 1 corrected Discover to a $308.68 credit and recorded it. On sync 2 the provider's balance
+  // already counts two charges the ledger has not received, and the negation reads it as owed.
+  const card = insertAccount(db, { account_name: 'Discover', type: 'credit', current_balance: 29368, is_liability: 1 });
+  settledSheet(db, '2026-08-05', { [checking]: 500000, [card]: -30868 });
+
+  correctLiabilitySigns(db, '2026-10-20T12:00:00Z');
+  takeSnapshot();
+
+  const row = todaySheet(db);
+  assert.deepEqual(JSON.parse(row.breakdown), { [checking]: 500000 });
+  assert.deepEqual([row.covered_accounts, row.total_accounts], [1, 2]);
+  assert.equal(row.net_worth, 500000);
+  db.close();
+});
+
+test('HEALTHY: a corrected card on a complete ledger is recorded as its credit, covering every account', () => {
+  const db = migratedTestDb();
+  _setDbForTesting(db);
+  const checking = insertAccount(db, { type: 'checking', current_balance: 500000 });
+  const card = insertAccount(db, { account_name: 'Discover', type: 'credit', current_balance: 30868, is_liability: 1 });
+  settledSheet(db, '2026-08-05', { [checking]: 500000, [card]: -30868 });
+
+  const report = correctLiabilitySigns(db, '2026-10-20T12:00:00Z');
+  takeSnapshot();
+
+  assert.deepEqual(report.unverifiable, []);
+  const row = todaySheet(db);
+  assert.deepEqual(JSON.parse(row.breakdown), { [checking]: 500000, [card]: -30868 });
+  assert.deepEqual([row.covered_accounts, row.total_accounts], [2, 2]);
   db.close();
 });

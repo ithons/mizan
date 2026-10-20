@@ -54,7 +54,7 @@ interface LiabilityRow {
  * Correct any liability whose stored balance has the magnitude the ledger implies and the opposite
  * sign, and report any liability whose direction the ledger contradicts without being able to fix.
  */
-export function correctLiabilitySigns(db: Database.Database, now: string): LiabilitySignReport {
+export function correctLiabilitySigns(db: Database.Database, now: string, options: { apply?: boolean } = {}): LiabilitySignReport {
   const accounts = db.prepare(`
     SELECT id, account_name, current_balance
     FROM accounts
@@ -167,7 +167,7 @@ export function correctLiabilitySigns(db: Database.Database, now: string): Liabi
         continue;
       }
 
-      updateBalance.run(expectedOwed, now, account.id);
+      if (options.apply !== false) updateBalance.run(expectedOwed, now, account.id);
       report.corrections.push({
         account_id: account.id,
         account_name: account.account_name,
@@ -213,4 +213,13 @@ export function describeLiabilitySignCorrection(correction: LiabilitySignCorrect
   const stored = describePosition(correction.stored_balance);
   const adopted = describePosition(correction.corrected_balance);
   return `Provider reported ${stored}; the ledger since ${correction.anchor_date} gives ${adopted}. Stored as ${correction.corrected_balance < 0 ? 'a credit' : 'owed'}.`;
+}
+
+/**
+ * Liabilities whose stored direction nothing has checked: the ledger contradicts it and could not
+ * settle it, or it is contradicted exactly and has not been corrected yet. Read only.
+ */
+export function liabilitiesInDoubt(db: Database.Database): Set<string> {
+  const report = correctLiabilitySigns(db, new Date().toISOString(), { apply: false });
+  return new Set([...report.unverifiable, ...report.corrections].map((account) => account.account_id));
 }
