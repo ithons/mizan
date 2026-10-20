@@ -6,7 +6,6 @@ import {
   readSnapshotBefore,
   readSnapshots,
 } from '../server/src/services/netWorthHistory';
-import { getSnapshotBalanceHistory } from '../server/src/services/balanceHistory';
 import { insertAccount, migratedTestDb } from './helpers/schema';
 
 /**
@@ -58,20 +57,6 @@ test('measuredOnly excludes reconstructions from a comparison', () => {
   assert.equal(readSnapshotBefore(db, '2026-06-15')?.date, '2026-06-01');
   assert.equal(readSnapshotBefore(db, '2026-06-15', { measuredOnly: true }), null);
   assert.equal(readSnapshotBefore(db, '2026-07-01', { measuredOnly: true })?.date, '2026-06-30');
-  db.close();
-});
-
-test('a per-account balance series marks its reconstructed points', () => {
-  const db = migratedTestDb();
-  // A market-driven account is the one that still reads its series out of the snapshots, because
-  // reversing buys and sells off a brokerage balance cannot reconstruct a price move.
-  const account = insertAccount(db, { type: 'brokerage' });
-  seed(db, account);
-
-  const series = getSnapshotBalanceHistory(db, account);
-  // Without the flag this drew one solid measured line through $1,500 -> $1,510 -> $1.00, so an
-  // account that was not yet connected appeared to hold $1,510 and then collapse to nothing.
-  assert.deepEqual(series.points.map((p) => p.source), ['estimated', 'estimated', 'measured', 'measured']);
   db.close();
 });
 

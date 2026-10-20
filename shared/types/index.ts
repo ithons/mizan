@@ -48,20 +48,21 @@ export interface Account {
  *
  * - `ledger`: replayed from this account's own transactions off its current balance. Every point of
  *   a `ledger` basis series is this one, which is why that line never changes style mid-series.
- * - `measured`: a value a net-worth snapshot recorded. Only the snapshot basis produces these.
- * - `estimated`: a reverse-replay reconstruction stored as a snapshot, for months the ledger never
- *   reached. Only the snapshot basis produces these.
+ * - `measured`: a known value of a market-driven account: a balance recorded that day, a statement,
+ *   or positions times that day's close. Only the market basis produces these.
+ * - `estimated`: a market-driven account between known values, replaying only money moved in or
+ *   out. Only the market basis produces these.
  */
 export type BalancePointSource = 'ledger' | 'measured' | 'estimated';
 
-export type BalanceSeriesBasis = 'ledger' | 'snapshot';
+export type BalanceSeriesBasis = 'ledger' | 'market';
 
 /** Why the series begins where it does. A chart that starts mid-air must say so. */
 export type BalanceSeriesStart =
   | 'first_transaction'
   | 'backfill_floor'
   | 'requested_window'
-  | 'snapshot_series'
+  | 'market_valuation'
   | 'no_ledger'
   | 'account_not_found';
 
@@ -88,10 +89,7 @@ export interface AccountBalanceHistory {
   points: BalanceHistoryPoint[];
   start_date: string | null;
   start_reason: BalanceSeriesStart;
-  /**
-   * Measured snapshots falling inside the drawn window, to be marked as points on the line. Always
-   * empty on the `snapshot` basis, where the measurements are already the line itself.
-   */
+  /** Measured snapshots falling inside the drawn window, to be marked as points on the line. */
   measurements: BalanceMeasurement[];
   /**
    * How many transactions built the drawn window, not how many the account has ever held.

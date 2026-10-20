@@ -18,7 +18,7 @@ import {
 import {
   MARKET_DRIVEN_TYPES,
   getLedgerBalanceHistory,
-  getSnapshotBalanceHistory,
+  getMarketBalanceHistory,
 } from '../services/balanceHistory';
 import type { AccountBalanceHistory } from '../../../shared/types';
 
@@ -55,12 +55,8 @@ router.get('/', (_req: Request, res: Response, next: NextFunction): void => {
   }
 });
 
-// GET /:id/history - this account's balance over time
-//
-// Routed by account type, and the split is the point. An account whose balance moves only when a
-// transaction moves it can be replayed from its own ledger, one point per day, all the way back to
-// its first transaction. A market-driven one cannot: reversing individual buys and sells off a
-// brokerage balance cannot reconstruct a price move, so it keeps the measured snapshot series.
+// GET /:id/history - this account's balance over time. A market-driven account moves with prices
+// the ledger does not record, so it is valued the way the net worth timeline values it.
 router.get('/:id/history', (req: Request, res: Response, next: NextFunction): void => {
   try {
     const db = getDb();
@@ -71,7 +67,7 @@ router.get('/:id/history', (req: Request, res: Response, next: NextFunction): vo
 
     const history =
       account && MARKET_DRIVEN_TYPES.has(account.type)
-        ? getSnapshotBalanceHistory(db, id)
+        ? getMarketBalanceHistory(db, id)
         : getLedgerBalanceHistory(db, id);
 
     res.json({ data: historyToDollars(history) });

@@ -1,4 +1,5 @@
 import type Database from 'better-sqlite3';
+import { netWorthTimeline } from './netWorthTimeline';
 import { addDays, format, parseISO } from 'date-fns';
 import type {
   AccountBalanceHistory,
@@ -249,58 +250,34 @@ export function getLedgerBalanceHistory(
   };
 }
 
-/**
- * The snapshot-derived series, for accounts whose balance is not a function of their ledger.
- *
- * A brokerage or crypto wallet moves when prices move and no transaction records it, so reversing
- * individual buys and sells off today's balance cannot reconstruct the balance it had. That is the
- * same reason snapshot.ts and reconciliation.ts both carry this set. Estimated snapshots stay marked
- * as estimated: they are reverse-replay reconstructions, not balances anyone observed.
- */
 export { MARKET_DRIVEN_TYPES } from '../../../shared/accountTypes';
 
-export function getSnapshotBalanceHistory(
-  db: Database.Database,
-  accountId: string
-): AccountBalanceHistory {
-  // Signed like the ledger series, so `balance` means one thing across both bases. No market-driven
-  // type is a liability today; a series that silently changed sign with its basis would be a trap
-  // for whoever makes one.
-  const account = db.prepare('SELECT is_liability FROM accounts WHERE id = ?').get(accountId) as
-    | { is_liability: number }
-    | undefined;
-  const isLiability = account?.is_liability === 1;
-
-  const rows = db.prepare(
-    'SELECT date, breakdown, is_estimated FROM net_worth_snapshots ORDER BY date ASC'
-  ).all() as Array<{ date: string; breakdown: string; is_estimated: number }>;
-
-  const points: BalanceHistoryPoint[] = [];
-  for (const row of rows) {
-    let breakdown: Record<string, unknown>;
-    try {
-      breakdown = JSON.parse(row.breakdown) as Record<string, unknown>;
-    } catch {
-      continue;
-    }
-    const cents = breakdown[accountId];
-    if (typeof cents === 'number' && Number.isFinite(cents)) {
-      points.push({
-        date: row.date,
-        balance: signed(cents, isLiability),
-        source: row.is_estimated === 1 ? 'estimated' : 'measured',
-      });
-    }
-  }
-
+/**
+ * A market-driven account's series: that account's own line in the net worth timeline, so its page
+ * and the Accounts chart draw one series. Measured sheets ride along as marks.
+ */
+export function getMarketBalanceHistory(db: Database.Database, accountId: string, options: { today?: string } = {}): AccountBalanceHistory {
+  const account = db.prepare('SELECT is_liability FROM accounts WHERE id = ?').get(accountId) as { is_liability: number } | undefined;
+  const empty = (reason: BalanceSeriesStart): AccountBalanceHistory => ({
+    basis: 'market', points: [], start_date: null, start_reason: reason, measurements: [], drawn_transaction_count: 0,
+  });
+  if (!account) return empty('account_not_found');
+  const today = options.today ?? todayLocal();
+  const timeline = netWorthTimeline(db, { accountIds: [accountId], today });
+  const first = timeline.accounts[0]?.first_date;
+  if (!first) return empty('no_ledger');
+  const points: BalanceHistoryPoint[] = timeline.points.flatMap((p) => {
+    const balance = p.by_account[accountId];
+    if (p.date < first || balance === undefined) return [];
+    return [{ date: p.date, balance, source: p.estimated_accounts.includes(accountId) ? 'estimated' : 'measured' }];
+  });
+  if (points.length === 0) return empty('no_ledger');
   return {
-    basis: 'snapshot',
+    basis: 'market',
     points,
-    start_date: points.length > 0 ? points[0].date : null,
-    start_reason: points.length > 0 ? 'snapshot_series' : 'no_ledger',
-    // The measurements ARE the line here, so marking them again would draw a dot on every point.
-    measurements: [],
-    // Zero because no transaction built this line, not because the account has none.
+    start_date: points[0].date,
+    start_reason: 'market_valuation',
+    measurements: readMeasurements(db, accountId, account.is_liability === 1, points[0].date, today),
     drawn_transaction_count: 0,
   };
 }

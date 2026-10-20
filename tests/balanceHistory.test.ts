@@ -5,7 +5,8 @@ import express from 'express';
 import type Database from 'better-sqlite3';
 import { _setDbForTesting } from '../server/src/db/index';
 import accountsRouter from '../server/src/routes/accounts';
-import { getLedgerBalanceHistory, getSnapshotBalanceHistory } from '../server/src/services/balanceHistory';
+import { getLedgerBalanceHistory, getMarketBalanceHistory } from '../server/src/services/balanceHistory';
+import { netWorthTimeline } from '../server/src/services/netWorthTimeline';
 import { seriesMeasurements, seriesOrigin } from '../client/src/views/accounts/AccountDetail';
 import { trendGeometry } from '../client/src/components/balance/TrendChart';
 import type { AccountBalanceHistory } from '../shared/types';
@@ -459,27 +460,35 @@ test('an unknown account id says so instead of returning an empty series', () =>
   db.close();
 });
 
-test('a market-driven account keeps the snapshot series, estimates marked as estimates', () => {
+test('a market-driven account draws its own line of the net worth timeline, with recorded balances as marks', () => {
   const db = migratedTestDb();
   const id = insertAccount(db, { account_name: 'Fidelity Individual', type: 'brokerage', current_balance: 193948 });
-  // A brokerage's balance moves when prices move and no transaction records it, so a reverse
-  // replay of its buys and sells cannot reconstruct what it was worth.
-  insertTransaction(db, { account_id: id, date: '2026-05-21', amount: -40000 });
-  insertSnapshot(db, '2026-02-01', { [id]: 173698 }, true);
+  insertTransaction(db, { account_id: id, date: '2026-05-21', amount: 40000, category_id: 'cat_inv_transfer' });
   insertSnapshot(db, '2026-06-30', { [id]: 180000 }, false);
   insertSnapshot(db, '2026-07-29', { [id]: 193948 }, false);
 
-  const history = getSnapshotBalanceHistory(db, id);
+  const history = getMarketBalanceHistory(db, id, { today: TODAY });
+  const timeline = netWorthTimeline(db, { accountIds: [id], today: TODAY });
 
-  assert.equal(history.basis, 'snapshot');
-  assert.deepEqual(history.points.map((p) => p.source), ['estimated', 'measured', 'measured']);
-  assert.equal(history.start_reason, 'snapshot_series');
-  // The measurements are already the line, so marking them again would dot every point.
-  assert.deepEqual(history.measurements, []);
-  assert.equal(seriesMeasurements(history), null);
-  assert.match(seriesOrigin(history) ?? '', /cannot reconstruct a price move/);
+  assert.equal(history.basis, 'market');
+  assert.equal(history.start_reason, 'market_valuation');
+  assert.equal(history.start_date, '2026-05-21');
+  for (const point of history.points) {
+    assert.equal(point.balance, timeline.points.find((p) => p.date === point.date)!.by_account[id], point.date);
+  }
+  assert.equal(history.points.find((p) => p.date === '2026-06-30')!.source, 'measured');
+  assert.equal(history.points.find((p) => p.date === '2026-06-15')!.source, 'estimated');
+  assert.deepEqual(history.measurements.map((m) => m.date), ['2026-06-30', '2026-07-29']);
+  assert.match(seriesMeasurements(history) ?? '', /Dots mark the 2 balances/);
   assertSilent(history, 'brokerage');
 
+  db.close();
+});
+
+test('HEALTHY: a market-driven account with no transactions has no line rather than a flat one', () => {
+  const db = migratedTestDb();
+  const id = insertAccount(db, { account_name: 'Coinbase', type: 'crypto_wallet', current_balance: 0 });
+  assert.equal(getMarketBalanceHistory(db, id, { today: TODAY }).start_reason, 'no_ledger');
   db.close();
 });
 
@@ -487,6 +496,7 @@ test('GET /:id/history routes by account type and answers in dollars', async () 
   const db = migratedTestDb();
   const ledgerId = seedWealthfront(db);
   const marketId = insertAccount(db, { account_name: 'Coinbase', type: 'crypto_wallet', current_balance: 39905 });
+  insertTransaction(db, { account_id: marketId, date: '2026-06-30', amount: -40492, category_id: 'cat_crypto_buy' });
   insertSnapshot(db, '2026-06-30', { [marketId]: 40492 }, false);
   insertSnapshot(db, '2026-07-29', { [marketId]: 39905 }, false);
 
@@ -502,8 +512,9 @@ test('GET /:id/history routes by account type and answers in dollars', async () 
     assertSilent(ledger, 'route: ledger');
 
     const market = await fetchHistory(`${baseUrl}/api/accounts/${marketId}/history`);
-    assert.equal(market.basis, 'snapshot');
-    assert.deepEqual(market.points.map((p) => p.balance), [404.92, 399.05]);
+    assert.equal(market.basis, 'market');
+    assert.equal(market.points[0].balance, 404.92);
+    assert.equal(markOn(market, '2026-07-29'), 399.05);
     assertSilent(market, 'route: market');
   });
 

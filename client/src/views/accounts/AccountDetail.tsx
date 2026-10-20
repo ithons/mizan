@@ -53,8 +53,8 @@ export function seriesOrigin(history: AccountBalanceHistory): string | null {
           : `No transactions fall in the window shown, from ${from}. The line holds the balance carried into it.`;
       }
       return `Reconstructed from the ${count} drawn here, over the window shown, from ${from}.`;
-    case 'snapshot_series':
-      return 'Drawn from recorded balance sheets rather than this account’s ledger: reversing individual buys and sells cannot reconstruct a price move.';
+    case 'market_valuation':
+      return 'Valued at each day’s closing prices where the recorded holdings agree with the balance the institution reported, and at the recorded balance where there is one. Dashed stretches are estimates that replay only money moved in or out.';
     case 'no_ledger':
       return 'No transactions on this account yet, so there is no balance history to draw.';
     case 'account_not_found':
@@ -72,7 +72,7 @@ export function seriesOrigin(history: AccountBalanceHistory): string | null {
  * inflows and outflows sits away from every one of those boundaries without anything being wrong.
  */
 export function seriesMeasurements(history: AccountBalanceHistory): string | null {
-  if (history.basis !== 'ledger' || history.measurements.length === 0) return null;
+  if (history.measurements.length === 0) return null;
   return history.measurements.length === 1
     ? 'The dot is the one balance recorded for this account on a day net worth was captured.'
     : `Dots mark the ${history.measurements.length} balances recorded for this account on days net worth was captured.`;
@@ -106,8 +106,7 @@ export function AccountDetail() {
   });
   const { data: txPage } = txQ;
 
-  // One line, one style. A ledger series is a reconstruction end to end and says so in `origin`;
-  // only the snapshot basis carries reverse-replayed points, and those stay dashed.
+  // A ledger series is one style end to end; only the market basis carries estimated stretches.
   const chart = useMemo(
     () => (history?.points ?? []).map((p) => ({ date: p.date, value: p.balance, estimated: p.source === 'estimated' })),
     [history]
