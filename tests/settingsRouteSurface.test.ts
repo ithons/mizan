@@ -61,6 +61,18 @@ test('no generic preference writer: a retired key cannot be put back through /ap
   db.close();
 });
 
+test('Coinbase keys are written only through /api/coinbase/connect, which tests them first', async () => {
+  const db = migratedTestDb();
+  await withRouter(db, async (call) => {
+    const status = await call('/api/settings/credentials/coinbase', {
+      method: 'POST',
+      body: JSON.stringify({ keyName: 'organizations/x/apiKeys/y', privateKey: 'not-a-key' }),
+    });
+    assert.equal(status, 404);
+  });
+  db.close();
+});
+
 test('HEALTHY: the settings routes that have callers still answer', async () => {
   const db = migratedTestDb();
   await withRouter(db, async (call) => {
