@@ -1045,6 +1045,37 @@ test('HEALTHY: an ordinary create_merchant_rule call applies and reports only th
   );
 });
 
+test('create_merchant_rule refiles a rule-filed match and leaves a hand-filed one, as its description says', (t) => {
+  const fx = writeFixture();
+  t.after(() => fx.db.close());
+  const base = { account_id: fx.accountId, date: '2026-07-10', amount: -1_200, merchant_name: 'Trupanion', original_name: 'Trupanion' };
+  insertTransaction(fx.db, { ...base, id: 'by_rule', category_id: 'cat_food', category_source: 'rule' });
+  insertTransaction(fx.db, { ...base, id: 'by_hand', category_id: 'cat_food', category_source: 'human', manually_categorized: 1 });
+  insertTransaction(fx.db, { ...base, id: 'unfiled', category_id: null });
+  // History has to agree with the rule, or the guard refuses it before any sweep runs.
+  for (const id of ['settled_1', 'settled_2', 'settled_3']) {
+    insertTransaction(fx.db, { ...base, id, category_id: 'cat_health', category_source: 'rule' });
+  }
+
+  const result = runAdvisorTool(fx.db, 'create_merchant_rule', { pattern: 'Trupanion', category_id: 'cat_health' }) as { applied: boolean };
+  assert.equal(result.applied, true);
+
+  const rows = fx.db.prepare('SELECT id, category_id FROM transactions ORDER BY id').all();
+  assert.deepEqual(rows, [
+    { id: 'by_hand', category_id: 'cat_food' },
+    { id: 'by_rule', category_id: 'cat_health' },
+    { id: 'settled_1', category_id: 'cat_health' },
+    { id: 'settled_2', category_id: 'cat_health' },
+    { id: 'settled_3', category_id: 'cat_health' },
+    { id: 'unfiled', category_id: 'cat_health' },
+  ]);
+  const tool = ADVISOR_TOOLS.find((entry) => entry.name === 'create_merchant_rule');
+  const described = JSON.stringify(tool);
+  assert.match(described, /already filed by a rule/);
+  assert.match(described, /categorized by hand[^.]*left alone/);
+  assert.doesNotMatch(described, /existing uncategorized transactions/);
+});
+
 test('the audit trail can tell a chat write from a background pass write', (t) => {
   const fx = writeFixture();
   t.after(() => fx.db.close());

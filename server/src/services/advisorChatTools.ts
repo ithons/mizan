@@ -227,7 +227,7 @@ export const ADVISOR_TOOLS: Anthropic.Tool[] = [
   {
     name: 'create_merchant_rule',
     description:
-      'Create a standing rule mapping a merchant pattern to a category, so future transactions from that merchant categorize themselves. Optionally apply it to existing uncategorized transactions too. Matching is fuzzy, so a broad pattern can sweep in more than you intend: prefer the specific merchant name.',
+      'Create a standing rule mapping a merchant pattern to a category, so future transactions from that merchant categorize themselves. By default it also refiles existing matches (see apply_existing). Matching is fuzzy, so a broad pattern can sweep in more than you intend: prefer the specific merchant name.',
     input_schema: {
       type: 'object',
       properties: {
@@ -235,7 +235,7 @@ export const ADVISOR_TOOLS: Anthropic.Tool[] = [
         category_id: { type: 'string', description: 'Category id, not its display name.' },
         apply_existing: {
           type: 'boolean',
-          description: 'Also categorize existing uncategorized transactions that match. Defaults to true.',
+          description: 'Defaults to true. Also refiles every existing matching transaction the owner did not categorize by hand, including ones already filed by a rule or by the AI. Rows the owner categorized by hand, refunds, and rows a higher-precedence rule holds are left alone.',
         },
       },
       required: ['pattern', 'category_id'],
