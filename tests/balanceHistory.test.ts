@@ -525,9 +525,8 @@ test('GET /:id/history routes by account type and answers in dollars', async () 
  * What the chart draws for each of those series.
  *
  * Every segment is classified by its own two ends. An earlier version split the series at a single
- * estimated/measured boundary, which the snapshot series only satisfies by luck: `backfillSnapshots`
- * writes an estimated row for any past month holding no measured snapshot, so a fortnight with the
- * app switched off puts an estimate after a measurement. The last case here is that series.
+ * estimated/measured boundary, and a series can move between estimate and known value many times.
+ * The last case here is that series.
  */
 test('a ledger series is one unbroken line, with the recorded balances dotted on it', () => {
   const days = ['2026-07-01', '2026-07-02', '2026-07-03', '2026-07-04'];

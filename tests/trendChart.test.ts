@@ -22,7 +22,7 @@ import { trendCaptions,
  *
  * Re-run 2026-07-31 against a copy of `.mizan/mizan.db` at migration 054, the same query returns
  * 32 rows: 16 estimated 2024-07-01..2026-06-01, NONE of them with a NULL count because
- * `backfillSnapshots` now writes one on every row it recomputes, and every estimated value has
+ * the monthly reconstruction (since deleted) wrote one on every row it recomputed, and every estimated value had
  * moved (2026-06-01 is $5,521.48 there, not the $3,868.92 pinned below). Kept as a fixed capture
  * rather than refreshed, because a chart geometry test wants a stable series and the shapes it
  * exercises are the point; the values are this file's own input and are not claimed to be live.
@@ -186,9 +186,7 @@ test('the stored series has no gap wide enough to withhold, so the whole line is
 });
 
 test('a reach the ledger cannot justify is not drawn across, and its far point is not deleted', () => {
-  // CONSTRUCTED, not stored. scripts/backfill/rebuild.ts is the only caller of backfillSnapshots
-  // outside tests, and running it extends history back past the app's own cadence. This is that
-  // shape: one much older reading in front of the twenty rows the database actually holds.
+  // CONSTRUCTED, not stored: one much older reading in front of the twenty rows the fixture holds.
   const extended: TrendPoint[] = [{ date: '2024-07-01', value: 591.0, estimated: true, coverage: 6 }, ...storedSeries()];
 
   const geometry = trendGeometry(extended, []);

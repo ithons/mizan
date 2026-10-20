@@ -26,22 +26,9 @@ export interface TrendPoint {
   date: string;
   value: number;
   /**
-   * True when the point is reconstructed rather than observed. Net-worth history before the
-   * first real sync is estimated by undoing transactions off today's balances, which cannot
-   * see what it has no record of: a credit card's payments, or any month the ledger does not
-   * reach. Drawing that as the same solid line as a measured balance is the chart asserting
-   * something it does not know.
-   *
-   * The two ends of that join, re-measured 2026-07-31 against a copy of `.mizan/mizan.db` at
-   * migration 054. `backfillSnapshots` recomputes every estimated row on each run, so the figure
-   * previously written here ($3,868.92 for 2026-06-01) is one the query no longer returns:
-   *
-   *   SELECT date, net_worth / 100.0, is_estimated FROM net_worth_snapshots
-   *   WHERE date IN ('2026-06-01', '2026-06-30');
-   *   -- 2026-06-01 5521.48 1 | 2026-06-30 1068.29 0
-   *
-   * The last estimated month reads $5,521.48 against $1,068.29 measured 29 days later: a gap of
-   * $4,453.19 that is a guess meeting a measurement, not money moving.
+   * True when the point is an estimate rather than a known value: in the net worth timeline, an
+   * investment or crypto account between known values. Drawing it as the same solid line as a
+   * known value is the chart asserting something it does not know.
    */
   estimated?: boolean;
   /**
@@ -50,18 +37,7 @@ export interface TrendPoint {
    * quantity as much as a change of money: the stored series steps 11 accounts to 14 across
    * 2026-07-23 to 2026-07-24. Omit it rather than guess.
    *
-   * Omission is itself a state the chart has to handle rather than read as agreement, and the
-   * column is nullable, so the handling stays whatever this database happens to hold today.
-   * Re-measured 2026-07-31 against a copy of `.mizan/mizan.db` at migration 054:
-   *
-   *   SELECT COUNT(*) FROM net_worth_snapshots WHERE is_estimated = 1 AND covered_accounts IS NULL;
-   *   -- 0
-   *   SELECT COUNT(*) FROM net_worth_snapshots WHERE is_estimated = 1;
-   *   -- 16
-   *
-   * So no such row exists here now; the "5, which is every estimated row there is" written here
-   * before reproduces neither half. `backfillSnapshots` writes a count on every row it recomputes,
-   * which is why the one-ended segment this paragraph described has since closed.
+   * Omission is itself a state the chart has to handle rather than read as agreement.
    *
    * A segment with a count on neither end makes no coverage claim and is left alone; a segment
    * with a count on exactly one end knows only that it cannot compare them.
@@ -325,11 +301,9 @@ function timeTicks(first: Date, last: Date, x: (t: number) => number): TrendTime
  *
  * and `trendGeometry` over those 32 rows reports maxDrawnGapDays 31.
  *
- * It also makes no assumption about where reconstructed points sit. An earlier version split the
- * series at a single estimated/measured boundary; `backfillSnapshots` writes an estimated row for
- * any past month with no measured snapshot, so a fortnight with the app switched off puts an
- * estimate after a measurement and the series splits twice. Every segment is classified by its
- * own two ends instead.
+ * It also makes no assumption about where estimated points sit. An earlier version split the
+ * series at a single estimated/measured boundary, and a series can move between estimate and
+ * known value many times, so every segment is classified by its own two ends instead.
  *
  * @throws RangeError when `history` is not strictly increasing in parseable dates. Every caller
  * feeds it a `ORDER BY date ASC` result over a UNIQUE date column, and the alternative to raising

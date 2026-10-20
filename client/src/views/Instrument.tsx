@@ -487,7 +487,7 @@ export function Instrument() {
    *   SELECT provider, status, accounts_seen, error_message FROM sync_run_items
    *   WHERE run_id = '1ad2346d-dd6a-4e4a-856a-f719a1f94db5';
    *   -- simplefin | failed | 0 | Request failed with status code 402
-   *   -- coinbase, transaction-integrity, auto-categorization, net-worth-reconstruction | succeeded
+   *   -- coinbase, transaction-integrity, auto-categorization | succeeded
    *
    * SimpleFIN returned nothing, so thirteen of the fourteen balances in that sheet are whatever the
    * previous run left, and the sheet still recorded `covered_accounts = total_accounts = 14`,
