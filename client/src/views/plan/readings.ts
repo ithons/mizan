@@ -65,7 +65,7 @@ export function claimLines(
       key: 'inflows',
       label: `Income expected in the next ${sheet.forecast_days} days`,
       delta: sheet.expected_inflows,
-      note: 'Recurring income last paid into these accounts or onto a card counted here. Income paid anywhere else is not counted here; one with no deposit yet, or last paid into an account since closed, counts unless filed under Investments or Crypto.',
+      note: `Recurring income last paid into these accounts or onto a card counted here. Income paid anywhere else is not counted here; one with no deposit yet, or last paid into an account since closed, counts unless filed under Investments or Crypto.${lateIncomeNote(sheet.overdue_income_counted ?? [])}`,
     }),
     {
       key: 'cards',
@@ -131,6 +131,12 @@ function lumpNote(lumps: NonNullable<SafeToSpend['unbudgeted_not_assumed_to_repe
   if (lumps.length === 0) return '';
   const named = lumps.map((lump) => `${lump.label} ${formatCurrency(lump.amount)} on ${formatDateShort(lump.date)}`).join(', ');
   return ` Left out as too large to assume it repeats: ${named}.`;
+}
+
+function lateIncomeNote(late: NonNullable<SafeToSpend['overdue_income_counted']>): string {
+  if (late.length === 0) return '';
+  const named = late.map((item) => `${item.name} ${formatCurrency(item.amount)}, expected ${formatDateShort(item.expected_on)}`).join('; ');
+  return ` Counted although late and not yet posted: ${named}.`;
 }
 
 function emptyNote(count: MaybeCount, allocated: number, sentence: string): string | undefined {

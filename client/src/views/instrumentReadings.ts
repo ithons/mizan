@@ -3,7 +3,7 @@ import type { Account, NetWorthSnapshot, ReportSummary, SafeToSpend, SpendingRep
 import { isInCredit, signedAccountBalance } from '../lib/accountBalance';
 import { bySignedMagnitude, type FigureStates } from '../components/balance';
 import { comparableHistory, type BeamHistoryPoint } from '../components/balance/BalanceScale';
-import { formatCurrency, formatWholeCurrency } from '../lib/formatters';
+import { formatCurrency, formatDateShort, formatWholeCurrency } from '../lib/formatters';
 
 /**
  * Everything `/` states, as data.
@@ -34,6 +34,13 @@ export function readCardCredit(accounts: Account[]): CardCreditReading {
     cards: cards.length,
     total: credited.reduce((sum, card) => sum + signedAccountBalance(card), 0),
   };
+}
+
+/** The per-day line's own disclosure: the allowance counts late pay as money already in hand. */
+export function lateIncomeAllowanceNote(sheet: Pick<SafeToSpend, 'overdue_income_counted'>): string | null {
+  const late = sheet.overdue_income_counted ?? [];
+  if (late.length === 0) return null;
+  return `This counts ${late.map((item) => item.name).join(' and ')} as arrived, though it was due ${late.length === 1 ? formatDateShort(late[0].expected_on) : 'earlier'} and has not posted.`;
 }
 
 /**

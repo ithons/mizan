@@ -14,6 +14,7 @@ import {
   shoppingBudget,
   text,
 } from './helpers/planHarness';
+import { lateIncomeAllowanceNote } from '../client/src/views/instrumentReadings';
 import type { Budget } from '../shared/types';
 
 /**
@@ -474,6 +475,19 @@ test('the expected income line says which income it leaves out', () => {
   const line = claimLines({ ...SHEET, expected_inflows: 1143.95 }, 1, 1).find((l) => l.key === 'inflows');
   assert.ok(line);
   assert.match(line.note ?? '', /last paid into these accounts or onto a card counted here\. Income paid anywhere else is not counted here; one with no deposit yet, or last paid into an account since closed, counts unless filed under Investments or Crypto\./);
+  assert.doesNotMatch(line.note ?? '', /late/, 'HEALTHY: nothing named when no income is late');
+});
+
+test('the expected income line names a late paycheck it still counts', () => {
+  const sheet = {
+    ...SHEET,
+    expected_inflows: 1143.95,
+    overdue_income_counted: [{ name: 'Mass Inst Payroll', expected_on: '2026-10-17', amount: 228.78 }],
+  };
+  const line = claimLines(sheet, 1, 1).find((l) => l.key === 'inflows');
+  assert.match(line?.note ?? '', /Counted although late and not yet posted: Mass Inst Payroll \$228\.78, expected /);
+  assert.match(lateIncomeAllowanceNote(sheet) ?? '', /counts Mass Inst Payroll as arrived/);
+  assert.equal(lateIncomeAllowanceNote(SHEET), null, 'HEALTHY: the per-day line adds nothing when pay is on time');
 });
 
 test('a card paid from outside the pool shows as its own line, not as a transfer in', () => {

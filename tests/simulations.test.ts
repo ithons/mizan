@@ -176,6 +176,18 @@ test('income expected already but not posted is named when a projection counts i
   });
 });
 
+test('the sheet names late income it counts, and the projection reads the same list', () => {
+  withLedger((db) => {
+    assert.equal(readSafeToSpend(db).overdue_income_counted, undefined, 'HEALTHY: nothing named when pay is on time');
+    db.prepare("UPDATE recurring_patterns SET next_expected = ? WHERE merchant_name LIKE '%payroll%'").run(day(3));
+    const sheet = readSafeToSpend(db);
+    const late = sheet.overdue_income_counted ?? [];
+    assert.ok(late.some((item) => item.expected_on === day(3) && item.amount === 544.18));
+    assert.ok(late.reduce((sum, item) => sum + item.amount, 0) <= sheet.expected_inflows, 'named money is part of the income line');
+    assert.deepEqual(projectFree(db, 30).overdue_income_counted, late);
+  });
+});
+
 function steadyLedger(): Database.Database {
   const db = migratedTestDb();
   const chase = insertAccount(db, { account_name: 'Chase', type: 'checking', current_balance: 500000 });

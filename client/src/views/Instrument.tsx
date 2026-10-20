@@ -54,6 +54,7 @@ import {
   formatPayoffFigure,
   formatPointsFigure,
   isWindowId,
+  lateIncomeAllowanceNote,
   payoffState,
   readCardCredit,
   readComparison,
@@ -706,6 +707,7 @@ export function Instrument() {
                 <div className="mt-1 text-note text-muted tabular-nums">
                   About {formatWholeCurrency(safeToSpendQ.data.per_day_until_next_income)} a day until your next pay on{' '}
                   {format(parseISO(safeToSpendQ.data.next_income_date), 'd MMMM')}
+                  {lateIncomeAllowanceNote(safeToSpendQ.data) && <span className="block">{lateIncomeAllowanceNote(safeToSpendQ.data)}</span>}
                 </div>
               )}
               <ExplainPanel disclosure={freeExplain}>

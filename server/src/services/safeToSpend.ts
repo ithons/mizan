@@ -56,6 +56,8 @@ export interface SafeToSpendBreakdown {
   upcomingBills: number;
   /** Scheduled income in the forecast window. */
   expectedInflows: number;
+  /** The part of expectedInflows dated before today: late, not posted, and counted as arriving. */
+  overdueIncome: ScheduledEffect[];
   /**
    * Scheduled transfers out of the pool to the owner's other non-card accounts, less any scheduled
    * into it. Card payments are not here: the whole card balance is already a claim.
@@ -99,6 +101,7 @@ export interface SafeToSpendInputs {
     rollover_balance?: number | null;
   }>;
   forecastDays?: number;
+  today?: Date;
 }
 
 export function computeSafeToSpend(
@@ -133,6 +136,8 @@ export function computeSafeToSpend(
   const upcomingBills = Math.abs(forecast.bills);
   const incomeEffects = inflowsIntoPool(db, forecast.occurrences, pool, liabilities);
   const expectedInflows = incomeEffects.reduce((sum, item) => sum + item.cents, 0);
+  const todayKey = localDate(inputs.today ?? new Date());
+  const overdueIncome = incomeEffects.filter((item) => item.date < todayKey);
   const owed = new Map(accounts.filter((account) => account.is_liability).map((account) => [account.id, account.current_balance]));
   const cards = new Set((db.prepare('SELECT id FROM accounts WHERE is_liability = 1').all() as Array<{ id: string }>).map((row) => row.id));
   const { transfers: recurringTransfers, cardRelief, effects: transferEffects } = transfersAcrossPool(forecast.occurrences, pool, cards, owed);
@@ -199,6 +204,7 @@ export function computeSafeToSpend(
     cardBalances,
     upcomingBills,
     expectedInflows,
+    overdueIncome,
     recurringTransfers,
     cardRelief,
     estimatedUnbudgeted,
@@ -412,6 +418,13 @@ function earmarksFromPool(goal: GoalEarmarkRow): boolean {
   });
 }
 
+const localDate = (date: Date) =>
+  `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+
+export function overdueIncomeCounted(breakdown: Pick<SafeToSpendBreakdown, 'overdueIncome'>) {
+  return breakdown.overdueIncome.map((item) => ({ name: item.label, expected_on: item.date, amount: toDollars(item.cents) }));
+}
+
 /** The breakdown the screen and the advisor both read, in dollars, for this month's budgets. */
 export function readSafeToSpend(db: Database.Database, forecastDays?: number) {
   const now = new Date();
@@ -422,6 +435,7 @@ export function readSafeToSpend(db: Database.Database, forecastDays?: number) {
     card_balances: toDollars(breakdown.cardBalances),
     upcoming_bills: toDollars(breakdown.upcomingBills),
     expected_inflows: toDollars(breakdown.expectedInflows),
+    ...(breakdown.overdueIncome.length > 0 ? { overdue_income_counted: overdueIncomeCounted(breakdown) } : {}),
     recurring_transfers: toDollars(breakdown.recurringTransfers),
     card_relief: toDollars(breakdown.cardRelief),
     estimated_unbudgeted: toDollars(breakdown.estimatedUnbudgeted),
@@ -442,7 +456,7 @@ export function readSafeToSpend(db: Database.Database, forecastDays?: number) {
  * is not counted, because it has not arrived when this money is being spent.
  */
 function dailyAllowance(breakdown: SafeToSpendBreakdown, now: Date): { next_income_date: string | null; per_day_until_next_income: number | null } {
-  const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+  const today = localDate(now);
   const next = breakdown.scheduled.find((item) => item.kind === 'income' && item.date > today)?.date ?? null;
   if (!next) return { next_income_date: null, per_day_until_next_income: null };
   const days = Math.max(1, Math.round((Date.parse(`${next}T00:00:00`) - Date.parse(`${today}T00:00:00`)) / 86_400_000));

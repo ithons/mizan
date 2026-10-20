@@ -1433,6 +1433,8 @@ export interface SafeToSpend {
   upcoming_bills: number;
   /** Scheduled income over forecast_days. */
   expected_inflows: number;
+  /** Income in expected_inflows that was due before today and has not posted. Absent when none is. */
+  overdue_income_counted?: Array<{ name: string; expected_on: string; amount: number }>;
   /** Scheduled transfers out of the liquid pool to the owner's other non-card accounts, less those into it. */
   recurring_transfers: number;
   /** Scheduled payments to a card from accounts outside the pool, up to what each card owes. */

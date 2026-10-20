@@ -1,6 +1,6 @@
 import type Database from 'better-sqlite3';
 import { addDays, addMonths, format, parseISO, startOfMonth, subMonths, endOfMonth } from 'date-fns';
-import { computeSafeToSpend, type ScheduledEffect } from './safeToSpend';
+import { computeSafeToSpend, overdueIncomeCounted, type ScheduledEffect } from './safeToSpend';
 import { getMonthlyBudgetsWithProjection } from './budgetProjection';
 import { getCashflowReport, getSpendingReport } from './reporting';
 import { calculateGoalProgress } from './goalProgress';
@@ -108,7 +108,7 @@ export function checkAdjustments(db: Database.Database, raw: unknown, days: numb
  */
 export function projectFree(db: Database.Database, days: number, adjustments: ProjectionAdjustment[] = [], today = new Date()) {
   const budgets = getMonthlyBudgetsWithProjection(db, today.getFullYear(), today.getMonth() + 1);
-  const sheet = computeSafeToSpend(db, { budgets, forecastDays: days });
+  const sheet = computeSafeToSpend(db, { budgets, forecastDays: days, today });
   const start = sheet.liquid - sheet.cardBalances - sheet.allocatedBudgets - sheet.allocatedGoals;
   const perDay = sheet.estimatedUnbudgeted / days;
   const scale = adjustments.reduce((factor, a) => (a.kind === 'scale_unbudgeted' ? factor * (1 + a.percent / 100) : factor), 1);
@@ -120,13 +120,12 @@ export function projectFree(db: Database.Database, days: number, adjustments: Pr
     lowest_on: curve.lowestDate,
     first_short_on: curve.firstNegativeDate,
   });
-  const todayKey = ymd(today);
-  const overdue = sheet.scheduled.filter((item) => item.kind === 'income' && item.date < todayKey);
+  const overdue = sheet.overdueIncome;
   return {
     days,
     baseline: dollars(baseline),
     ...(overdue.length > 0 ? {
-      overdue_income_counted: overdue.map((item) => ({ name: item.label, expected_on: item.date, amount: toDollars(item.cents) })),
+      overdue_income_counted: overdueIncomeCounted(sheet),
     } : {}),
     ...(adjustments.length > 0 ? { scenario: dollars(scenario), change_at_end: toDollars(scenario.end - baseline.end) } : {}),
     assumptions: [
