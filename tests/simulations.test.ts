@@ -361,6 +361,7 @@ test('runway nets a refund-heavy month and counts an empty month, the way the ad
 test('runway claims no cover when refunds exceed spending across the window', () => {
   const { runway } = runwayAgainstContext([{ monthsBack: 2, amount: -10000 }, { monthsBack: 1, amount: 30000 }]);
   assert.equal(runway.months_covered, null);
+  assert.match((runway as { note?: string }).note ?? '', /Refunds matched or exceeded spending/);
 });
 
 test('HEALTHY: steady monthly spending reads the same average either way', () => {
@@ -368,4 +369,5 @@ test('HEALTHY: steady monthly spending reads the same average either way', () =>
   assert.equal(runway.average_monthly_spending, 300);
   assert.equal(runway.average_monthly_spending, context);
   assert.equal(runway.months_covered, 20);
+  assert.equal((runway as { note?: string }).note, undefined);
 });

@@ -197,6 +197,7 @@ export function cashRunway(db: Database.Database, months = 3, today = new Date()
     cards_owed: toDollars(sheet.cardBalances),
     average_monthly_spending: toDollars(Math.round(average)),
     months_covered: average > 0 ? Math.round((cover / average) * 10) / 10 : null,
+    ...(average > 0 ? {} : { note: 'Refunds matched or exceeded spending over these months, so there is no spending rate to run the cash down at.' }),
     measured_months: window.months,
     assumptions: [
       'Card balances are paid from the liquid accounts first.',
