@@ -1,7 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import type Database from 'better-sqlite3';
-import { migratedTestDb, insertAccount, TEST_NOW } from './helpers/schema';
+import { migratedTestDb, insertAccount, insertTransaction, TEST_NOW } from './helpers/schema';
+import { renameCoinbasePlaceholders } from '../scripts/coinbase-merchant-names';
 import {
   syncCoinbaseLedger,
   upsertCoinbaseTransaction,
@@ -84,4 +85,48 @@ test('a ledger row with no timestamp is dated on the local day, like every other
   await syncCoinbaseLedger(db, request, lateEvening);
   const row = db.prepare('SELECT date FROM transactions WHERE account_id = ?').get(account) as { date: string };
   assert.equal(row.date, isoToLocalDate(lateEvening));
+});
+
+test('a synced row is named after its action, not after the exchange', async () => {
+  const { db, account } = walletWithImported([]);
+  const { request } = stub([[txn('fresh')]]);
+
+  await syncCoinbaseLedger(db, request, TEST_NOW);
+  const row = db.prepare('SELECT merchant_name, original_name FROM transactions WHERE account_id = ?').get(account);
+  assert.deepEqual(row, { merchant_name: 'Send BTC', original_name: 'Send BTC' });
+});
+
+function placeholderRow(db: Database.Database, account: string, original: string, source: 'human' | null = null): string {
+  const id = insertTransaction(db, { account_id: account, merchant_name: 'Coinbase', original_name: original });
+  db.prepare('UPDATE transactions SET merchant_name_source = ? WHERE id = ?').run(source, id);
+  return id;
+}
+
+const merchantOf = (db: Database.Database, id: string) =>
+  (db.prepare('SELECT merchant_name FROM transactions WHERE id = ?').get(id) as { merchant_name: string }).merchant_name;
+
+test('the repair renames placeholder rows once and records each rename', () => {
+  const { db, account } = walletWithImported([]);
+  const id = placeholderRow(db, account, 'Convert sold USDT');
+
+  assert.equal(renameCoinbasePlaceholders(db, false, TEST_NOW), 1, 'a dry run counts');
+  assert.equal(merchantOf(db, id), 'Coinbase');
+
+  assert.equal(renameCoinbasePlaceholders(db, true, TEST_NOW), 1);
+  assert.equal(merchantOf(db, id), 'Convert sold USDT');
+  assert.deepEqual(
+    db.prepare('SELECT from_value, to_value, origin FROM transaction_field_revisions WHERE transaction_id = ?').all(id),
+    [{ from_value: 'Coinbase', to_value: 'Convert sold USDT', origin: 'import_rule' }]
+  );
+  assert.equal(renameCoinbasePlaceholders(db, true, TEST_NOW), 0, 'a second run renames nothing');
+});
+
+test('HEALTHY: the repair leaves named rows, owner names and other accounts alone', () => {
+  const { db, account } = walletWithImported(['a']);
+  placeholderRow(db, account, 'Send BTC', 'human');
+  placeholderRow(db, account, 'Coinbase');
+  insertTransaction(db, { account_id: insertAccount(db, { account_name: 'Checking' }), merchant_name: 'Coinbase', original_name: 'COINBASE INC' });
+
+  assert.equal(renameCoinbasePlaceholders(db, true, TEST_NOW), 0);
+  assert.equal((db.prepare('SELECT COUNT(*) AS n FROM transaction_field_revisions').get() as { n: number }).n, 0);
 });

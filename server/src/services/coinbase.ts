@@ -362,13 +362,14 @@ export function upsertCoinbaseTransaction(
       (id, coinbase_transaction_id, account_id, date, amount, merchant_name,
        original_name, category_id, category_source, quantity, security_id, pending, is_manual, source_type,
        created_at, updated_at)
-    VALUES (?, ?, ?, ?, ?, 'Coinbase', ?, ?, 'import', ?, ?, 0, 0, 'coinbase', ?, ?)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'import', ?, ?, 0, 0, 'coinbase', ?, ?)
   `).run(
     uuidv4(),
     write.coinbaseTransactionId,
     write.accountId,
     write.date,
     write.amountCents,
+    write.originalName,
     write.originalName,
     write.categoryId,
     write.units ? write.units.quantity : null,
