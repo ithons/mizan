@@ -8,6 +8,7 @@ import {
   type CoinbaseV2Request,
   type CoinbaseV2Transaction,
 } from '../server/src/services/coinbase';
+import { isoToLocalDate } from '../server/src/services/dates';
 
 function txn(id: string, over: Partial<CoinbaseV2Transaction> = {}): CoinbaseV2Transaction {
   return {
@@ -72,4 +73,15 @@ test('a pending row keeps the walk going, so it is imported once it completes', 
 
   await syncCoinbaseLedger(db, request, TEST_NOW);
   assert.equal(transactionPages(paths).length, 2);
+});
+
+// Late evening in the Americas is already tomorrow in UTC; the app's day is the local one.
+test('a ledger row with no timestamp is dated on the local day, like every other row', async () => {
+  const { db, account } = walletWithImported([]);
+  const lateEvening = '2026-07-01T02:00:00.000Z';
+  const { request } = stub([[txn('undated', { created_at: '' })]]);
+
+  await syncCoinbaseLedger(db, request, lateEvening);
+  const row = db.prepare('SELECT date FROM transactions WHERE account_id = ?').get(account) as { date: string };
+  assert.equal(row.date, isoToLocalDate(lateEvening));
 });

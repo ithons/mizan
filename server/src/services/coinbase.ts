@@ -737,9 +737,7 @@ export async function syncTradeHistory(connectionId: string): Promise<number> {
       );
       const signedAmount = side === 'BUY' ? -amount : amount;
 
-      const date = order.created_time
-        ? isoToLocalDate(order.created_time)
-        : now.split('T')[0];
+      const date = isoToLocalDate(order.created_time || now);
 
       // Manual history owns everything below this account's floor; never let a deep
       // pull re-insert a crypto trade the imported backfill already covers.
@@ -796,7 +794,7 @@ export async function fetchCoinbaseV2Pages<T>(
 }
 
 function ledgerDate(txn: CoinbaseV2Transaction, now: string): string {
-  return txn.created_at ? isoToLocalDate(txn.created_at) : now.split('T')[0];
+  return isoToLocalDate(txn.created_at || now);
 }
 
 // Settled means no later sync can learn anything from the row: imported with units (or with none
