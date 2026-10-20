@@ -12,10 +12,6 @@ const PROVIDERS: Readonly<Record<AiProviderId, AiProvider>> = {
   gemini: geminiProvider,
 };
 
-export function getProvider(id: AiProviderId): AiProvider {
-  return PROVIDERS[id];
-}
-
 /**
  * The provider that owns `modelId`.
  *

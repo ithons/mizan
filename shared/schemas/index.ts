@@ -194,13 +194,6 @@ export const UpdateSecurityMetadataSchema = z.object({
   type: z.enum(['equity', 'etf', 'mutual_fund', 'crypto', 'cash', 'other']).nullable().optional(),
 });
 
-export const ExportCsvSchema = z.object({
-  startDate: z.string().optional(),
-  endDate: z.string().optional(),
-  accountIds: z.array(z.string()).optional(),
-  format: z.enum(['mizan', 'monarch']).optional(),
-});
-
 export const DeleteDataSchema = z.object({
   confirm: z.literal('delete'),
 });
@@ -340,24 +333,6 @@ export const NotificationRuleParamsSchemas = {
   account_shortfall: z.object({ days_ahead: z.number().int().min(1).max(60).default(14) }),
   card_payment_missing: z.object({ min_days_late: z.number().int().min(0).max(30).default(3) }),
 } as const;
-
-const notificationRuleVariant = <K extends keyof typeof NotificationRuleParamsSchemas>(kind: K) =>
-  z.object({ kind: z.literal(kind), params: NotificationRuleParamsSchemas[kind] });
-
-export const NotificationRuleSpecSchema = z.discriminatedUnion('kind', [
-  notificationRuleVariant('budget_threshold'),
-  notificationRuleVariant('large_transaction'),
-  notificationRuleVariant('bill_due'),
-  notificationRuleVariant('low_balance'),
-  notificationRuleVariant('safe_to_spend_negative'),
-  notificationRuleVariant('sync_failed'),
-  notificationRuleVariant('goal_milestone'),
-  notificationRuleVariant('unusual_spending'),
-  notificationRuleVariant('recurring_amount_changed'),
-  notificationRuleVariant('income_late'),
-  notificationRuleVariant('account_shortfall'),
-  notificationRuleVariant('card_payment_missing'),
-]);
 
 export const CreateNotificationRuleSchema = z.object({
   kind: z.string().min(1),

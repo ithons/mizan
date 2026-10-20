@@ -641,11 +641,3 @@ export function nextTabStop(count: number, activeIndex: number, shift: boolean):
   if (shift) return activeIndex <= 0 ? count - 1 : activeIndex - 1;
   return activeIndex === -1 || activeIndex === count - 1 ? 0 : activeIndex + 1;
 }
-
-/** The live scene, for assertions in a browser console. Not a subscription and not for rendering. */
-export function readKeyboardScene(): { bindings: BindingRef[]; overlays: string[] } {
-  return {
-    bindings: bindings.map(({ id, owner }) => ({ id, owner })),
-    overlays: [...overlays],
-  };
-}

@@ -66,10 +66,6 @@ export function formatCurrencyColored(amount: number): { text: string; className
   return { text: `\u2212${formatted}`, className: 'text-negative' };
 }
 
-export function formatCrypto(amount: number, currency: string): string {
-  return `${amount.toFixed(8)} ${currency}`;
-}
-
 export function formatDate(dateStr: string): string {
   try {
     return format(parseISO(dateStr), 'MMM d, yyyy');
@@ -83,14 +79,6 @@ export function formatDateShort(dateStr: string): string {
     return format(parseISO(dateStr), 'MMM d');
   } catch {
     return dateStr;
-  }
-}
-
-export function formatMonth(yearMonth: string): string {
-  try {
-    return format(parseISO(`${yearMonth}-01`), 'MMM yyyy');
-  } catch {
-    return yearMonth;
   }
 }
 

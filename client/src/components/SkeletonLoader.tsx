@@ -15,16 +15,6 @@ export function SkeletonRow({ cols = 5 }: { cols?: number }) {
   );
 }
 
-export function SkeletonList({ rows = 8, cols = 5 }: { rows?: number; cols?: number }) {
-  return (
-    <>
-      {Array.from({ length: rows }).map((_, i) => (
-        <SkeletonRow key={i} cols={cols} />
-      ))}
-    </>
-  );
-}
-
 /** Hairline list-row skeletons matching the Balance row rhythm. */
 export function SkeletonRows({ rows = 5 }: { rows?: number }) {
   const widths = ['45%', '60%', '35%', '55%', '40%', '50%'];
@@ -39,16 +29,6 @@ export function SkeletonRows({ rows = 5 }: { rows?: number }) {
           <div className="h-4 w-16 animate-pulse rounded bg-track" />
         </div>
       ))}
-    </div>
-  );
-}
-
-export function SkeletonCard() {
-  return (
-    <div className="space-y-3 rounded-xl border border-line-2 bg-card shadow-e1 p-[18px]">
-      <div className="h-3 w-1/3 animate-pulse rounded bg-track" />
-      <div className="h-6 w-2/3 animate-pulse rounded bg-track" />
-      <div className="h-3 w-1/2 animate-pulse rounded bg-track/60" />
     </div>
   );
 }

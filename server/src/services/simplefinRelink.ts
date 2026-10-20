@@ -772,11 +772,6 @@ export function getRelinkProposal(db: Database.Database, id: string): SimplefinR
   return row ? hydrate(row) : null;
 }
 
-export function listRelinkProposals(db: Database.Database, limit = 20): SimplefinRelinkProposal[] {
-  const rows = db.prepare(`${SELECT_PROPOSAL} ORDER BY detected_at DESC, id DESC LIMIT ?`).all(limit) as ProposalRow[];
-  return rows.map(hydrate);
-}
-
 // ---------------------------------------------------------------------------
 // 4. The sync guard
 // ---------------------------------------------------------------------------

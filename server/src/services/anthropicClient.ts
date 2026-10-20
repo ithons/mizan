@@ -1,33 +1,4 @@
 import Anthropic from '@anthropic-ai/sdk';
-import { resolveCredential, type CredentialSource } from './aiProviders/credentials';
-
-/**
- * Single place the app decides whether it can talk to Anthropic, and how.
- *
- * Every AI path used to hardcode `new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })`, which
- * silently disabled the advisor, the background worker, and category suggestions for anyone
- * authenticating any other way: the key is only ONE of the credentials the SDK understands.
- *
- * The SDK resolves credentials itself, first match wins:
- *   1. ANTHROPIC_API_KEY
- *   2. ANTHROPIC_AUTH_TOKEN        (e.g. a short-lived OAuth access token)
- *   3. an OAuth profile from `ant auth login`, stored under the Anthropic config dir
- *
- * So when one of those is present the client is constructed bare and the SDK picks it. Phase 10
- * adds a fourth source below all of them, the encrypted `.mizan/credentials.json` store, which
- * the SDK knows nothing about and therefore has to be passed explicitly. The ordering lives in
- * `aiProviders/credentials.ts` because OpenAI and Gemini resolve the same way minus the OAuth
- * profile, which is Anthropic's alone.
- */
-
-export function hasAnthropicCredentials(): boolean {
-  return resolveCredential('anthropic').source !== 'none';
-}
-
-/** Describes the credential in use, for settings/status surfaces. Never returns the secret. */
-export function anthropicCredentialSource(): CredentialSource {
-  return resolveCredential('anthropic').source;
-}
 
 /**
  * Per-request wall clock for the Anthropic adapter's one-shot calls.

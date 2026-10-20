@@ -28,8 +28,6 @@ import type { AdvisorDraftActionKind } from '../../../shared/types';
  * the model asserts rather than one the owner set.
  */
 
-export type DraftAutonomy = 'autonomous' | 'proposal_only';
-
 /** The four tests a write has to pass. A proposal-only kind names the ones it fails. */
 export type AutonomyCriterion =
   /** It reports something already true of stored data rather than deciding something new. */
@@ -253,10 +251,6 @@ export const OWNER_CARVE_OUT_KINDS: ReadonlySet<AdvisorDraftActionKind> = new Se
 
 export function isAutonomousDraftKind(kind: string): boolean {
   return AUTONOMOUS_DRAFT_KINDS.has(kind as AdvisorDraftActionKind);
-}
-
-export function draftAutonomyDeclaration(kind: string): DraftAutonomyDeclaration | null {
-  return DRAFT_KIND_AUTONOMY[kind as AdvisorDraftActionKind] ?? null;
 }
 
 /**

@@ -1,4 +1,3 @@
-import { INVESTED_TYPES } from '@shared/accountTypes';
 
 export const ACCOUNT_TYPE_LABELS: Record<string, string> = {
   checking: 'Checking',
@@ -11,32 +10,6 @@ export const ACCOUNT_TYPE_LABELS: Record<string, string> = {
   cash: 'Cash',
   other: 'Other',
   closed: 'Closed',
-};
-
-export const ACCOUNT_TYPE_GROUPS: Record<string, string[]> = {
-  'Cash & Savings': ['checking', 'savings', 'cash'],
-  'Credit Cards': ['credit'],
-  Investments: [...INVESTED_TYPES],
-  Crypto: ['crypto_wallet'],
-  Manual: ['other'],
-  Closed: ['closed'],
-};
-
-export const FREQUENCY_LABELS: Record<string, string> = {
-  weekly: 'Weekly',
-  biweekly: 'Biweekly',
-  monthly: 'Monthly',
-  quarterly: 'Quarterly',
-  annual: 'Annual',
-};
-
-export const INVESTMENT_TX_TYPE_LABELS: Record<string, string> = {
-  buy: 'Buy',
-  sell: 'Sell',
-  dividend: 'Dividend',
-  transfer: 'Transfer',
-  fee: 'Fee',
-  other: 'Other',
 };
 
 // `export { CHART_COLORS as CATEGORY_COLORS }` used to live here and is deliberately gone. It had

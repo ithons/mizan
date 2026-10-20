@@ -539,25 +539,6 @@ export interface Goal {
   account_is_liability?: boolean | null;
 }
 
-
-
-export interface SimplefinConnection {
-  id: string;
-  access_url: string;
-  last_synced_at?: string | null;
-  status: string;
-  created_at: string;
-}
-
-export interface CoinbaseConnection {
-  id: string;
-  coinbase_user_id: string;
-  display_name?: string | null;
-  last_synced_at?: string | null;
-  status: string;
-  created_at: string;
-}
-
 export type NetWorthTimelineStep = 'day' | 'week' | 'month';
 
 export type NetWorthTimelineAccount = {
@@ -1208,10 +1189,6 @@ export interface AdvisorSettingsUpdate {
   effort?: AdvisorEffort;
   /** Job name to model id. Cross-provider tiering is a feature, not an accident. */
   jobs?: Record<string, string>;
-}
-
-export interface ApiResponse<T> {
-  data: T;
 }
 
 export interface ApiError {

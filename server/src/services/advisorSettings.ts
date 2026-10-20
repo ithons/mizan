@@ -230,10 +230,6 @@ export const MODEL_CAPABILITIES: Readonly<Record<string, ModelCapabilities>> = {
   },
 };
 
-export function providerOf(modelId: string): AiProviderId | null {
-  return MODEL_CAPABILITIES[modelId]?.provider ?? null;
-}
-
 // Server-authoritative model whitelist, derived so it cannot drift from the capability
 // table. The chat loop reads its model from a preference, so this list is the security
 // boundary: a tampered client can't point the advisor at an arbitrary model string. That
