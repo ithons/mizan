@@ -1,5 +1,6 @@
 import type Database from 'better-sqlite3';
 import { readSnapshots } from './netWorthHistory';
+import { MARKET_DRIVEN_TYPES } from '../../../shared/accountTypes';
 
 /**
  * Does the ledger explain the balance?
@@ -235,9 +236,6 @@ interface AccountRow {
   type: string;
 }
 
-// Mirrors the set snapshot.ts uses for the same reason: reversing individual buys and sells off a
-// market-driven balance cannot reconstruct a price move.
-const MARKET_DRIVEN_TYPES = new Set(['brokerage', 'ira_traditional', 'ira_roth', 'crypto_wallet']);
 
 export function reconcileAccounts(
   db: Database.Database,

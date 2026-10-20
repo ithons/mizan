@@ -14,6 +14,7 @@ import { getDb } from '../db/index';
 import { compareTwoStrings } from "string-similarity";
 import { toCents } from './money';
 import { excludedFromTotalsSql } from './transactionFilters';
+import { MARKET_DRIVEN_TYPES } from '../../../shared/accountTypes';
 
 export type RecurringFrequency = 'weekly' | 'biweekly' | 'monthly' | 'quarterly' | 'annual';
 
@@ -547,9 +548,9 @@ export function detectRecurring(): void {
       AND COALESCE(t.category_id, '') NOT LIKE 'cat_xfer%'
       -- What happens inside a brokerage or wallet (a dividend, a reinvestment) never reaches the
       -- cash the forecast is about.
-      AND a.type NOT IN ('brokerage', 'ira_traditional', 'ira_roth', 'crypto_wallet')
+      AND a.type NOT IN (${[...MARKET_DRIVEN_TYPES].map(() => '?').join(', ')})
     ORDER BY t.date ASC
-  `).all(cutoff) as TxnRow[];
+  `).all(cutoff, ...MARKET_DRIVEN_TYPES) as TxnRow[];
 
   // 2. Group by normalized merchant name
   const groups = new Map<

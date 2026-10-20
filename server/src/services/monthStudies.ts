@@ -3,6 +3,7 @@ import { endOfMonth, format, parseISO, startOfMonth, subMonths } from 'date-fns'
 import { getCashflowReport, getSpendingReport } from './reporting';
 import { excludedFromTotalsSql } from './transactionFilters';
 import { toDollars } from './money';
+import { MARKET_DRIVEN_TYPES } from '../../../shared/accountTypes';
 
 const ymd = (date: Date) => format(date, 'yyyy-MM-dd');
 
@@ -108,10 +109,10 @@ export function fundingMix(db: Database.Database, months = 6, today = new Date()
     JOIN transactions i ON i.transfer_pair_id = o.transfer_pair_id AND i.id <> o.id
     JOIN accounts ia ON ia.id = i.account_id
     WHERE o.amount < 0 AND o.transfer_status = 'confirmed'
-      AND ia.type IN ('brokerage', 'ira_traditional', 'ira_roth', 'crypto_wallet')
+      AND ia.type IN (${[...MARKET_DRIVEN_TYPES].map(() => '?').join(', ')})
       AND o.date BETWEEN ? AND ?
     GROUP BY 1
-  `).all(ymd(first), ymd(last)) as Array<{ month: string; cents: number }>;
+  `).all(...MARKET_DRIVEN_TYPES, ymd(first), ymd(last)) as Array<{ month: string; cents: number }>;
   const of = (rows: Array<{ month: string; cents: number }>, month: string) => rows.find((row) => row.month === month)?.cents ?? 0;
   return {
     months: flows.map((row) => {

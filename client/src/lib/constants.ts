@@ -1,3 +1,5 @@
+import { INVESTED_TYPES } from '@shared/accountTypes';
+
 export const ACCOUNT_TYPE_LABELS: Record<string, string> = {
   checking: 'Checking',
   savings: 'Savings',
@@ -14,7 +16,7 @@ export const ACCOUNT_TYPE_LABELS: Record<string, string> = {
 export const ACCOUNT_TYPE_GROUPS: Record<string, string[]> = {
   'Cash & Savings': ['checking', 'savings', 'cash'],
   'Credit Cards': ['credit'],
-  Investments: ['brokerage', 'ira_traditional', 'ira_roth'],
+  Investments: [...INVESTED_TYPES],
   Crypto: ['crypto_wallet'],
   Manual: ['other'],
   Closed: ['closed'],

@@ -1,6 +1,6 @@
 import type Database from 'better-sqlite3';
 import { addDays, format, parseISO } from 'date-fns';
-import { MARKET_DRIVEN_TYPES } from './balanceHistory';
+import { MARKET_DRIVEN_TYPES } from '../../../shared/accountTypes';
 import { getPreference, setPreference } from './preferences';
 
 /** Tickers worth exactly a dollar, valued without a lookup. USD itself is left out of positions (see marketValuation.ts). */

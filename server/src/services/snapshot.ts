@@ -5,6 +5,7 @@ import { getDb } from '../db/index';
 import { getPreference, setPreference } from './preferences';
 import { readPortfolioAccounts } from './netWorthHistory';
 import { pricedMarketValues } from './marketValuation';
+import { MARKET_DRIVEN_TYPES, bucketOf } from '../../../shared/accountTypes';
 
 // Upper bound on reverse-replay estimation: a 50-year backstop so a stray ancient
 // transaction can't spin the loop for an absurd number of months. There is deliberately no
@@ -176,24 +177,16 @@ export function takeSnapshot(): void {
   let crypto_assets = 0;
   const breakdown: Record<string, number> = {};
 
-  // 'closed' accounts are former deposit accounts (checking/savings) kept for net-worth history;
-  // they're $0 today so this bucketing is a no-op live, but keeps them liquid in the breakdown.
-  const liquidTypes = new Set(['checking', 'savings', 'cash', 'closed']);
-  const investmentTypes = new Set(['brokerage', 'ira_traditional', 'ira_roth']);
-
   for (const account of accounts) {
     breakdown[account.id] = account.current_balance;
     if (account.is_liability) {
       total_liabilities += account.current_balance;
     } else {
       total_assets += account.current_balance;
-      if (liquidTypes.has(account.type)) {
-        liquid_assets += account.current_balance;
-      } else if (investmentTypes.has(account.type)) {
-        investment_assets += account.current_balance;
-      } else if (account.type === 'crypto_wallet') {
-        crypto_assets += account.current_balance;
-      }
+      const bucket = bucketOf(account.type);
+      if (bucket === 'liquid') liquid_assets += account.current_balance;
+      else if (bucket === 'invested') investment_assets += account.current_balance;
+      else if (bucket === 'crypto') crypto_assets += account.current_balance;
     }
   }
 
@@ -656,20 +649,8 @@ export function backfillSnapshots(): void {
     };
   }
 
-  // 'closed' accounts reconstruct their history through the deposit (else) branch below and
-  // bucket as liquid: they were checking/savings before closure.
-  const liquidTypes = new Set(['checking', 'savings', 'cash', 'closed']);
-  const investmentTypes = new Set(['brokerage', 'ira_traditional', 'ira_roth']);
 
-  // Accounts whose value is market-driven, not transaction-driven. Reversing individual
-  // buys/sells/dividends off their current value is meaningless (a $100 buy doesn't change
-  // account value, it converts cash to securities). Since transaction data can't
-  // reconstruct market moves, we instead reverse only NEW external money entering the
-  // account (the user's periodic auto-investing / crypto buys) and hold market value flat.
-  // Result: past value ≈ "what you'd contributed by then", a flagged estimate, not the
-  // reverse-every-trade nonsense.
-  const marketValueTypes = new Set(['brokerage', 'ira_traditional', 'ira_roth', 'crypto_wallet']);
-  const anchors = readMarketAnchors(db, accounts.filter((a) => marketValueTypes.has(a.type)).map((a) => a.id));
+  const anchors = readMarketAnchors(db, accounts.filter((a) => MARKET_DRIVEN_TYPES.has(a.type)).map((a) => a.id));
 
   // Walk backwards month by month across the full history.
   for (let monthsBack = 1; monthsBack <= monthsBackLimit; monthsBack++) {
@@ -720,7 +701,7 @@ export function backfillSnapshots(): void {
       if (anchoredAt[txn.account_id] !== undefined && txn.date > anchoredAt[txn.account_id]) continue;
       const meta = accountMap[txn.account_id];
       // Transaction sign: negative = money out (expense), positive = money in (income).
-      if (meta && marketValueTypes.has(meta.type)) {
+      if (meta && MARKET_DRIVEN_TYPES.has(meta.type)) {
         approxBalances[txn.account_id] -= externalMarketFlow(txn, meta.type);
       } else if (meta?.is_liability) {
         // Liability balances are stored as positive "amount owed" and move OPPOSITE the
@@ -748,7 +729,7 @@ export function backfillSnapshots(): void {
       const m = accountMap[id];
       if (!m) continue;
       const floor = m.is_liability ? Math.min(0, m.current_balance) : 0;
-      if ((marketValueTypes.has(m.type) || m.is_liability) && approxBalances[id] < floor) {
+      if ((MARKET_DRIVEN_TYPES.has(m.type) || m.is_liability) && approxBalances[id] < floor) {
         approxBalances[id] = floor;
         clampedAccounts.add(id);
       }
@@ -780,13 +761,10 @@ export function backfillSnapshots(): void {
         total_liabilities += balance;
       } else {
         total_assets += balance;
-        if (liquidTypes.has(account.type)) {
-          liquid_assets += balance;
-        } else if (investmentTypes.has(account.type)) {
-          investment_assets += balance;
-        } else if (account.type === 'crypto_wallet') {
-          crypto_assets += balance;
-        }
+        const bucket = bucketOf(account.type);
+        if (bucket === 'liquid') liquid_assets += balance;
+        else if (bucket === 'invested') investment_assets += balance;
+        else if (bucket === 'crypto') crypto_assets += balance;
       }
     }
 

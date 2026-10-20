@@ -1,6 +1,6 @@
 import type Database from 'better-sqlite3';
 import { addDays, format, parseISO } from 'date-fns';
-import { MARKET_DRIVEN_TYPES } from './balanceHistory';
+import { MARKET_DRIVEN_TYPES, bucketOf } from '../../../shared/accountTypes';
 import { externalMarketFlow, readMarketAnchors } from './snapshot';
 import type { NetWorthTimelineAccount, NetWorthTimelinePoint, NetWorthTimelineStep } from '../../../shared/types';
 
@@ -24,9 +24,6 @@ interface TxnRow {
   transfer_status: string | null;
   is_internal_trade: number;
 }
-
-const LIQUID = new Set(['checking', 'savings', 'cash', 'closed']);
-const INVESTED = new Set(['brokerage', 'ira_traditional', 'ira_roth']);
 
 function days(from: string, to: string): string[] {
   const out: string[] = [];
@@ -146,9 +143,8 @@ export function netWorthTimeline(
       point.net_worth += value;
       if (s.account.is_liability) point.liabilities -= value;
       else point.assets += value;
-      if (LIQUID.has(s.account.type)) point.liquid += value;
-      else if (INVESTED.has(s.account.type)) point.invested += value;
-      else if (s.account.type === 'crypto_wallet') point.crypto += value;
+      const bucket = bucketOf(s.account.type);
+      if (bucket !== 'other') point[bucket] += value;
       if (!s.observed[i]) {
         point.estimated = true;
         point.estimated_accounts.push(s.account.id);

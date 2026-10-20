@@ -25,6 +25,7 @@ import { listMemories } from './aiMemory';
 import { MAX_PAIR_DAY_GAP, findFlowConservationViolations } from './flowConservation';
 import { SCHEDULED_ROUTE } from '../../../shared/routes';
 import { settledNetWorthCents } from './inTransit';
+import { INVESTED_TYPES, bucketOf } from '../../../shared/accountTypes';
 
 export const ADVISOR_PROFILE_PREFERENCE_KEY = 'advisor_user_profile';
 
@@ -947,9 +948,6 @@ export function buildFinancialContext(): string {
     is_liability: number; is_hidden: number; account_name: string; institution_name: string;
   }>;
 
-  const liquidTypes = new Set(['checking', 'savings', 'cash']);
-  const investTypes = new Set(['brokerage', 'ira_traditional', 'ira_roth']);
-  const cryptoTypes = new Set(['crypto_wallet']);
 
   let liquid = 0, investments = 0, crypto = 0, liabilities = 0, otherAssets = 0;
   const acctLines: string[] = [];
@@ -968,13 +966,13 @@ export function buildFinancialContext(): string {
           ? `  ${a.account_name} (${a.institution_name || a.type}): ${fmt(-bal)} credit balance (the card owes you)`
           : `  ${a.account_name} (${a.institution_name || a.type}): ${fmt(bal)} owed`
       );
-    } else if (liquidTypes.has(a.type)) {
+    } else if (bucketOf(a.type) === 'liquid') {
       liquid += bal;
       acctLines.push(`  ${a.account_name} (${a.type}): ${fmt(bal)}`);
-    } else if (investTypes.has(a.type)) {
+    } else if (bucketOf(a.type) === 'invested') {
       investments += bal;
       acctLines.push(`  ${a.account_name} (${a.type}): ${fmt(bal)}`);
-    } else if (cryptoTypes.has(a.type)) {
+    } else if (bucketOf(a.type) === 'crypto') {
       crypto += bal;
       acctLines.push(`  ${a.account_name} (crypto): ${fmt(bal)}`);
     } else {
@@ -1449,7 +1447,7 @@ export function buildFinancialContext(): string {
         AND EXISTS (SELECT 1 FROM holdings h WHERE h.account_id = a.id)
       ORDER BY a.account_name
     `).all() as Array<{ id: string; account_name: string; type: string; current_balance: number }>;
-    const outsideInvestments = holdingAccounts.filter((account) => !investTypes.has(account.type));
+    const outsideInvestments = holdingAccounts.filter((account) => !INVESTED_TYPES.has(account.type));
 
     if (Math.abs(totalPortfolio - investments) >= 0.01) {
       const gap = fmt(Math.abs(totalPortfolio - investments));

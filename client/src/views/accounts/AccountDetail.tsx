@@ -13,8 +13,8 @@ import { creditNote, isInCredit, signedAccountBalance } from '../../lib/accountB
 import { Screen, SectionLabel, TextButton, TrendChart } from '../../components/balance';
 import { SkeletonRows } from '../../components/SkeletonLoader';
 import { QueryErrorBanner } from '../../components/QueryErrorBanner';
+import { MARKET_DRIVEN_TYPES } from '@shared/accountTypes';
 
-const INVESTMENT_TYPES = new Set(['brokerage', 'ira_traditional', 'ira_roth', 'crypto_wallet']);
 
 function plural(count: number, noun: string): string {
   return `${count.toLocaleString()} ${noun}${count === 1 ? '' : 's'}`;
@@ -84,7 +84,7 @@ export function AccountDetail() {
 
   const { data: accounts, isLoading } = useQuery({ queryKey: ['accounts'], queryFn: () => accountsApi.list() });
   const account = accounts?.find((a) => a.id === id) ?? null;
-  const isInvestment = account ? INVESTMENT_TYPES.has(account.type) : false;
+  const isInvestment = account ? MARKET_DRIVEN_TYPES.has(account.type) : false;
   const balanceOnly = account?.balance_only === 1;
 
   const { data: history } = useQuery({

@@ -257,7 +257,7 @@ export function getLedgerBalanceHistory(
  * same reason snapshot.ts and reconciliation.ts both carry this set. Estimated snapshots stay marked
  * as estimated: they are reverse-replay reconstructions, not balances anyone observed.
  */
-export const MARKET_DRIVEN_TYPES = new Set(['brokerage', 'ira_traditional', 'ira_roth', 'crypto_wallet']);
+export { MARKET_DRIVEN_TYPES } from '../../../shared/accountTypes';
 
 export function getSnapshotBalanceHistory(
   db: Database.Database,

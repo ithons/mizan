@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { Account, SyncHealthConnection } from '@shared/types';
+import { INVESTED_TYPES } from '@shared/accountTypes';
 import { accountsApi, syncApi } from '../../lib/api';
 import { formatCompactRelative, formatWholeCurrency } from '../../lib/formatters';
 import { creditNote, isInCredit, signedAccountBalance } from '../../lib/accountBalance';
@@ -18,7 +19,7 @@ import { AddManualAccountModal, EditAccountModal, MergeAccountModal } from './Mo
 
 const GROUPS: Array<{ name: string; match: (a: Account) => boolean }> = [
   { name: 'Cash', match: (a) => !a.is_liability && ['checking', 'savings', 'cash'].includes(a.type) },
-  { name: 'Investments', match: (a) => !a.is_liability && ['brokerage', 'ira_traditional', 'ira_roth'].includes(a.type) },
+  { name: 'Investments', match: (a) => !a.is_liability && INVESTED_TYPES.has(a.type) },
   { name: 'Crypto', match: (a) => !a.is_liability && a.type === 'crypto_wallet' },
   { name: 'Credit cards', match: (a) => a.type === 'credit' },
   { name: 'Loans', match: (a) => a.is_liability && a.type !== 'credit' },

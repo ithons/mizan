@@ -1,4 +1,5 @@
 import type Database from 'better-sqlite3';
+import { MARKET_DRIVEN_TYPES } from '../../../shared/accountTypes';
 
 /**
  * The one place net-worth snapshots are read.
@@ -158,7 +159,7 @@ export function readSnapshotBefore(
  * 056 pins the same list in SQL, deliberately, because a migration must reproduce on a clone in a
  * year regardless of where this constant has moved to by then.
  */
-export const PORTFOLIO_ACCOUNT_TYPES = ['brokerage', 'ira_traditional', 'ira_roth', 'crypto_wallet'];
+export const PORTFOLIO_ACCOUNT_TYPES: readonly string[] = [...MARKET_DRIVEN_TYPES];
 
 export interface PortfolioAccountRow {
   id: string;
