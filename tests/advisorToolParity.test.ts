@@ -5,7 +5,7 @@ import { format } from 'date-fns';
 import { migratedTestDb, insertAccount } from './helpers/schema';
 import { runAdvisorTool } from '../server/src/services/advisorChatTools';
 import { getCashflowReport, getSpendingReport } from '../server/src/services/reporting';
-import { formatMoney } from '../server/src/services/aiContext';
+import { formatMoney } from '../server/src/services/money';
 
 // The advisor's aggregate tools used to run their own SQL, and drifted from the Reports page:
 // they counted transfer candidates, confirmed duplicates, and pending rows that Reports

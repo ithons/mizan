@@ -143,7 +143,9 @@ test('advisor report analysis cites the report slice and backing categories', (t
   );
 
   assert.equal(analysis.intent, 'reports');
-  assert.match(analysis.answer, /Mizān sees \$1\.0k income/);
+  assert.match(analysis.answer, /Mizān sees \$1,000\.00 income/);
+  const rendered = [analysis.answer, ...analysis.citations.map((citation) => citation.detail ?? '')].join('\n');
+  assert.doesNotMatch(rendered, /\$[\d.,]+[kM]\b/, 'Cmd+K must print the figure chat prints, not an abbreviation');
   assert.ok(analysis.citations.some((citation) => citation.id.startsWith('report:summary:')));
   assert.ok(analysis.citations.some((citation) => citation.record_id === 'cat_food'));
 });

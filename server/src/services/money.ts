@@ -17,6 +17,19 @@ export function toDollars(cents: number): number {
   return cents / 100;
 }
 
+// Takes dollars and renders to the cent, always. This string is a model's or the owner's whole
+// view of a figure, and abbreviating over $1,000 ($2,749.39 as "$2.7k") once left the model
+// reporting "$2.7k" under a prompt that told it never to fabricate a number.
+export function formatMoney(n: number | null | undefined): string {
+  if (n == null) return 'N/A';
+  const sign = n < 0 ? '-' : '';
+  const abs = Math.abs(n).toLocaleString('en-US', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
+  return `${sign}$${abs}`;
+}
+
 export function toCentsOrNull(dollars: number | null | undefined): number | null {
   return dollars == null ? null : toCents(dollars);
 }

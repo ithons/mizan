@@ -10,7 +10,7 @@ import type {
   TransactionReviewSummary,
 } from '../../../shared/types';
 import { getDb } from '../db/index';
-import { toCents, toDollars, toDollarsOrNull } from './money';
+import { formatMoney, toCents, toDollars, toDollarsOrNull } from './money';
 import { calculateGoalProgress } from './goalProgress';
 import { buildRecurringForecast } from './recurringForecast';
 import { getMonthlyBudgetsWithProjection } from './budgetProjection';
@@ -47,22 +47,6 @@ Be concise and direct. Use their dollar amounts and percentages.`;
 // fmt() takes dollars. EVERY money value in this file is integer cents: both inline-SQL
 // reads AND values returned from service functions (reporting, forecast, goal progress),
 // so every argument to fmt() must be wrapped in toDollars() at its call site.
-//
-// Renders to the cent, always. This string is a model's entire view of the numbers, and it
-// used to abbreviate anything over $1,000 ($2,749.39 became "$2.7k") while the system prompt
-// instructed the model to never fabricate figures. It complied and reported "$2.7k": it had
-// never been given the real number. Compactness is worth nothing here; there is no reader
-// whose eyes need saving.
-export function formatMoney(n: number | null | undefined): string {
-  if (n == null) return 'N/A';
-  const sign = n < 0 ? '-' : '';
-  const abs = Math.abs(n).toLocaleString('en-US', {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  });
-  return `${sign}$${abs}`;
-}
-
 const fmt = formatMoney;
 
 function pct(n: number | null | undefined): string {

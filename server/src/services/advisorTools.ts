@@ -12,7 +12,7 @@ import type {
   SubscriptionInsightItem,
 } from '../../../shared/types';
 import { buildAdvisorDrafts } from './advisorDrafts';
-import { toDollars } from './money';
+import { formatMoney, toDollars } from './money';
 import { calculateGoalProgress } from './goalProgress';
 import {
   computeBudgetRolloverLedger,
@@ -56,14 +56,7 @@ interface SectorAllocationRow {
 // the inline sectorRows SQL AND every value returned from service functions (reporting,
 // forecast, budgets, goals, subscriptions, holdings). So every argument to fmt() and every
 // citation `amount:` must be wrapped in toDollars() exactly once at its call site.
-function fmt(amount: number | null | undefined): string {
-  if (amount == null) return 'N/A';
-  const abs = Math.abs(amount);
-  const sign = amount < 0 ? '-' : '';
-  if (abs >= 1_000_000) return `${sign}$${(abs / 1_000_000).toFixed(2)}M`;
-  if (abs >= 1_000) return `${sign}$${(abs / 1_000).toFixed(1)}k`;
-  return `${sign}$${abs.toFixed(2)}`;
-}
+const fmt = formatMoney;
 
 // Dollarize an optional cents field, preserving undefined so fmt() and optional citation
 // `amount` fields keep their number | undefined contract.
