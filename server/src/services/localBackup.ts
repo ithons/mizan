@@ -33,6 +33,7 @@ export const LOCAL_BACKUP_TABLES = [
   'transaction_field_revisions',
   'holdings',
   'holdings_history',
+  'account_valuations',
   'budgets',
   'budget_rollover_ledger',
   'recurring_patterns',
