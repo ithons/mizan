@@ -8,11 +8,8 @@ import { formatCurrency, formatWholeCurrency } from '../lib/formatters';
 /**
  * Everything `/` states, as data.
  *
- * The view renders these; it decides nothing. Two reasons, and the second is the one that matters
- * here. First, a claim this app makes about the owner's money has to be testable without a DOM.
- * Second, this screen replaces three that each computed their own version of the same reading, and
- * `Reports.tsx` carried a comment about having shipped a build where two screens disagreed about
- * net worth. One module, one reading.
+ * The view renders these; it decides nothing, so a claim this app makes about the owner's money is
+ * testable without a DOM, and there is one module and one reading rather than a copy per panel.
  */
 
 /* ── The standing: what is true now, with no window over it ─────────────────── */
@@ -145,9 +142,7 @@ export function bucketsOf(s: NetWorthSnapshot): Buckets {
   // subtracting them in dollars leaves binary dust. On a sheet that accounts for every cent the
   // residual came out at something like 4.5e-13 rather than 0, `Math.max(0, ...)` kept it, and
   // Instrument's `row.amount !== 0` filter let it through to a BarRow that printed it as "Other
-  // $0": a bucket the owner does not have, on a sheet with nothing left over. The same
-  // subtraction-in-floats shape is what put "$0 would still be owed, with no cash left to reach
-  // it" on Reports, and it is why `cents()` exists twenty lines below this.
+  // $0": a bucket the owner does not have, on a sheet with nothing left over.
   //
   // A genuine "other" bucket is a real account type none of the three named ones covers, and it
   // survives this unchanged: it is whole cents and rounds to itself.
@@ -342,13 +337,10 @@ export function describeWeekChange(change: WeekChange): WeekChangeCaption {
 /**
  * Why there are four, and why the balance sheet is not one of them.
  *
- * Reports and Cash Flow were never two screens. They are the same query set over a different
- * window, and Today is that window set to now. But a window only means something for a FLOW. Net
- * worth, what is held, what is owed and what is free are states at an instant; putting a period
- * selector over them would be the screen claiming to measure something it cannot. So the selector
- * governs the lower half of this surface only, and the upper half has no window at all. That is
- * also why `Reports.tsx` ended up with two independent range selectors: it had discovered the same
- * split without naming it.
+ * A window only means something for a FLOW. Net worth, what is held, what is owed and what is free
+ * are states at an instant; putting a period selector over them would be the screen claiming to
+ * measure something it cannot. So the selector governs the lower half of this surface only, and
+ * the upper half has no window at all.
  *
  * Each window is a different question rather than a different length:
  *   this month   what is happening, in the month a budget and a paycheck live in
