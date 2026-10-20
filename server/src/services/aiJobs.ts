@@ -632,6 +632,19 @@ function conservationBreach(report: GuardedBatchReport<unknown>): AiJobInvariant
 /** Jobs already in flight. A pass awaits a slow model call; two must not overlap and double-apply. */
 const running = new Set<AiJobName>();
 
+/**
+ * Closes every `ai_runs` row an earlier process left at 'running'. Called once at boot, before any
+ * pass can start: `running` above is per process, so at that moment no row can belong to a live
+ * pass, and one still marked 'running' is a pass whose process exited before it could close it.
+ * Nothing reads a 'running' row as a signal, so leaving it would be clutter, not evidence.
+ */
+export function closeAbandonedAiRuns(db: Database.Database, now = new Date().toISOString()): number {
+  return db.prepare(
+    `UPDATE ai_runs SET status = 'failed', completed_at = ?, error_message = 'The process exited mid-pass.'
+      WHERE status = 'running'`
+  ).run(now).changes;
+}
+
 function maxActionRowid(db: Database.Database): number {
   const row = db.prepare(`SELECT COALESCE(MAX(rowid), 0) AS max FROM advisor_actions`).get() as { max: number };
   return row.max;

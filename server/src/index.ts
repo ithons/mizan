@@ -13,6 +13,7 @@ import { isSyncStale, runFullSync, startSyncScheduler, stopSyncScheduler } from 
 import { stopAiScheduler } from './services/aiScheduler';
 import { autoCategorizeTransactions } from './services/rules';
 import { reclassifyAutoAccountTypes } from './services/accountClassification';
+import { closeAbandonedAiRuns } from './services/aiJobs';
 import { errorHandler } from './middleware/errorHandler';
 import { buildLocalGuardConfig, localOriginGuard } from './middleware/localGuard';
 import { listenOnHost } from './listen';
@@ -68,6 +69,13 @@ async function main() {
     if (uncategorized > 0) autoCategorizeTransactions(startupDb);
   } catch (err) {
     console.error('[startup] Auto-categorization backfill failed:', err);
+  }
+
+  try {
+    const closed = closeAbandonedAiRuns(startupDb);
+    if (closed > 0) console.log(`[startup] Closed ${closed} AI pass${closed === 1 ? '' : 'es'} left running by an earlier process.`);
+  } catch (err) {
+    console.error('[startup] Closing abandoned AI passes failed:', err);
   }
 
   try {

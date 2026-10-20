@@ -8,6 +8,7 @@ import type { SyncEvent } from '../shared/types';
 import { JOB_MODELS } from '../server/src/services/advisorSettings';
 import {
   AI_JOBS,
+  closeAbandonedAiRuns,
   evaluateAiJobInvariants,
   runAiJob,
   type AiJobCollect,
@@ -273,6 +274,23 @@ test('the run row records the model the pass will actually call, not the declare
   assert.equal(row.model, 'claude-opus-5', 'the row names the declaration, not the pass');
   assert.equal(row.effort, 'medium', 'and the effort the retiered model was clamped to');
   assert.deepEqual(seen, ['claude-opus-5'], 'the collector was handed the same resolution');
+});
+
+test('boot closes a pass an earlier process left running, and leaves finished passes alone', (t) => {
+  const db = migratedTestDb();
+  t.after(() => db.close());
+  const insert = db.prepare(`INSERT INTO ai_runs (id, job, trigger_source, model, digest_section, status, started_at, completed_at, created_at)
+    VALUES (?, 'background_review', 'after_sync', 'claude-sonnet-5', 'review', ?, '2026-08-01T01:17:00Z', ?, '2026-08-01T01:17:00Z')`);
+  insert.run('run_orphan', 'running', null);
+  insert.run('run_done', 'completed', '2026-08-01T01:18:00Z');
+
+  assert.equal(closeAbandonedAiRuns(db, '2026-10-20T09:00:00Z'), 1);
+  const rows = db.prepare('SELECT id, status, completed_at, error_message FROM ai_runs ORDER BY id').all();
+  assert.deepEqual(rows, [
+    { id: 'run_done', status: 'completed', completed_at: '2026-08-01T01:18:00Z', error_message: null },
+    { id: 'run_orphan', status: 'failed', completed_at: '2026-10-20T09:00:00Z', error_message: 'The process exited mid-pass.' },
+  ]);
+  assert.equal(closeAbandonedAiRuns(db), 0, 'HEALTHY: a second boot with nothing abandoned writes nothing');
 });
 
 test('a job invoked from its own call site may not declare writes', () => {
