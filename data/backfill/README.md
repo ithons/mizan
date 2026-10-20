@@ -67,3 +67,19 @@ Importing into a **manual** account moves its `current_balance` (provider accoun
 untouched). Either set the manual account's true present balance and import history so
 it reconciles, or import first and correct the balance after. Provider accounts need no
 such care.
+
+## Scanned BofA checking and savings statements
+
+Paper statements for the two closed BofA accounts, scanned to image-only PDFs. Needs
+`brew install poppler tesseract`. The page text, `local.json` (the account holder name and personal merchant names, kept out of git) and `fixes.json` (each OCR correction, with how it
+was verified against the page image) live in `raw/bofa-statements/`.
+
+    python3 scripts/backfill/bofa_statements.py --ocr "<checking pdf>" "<savings pdf>"
+    tsx scripts/backfill/bofa-statements-import.ts            # dry run, rolled back
+    tsx scripts/backfill/bofa-statements-import.ts --commit
+    tsx scripts/backfill/rebuild.ts
+    tsx scripts/backfill/bofa-statements-import.ts --verify   # any time later
+
+The parser refuses to write unless every statement reconciles to its printed totals; the importer
+refuses a second run and re-proves each statement's totals and ending balance from the ledger.
+Rows carry `source_detail = 'bofa-statement-scan'`.
