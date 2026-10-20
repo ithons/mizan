@@ -80,3 +80,14 @@ test('choosing accounts limits both the totals and the coverage to them', () => 
   assert.equal(points.at(-1)!.net_worth, 70000);
   assert.equal(points.at(-1)!.coverage, 1);
 });
+
+test('a day names only the accounts that are estimated on it, so a cash account is never marked estimated', () => {
+  const { db, checking } = cashAndCard();
+  const broker = insertAccount(db, { account_name: 'Broker', type: 'brokerage', current_balance: 50000 });
+  insertTransaction(db, { account_id: broker, date: '2026-02-01', amount: 50000, category_id: 'cat_inv_transfer' });
+  const { points } = netWorthTimeline(db, { today: TODAY });
+  const day = points.find((p) => p.date === '2026-02-20')!;
+  assert.deepEqual(day.estimated_accounts, [broker]);
+  assert.ok(!day.estimated_accounts.includes(checking));
+  assert.deepEqual(points.find((p) => p.date === '2026-01-20')!.estimated_accounts, []);
+});

@@ -2,13 +2,14 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { Account, SyncHealthConnection } from '@shared/types';
-import { accountsApi, networthApi, syncApi } from '../../lib/api';
+import { accountsApi, syncApi } from '../../lib/api';
 import { formatCompactRelative, formatWholeCurrency } from '../../lib/formatters';
 import { creditNote, isInCredit, signedAccountBalance } from '../../lib/accountBalance';
 import { ACCOUNT_TYPE_LABELS } from '../../lib/constants';
 import { invalidateFinancialData } from '../../lib/queryInvalidation';
 import { useAppStore } from '../../store';
-import { Screen, ScreenHeader, SectionLabel, Figure, Row, TextButton, TrendChart } from '../../components/balance';
+import { Screen, ScreenHeader, SectionLabel, Figure, Row, TextButton } from '../../components/balance';
+import { NetWorthHistory } from './NetWorthHistory';
 import { ConfirmRemoveModal } from '../../components/ConfirmRemoveModal';
 import { QueryErrorBanner } from '../../components/QueryErrorBanner';
 import { LedgerIntegrityPanel } from '../../components/LedgerIntegrityPanel';
@@ -132,23 +133,6 @@ export function Accounts() {
 
   const accountsQ = useQuery({ queryKey: ['accounts'], queryFn: () => accountsApi.list() });
   const { data: accounts, isLoading } = accountsQ;
-  const { data: snapshots } = useQuery({
-    queryKey: ['networth', 'history', 12],
-    queryFn: () => networthApi.history(12),
-    retry: false,
-  });
-  // `covered_accounts` is NULL on rows written before migration 044, and undefined there rather
-  // than zero: the chart draws a coverage change only where it has two counts to compare.
-  const netWorthHistory = useMemo(
-    () =>
-      (snapshots ?? []).map((s) => ({
-        date: s.date,
-        value: s.net_worth,
-        estimated: Boolean(s.is_estimated),
-        coverage: s.covered_accounts ?? undefined,
-      })),
-    [snapshots]
-  );
   const { data: syncHealth } = useQuery({ queryKey: ['sync', 'health'], queryFn: () => syncApi.health(), retry: false });
   const healthByConnection = useMemo(() => {
     const map = new Map<string, SyncHealthConnection>();
@@ -358,12 +342,7 @@ export function Accounts() {
           whether two accounts' rows explain each other. */}
       <LedgerIntegrityPanel className="mb-8 flex-shrink-0" />
 
-      {netWorthHistory.length >= 2 && (
-        <div className="mb-8 flex-shrink-0">
-          <SectionLabel className="mb-2">Net worth · last 12 months</SectionLabel>
-          <TrendChart history={netWorthHistory} height={90} label="Net worth" />
-        </div>
-      )}
+      {accounts && accounts.length > 0 && <NetWorthHistory accounts={accounts} />}
 
       <div className="flex min-h-0 flex-1 flex-col gap-10 lg:flex-row lg:gap-12">
         {/* Grouped account list */}
