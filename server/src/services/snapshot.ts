@@ -5,6 +5,7 @@ import { getDb } from '../db/index';
 import { getPreference, setPreference } from './preferences';
 import { readPortfolioAccounts } from './netWorthHistory';
 import { pricedMarketValues } from './marketValuation';
+import { externalMarketFlow } from './portfolioFlows';
 import { MARKET_DRIVEN_TYPES, bucketOf } from '../../../shared/accountTypes';
 
 // Upper bound on reverse-replay estimation: a 50-year backstop so a stray ancient
@@ -505,29 +506,6 @@ export function reconcileReconstructedHistory(options: { force?: boolean } = {})
   setPreference(db, RECONSTRUCTION_MARK_KEY, mark);
 
   return { ran: true, trigger, ...reconstructionCounts(db) };
-}
-
-const PAIRED_TRANSFER = new Set(['candidate', 'confirmed']);
-
-/**
- * What a row on a market-driven account added to its value from outside, in cents, or 0. Only
- * external money is knowable: a buy funded from a bank raises value by its magnitude, a crypto
- * sell leg is the mirror of a buy (so a convert nets to zero), and a contribution or withdrawal
- * moves it by its signed amount. Buys with cash already inside, sells, dividends and the core
- * sweep are market-neutral here, because the ledger cannot see prices.
- */
-export function externalMarketFlow(
-  txn: { amount: number; category_id: string | null; transfer_status: string | null; is_internal_trade: number },
-  accountType: string
-): number {
-  const cat = txn.category_id ?? '';
-  if (cat === 'cat_inv_buy' || cat === 'cat_crypto_buy') return Math.abs(txn.amount);
-  if (cat === 'cat_crypto_sell') return -Math.abs(txn.amount);
-  if (txn.is_internal_trade === 0
-    && (cat === 'cat_inv_transfer' || (accountType !== 'crypto_wallet' && PAIRED_TRANSFER.has(txn.transfer_status ?? '')))) {
-    return txn.amount;
-  }
-  return 0;
 }
 
 /**

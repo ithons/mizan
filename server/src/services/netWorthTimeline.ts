@@ -1,7 +1,8 @@
 import type Database from 'better-sqlite3';
 import { addDays, format, parseISO } from 'date-fns';
 import { MARKET_DRIVEN_TYPES, bucketOf } from '../../../shared/accountTypes';
-import { externalMarketFlow, readMarketAnchors } from './snapshot';
+import { readMarketAnchors } from './snapshot';
+import { externalMarketFlow } from './portfolioFlows';
 import type { NetWorthTimelineAccount, NetWorthTimelinePoint, NetWorthTimelineStep } from '../../../shared/types';
 
 export type TimelineStep = NetWorthTimelineStep;

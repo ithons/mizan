@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { portfolioExternalFlows } from '../server/src/services/portfolioFlows';
+import { externalMarketFlow, portfolioExternalFlows } from '../server/src/services/portfolioFlows';
+import { netWorthTimeline } from '../server/src/services/netWorthTimeline';
 import { getPortfolioDelta } from '../client/src/lib/investmentAnalytics';
 import { insertAccount, insertTransaction, migratedTestDb } from './helpers/schema';
 
@@ -46,5 +47,50 @@ test('a crypto wallet counts its buys and sells as the money in and out, and hol
   assert.deepEqual(portfolioExternalFlows(db, [coinbase]), [
     { date: '2026-09-02', amount: 5000 },
     { date: '2026-09-20', amount: -1200 },
+  ]);
+});
+
+test('a buy paid with cash already in an IRA is no outside money, to the flows and to the timeline alike', () => {
+  const db = migratedTestDb();
+  const roth = insertAccount(db, { type: 'ira_roth', current_balance: 100000 });
+  const contribution = insertTransaction(db, { account_id: roth, date: '2026-10-14', amount: 100000, category_id: 'cat_inv_transfer' });
+  db.prepare("UPDATE transactions SET transfer_status = 'confirmed', transfer_pair_id = 'p' WHERE id = ?").run(contribution);
+  const buy = insertTransaction(db, { account_id: roth, date: '2026-10-16', amount: -19983, original_name: 'Investment Buy', category_id: 'cat_inv_buy' });
+  db.prepare('UPDATE transactions SET is_internal_trade = 1 WHERE id = ?').run(buy);
+
+  assert.deepEqual(portfolioExternalFlows(db, [roth]), [{ date: '2026-10-14', amount: 100000 }]);
+  const timeline = netWorthTimeline(db, { from: '2026-10-14', to: '2026-10-19', today: '2026-10-19' });
+  const on = (date: string) => timeline.points.find((p) => p.date === date)?.by_account[roth];
+  assert.equal(on('2026-10-15'), 100000, 'the internal buy is not replayed as a contribution');
+  assert.equal(on('2026-10-14'), 100000);
+});
+
+test('HEALTHY: the flows and the per-row rule agree on a mixed ledger', () => {
+  const db = migratedTestDb();
+  const fid = insertAccount(db, { type: 'brokerage' });
+  const coinbase = insertAccount(db, { type: 'crypto_wallet' });
+  const paired = insertTransaction(db, { account_id: fid, date: '2026-09-01', amount: 30000 });
+  db.prepare("UPDATE transactions SET transfer_status = 'confirmed', transfer_pair_id = 'q' WHERE id = ?").run(paired);
+  const internal = insertTransaction(db, { account_id: fid, date: '2026-09-02', amount: -30000, category_id: 'cat_inv_transfer' });
+  db.prepare('UPDATE transactions SET is_internal_trade = 1 WHERE id = ?').run(internal);
+  insertTransaction(db, { account_id: fid, date: '2026-09-03', amount: 41, category_id: 'cat_inv_dividend' });
+  insertTransaction(db, { account_id: coinbase, date: '2026-09-03', amount: -2500, category_id: 'cat_crypto_buy' });
+  insertTransaction(db, { account_id: coinbase, date: '2026-09-04', amount: 900, category_id: 'cat_crypto_sell' });
+  insertTransaction(db, { account_id: coinbase, date: '2026-09-04', amount: 700, category_id: 'cat_xfer_in' });
+
+  const rows = db.prepare(`
+    SELECT t.date, t.amount, t.category_id, t.transfer_status, t.is_internal_trade, a.type
+    FROM transactions t JOIN accounts a ON a.id = t.account_id
+  `).all() as Array<{ date: string; amount: number; category_id: string | null; transfer_status: string | null; is_internal_trade: number; type: string }>;
+  const expected = new Map<string, number>();
+  for (const row of rows) expected.set(row.date, (expected.get(row.date) ?? 0) + externalMarketFlow(row, row.type));
+  assert.deepEqual(
+    portfolioExternalFlows(db, [fid, coinbase]),
+    [...expected].filter(([, amount]) => amount !== 0).map(([date, amount]) => ({ date, amount })),
+  );
+  assert.deepEqual(portfolioExternalFlows(db, [fid, coinbase]), [
+    { date: '2026-09-01', amount: 30000 },
+    { date: '2026-09-03', amount: 2500 },
+    { date: '2026-09-04', amount: -900 },
   ]);
 });
