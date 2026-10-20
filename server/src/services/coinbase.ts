@@ -771,15 +771,64 @@ export async function syncTradeHistory(connectionId: string): Promise<number> {
   return insertedCount;
 }
 
+export type CoinbaseV2Request = <T>(path: string) => Promise<T>;
+
+interface V2Page<T> { data: T[]; pagination?: { next_uri: string | null } }
+
+// Page through a v2 list endpoint following pagination.next_uri (already includes the query).
+// v2 returns transactions newest-first, so `stopWhen` ends the walk at the first page with nothing
+// left to learn: without it every sync re-paged every sub-account's entire history.
+export async function fetchCoinbaseV2Pages<T>(
+  request: CoinbaseV2Request,
+  firstPath: string,
+  stopWhen?: (page: T[]) => boolean
+): Promise<T[]> {
+  const out: T[] = [];
+  let path: string | null = firstPath;
+  while (path) {
+    const page: V2Page<T> = await request<V2Page<T>>(path);
+    const rows = page.data || [];
+    out.push(...rows);
+    if (stopWhen && rows.length > 0 && stopWhen(rows)) break;
+    path = page.pagination?.next_uri ?? null;
+  }
+  return out;
+}
+
+function ledgerDate(txn: CoinbaseV2Transaction, now: string): string {
+  return txn.created_at ? isoToLocalDate(txn.created_at) : now.split('T')[0];
+}
+
+// Settled means no later sync can learn anything from the row: imported with units (or with none
+// to give), a type that is never imported, or below the floor. A row not yet completed is never
+// settled, because once it completes it has to be imported, and stopping above it would skip it
+// for good. Existing alone is not enough either: a row imported before migration 046 carries no
+// units, and stopping on it would strand it unit-less.
+export function coinbaseLedgerSettled(
+  db: Database.Database,
+  floor: string | null,
+  now: string
+): (txn: CoinbaseV2Transaction) => boolean {
+  const stored = db.prepare('SELECT quantity FROM transactions WHERE coinbase_transaction_id = ?');
+  return (txn) => {
+    if (txn.status !== 'completed') return false;
+    if (!txn.id || !classifyCoinbaseLedgerTx(txn)) return true;
+    if (isBelowBackfillFloor(ledgerDate(txn, now), floor)) return true;
+    const row = stored.get(txn.id) as { quantity: number | null } | undefined;
+    return row !== undefined && (row.quantity !== null || coinbaseLedgerUnits(txn) === null);
+  };
+}
+
 // Imports the non-trade crypto activity that the v3 brokerage-orders endpoint doesn't expose:
 // converts, sends, receives, and fiat deposits/withdrawals, from the v2 App API. Everything routes
 // to the single consolidated Coinbase account. Deduped on coinbase_transaction_id, floor-guarded,
 // completed-only. Independent of syncTradeHistory (different id space, disjoint types), so it's
 // called guarded, a v2 failure must not fail the whole sync.
-export async function syncCoinbaseLedger(): Promise<number> {
-  const db = getDb();
-  const now = new Date().toISOString();
-
+export async function syncCoinbaseLedger(
+  db: Database.Database = getDb(),
+  request: CoinbaseV2Request = (path) => signedRequest('GET', path),
+  now: string = new Date().toISOString()
+): Promise<number> {
   const acct = db.prepare(
     "SELECT id, backfill_floor_date FROM accounts WHERE connection_type = 'coinbase' AND type = 'crypto_wallet' LIMIT 1"
   ).get() as { id: string; backfill_floor_date: string | null } | undefined;
@@ -789,55 +838,22 @@ export async function syncCoinbaseLedger(): Promise<number> {
   }
 
   interface V2Account { id: string }
-  interface V2Page<T> { data: T[]; pagination?: { next_uri: string | null } }
-
-  // "Nothing left to learn from this row" is stronger than "this row exists": a row imported
-  // before migration 046 exists but carries no units, and stopping on it would strand those rows
-  // unit-less forever. Once the units are filled the walk goes back to stopping at the first
-  // fully-known page, so this costs one deep pass, not one per sync.
-  const settledStmt = db.prepare(
-    'SELECT quantity FROM transactions WHERE coinbase_transaction_id = ?'
-  );
-  const isSettled = (id: string): boolean => {
-    const row = settledStmt.get(id) as { quantity: number | null } | undefined;
-    return row !== undefined && row.quantity !== null;
-  };
-
-  // Page through a v2 list endpoint following pagination.next_uri (already includes the query).
-  //
-  // `stopWhen` bounds the walk. Without it this re-paged the ENTIRE ledger, every account and
-  // every transaction ever, on every sync, to insert the handful that were new: the one place
-  // where sync cost tracked total history instead of the size of the delta. v2 returns
-  // transactions newest-first, so a page containing nothing new means everything past it is
-  // older and already imported.
-  async function fetchAll<T>(firstPath: string, stopWhen?: (page: T[]) => boolean): Promise<T[]> {
-    const out: T[] = [];
-    let path: string | null = firstPath;
-    while (path) {
-      const page: V2Page<T> = await signedRequest<V2Page<T>>('GET', path);
-      const rows = page.data || [];
-      out.push(...rows);
-      if (stopWhen && rows.length > 0 && stopWhen(rows)) break;
-      path = page.pagination?.next_uri ?? null;
-    }
-    return out;
-  }
 
   // Only safe to short-circuit once something has been imported: on a first sync there is no
   // watermark to stop at and the full history genuinely has to be walked.
   const alreadyImported = (db.prepare(
     "SELECT COUNT(*) AS n FROM transactions WHERE coinbase_transaction_id IS NOT NULL AND source_type = 'coinbase'"
   ).get() as { n: number }).n > 0;
+  const isSettled = coinbaseLedgerSettled(db, acct.backfill_floor_date, now);
 
   let inserted = 0;
   let backfilled = 0;
-  const accounts = await fetchAll<V2Account>('/v2/accounts?limit=100');
+  const accounts = await fetchCoinbaseV2Pages<V2Account>(request, '/v2/accounts?limit=100');
   for (const cbAccount of accounts) {
-    const txns = await fetchAll<CoinbaseV2Transaction>(
+    const txns = await fetchCoinbaseV2Pages<CoinbaseV2Transaction>(
+      request,
       `/v2/accounts/${cbAccount.id}/transactions?limit=100`,
-      alreadyImported
-        ? (page) => page.every((t) => Boolean(t.id) && isSettled(t.id))
-        : undefined
+      alreadyImported ? (page) => page.every(isSettled) : undefined
     );
     for (const txn of txns) {
       if (!txn.id) continue;
@@ -845,7 +861,7 @@ export async function syncCoinbaseLedger(): Promise<number> {
       const classified = classifyCoinbaseLedgerTx(txn);
       if (!classified) continue;
 
-      const date = txn.created_at ? isoToLocalDate(txn.created_at) : now.split('T')[0];
+      const date = ledgerDate(txn, now);
       // Imported backfill owns dates below the floor; never let a deep pull re-insert them.
       if (isBelowBackfillFloor(date, acct.backfill_floor_date)) continue;
 
