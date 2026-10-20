@@ -131,7 +131,7 @@ export function netWorthTimeline(
   const series = accounts.map((a) => ({ account: a, ...accountSeries(a, txnsByAccount.get(a.id) ?? [], calendar, anchors.get(a.id) ?? []) }));
 
   const points: TimelinePoint[] = calendar.map((date, i) => {
-    const point: TimelinePoint = { date, net_worth: 0, assets: 0, liabilities: 0, liquid: 0, invested: 0, crypto: 0, estimated: false, coverage: 0, by_account: {} };
+    const point: TimelinePoint = { date, net_worth: 0, assets: 0, liabilities: 0, liquid: 0, invested: 0, crypto: 0, estimated: false, estimated_accounts: [], coverage: 0, by_account: {} };
     for (const s of series) {
       const value = s.values[i];
       if (value === null) continue;
@@ -143,7 +143,10 @@ export function netWorthTimeline(
       if (LIQUID.has(s.account.type)) point.liquid += value;
       else if (INVESTED.has(s.account.type)) point.invested += value;
       else if (s.account.type === 'crypto_wallet') point.crypto += value;
-      if (!s.observed[i]) point.estimated = true;
+      if (!s.observed[i]) {
+        point.estimated = true;
+        point.estimated_accounts.push(s.account.id);
+      }
     }
     return point;
   });

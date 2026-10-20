@@ -583,6 +583,8 @@ export type NetWorthTimelinePoint = {
   crypto: number;
   /** True when any included market-driven account is between observations on this day. */
   estimated: boolean;
+  /** The accounts whose value this day is an estimate between observations. */
+  estimated_accounts: string[];
   /** Accounts whose value this day is known; one that opened away from zero is unknown before its first row. */
   coverage: number;
   /** Each included account's value, signed as an asset (a card owed is negative). */

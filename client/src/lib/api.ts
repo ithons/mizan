@@ -2,6 +2,8 @@ import type {
   Account,
   AccountBalanceHistory,
   AdvisorAnalysis,
+  NetWorthTimeline,
+  NetWorthTimelineStep,
   AdvisorAutonomyResponse,
   AdvisorConfirmResponse,
   AdvisorContextResponse,
@@ -646,6 +648,14 @@ export const networthApi = {
     apiFetch<NetWorthSnapshot[]>(
       `/api/networth/history?${new URLSearchParams({ startDate, endDate }).toString()}`
     ),
+  timeline: (params: { from?: string; to?: string; step?: NetWorthTimelineStep; accounts?: readonly string[] }) => {
+    const query = new URLSearchParams();
+    if (params.from) query.set('from', params.from);
+    if (params.to) query.set('to', params.to);
+    if (params.step) query.set('step', params.step);
+    if (params.accounts) query.set('accounts', params.accounts.join(','));
+    return apiFetch<NetWorthTimeline>(`/api/networth/timeline?${query.toString()}`);
+  },
   reconstruction: () => apiFetch<ReconstructionState>('/api/networth/reconstruction'),
   rebuildReconstruction: () =>
     apiFetch<ReconstructionRun>('/api/networth/reconstruction/rebuild', { method: 'POST' }),
