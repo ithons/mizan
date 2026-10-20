@@ -115,6 +115,10 @@ function seedEveryTable(db: Database.Database, tag: string): SeededIds {
       VALUES (?, ?, ?, ?, 3.5, ?, ?, ?)
     `).run(`hist_${tag}_${index}`, accountId, securityId, date, 240 + index, 84000 + index, TEST_NOW);
   });
+  db.prepare(`
+    INSERT INTO account_valuations (id, account_id, date, value_cents, source, note, created_at)
+    VALUES (?, ?, '2026-06-30', 118326, 'statement', 'Statement06302026.pdf', ?)
+  `).run(`val_${tag}`, accountId, TEST_NOW);
 
   const budgetId = `bud_${tag}`;
   db.prepare(`
