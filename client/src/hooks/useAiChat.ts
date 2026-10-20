@@ -2,12 +2,11 @@ import { useState, useRef, useCallback, useEffect } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { aiApi } from '../lib/api';
 import { createTurnGate } from '../lib/turnGate';
-import type { AdvisorAnalysis, AdvisorDraftAction, ChatMessage } from '@shared/types';
+import type { AdvisorDraftAction, ChatMessage } from '@shared/types';
 
 export interface DisplayMessage extends ChatMessage {
   id: string;
   streaming?: boolean;
-  analysis?: AdvisorAnalysis;
   thinking?: string;
   thinkingActive?: boolean;
   toolActivity?: string;
@@ -222,11 +221,6 @@ export function useAiChat() {
       finish();
     };
 
-    // The heuristic /analyze endpoint is the only source of structured citations/drafts;
-    // run it alongside the real streamChat call (rather than instead of it) so the chat
-    // keeps reasoning over real financial context without losing the citation/draft UI.
-    const analysisPromise = aiApi.analyze(userText, controller.signal).catch(() => null);
-
     let streamErrorMsg: string | null = null;
 
     try {
@@ -255,14 +249,14 @@ export function useAiChat() {
         }
       );
 
-      const analysis = await analysisPromise;
-
       if (streamErrorMsg) {
-        // No ANTHROPIC_API_KEY or the LLM call failed outright - degrade to the local
-        // heuristic's answer text instead of erroring out, if it produced one.
+        // No API key, or the model call failed outright: fall back to the local heuristic's answer
+        // text. Only the text: its drafts and citations describe what the heuristic matched, not
+        // anything the model read, and in chat a write comes only from propose_changes.
+        const analysis = await aiApi.analyze(userText, controller.signal).catch(() => null);
         if (analysis) {
           assistantAccum = analysis.answer;
-          updateAssistant((m) => ({ ...m, content: analysis.answer, analysis, streaming: false, thinkingActive: false }));
+          updateAssistant((m) => ({ ...m, content: analysis.answer, streaming: false, thinkingActive: false }));
           await persist();
           finish();
         } else {
@@ -271,7 +265,7 @@ export function useAiChat() {
         return;
       }
 
-      updateAssistant((m) => ({ ...m, analysis: analysis ?? undefined, streaming: false, thinkingActive: false }));
+      updateAssistant((m) => ({ ...m, streaming: false, thinkingActive: false }));
       await persist();
       finish();
     } catch (err) {

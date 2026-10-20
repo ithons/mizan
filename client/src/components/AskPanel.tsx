@@ -1,11 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQuery } from '@tanstack/react-query';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeSanitize from 'rehype-sanitize';
-import type { AdvisorDraftAction } from '@shared/types';
 import { aiApi } from '../lib/api';
-import { useAppStore } from '../store';
 import type { DisplayMessage, AiChat } from '../hooks/useAiChat';
 import { TextButton } from './balance';
 import { ProposalCard } from './ProposalCard';
@@ -34,18 +32,7 @@ const FALLBACK_PROMPTS = [
   'Summarize my spending this month',
 ];
 
-function AssistantMessage({
-  message,
-  onConfirmDraft,
-  confirming,
-}: {
-  message: DisplayMessage;
-  onConfirmDraft: (draft: AdvisorDraftAction) => void;
-  confirming: boolean;
-}) {
-  const drafts = message.analysis?.drafts ?? [];
-  const citations = message.analysis?.citations ?? [];
-
+function AssistantMessage({ message }: { message: DisplayMessage }) {
   return (
     <div className="mb-5 flex gap-3.5">
       <span
@@ -84,30 +71,9 @@ function AssistantMessage({
             />
           )}
         </div>
-        {drafts.length > 0 && !message.streaming && (
-          <div className="mt-3.5 flex flex-wrap items-center gap-x-6 gap-y-2 text-body-lg">
-            {drafts.map((draft) => (
-              <button
-                key={draft.id}
-                type="button"
-                disabled={confirming}
-                onClick={() => onConfirmDraft(draft)}
-                className="border-b border-ink pb-0.5 text-ink transition-opacity hover:opacity-75 disabled:opacity-40"
-              >
-                {draft.label}
-              </button>
-            ))}
-          </div>
-        )}
         {(message.proposals?.length ?? 0) > 0 && (
           <div className="mt-3.5 grid gap-2.5">
             {message.proposals!.map((proposal) => <ProposalCard key={proposal.id} proposal={proposal} />)}
-          </div>
-        )}
-        {citations.length > 0 && !message.streaming && (
-          <div className="mt-3.5 text-note text-muted">
-            Based on {citations.slice(0, 3).map((c) => c.label.toLowerCase()).join(', ')}
-            {citations.length > 3 ? ` and ${citations.length - 3} more` : ''}.
           </div>
         )}
       </div>
@@ -177,8 +143,6 @@ export function AskPanel({
   /** Offered from ⌘K: the same conversation, on its own page. */
   onExpand?: () => void;
 }) {
-  const qc = useQueryClient();
-  const { addToast } = useAppStore();
   const { messages, isStreaming, conversationId, sendMessage, stopStreaming, clearChat, loadConversation } = chat;
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -192,15 +156,6 @@ export function AskPanel({
   }, [messages]);
 
   const { data: context } = useQuery({ queryKey: ['ai-context'], queryFn: () => aiApi.getContext() });
-
-  const confirmDraft = useMutation({
-    mutationFn: (action: AdvisorDraftAction) => aiApi.confirmDraft(action),
-    onSuccess: (res) => {
-      addToast({ type: 'success', message: res.message || 'Applied.' });
-      void qc.invalidateQueries();
-    },
-    onError: (err: Error) => addToast({ type: 'error', message: err.message }),
-  });
 
   const send = (text: string) => {
     if (!text.trim() || isStreaming) return;
@@ -238,12 +193,7 @@ export function AskPanel({
                 </div>
               </div>
             ) : (
-              <AssistantMessage
-                key={m.id}
-                message={m}
-                onConfirmDraft={(d) => confirmDraft.mutate(d)}
-                confirming={confirmDraft.isPending}
-              />
+              <AssistantMessage key={m.id} message={m} />
             )
           )
         )}

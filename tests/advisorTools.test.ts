@@ -5,8 +5,14 @@ import { format, subDays } from 'date-fns';
 import { migratedTestDb, insertAccount } from './helpers/schema';
 import { confirmAdvisorDraft } from '../server/src/services/advisorDrafts';
 import { analyzeAdvisorQuestion, buildAdvisorReadTools } from '../server/src/services/advisorTools';
+import type { AdvisorDraftAction, AdvisorDraftPayload } from '../shared/types';
 
 const TEST_NOW = '2026-06-30T12:00:00.000Z';
+
+// The palette offers no draft of these kinds, so the handler is driven with a draft built here.
+function storedDraft(payload: AdvisorDraftPayload): AdvisorDraftAction {
+  return { id: `draft_${payload.kind}`, kind: payload.kind, label: 'Change', summary: 'Change', route: '/', payload, changes: [], citations: [], confirmation_required: true };
+}
 
 function insertTransaction(
   db: Database.Database,
@@ -373,7 +379,7 @@ test('advisor drafts and confirms a transaction category change', (t) => {
   assert.equal(transaction.review_status, 'reviewed');
 });
 
-test('advisor drafts and confirms budget and goal updates', (t) => {
+test('advisor drafts a budget update and confirms budget and goal updates', (t) => {
   const db = setupAdvisorDb();
   t.after(() => db.close());
 
@@ -389,14 +395,7 @@ test('advisor drafts and confirms budget and goal updates', (t) => {
   const budget = db.prepare('SELECT amount FROM budgets WHERE id = ?').get('budget_food') as { amount: number };
   assert.equal(budget.amount, 20000);
 
-  const goalAnalysis = analyzeAdvisorQuestion(
-    db,
-    'Set Emergency Fund goal target to $6000',
-    new Date(TEST_NOW)
-  );
-  const goalDraft = goalAnalysis.drafts.find((item) => item.kind === 'update_goal_target');
-  assert.ok(goalDraft);
-  confirmAdvisorDraft(db, goalDraft, true);
+  confirmAdvisorDraft(db, storedDraft({ kind: 'update_goal_target', goal_id: 'goal_emergency', target_amount: 6000 }), true);
 
   const goal = db.prepare('SELECT target_amount FROM goals WHERE id = ?').get('goal_emergency') as {
     target_amount: number;
@@ -430,6 +429,21 @@ test('advisor draft confirmation requires explicit confirmation', (t) => {
     is_confirmed: number;
   };
   assert.equal(recurring.is_confirmed, 1);
+});
+
+test('asking to confirm a bill no pattern names offers no confirmation, rather than whichever pattern sorts first', (t) => {
+  const db = setupAdvisorDb();
+  t.after(() => db.close());
+  db.prepare(`
+    INSERT INTO recurring_patterns (
+      id, merchant_name, category_id, average_amount, frequency, last_seen, next_expected,
+      is_active, is_confirmed, transaction_count, created_at, updated_at
+    )
+    VALUES ('rec_gym', 'Gym Club', 'cat_food', 40, 'monthly', '2026-06-01', '2026-07-01', 1, 0, 3, ?, ?)
+  `).run(TEST_NOW, TEST_NOW);
+
+  const analysis = analyzeAdvisorQuestion(db, 'confirm my rent bill', new Date(TEST_NOW));
+  assert.equal(analysis.drafts.find((item) => item.kind === 'confirm_recurring'), undefined);
 });
 
 test('advisor drafts and confirms a suggested merchant rule', (t) => {
@@ -509,32 +523,18 @@ test('advisor drafts and confirms recurring occurrence adjustments', (t) => {
   assert.equal(adjustment.original_date, '2026-07-01');
 });
 
-test('advisor drafts and confirms investment metadata changes', (t) => {
+test('stored investment metadata drafts still apply', (t) => {
   const db = setupAdvisorDb();
   t.after(() => db.close());
 
-  const basisAnalysis = analyzeAdvisorQuestion(
-    db,
-    'Set CASH cost basis to $500',
-    new Date(TEST_NOW)
-  );
-  const basisDraft = basisAnalysis.drafts.find((item) => item.kind === 'set_manual_cost_basis');
-  assert.ok(basisDraft);
-  confirmAdvisorDraft(db, basisDraft, true);
+  confirmAdvisorDraft(db, storedDraft({ kind: 'set_manual_cost_basis', holding_id: 'holding_cash', manual_cost_basis: 500 }), true);
 
   const holding = db.prepare('SELECT manual_cost_basis FROM holdings WHERE id = ?').get('holding_cash') as {
     manual_cost_basis: number;
   };
   assert.equal(holding.manual_cost_basis, 50000);
 
-  const sectorAnalysis = analyzeAdvisorQuestion(
-    db,
-    'Set CASH sector to Cash',
-    new Date(TEST_NOW)
-  );
-  const sectorDraft = sectorAnalysis.drafts.find((item) => item.kind === 'set_sector_metadata');
-  assert.ok(sectorDraft);
-  confirmAdvisorDraft(db, sectorDraft, true);
+  confirmAdvisorDraft(db, storedDraft({ kind: 'set_sector_metadata', security_id: 'sec_cash', sector: 'Cash', sector_source: 'manual' }), true);
 
   const security = db.prepare('SELECT sector, sector_source FROM securities WHERE id = ?').get('sec_cash') as {
     sector: string;

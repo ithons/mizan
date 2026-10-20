@@ -43,7 +43,7 @@ import {
 import { refreshTransactionIntegrity } from './transactionIntegrity';
 import { upsertRecurringAdjustment } from './recurringAdjustments';
 import { setManualCostBasis, setSecurityMetadata } from './investmentMetadata';
-import { toCents, toDollars, toDollarsOrNull } from './money';
+import { toCents, toDollars } from './money';
 import { AdvisorDraftPayloadSchema } from '../../../shared/schemas';
 import { safeJsonParse } from './jsonSafe';
 import { SCHEDULED_ROUTE } from '../../../shared/routes';
@@ -77,12 +77,6 @@ interface BudgetRow {
   category_name: string;
 }
 
-interface GoalRow {
-  id: string;
-  name: string;
-  target_amount: number;
-}
-
 interface RecurringRow {
   id: string;
   merchant_name: string;
@@ -93,18 +87,6 @@ interface RecurringRow {
   next_expected: string;
   is_confirmed: number;
   transaction_count: number;
-}
-
-interface HoldingDraftRow {
-  id: string;
-  security_id: string;
-  ticker: string | null;
-  security_name: string | null;
-  institution_value: number;
-  provider_cost_basis: number | null;
-  manual_cost_basis: number | null;
-  effective_cost_basis: number | null;
-  sector: string | null;
 }
 
 function normalize(value: string): string {
@@ -131,17 +113,6 @@ function dateMentions(question: string): string[] {
   return Array.from(question.matchAll(/\b\d{4}-\d{2}-\d{2}\b/g)).map((match) => match[0]);
 }
 
-function quotedName(question: string): string | null {
-  const match = question.match(/["']([^"']{1,80})["']/);
-  return match?.[1].trim() || null;
-}
-
-function afterKeywordName(question: string, keyword: string): string | null {
-  const escaped = keyword.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  const match = question.match(new RegExp(`\\b${escaped}\\b\\s+(?:called|named|to|as)?\\s*([a-zA-Z0-9 &/._-]{2,80})`, 'i'));
-  return match?.[1].trim().replace(/[.?!]+$/, '') || null;
-}
-
 function categories(db: Database.Database): CategoryRow[] {
   return db.prepare(`
     SELECT id, name, parent_id
@@ -156,40 +127,6 @@ function assertCategory(db: Database.Database, categoryId: string): CategoryRow 
     | undefined;
   if (!row) throw new Error('Category not found');
   return row;
-}
-
-function holdingRows(db: Database.Database): HoldingDraftRow[] {
-  // A stored basis of 0 is unreported (migration 043), so it must surface as NULL here too, or a
-  // draft's citation reads "Effective $0.00" for a position whose basis nobody actually knows.
-  return db.prepare(`
-    SELECT
-      h.id,
-      h.security_id,
-      h.institution_value,
-      CASE WHEN h.cost_basis > 0 THEN h.cost_basis END AS provider_cost_basis,
-      h.manual_cost_basis,
-      COALESCE(h.manual_cost_basis, CASE WHEN h.cost_basis > 0 THEN h.cost_basis END) AS effective_cost_basis,
-      s.ticker,
-      s.name AS security_name,
-      s.sector
-    FROM holdings h
-    JOIN securities s ON s.id = h.security_id
-    ORDER BY h.institution_value DESC
-  `).all() as HoldingDraftRow[];
-}
-
-function holdingName(holding: HoldingDraftRow): string {
-  return holding.ticker ?? holding.security_name ?? holding.id;
-}
-
-function findHoldingMention(db: Database.Database, question: string): HoldingDraftRow | null {
-  const text = normalize(question);
-  const holdings = holdingRows(db);
-  return holdings.find((holding) => {
-    const ticker = holding.ticker ? normalize(holding.ticker) : '';
-    const name = holding.security_name ? normalize(holding.security_name) : '';
-    return Boolean((ticker && text.includes(ticker)) || (name && text.includes(name)));
-  }) ?? (holdings.length === 1 ? holdings[0] : null);
 }
 
 function findCategoryMention(db: Database.Database, question: string): CategoryRow | null {
@@ -353,55 +290,6 @@ function draftUpdateBudget(db: Database.Database, question: string): AdvisorDraf
   });
 }
 
-function activeGoals(db: Database.Database): GoalRow[] {
-  return db.prepare(`
-    SELECT id, name, target_amount
-    FROM goals
-    WHERE is_archived = 0
-    ORDER BY target_date IS NULL ASC, target_date ASC, created_at ASC
-  `).all() as GoalRow[];
-}
-
-function draftUpdateGoal(db: Database.Database, question: string): AdvisorDraftAction | null {
-  const text = normalize(question);
-  if (!/\b(goal|target)\b/.test(text)) return null;
-
-  const amount = moneyAmount(question);
-  if (amount === null) return null;
-
-  const goals = activeGoals(db);
-  const goal = goals.find((candidate) => text.includes(normalize(candidate.name))) ?? (goals.length === 1 ? goals[0] : null);
-  if (!goal) return null;
-
-  const payload: AdvisorDraftPayload = {
-    kind: 'update_goal_target',
-    goal_id: goal.id,
-    target_amount: amount,
-  };
-
-  return draft({
-    kind: 'update_goal_target',
-    label: `Update ${goal.name} target`,
-    summary: `Set the ${goal.name} target to $${amount.toFixed(2)}.`,
-    route: '/plan',
-    payload,
-    changes: [
-      { field: 'target amount', before: toDollars(goal.target_amount), after: amount },
-    ],
-    citations: [
-      citation({
-        id: `goal:${goal.id}`,
-        kind: 'goal',
-        label: goal.name,
-        detail: `Current target $${toDollars(goal.target_amount).toFixed(2)}`,
-        route: '/plan',
-        record_id: goal.id,
-        amount: toDollars(goal.target_amount),
-      }),
-    ],
-  });
-}
-
 function recurringCandidates(db: Database.Database): RecurringRow[] {
   return db.prepare(`
     SELECT
@@ -455,7 +343,7 @@ function draftConfirmRecurring(db: Database.Database, question: string): Advisor
   if (!text.includes('confirm') || !/\b(recurring|bill|subscription)\b/.test(text)) return null;
 
   const candidates = recurringCandidates(db);
-  const recurring = candidates.find((candidate) => text.includes(normalize(candidate.merchant_name))) ?? candidates[0] ?? null;
+  const recurring = candidates.find((candidate) => text.includes(normalize(candidate.merchant_name)));
   if (!recurring) return null;
 
   const payload: AdvisorDraftPayload = {
@@ -548,92 +436,6 @@ function draftRecurringAdjustment(db: Database.Database, question: string): Advi
   });
 }
 
-function draftManualCostBasis(db: Database.Database, question: string): AdvisorDraftAction | null {
-  const text = normalize(question);
-  if (!text.includes('cost basis')) return null;
-
-  const holding = findHoldingMention(db, question);
-  if (!holding) return null;
-
-  const shouldClear = /\b(clear|remove|reset)\b/.test(text);
-  const amount = shouldClear ? null : moneyAmount(question);
-  if (!shouldClear && amount == null) return null;
-
-  const payload: AdvisorDraftPayload = {
-    kind: 'set_manual_cost_basis',
-    holding_id: holding.id,
-    manual_cost_basis: amount,
-    note: amount == null ? null : 'Set from Advisor draft',
-  };
-
-  return draft({
-    kind: 'set_manual_cost_basis',
-    label: `${amount == null ? 'Clear' : 'Set'} ${holdingName(holding)} cost basis`,
-    summary: amount == null
-      ? `Clear the manual cost basis override for ${holdingName(holding)}.`
-      : `Set ${holdingName(holding)} manual cost basis to $${amount.toFixed(2)} while preserving provider basis.`,
-    route: '/investments',
-    payload,
-    changes: [
-      { field: 'manual cost basis', before: toDollarsOrNull(holding.manual_cost_basis), after: amount },
-    ],
-    citations: [
-      citation({
-        id: `holding:${holding.id}:cost-basis`,
-        kind: 'investment',
-        label: holdingName(holding),
-        detail: holding.effective_cost_basis == null ? 'Missing effective cost basis' : `Effective $${toDollars(holding.effective_cost_basis).toFixed(2)}`,
-        route: '/investments',
-        record_id: holding.id,
-        amount: toDollars(holding.institution_value),
-      }),
-    ],
-  });
-}
-
-function draftSectorMetadata(db: Database.Database, question: string): AdvisorDraftAction | null {
-  const text = normalize(question);
-  if (!text.includes('sector')) return null;
-
-  const holding = findHoldingMention(db, question);
-  if (!holding) return null;
-
-  const shouldClear = /\b(clear|remove|reset)\b/.test(text);
-  const rawSector = shouldClear ? null : afterKeywordName(question, 'to') ?? quotedName(question);
-  const sector = rawSector?.replace(/\bsector\b/i, '').trim() || null;
-  if (!shouldClear && !sector) return null;
-
-  const payload: AdvisorDraftPayload = {
-    kind: 'set_sector_metadata',
-    security_id: holding.security_id,
-    sector,
-    sector_source: sector ? 'manual' : null,
-  };
-
-  return draft({
-    kind: 'set_sector_metadata',
-    label: `${sector ? 'Set' : 'Clear'} ${holdingName(holding)} sector`,
-    summary: sector
-      ? `Set ${holdingName(holding)} sector metadata to ${sector}.`
-      : `Clear sector metadata for ${holdingName(holding)}.`,
-    route: '/investments',
-    payload,
-    changes: [
-      { field: 'sector', before: holding.sector, after: sector },
-    ],
-    citations: [
-      citation({
-        id: `security:${holding.security_id}:sector`,
-        kind: 'investment',
-        label: holdingName(holding),
-        detail: holding.sector ?? 'Sector not available',
-        route: '/investments',
-        record_id: holding.security_id,
-      }),
-    ],
-  });
-}
-
 export function buildAdvisorDrafts(
   db: Database.Database,
   question: string
@@ -642,11 +444,8 @@ export function buildAdvisorDrafts(
   const candidates = [
     draftCategorizeTransaction(db, question),
     draftUpdateBudget(db, question),
-    draftUpdateGoal(db, question),
     draftConfirmRecurring(db, question),
     draftRecurringAdjustment(db, question),
-    draftManualCostBasis(db, question),
-    draftSectorMetadata(db, question),
     text.includes('rule') || text.includes('review') ? draftFromRuleSuggestion(db) : null,
   ].filter((item): item is AdvisorDraftAction => Boolean(item));
 
