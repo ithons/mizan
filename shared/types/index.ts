@@ -1036,7 +1036,7 @@ export interface AdvisorDraftAction {
   changes: AdvisorDraftChange[];
   citations: AdvisorCitation[];
   confirmation_required: true;
-  status?: 'open' | 'confirmed' | 'dismissed';
+  status?: 'open' | 'confirmed' | 'dismissed' | 'superseded';
   created_at?: string;
   updated_at?: string;
 }

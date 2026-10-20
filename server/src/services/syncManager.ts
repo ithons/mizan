@@ -34,6 +34,7 @@ import { triggerAfterSyncAiJobs } from './aiScheduler';
 import { withRetry } from './retry';
 import { evaluateNotifications } from './notifications';
 import { refreshSecurityPricesDaily } from './priceHistory';
+import { supersedeLapsedDrafts } from './advisorDrafts';
 import type { NotificationEvaluationSummary } from '../../../shared/types';
 
 // SSE clients registry
@@ -789,6 +790,13 @@ async function _runFullSyncInternal(): Promise<void> {
     );
     const integrity = postSync.integrity;
     deferredError = postSync.deferredError;
+
+    // A proposal the sync just made moot (its row filed, its category or goal gone) stops waiting.
+    try {
+      supersedeLapsedDrafts(db);
+    } catch (err) {
+      console.error('[sync] superseding lapsed drafts failed:', (err as Error).message);
+    }
 
     // Public daily closes for held securities, once a day. Best effort: a quote source being down
     // costs only computed investment values for days the app did not record, so it is reported

@@ -1515,6 +1515,31 @@ interface OpenDraftRow {
 }
 
 /**
+ * Close every open draft whose premise has lapsed (see `draftLiveness`), as `superseded` with the
+ * reason, so a proposal that can no longer do anything stops waiting on the owner. Not `dismissed`:
+ * that status is the owner's refusal, and the model is shown it as one. A draft that cannot be
+ * judged, or whose payload no longer parses, is left open.
+ */
+export function supersedeLapsedDrafts(db: Database.Database, now = new Date().toISOString()): number {
+  const open = db.prepare("SELECT id, payload FROM advisor_drafts WHERE status = 'open'").all() as Array<{ id: string; payload: string }>;
+  const close = db.prepare(`
+    UPDATE advisor_drafts SET status = 'superseded', closed_reason = ?, updated_at = ? WHERE id = ? AND status = 'open'
+  `);
+  let closed = 0;
+  for (const draft of open) {
+    const parsed = AdvisorDraftPayloadSchema.safeParse(safeJsonParse<unknown>(draft.payload, null, `advisor_drafts.payload for ${draft.id}`));
+    if (!parsed.success) continue;
+    const declined = ownerDeclinedProposal(db, parsed.data) !== null;
+    if (!declined && premiseLiveness(db, parsed.data) !== 'lapsed') continue;
+    const reason = declined
+      ? 'You declined this same change before.'
+      : 'It no longer applies: what it names is gone, the change already holds, or the row has since been decided.';
+    closed += close.run(reason, now, draft.id).changes;
+  }
+  return closed;
+}
+
+/**
  * The category the model is proposing FOR SOMETHING, or null when the payload names no such thing.
  *
  * One other kind carries a `category_id` that is the subject of the change rather than a proposal
