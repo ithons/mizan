@@ -157,24 +157,40 @@ test('HEALTHY: no goals means no earmark and no shortfall invented', () => {
   db.close();
 });
 
-test('the earmark is the whole linked balance, which is exactly what /plan reports as saved', () => {
+test('an over-funded linked goal earmarks its target, the figure its /plan card shows', () => {
   const db = migratedTestDb();
   insertAccount(db, { id: 'acc_checking', type: 'checking', current_balance: 100000 });
-  insertAccount(db, { id: 'acc_savings', type: 'savings', current_balance: 900000 });
-  // `calculateGoalProgress` clamps `progress_amount` and `progress_percent` to the target but
-  // leaves `current_amount` at the full balance, and `routes/goals.ts` renders `current_amount`.
-  // So /plan reports $9,000 saved against a $5,000 goal at 100%, and this earmark has to be the
-  // same $9,000 or the two surfaces disagree again in the other direction. Asserting the uncapped
-  // figure is deliberate: agreement with /plan is the property, not a ceiling of my own choosing.
+  insertAccount(db, { id: 'acc_savings', type: 'savings', current_balance: 500370 });
+  // The live shape: Wealthfront Cash at $5,003.70 against a $5,000 goal. The card reads
+  // progress_amount, $5,000 of $5,000; the $3.70 above the target is not set aside for anything.
   goalLinkedTo(db, 'acc_savings', { current: 0, target: 500000 });
 
   const result = computeSafeToSpend(db);
-  assert.equal(result.allocatedGoals, 900000, 'must equal the current_amount /plan renders');
+  assert.equal(result.allocatedGoals, 500000);
   assert.equal(
-    calculateGoalProgress({ type: 'savings', target_amount: 500000, current_amount: 0, account_balance: 900000 }).current_amount,
+    calculateGoalProgress({ type: 'savings', target_amount: 500000, current_amount: 0, account_balance: 500370 }).progress_amount,
     result.allocatedGoals,
-    'the earmark and the goal screen must be the same number, by construction'
   );
+  assert.equal(result.free, 600370 - 500000);
+  db.close();
+});
+
+test('HEALTHY: a linked goal under its target still earmarks the whole balance', () => {
+  const db = migratedTestDb();
+  insertAccount(db, { id: 'acc_checking', type: 'checking', current_balance: 100000 });
+  insertAccount(db, { id: 'acc_savings', type: 'savings', current_balance: 499999 });
+  goalLinkedTo(db, 'acc_savings', { current: 0, target: 500000 });
+
+  assert.equal(computeSafeToSpend(db).allocatedGoals, 499999);
+  db.close();
+});
+
+test('an unlinked goal recorded above its target earmarks the target', () => {
+  const db = migratedTestDb();
+  insertAccount(db, { id: 'acc_checking', type: 'checking', current_balance: 900000 });
+  goalLinkedTo(db, null, { current: 700000, target: 500000 });
+
+  assert.equal(computeSafeToSpend(db).allocatedGoals, 500000);
   db.close();
 });
 

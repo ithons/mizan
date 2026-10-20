@@ -71,7 +71,7 @@ export interface SafeToSpendBreakdown {
   unbudgetedLumps: UnbudgetedLump[];
   /** Budgeted-but-unspent allocations still expected to be drawn. */
   allocatedBudgets: number;
-  /** Money already earmarked against savings goals. */
+  /** Money already earmarked against savings goals, each capped at its target. */
   allocatedGoals: number;
   /** Budgets of the months after this one that fall inside the window, prorated by day. */
   budgetsAhead: number;
@@ -169,6 +169,9 @@ export function computeSafeToSpend(
   // money sitting in the goal's own account. It is bidirectional. A linked account that has grown
   // past `current_amount` was previously UNDERSTATED, so `free` read too high.
   //
+  // Capped at the target (`progress_amount`), because money above it is set aside for nothing, and
+  // the goal card on /plan shows the capped figure; the uncapped balance made the two disagree.
+  //
   // Savings goals only, deliberately: a debt-payoff goal's progress is already carried by
   // `cardBalances` above, and counting it here would subtract the same money twice.
   //
@@ -188,7 +191,7 @@ export function computeSafeToSpend(
   `).all() as GoalEarmarkRow[];
   const allocatedGoals = goals.reduce((sum, goal) => {
     if (goal.account_id !== null && !earmarksFromPool(goal)) return sum;
-    return sum + calculateGoalProgress(goal).current_amount;
+    return sum + calculateGoalProgress(goal).progress_amount;
   }, 0);
 
   return {
