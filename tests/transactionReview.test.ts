@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import Database from 'better-sqlite3';
-import { migratedTestDb, insertAccount } from './helpers/schema';
+import { migratedTestDb, insertAccount, insertTransaction } from './helpers/schema';
 import { getTransactionReviewSummary } from '../server/src/services/transactionReview';
 
 function setupReviewDb(): Database.Database {
@@ -122,4 +122,43 @@ test('an explicitly dismissed transaction is the only thing suppressed from unca
   const summary = getTransactionReviewSummary(db);
   const uncategorized = summary.queues.find((q) => q.id === 'uncategorized')?.count ?? 0;
   assert.equal(uncategorized, 1, "only 'dismissed' suppresses a row");
+});
+
+test('each queue counts every open item, not the length of the short list it renders', (t) => {
+  const db = migratedTestDb();
+  t.after(() => db.close());
+  const checking = insertAccount(db, { type: 'checking' });
+  const savings = insertAccount(db, { type: 'savings' });
+  for (let i = 0; i < 21; i++) {
+    const date = `2026-05-${String(i + 1).padStart(2, '0')}`;
+    const out = insertTransaction(db, { account_id: checking, date, amount: -(1000 + i) });
+    const into = insertTransaction(db, { account_id: savings, date, amount: 1000 + i });
+    db.prepare("UPDATE transactions SET transfer_pair_id = ?, transfer_status = 'candidate' WHERE id IN (?, ?)").run(`xfer_${i}`, out, into);
+    const dupes = [insertTransaction(db, { account_id: checking, date, amount: -(2000 + i) }), insertTransaction(db, { account_id: checking, date, amount: -(2000 + i) })];
+    db.prepare("UPDATE transactions SET duplicate_group_id = ?, duplicate_status = 'candidate' WHERE id IN (?, ?)").run(`dup_${i}`, ...dupes);
+  }
+  const pattern = db.prepare(`
+    INSERT INTO recurring_patterns (id, merchant_name, average_amount, frequency, last_seen, next_expected, is_active, is_confirmed, transaction_count, created_at, updated_at)
+    VALUES (?, ?, 1000, 'monthly', '2026-06-01', '2026-07-01', 1, 0, 3, '2026-06-01', '2026-06-01')
+  `);
+  for (let i = 0; i < 11; i++) pattern.run(`rp_${i}`, `Merchant ${i}`);
+
+  const summary = getTransactionReviewSummary(db);
+  const counts = new Map(summary.queues.map((queue) => [queue.id, queue.count]));
+  assert.equal(counts.get('transfer_candidates'), 21);
+  assert.equal(counts.get('duplicate_candidates'), 21);
+  assert.equal(counts.get('recurring_candidates'), 11);
+  assert.deepEqual(
+    [summary.transfer_candidates.length, summary.duplicate_candidates.length, summary.recurring_candidates.length],
+    [20, 20, 10]
+  );
+});
+
+test('HEALTHY: a settled ledger has nothing in any queue', (t) => {
+  const db = migratedTestDb();
+  t.after(() => db.close());
+  insertTransaction(db, { amount: -1200, merchant_name: 'Cafe', category_id: 'cat_food', review_status: 'reviewed' });
+  const summary = getTransactionReviewSummary(db);
+  assert.deepEqual(summary.queues.filter((queue) => queue.count !== 0).map((queue) => queue.id), []);
+  assert.equal(summary.total_open, 0);
 });

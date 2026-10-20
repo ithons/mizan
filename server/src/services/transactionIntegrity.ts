@@ -220,6 +220,15 @@ export function refreshDuplicateCandidates(db: Database.Database): DuplicateDete
   return { groupCount, transactionCount, newGroupCount, newTransactionCount };
 }
 
+const DUPLICATE_CANDIDATE_WHERE = "t.duplicate_status = 'candidate' AND t.duplicate_group_id IS NOT NULL";
+
+/** Every open group, where the list below is only the newest few. */
+export function countDuplicateCandidateGroups(db: Database.Database): number {
+  return (db.prepare(`
+    SELECT COUNT(DISTINCT t.duplicate_group_id) AS n FROM transactions t WHERE ${DUPLICATE_CANDIDATE_WHERE}
+  `).get() as { n: number }).n;
+}
+
 export function getDuplicateCandidateGroups(
   db: Database.Database,
   limit = 20
@@ -235,8 +244,7 @@ export function getDuplicateCandidateGroups(
       GROUP_CONCAT(t.id) AS transaction_ids
     FROM transactions t
     JOIN accounts a ON a.id = t.account_id
-    WHERE t.duplicate_status = 'candidate'
-      AND t.duplicate_group_id IS NOT NULL
+    WHERE ${DUPLICATE_CANDIDATE_WHERE}
     GROUP BY t.duplicate_group_id
     ORDER BY date DESC
     LIMIT ?
@@ -744,6 +752,22 @@ export function refreshTransferCandidates(db: Database.Database): TransferDetect
   };
 }
 
+const TRANSFER_CANDIDATE_JOIN = `
+    FROM transactions outflow
+    JOIN transactions inflow
+      ON inflow.transfer_pair_id = outflow.transfer_pair_id
+      AND inflow.amount > 0
+    JOIN accounts from_account ON from_account.id = outflow.account_id
+    JOIN accounts to_account ON to_account.id = inflow.account_id
+    WHERE outflow.transfer_status = 'candidate'
+      AND outflow.amount < 0
+      AND outflow.transfer_pair_id IS NOT NULL`;
+
+/** Every open pair, where the list below is only the newest few. */
+export function countTransferCandidatePairs(db: Database.Database): number {
+  return (db.prepare(`SELECT COUNT(*) AS n ${TRANSFER_CANDIDATE_JOIN}`).get() as { n: number }).n;
+}
+
 export function getTransferCandidatePairs(
   db: Database.Database,
   limit = 20
@@ -757,15 +781,7 @@ export function getTransferCandidatePairs(
       to_account.account_name AS to_account_name,
       outflow.id AS outflow_transaction_id,
       inflow.id AS inflow_transaction_id
-    FROM transactions outflow
-    JOIN transactions inflow
-      ON inflow.transfer_pair_id = outflow.transfer_pair_id
-      AND inflow.amount > 0
-    JOIN accounts from_account ON from_account.id = outflow.account_id
-    JOIN accounts to_account ON to_account.id = inflow.account_id
-    WHERE outflow.transfer_status = 'candidate'
-      AND outflow.amount < 0
-      AND outflow.transfer_pair_id IS NOT NULL
+    ${TRANSFER_CANDIDATE_JOIN}
     ORDER BY outflow.date DESC
     LIMIT ?
   `).all(limit) as TransferCandidatePair[];

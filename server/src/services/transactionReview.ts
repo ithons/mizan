@@ -9,6 +9,8 @@ import { suggestMerchantRules } from './rules';
 import { isDraftStillActionable } from './advisorDrafts';
 import { safeJsonParse } from './jsonSafe';
 import {
+  countDuplicateCandidateGroups,
+  countTransferCandidatePairs,
   getDuplicateCandidateGroups,
   getTransferCandidatePairs,
 } from './transactionIntegrity';
@@ -34,6 +36,12 @@ function getCounts(db: Database.Database): ReviewCounts {
   `).get() as ReviewCounts;
 }
 
+const RECURRING_CANDIDATE_WHERE = 'rp.is_active = 1 AND rp.is_confirmed = 0 AND rp.transaction_count >= 3';
+
+function countRecurringCandidates(db: Database.Database): number {
+  return (db.prepare(`SELECT COUNT(*) AS n FROM recurring_patterns rp WHERE ${RECURRING_CANDIDATE_WHERE}`).get() as { n: number }).n;
+}
+
 function getRecurringCandidates(db: Database.Database): RecurringPattern[] {
   return db.prepare(`
     SELECT
@@ -42,9 +50,7 @@ function getRecurringCandidates(db: Database.Database): RecurringPattern[] {
       c.color AS category_color
     FROM recurring_patterns rp
     LEFT JOIN categories c ON c.id = rp.category_id
-    WHERE rp.is_active = 1
-      AND rp.is_confirmed = 0
-      AND rp.transaction_count >= 3
+    WHERE ${RECURRING_CANDIDATE_WHERE}
     ORDER BY rp.transaction_count DESC, rp.next_expected ASC
     LIMIT 10
   `).all() as RecurringPattern[];
@@ -133,7 +139,7 @@ export function getTransactionReviewSummary(db: Database.Database): TransactionR
     {
       id: 'recurring_candidates',
       label: 'Recurring candidates',
-      count: recurringCandidates.length,
+      count: countRecurringCandidates(db),
       action_label: 'Confirm',
       severity: 'info',
     },
@@ -142,7 +148,7 @@ export function getTransactionReviewSummary(db: Database.Database): TransactionR
       // transactions instead made the badge ~2x the number of actionable rows.
       id: 'duplicate_candidates',
       label: 'Possible duplicates',
-      count: duplicateCandidates.length,
+      count: countDuplicateCandidateGroups(db),
       action_label: 'Review',
       severity: 'warning',
     },
@@ -150,7 +156,7 @@ export function getTransactionReviewSummary(db: Database.Database): TransactionR
       // Counted per PAIR, matching the rendered rows.
       id: 'transfer_candidates',
       label: 'Detected transfers',
-      count: transferCandidates.length,
+      count: countTransferCandidatePairs(db),
       action_label: 'Review',
       severity: 'info',
       filters: {
