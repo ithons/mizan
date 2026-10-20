@@ -8,7 +8,7 @@ import type {
   NotificationRuleKind,
   NotificationRuleSpec,
 } from '@shared/types';
-import { NOTIFICATION_RULE_KINDS } from '@shared/types';
+import { NOTIFICATION_RULE_KINDS, PARTIAL_RUNS_BEFORE_NOTIFYING } from '@shared/types';
 import { accountsApi, categoriesApi, flattenCategories, goalsApi, notificationsApi } from '../../lib/api';
 import { useDesktopAlertsPreference } from '../../lib/desktopAlerts';
 import { useAppStore } from '../../store';
@@ -74,7 +74,7 @@ function describeRule(spec: NotificationRuleSpec, lookups: Lookups): string {
       return 'When what is free to spend over the next 30 days goes below zero. At most once a month.';
     case 'sync_failed':
       return spec.params.include_partial
-        ? 'When a sync fails or finishes with issues. Once per run of failures.'
+        ? `When a sync fails, or ${PARTIAL_RUNS_BEFORE_NOTIFYING} in a row finish with issues. Once per run of failures.`
         : 'When a sync fails outright. Once per run of failures.';
     case 'goal_milestone':
       return `When ${nameOf(lookups.goals, spec.params.goal_id, (g) => g.name, 'any goal')} reaches ${spec.params.milestones.join('%, ')}%.`;

@@ -200,6 +200,54 @@ test('sync_failed notifies once per run of failures, and again after a success b
   assertIdempotent(db);
 });
 
+function insertCoinbaseNote(db: Database.Database, runId: string): void {
+  db.prepare(`INSERT INTO sync_run_items (id, run_id, provider, status, started_at, error_message)
+    VALUES (?, ?, 'coinbase', 'skipped', '2026-10-01T00:00:00.000Z', 'LINK could not be priced (timeout of 60000ms exceeded); its last known value was kept.')`)
+    .run(`item_${runId}`, runId);
+}
+
+test('HEALTHY: a partial run the next run recovers from never notifies, and neither does a pair', () => {
+  const { db } = withOnlyRule({ kind: 'sync_failed', params: { include_partial: true } });
+  insertRun(db, 'p1', 'partial', '2026-10-01T10:00:00.000Z');
+  insertCoinbaseNote(db, 'p1');
+  assert.deepEqual(fires(db), []);
+  insertRun(db, 's1', 'succeeded', '2026-10-01T11:00:00.000Z');
+  assert.deepEqual(fires(db), []);
+  insertRun(db, 'p2', 'partial', '2026-10-01T12:00:00.000Z');
+  insertRun(db, 'p3', 'partial', '2026-10-01T13:00:00.000Z');
+  assert.deepEqual(fires(db), []);
+  insertRun(db, 's2', 'succeeded', '2026-10-01T14:00:00.000Z');
+  assert.deepEqual(fires(db), []);
+  assert.equal(listNotifications(db).length, 0);
+});
+
+test('a partial streak that persists notifies exactly once, keyed by its first run, and routes to the failing provider', () => {
+  const { db } = withOnlyRule({ kind: 'sync_failed', params: { include_partial: true } });
+  insertRun(db, 's0', 'succeeded', '2026-10-01T09:00:00.000Z');
+  const partial = (id: string, hour: number) => {
+    insertRun(db, id, 'partial', `2026-10-01T${hour}:00:00.000Z`);
+    insertCoinbaseNote(db, id);
+  };
+  partial('p1', 10);
+  partial('p2', 11);
+  assert.deepEqual(fires(db), []);
+  partial('p3', 12);
+  assert.deepEqual(fires(db), ['sync_failed:p1']);
+  partial('p4', 13);
+  assert.deepEqual(fires(db), [], 'a longer streak is still the same streak');
+  const [notification] = listNotifications(db);
+  assert.equal(notification.route, '/settings?section=coinbase');
+  assert.match(notification.body, /^The last 3 syncs each finished with issues/);
+});
+
+test('a failed run notifies at once, even one run into a streak', () => {
+  const { db } = withOnlyRule({ kind: 'sync_failed', params: { include_partial: true } });
+  insertRun(db, 'p1', 'partial', '2026-10-01T10:00:00.000Z');
+  insertRun(db, 'f1', 'failed', '2026-10-01T11:00:00.000Z');
+  assert.deepEqual(fires(db), ['sync_failed:p1']);
+  assert.equal(listNotifications(db)[0].route, '/settings?section=connections');
+});
+
 test('HEALTHY: sync_failed is silent when the latest finished run succeeded, past failures notwithstanding', () => {
   const { db } = withOnlyRule({ kind: 'sync_failed', params: { include_partial: true } });
   insertRun(db, 'r1', 'failed', '2026-10-01T10:00:00.000Z');

@@ -1850,6 +1850,13 @@ export interface SimplefinRelinkDismissResponse {
   acknowledged_provider_ids: string[];
 }
 
+/**
+ * A partial sync run is ordinarily an upstream timeout or a DNS blip, with the last known value
+ * kept, that the next hourly run recovers from. The owner can do nothing about one, so a streak
+ * made only of partial runs notifies once it has lasted this many runs; a failed run notifies at once.
+ */
+export const PARTIAL_RUNS_BEFORE_NOTIFYING = 3;
+
 export const NOTIFICATION_RULE_KINDS = [
   'budget_threshold',
   'large_transaction',

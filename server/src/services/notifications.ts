@@ -5,6 +5,7 @@ import { NotificationRuleParamsSchemas } from '../../../shared/schemas';
 import { SCHEDULED_ROUTE } from '../../../shared/routes';
 import {
   NOTIFICATION_RULE_KINDS,
+  PARTIAL_RUNS_BEFORE_NOTIFYING,
   type AppNotification,
   type ProjectedBudget,
   type NotificationEvaluationError,
@@ -457,24 +458,37 @@ const syncFailed: Evaluator<'sync_failed'> = (ctx, params) => {
     ORDER BY started_at DESC, id DESC LIMIT 1
   `).get() as SyncRunRow | undefined;
   if (!latest || !failing.includes(latest.status)) return [];
-  const streakStart = ctx.db.prepare(`
+  const streak = ctx.db.prepare(`
     SELECT id, status, error_message FROM sync_runs
     WHERE status IN (${failing.map(() => '?').join(',')})
       AND started_at > COALESCE((
         SELECT MAX(started_at) FROM sync_runs
         WHERE status != 'running' AND status NOT IN (${failing.map(() => '?').join(',')})
       ), '')
-    ORDER BY started_at ASC, id ASC LIMIT 1
-  `).get(...failing, ...failing) as SyncRunRow;
+    ORDER BY started_at ASC, id ASC
+  `).all(...failing, ...failing) as SyncRunRow[];
+  const anyFailed = streak.some((run) => run.status === 'failed');
+  if (!anyFailed && streak.length < PARTIAL_RUNS_BEFORE_NOTIFYING) return [];
+  const message = latest.error_message ?? 'No error message was recorded for this run.';
   return [{
-    dedupe_key: `sync_failed:${streakStart.id}`,
+    dedupe_key: `sync_failed:${streak[0].id}`,
     title: latest.status === 'failed' ? 'Sync failed' : 'Sync finished with issues',
-    body: latest.error_message ?? 'No error message was recorded for this run.',
+    body: anyFailed ? message : `The last ${streak.length} syncs each finished with issues. The latest: ${message}`,
     severity: latest.status === 'failed' ? 'critical' : 'warning',
-    payload: { run_id: latest.id, first_failed_run_id: streakStart.id, status: latest.status },
-    route: '/settings?section=connections',
+    payload: { run_id: latest.id, first_failed_run_id: streak[0].id, status: latest.status },
+    route: connectionRouteFor(ctx.db, latest.id),
   }];
 };
+
+/** The connection panel for the provider whose stage reported trouble, when exactly one did. */
+function connectionRouteFor(db: Database.Database, runId: string): string {
+  const providers = (db.prepare(`
+    SELECT DISTINCT provider FROM sync_run_items
+    WHERE run_id = ? AND (status IN ('failed', 'reauth_required') OR error_message IS NOT NULL)
+  `).all(runId) as Array<{ provider: string }>).map((row) => row.provider);
+  if (providers.length === 1 && providers[0] === 'coinbase') return '/settings?section=coinbase';
+  return '/settings?section=connections';
+}
 
 type GoalRow = GoalProgressInput & { id: string; name: string };
 
