@@ -435,7 +435,6 @@ function ProviderKeyRow({ status }: { status: AdvisorProviderStatus }) {
   const [draft, setDraft] = useState('');
   const invalidate = () => {
     qc.invalidateQueries({ queryKey: ['ai-settings'] });
-    qc.invalidateQueries({ queryKey: ['ai-providers'] });
   };
   const save = useMutation({
     mutationFn: (key: string) => aiApi.saveProviderKey(status.id, key),

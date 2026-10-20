@@ -6,11 +6,11 @@ import os from 'node:os';
 import path from 'node:path';
 import express from 'express';
 
-// /api/ai/providers and the provider-key PUT/DELETE responses are typed on the client as
-// `AdvisorProviderStatus[]`, which carries `credential_source`. The server used to build its
-// own inline shape with `source` instead, so the first screen rendering from those responses
-// would have read every provider as "no credential found". This drives the real router and
-// asserts the wire shape is the shared one, and the same one /api/ai/settings already sends.
+// The provider-key PUT/DELETE responses and the /api/ai/settings payload are typed on the client
+// as `AdvisorProviderStatus[]`, which carries `credential_source`. The server used to build its
+// own inline shape with `source` instead, so a screen rendering from those responses would have
+// read every provider as "no credential found". This drives the real router and asserts the wire
+// shape is the shared one.
 
 // A scratch MIZAN_DIR, so the DELETE below cannot reach the owner's credential store. It has to be
 // set before anything loads db/index.ts, which freezes MIZAN_DIR at module load, and a static import
@@ -65,23 +65,19 @@ async function withServer(fn: (baseUrl: string) => Promise<void>): Promise<void>
 
 test.after(() => fs.rmSync(MIZAN_DIR, { recursive: true, force: true }));
 
-test('GET /api/ai/providers sends the shared AdvisorProviderStatus shape', async () => {
+test('GET /api/ai/settings sends providers in the shared AdvisorProviderStatus shape', async () => {
   await withEnvKeys(() =>
     withServer(async (baseUrl) => {
-      const res = await fetch(`${baseUrl}/api/ai/providers`);
+      const res = await fetch(`${baseUrl}/api/ai/settings`);
       assert.equal(res.status, 200);
-      const body = (await res.json()) as { data: { providers: Array<Record<string, unknown>> } };
-      assert.equal(body.data.providers.length, 3);
-      for (const p of body.data.providers) {
+      const body = (await res.json()) as { data: { available: { providers: Array<Record<string, unknown>> } } };
+      const providers = body.data.available.providers;
+      assert.equal(providers.length, 3);
+      for (const p of providers) {
         assert.deepEqual(Object.keys(p).sort(), ['configured', 'credential_source', 'id']);
         assert.equal(p.credential_source, 'env', `${String(p.id)} misreports an env key`);
         assert.equal(p.configured, true);
       }
-
-      const settings = (await (await fetch(`${baseUrl}/api/ai/settings`)).json()) as {
-        data: { available: { providers: unknown[] } };
-      };
-      assert.deepEqual(body.data.providers, settings.data.available.providers);
     })
   );
 });

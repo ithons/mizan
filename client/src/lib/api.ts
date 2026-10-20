@@ -881,8 +881,6 @@ export const aiApi = {
      use and whether one exists, which is all a settings screen needs to render. A key
      supplied through `.env` is not deletable from the UI, and the server says so rather than
      reporting success on a deletion the owner cannot see the effect of. */
-  listProviders: () =>
-    apiFetch<{ providers: AdvisorProviderStatus[] }>('/api/ai/providers'),
   saveProviderKey: (provider: AiProviderId, apiKey: string) =>
     apiFetch<{ providers: AdvisorProviderStatus[] }>(`/api/ai/providers/${provider}/key`, {
       method: 'PUT',

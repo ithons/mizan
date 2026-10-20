@@ -740,15 +740,6 @@ function parseProviderId(raw: unknown): AiProviderId | null {
   return AI_PROVIDER_IDS.includes(id as AiProviderId) ? (id as AiProviderId) : null;
 }
 
-// GET /api/ai/providers - which providers can be reached, and how
-router.get('/providers', (_req: Request, res: Response, next: NextFunction): void => {
-  try {
-    res.json({ data: { providers: providerStatuses() } });
-  } catch (err) {
-    next(err);
-  }
-});
-
 // PUT /api/ai/providers/:provider/key - store a key for one provider
 router.put('/providers/:provider/key', (req: Request, res: Response, next: NextFunction): void => {
   try {
