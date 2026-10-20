@@ -396,12 +396,6 @@ export interface RecurringForecast {
   net: number;
   /** Scheduled money moving out to the owner's other accounts. */
   transfers: number;
-  confirmed_income: number;
-  confirmed_bills: number;
-  likely_income: number;
-  likely_bills: number;
-  uncertain_income: number;
-  uncertain_bills: number;
   overdue_count: number;
   review_count: number;
   occurrences: RecurringForecastOccurrence[];

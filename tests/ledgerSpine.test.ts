@@ -281,12 +281,6 @@ function forecast(overrides: Partial<RecurringForecast> = {}): RecurringForecast
     bills: 64.04,
     net: 2112.68,
     transfers: 0,
-    confirmed_income: 2176.72,
-    confirmed_bills: 64.04,
-    likely_income: 0,
-    likely_bills: 0,
-    uncertain_income: 0,
-    uncertain_bills: 0,
     overdue_count: 0,
     review_count: 0,
     occurrences: [

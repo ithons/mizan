@@ -800,10 +800,7 @@ test("a pass that proposes a carve-out kind queues it and does not apply it", as
 
 // ─── The arguments say only what was checked ─────────────────────────────────
 
-test('confirming a recurring pattern moves the confidence bucket and no total the guard reads', () => {
-  // Every half of the confirm_recurring argument, because the claim used to be "confirming moves no
-  // forecast total" and buildRecurringForecast returns six bucketed totals as well as three
-  // headline ones. Confirming moves a bucket; it does not move net, income or bills.
+test('confirming a recurring pattern moves the confidence label and no total the guard reads', () => {
   const fx = setup();
   const soon = new Date(Date.now() + 5 * 86_400_000).toISOString().slice(0, 10);
   fx.db.prepare(
@@ -825,16 +822,9 @@ test('confirming a recurring pattern moves the confidence bucket and no total th
   assert.equal(after.bills, before.bills);
   assert.equal(after.income, before.income);
 
-  // What moves, and is not claimed to be invariant.
-  assert.equal(before.confirmed_bills, 0);
-  assert.equal(before.likely_bills, before.bills);
-  assert.equal(after.confirmed_bills, before.bills, 'the same money, counted in a different bucket');
-  assert.equal(after.likely_bills, 0);
-
-  // And what does not move, for the narrow reason the argument gives rather than by luck.
+  assert.ok(before.occurrences.every((o) => o.confidence_label === 'likely' && o.confidence < 1));
+  assert.ok(after.occurrences.every((o) => o.confidence_label === 'confirmed' && o.confidence === 1));
   assert.equal(after.review_count, before.review_count);
-  assert.equal(before.uncertain_bills, 0, "an unconfirmed pattern in the forecast is 'likely', never 'uncertain'");
-  assert.equal(after.uncertain_bills, 0);
 
   assert.equal(DRAFT_KIND_AUTONOMY.confirm_recurring.autonomy, 'proposal_only', 'nothing acts on any of it');
   fx.db.close();

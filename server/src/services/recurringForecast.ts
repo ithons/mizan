@@ -53,11 +53,6 @@ function confidenceLabel(confidence: number): RecurringForecastOccurrence['confi
   return 'uncertain';
 }
 
-function forecastBucket(occurrence: RecurringForecastOccurrence): 'confirmed' | 'likely' | 'uncertain' {
-  if (occurrence.is_confirmed) return 'confirmed';
-  return occurrence.confidence_label === 'likely' ? 'likely' : 'uncertain';
-}
-
 // Calendar days, not a wall-clock delta. `status` is decided by comparing date strings, so the old
 // millisecond subtraction contradicted it from local noon onward: an occurrence dated today came
 // back days_until -1 while status stayed 'upcoming', and Today's rail said "in 3d" for a bill four
@@ -92,11 +87,7 @@ function buildOccurrence(
     : expected.amount;
   const effectiveDate = parseISO(expectedDate);
   const status: RecurringForecastOccurrence['status'] = expectedDate < today ? 'overdue' : 'upcoming';
-  const needsReview = skipped
-    ? false
-    : status === 'overdue'
-      ? true
-      : !pattern.is_confirmed && confidenceLabelValue !== 'likely';
+  const needsReview = !skipped && status === 'overdue';
 
   return {
     id: `${pattern.id}:${originalDate}`,
@@ -318,29 +309,12 @@ export function buildRecurringForecast(
     occurrence.amount > 0 ? sum + occurrence.amount : sum, 0);
   const bills = counted.reduce((sum, occurrence) =>
     occurrence.amount < 0 ? sum + Math.abs(occurrence.amount) : sum, 0);
-  const bucketedTotals = {
-    confirmed_income: 0,
-    confirmed_bills: 0,
-    likely_income: 0,
-    likely_bills: 0,
-    uncertain_income: 0,
-    uncertain_bills: 0,
-  };
-
-  for (const occurrence of counted) {
-    const bucket = forecastBucket(occurrence);
-    const side = occurrence.amount > 0 ? 'income' : 'bills';
-    const key = `${bucket}_${side}` as keyof typeof bucketedTotals;
-    bucketedTotals[key] += Math.abs(occurrence.amount);
-  }
-
   return {
     days,
     income,
     bills,
     net: income - bills,
     transfers,
-    ...bucketedTotals,
     overdue_count: kept.filter((occurrence) => occurrence.status === 'overdue').length,
     review_count: kept.filter((occurrence) => occurrence.needs_review).length,
     occurrences,

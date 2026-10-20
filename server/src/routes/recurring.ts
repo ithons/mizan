@@ -46,12 +46,6 @@ function forecastToDollars(forecast: RecurringForecast): RecurringForecast {
     bills: toDollars(forecast.bills),
     net: toDollars(forecast.net),
     transfers: toDollars(forecast.transfers),
-    confirmed_income: toDollars(forecast.confirmed_income),
-    confirmed_bills: toDollars(forecast.confirmed_bills),
-    likely_income: toDollars(forecast.likely_income),
-    likely_bills: toDollars(forecast.likely_bills),
-    uncertain_income: toDollars(forecast.uncertain_income),
-    uncertain_bills: toDollars(forecast.uncertain_bills),
     occurrences: forecast.occurrences.map(occurrenceToDollars),
   };
 }

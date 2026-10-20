@@ -157,8 +157,6 @@ test('recurring forecast uses signed amounts and ignores weak patterns', (t) => 
       ['streaming', -14],
     ]
   );
-  assert.equal(forecast.confirmed_income, 2000);
-  assert.equal(forecast.confirmed_bills, 1014);
   assert.equal(forecast.review_count, 0);
 });
 
@@ -183,7 +181,6 @@ test('recurring forecast keeps one overdue occurrence visible for review', (t) =
 
   assert.equal(forecast.overdue_count, 1);
   assert.equal(forecast.review_count, 1);
-  assert.equal(forecast.likely_bills, 100);
   assert.equal(overdue?.status, 'overdue');
   assert.equal(overdue?.needs_review, true);
   assert.equal(overdue?.confidence_label, 'likely');
