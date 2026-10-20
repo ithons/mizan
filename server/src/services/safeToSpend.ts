@@ -73,9 +73,9 @@ export interface SafeToSpendBreakdown {
   allocatedBudgets: number;
   /** Money already earmarked against savings goals. */
   allocatedGoals: number;
-  /** Signed. Negative means the claims exceed the pool. */
   /** Budgets of the months after this one that fall inside the window, prorated by day. */
   budgetsAhead: number;
+  /** Signed. Negative means the claims exceed the pool. */
   free: number;
   forecastDays: number;
   /** Every dated scheduled item behind inflows, bills, transfers and card relief, as its effect on free, in cents. */

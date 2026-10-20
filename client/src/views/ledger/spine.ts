@@ -566,10 +566,7 @@ export interface ScheduledReading {
  * than a page of it, so these are sums of a complete set and not of what happened to be loaded.
  * The settled half of this screen is paged, which is exactly why it carries no totals at all.
  *
- * `net` is signed, and the two directions are different states. Re-measured on 2026-07-31 by
- * running `buildRecurringForecast(db, 30)` against a read-only copy of `.mizan/mizan.db` at
- * migration `053_drop_budget_groups.sql`: 7 occurrences from 4 distinct patterns, income
- * $2,176.72, bills $64.04, net +$2,112.68, 0 overdue.
+ * `net` is signed, and the two directions are different states.
  */
 export function readSchedule(
   forecast: RecurringForecast | undefined,
