@@ -286,7 +286,7 @@ function deleteBlockers(db: ReturnType<typeof getDb>, id: string): DeleteBlocker
   if (feedback > 0) {
     blockers.push({
       count: feedback,
-      error: `Cannot delete category: ${feedback} recorded AI decision${feedback === 1 ? '' : 's'} name${feedback === 1 ? 's' : ''} it, and deleting it would leave ${feedback === 1 ? 'that record' : 'those records'} pointing at a category that no longer exists. Merge it instead, or clear the declined suggestion${feedback === 1 ? '' : 's'} in Settings first.`,
+      error: `Cannot delete category: ${feedback} recorded AI decision${feedback === 1 ? '' : 's'} name${feedback === 1 ? 's' : ''} it, and deleting it would leave ${feedback === 1 ? 'that record' : 'those records'} pointing at a category that no longer exists. Merge it instead, or clear the declined suggestion${feedback === 1 ? '' : 's'} in Settings, under Advisor, Suggestions you turned down, first.`,
     });
   }
 

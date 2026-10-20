@@ -655,7 +655,6 @@ export function AdvisorModelPanel({ open, onToggle }: { open: boolean; onToggle:
 }
 
 export function Settings() {
-  const { addToast } = useAppStore();
   const [searchParams] = useSearchParams();
   const [openPanel, setOpenPanel] = useState<PanelId>(null);
   const [advisorOpen, setAdvisorOpen] = useState(false);
@@ -670,7 +669,7 @@ export function Settings() {
     else if (section === 'coinbase') setOpenPanel('coinbase');
     else if (section === 'data' || section === 'import') setOpenPanel('import');
     else if (section === 'notifications') setOpenPanel('notifications');
-    // The category delete refusal names this panel, so it has to be linkable by name.
+    // The category delete refusal names this panel.
     else if (section === 'ai_declined') setOpenPanel('ai_declined');
   }, [searchParams]);
 
@@ -686,16 +685,6 @@ export function Settings() {
   const autonomyStatus = autonomyQuery.isError
     ? { sub: 'The boundary could not be read from the server, so nothing here states it.', trailing: 'Unknown' }
     : { sub: 'Reading the boundary from the server…', trailing: 'Reading' };
-  const backup = useMutation({
-    mutationFn: () => settingsApi.exportBackupJson(),
-    onSuccess: () => addToast({ type: 'success', message: 'Backup downloaded' }),
-    onError: (err: Error) => addToast({ type: 'error', message: err.message }),
-  });
-  const exportCsv = useMutation({
-    mutationFn: () => settingsApi.exportCsv(),
-    onSuccess: () => addToast({ type: 'success', message: 'CSV exported' }),
-    onError: (err: Error) => addToast({ type: 'error', message: err.message }),
-  });
 
   const simplefinAccounts = (accounts ?? []).filter((a) => a.connection_type === 'simplefin').length;
   const coinbaseAccounts = (accounts ?? []).filter((a) => a.connection_type === 'coinbase').length;
@@ -766,22 +755,11 @@ export function Settings() {
             }
             trailing={statusText(Boolean(credentials?.coinbase))}
             onClick={() => toggle('coinbase')}
+            last={openPanel !== 'coinbase'}
           />
           {openPanel === 'coinbase' && (
             <ExpandedPanel>
               <CoinbaseSection />
-            </ExpandedPanel>
-          )}
-          <SettingsRow
-            title="CSV import"
-            sub="For accounts not covered above"
-            trailing={<span className="text-muted">Import</span>}
-            onClick={() => toggle('import')}
-            last
-          />
-          {openPanel === 'import' && (
-            <ExpandedPanel>
-              <DataSection />
             </ExpandedPanel>
           )}
         </div>
@@ -897,17 +875,17 @@ export function Settings() {
         <div>
           <SectionLabel className="mb-1.5">Data</SectionLabel>
           <SettingsRow
-            title="Local backup"
-            sub="Full JSON snapshot of the database"
-            trailing={<span className="text-muted">{backup.isPending ? 'Backing up…' : 'Back up now'}</span>}
-            onClick={() => backup.mutate()}
+            title="Import, export and backup"
+            sub="CSV import and export, backup and restore, reconstructed history, data quality, sync activity, delete all data"
+            trailing={<span className="text-muted">{openPanel === 'import' ? 'Hide' : 'Open'}</span>}
+            onClick={() => toggle('import')}
+            last={openPanel !== 'import'}
           />
-          <SettingsRow
-            title="Export all data"
-            trailing={<span className="text-muted">{exportCsv.isPending ? 'Exporting…' : 'CSV'}</span>}
-            onClick={() => exportCsv.mutate()}
-            last
-          />
+          {openPanel === 'import' && (
+            <ExpandedPanel>
+              <DataSection />
+            </ExpandedPanel>
+          )}
         </div>
 
         <div className="mt-8 text-note leading-relaxed text-muted-2">

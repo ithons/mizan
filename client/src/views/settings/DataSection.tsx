@@ -432,7 +432,7 @@ export function DataSection() {
                 className="flex items-center gap-2 rounded-lg border border-pill-border bg-pill-bg px-4 py-2 text-body-lg text-muted transition-colors hover:text-ink"
                 onClick={handleCsvExport}
               >
-                <Download size={14} /> Export CSV
+                <Download size={14} /> Export transactions CSV
               </button>
               <button
                 className="flex items-center gap-2 rounded-lg border border-pill-border bg-pill-bg px-4 py-2 text-body-lg text-muted transition-colors hover:text-ink"
@@ -691,5 +691,3 @@ export function DataSection() {
     </div>
   );
 }
-
-// ─── About Section ────────────────────────────────────────────────────────────
