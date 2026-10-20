@@ -791,6 +791,27 @@ test('HEALTHY: a queue holding only a budget proposal does not call the reports 
   assert.equal(issues[0].message, '1 AI suggestion is waiting for review.');
 });
 
+test('an open reimbursement link counts as work that moves reports, because confirming it refiles and redates the refund', (t) => {
+  const db = freshlySyncedDb();
+  t.after(() => db.close());
+
+  const checking = insertAccount(db, { account_name: 'Checking', current_balance: 300000 });
+  const purchase = insertTransaction(db, { account_id: checking, date: daysAgo(5), amount: -6000, category_id: 'cat_food' });
+  const zelle = insertTransaction(db, { account_id: checking, date: daysAgo(2), amount: 3000, category_id: 'cat_food' });
+  db.prepare(`
+    INSERT INTO advisor_drafts (id, kind, label, summary, route, payload, changes, citations, status, created_at, updated_at)
+    VALUES ('draft_link', 'link_reimbursement', 'Link', 'Link this payback', '/ledger', ?, '[]', '[]', 'open', ?, ?)
+  `).run(
+    JSON.stringify({ kind: 'link_reimbursement', reimbursement_id: zelle, purchase_id: purchase }),
+    TODAY.toISOString(),
+    TODAY.toISOString()
+  );
+
+  const issues = getDataQualitySummary(db).issues;
+  assert.equal(issues.length, 1);
+  assert.equal(issues[0].message, '1 AI suggestion needs review before reports can be fully trusted.');
+});
+
 test('a backlog that does move reports keeps the reports clause, and names the rest apart from it', (t) => {
   const db = freshlySyncedDb();
   t.after(() => db.close());

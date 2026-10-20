@@ -155,8 +155,9 @@ const QUEUES_THAT_MOVE_REPORTS: ReadonlySet<string> = new Set([
 ]);
 
 /**
- * Which draft kinds write a transaction's category, declared over the whole union so a new kind is
- * a compile error until someone decides. `ai_insights` counts every open draft whatever its kind,
+ * Which draft kinds move a report figure (a row's category or its report month), declared over the
+ * whole union so a new kind is a compile error until someone decides. A reimbursement link does
+ * both: the refund takes the purchase's category and is reported in the purchase's month. `ai_insights` counts every open draft whatever its kind,
  * and a queue holding one `update_budget` draft on a fully categorized ledger used to read
  * "before reports can be fully trusted". A retirement is false because the model may only retire a
  * rule that files zero rows (draftAutonomy.ts), so no current figure moves when it lands.
@@ -174,7 +175,7 @@ const DRAFT_KIND_MOVES_REPORTS: Readonly<Record<AdvisorDraftActionKind, boolean>
   delete_budget: false,
   create_goal: false,
   dismiss_recurring: false,
-  link_reimbursement: false,
+  link_reimbursement: true,
   update_account: false,
   set_notification_rule: false,
   delete_notification_rule: false,
