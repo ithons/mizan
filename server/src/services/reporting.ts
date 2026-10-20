@@ -21,18 +21,13 @@ import {
 } from 'date-fns';
 import type {
   CashflowReport,
-  ReportDrilldown,
   ReportCategoryChange,
   ReportComparisonMode,
-  ReportEvidenceDrilldown,
-  ReportEvidenceKind,
   ReportExcludedFlowSummary,
   ReportMetricSummary,
   NullableMetricSummary,
-  ReportNetWorthEvidence,
   ReportSummary,
   SpendingReport,
-  NetWorthSnapshot,
   NetWorthAttribution,
   TopMerchantsReport,
 } from '../../../shared/types';
@@ -51,25 +46,6 @@ interface ReportDateRange {
 
 interface SpendingReportOptions extends ReportDateRange {
   parentOnly?: boolean;
-}
-
-interface ReportDrilldownOptions extends ReportDateRange {
-  kind: 'spending' | 'income';
-  categoryId: string;
-}
-
-interface ReportEvidenceOptions extends ReportDateRange {
-  kind: ReportEvidenceKind;
-  month?: string;
-  flowType?: ReportExcludedFlowSummary['flow_type'];
-}
-
-interface NetWorthEvidenceAccountRow {
-  id: string;
-  account_name: string | null;
-  institution_name: string | null;
-  type: string | null;
-  is_liability: number | null;
 }
 
 export interface TrendReport {
@@ -321,12 +297,6 @@ function excludedFlowType(rootId: string): ReportExcludedFlowSummary['flow_type'
   return 'transfers';
 }
 
-function rootIdsForFlowType(flowType: ReportExcludedFlowSummary['flow_type']): string[] {
-  if (flowType === 'investments') return ['cat_inv'];
-  if (flowType === 'crypto') return ['cat_crypto'];
-  return ['cat_xfer'];
-}
-
 export function getCashflowReport(
   db: Database.Database,
   range: ReportDateRange
@@ -570,12 +540,6 @@ export function getIncomeReport(
   };
 }
 
-function categoryName(db: Database.Database, categoryId: string): string {
-  if (categoryId === 'uncategorized') return 'Uncategorized';
-  const row = db.prepare('SELECT name FROM categories WHERE id = ?').get(categoryId) as { name: string } | undefined;
-  return row?.name ?? 'Unknown category';
-}
-
 function childrenByParent(db: Database.Database): Map<string, string[]> {
   const rows = db.prepare('SELECT id, parent_id FROM categories').all() as Array<{
     id: string;
@@ -598,61 +562,6 @@ function collectDescendants(children: Map<string, string[]>, categoryId: string)
     childId,
     ...collectDescendants(children, childId),
   ]);
-}
-
-export function getReportDrilldown(
-  db: Database.Database,
-  options: ReportDrilldownOptions
-): ReportDrilldown {
-  const { conditions, params } = dateConditions(options);
-  const categoryParams: unknown[] = [];
-
-  if (options.kind === 'spending') {
-    conditions.push(expenseCategoryCondition());
-  } else {
-    conditions.push(incomeCategoryCondition());
-  }
-
-  if (options.categoryId === 'uncategorized') {
-    conditions.push('t.category_id IS NULL');
-  } else {
-    const categoryIds = [
-      options.categoryId,
-      ...collectDescendants(childrenByParent(db), options.categoryId),
-    ];
-    conditions.push(`t.category_id IN (${categoryIds.map(() => '?').join(',')})`);
-    categoryParams.push(...categoryIds);
-  }
-
-  const rows = db.prepare(`
-    ${excludedCategoriesCte()}
-    SELECT
-      t.*,
-      c.name AS category_name,
-      c.color AS category_color,
-      c.icon AS category_icon,
-      a.account_name,
-      a.institution_name
-    FROM transactions t
-    LEFT JOIN categories c ON c.id = t.category_id
-    LEFT JOIN accounts a ON a.id = t.account_id
-    WHERE ${conditions.join(' AND ')}
-    ORDER BY t.date DESC, t.created_at DESC
-  `).all(...excludedCategoryParams(), ...params, ...categoryParams) as ReportDrilldown['transactions'];
-
-  const total = rows.reduce((sum, transaction) =>
-    sum + (options.kind === 'spending' ? Math.abs(transaction.amount) : transaction.amount), 0);
-
-  return {
-    kind: options.kind,
-    category_id: options.categoryId,
-    category_name: categoryName(db, options.categoryId),
-    start_date: options.startDate,
-    end_date: options.endDate,
-    total,
-    count: rows.length,
-    transactions: rows,
-  };
 }
 
 export function getSpendingTrendsReport(
@@ -748,205 +657,6 @@ export function getSpendingTrendsReport(
       color: series.color,
       values: months.map((month) => series.valuesByMonth.get(month) ?? 0),
     })),
-  };
-}
-
-function transactionEvidenceSelect(): string {
-  return `
-    SELECT
-      t.*,
-      c.name AS category_name,
-      c.color AS category_color,
-      c.icon AS category_icon,
-      a.account_name,
-      a.institution_name
-    FROM transactions t
-    LEFT JOIN categories c ON c.id = t.category_id
-    LEFT JOIN accounts a ON a.id = t.account_id
-  `;
-}
-
-function evidenceTotals(rows: ReportEvidenceDrilldown['transactions']): Pick<
-  ReportEvidenceDrilldown,
-  'income' | 'expenses' | 'net' | 'total' | 'count'
-> {
-  const income = rows.reduce((sum, transaction) => sum + (transaction.amount > 0 ? transaction.amount : 0), 0);
-  const expenses = rows.reduce((sum, transaction) => sum + (transaction.amount < 0 ? Math.abs(transaction.amount) : 0), 0);
-  const net = rows.reduce((sum, transaction) => sum + transaction.amount, 0);
-
-  return {
-    income,
-    expenses,
-    net,
-    total: income + expenses,
-    count: rows.length,
-  };
-}
-
-function monthRangeFromYearMonth(month: string): ReportDateRange | null {
-  if (!/^\d{4}-\d{2}$/.test(month)) return null;
-
-  const monthStart = parseISO(`${month}-01`);
-  if (Number.isNaN(monthStart.getTime())) return null;
-
-  return {
-    startDate: format(startOfMonth(monthStart), 'yyyy-MM-dd'),
-    endDate: format(endOfMonth(monthStart), 'yyyy-MM-dd'),
-  };
-}
-
-function getCashflowEvidence(
-  db: Database.Database,
-  options: ReportEvidenceOptions
-): ReportEvidenceDrilldown {
-  const monthRange = options.month ? monthRangeFromYearMonth(options.month) : null;
-  const range = monthRange ?? { startDate: options.startDate, endDate: options.endDate };
-  const { conditions, params } = dateConditions(range);
-  conditions.push(`(
-    ${incomeCategoryCondition()}
-    OR ${expenseCategoryCondition()}
-  )`);
-
-  const rows = db.prepare(`
-    ${excludedCategoriesCte()}
-    ${transactionEvidenceSelect()}
-    WHERE ${conditions.join(' AND ')}
-    ORDER BY t.date DESC, t.created_at DESC
-  `).all(...excludedCategoryParams(), ...params) as ReportEvidenceDrilldown['transactions'];
-
-  return {
-    kind: 'cashflow_month',
-    label: options.month ? `Cash flow for ${options.month}` : 'Cash flow',
-    start_date: range.startDate,
-    end_date: range.endDate,
-    month: options.month,
-    ...evidenceTotals(rows),
-    transactions: rows,
-  };
-}
-
-function getExcludedFlowEvidence(
-  db: Database.Database,
-  options: ReportEvidenceOptions
-): ReportEvidenceDrilldown {
-  const flowType = options.flowType ?? 'transfers';
-  const rootIds = rootIdsForFlowType(flowType);
-  const { conditions, params } = dateConditions(options);
-  conditions.push(`excluded.root_id IN (${rootIds.map(() => '?').join(',')})`);
-  params.push(...rootIds);
-
-  const rows = db.prepare(`
-    ${excludedCategoriesWithRootCte()}
-    ${transactionEvidenceSelect()}
-    JOIN excluded_report_categories excluded ON excluded.id = t.category_id
-    WHERE ${conditions.join(' AND ')}
-    ORDER BY t.date DESC, t.created_at DESC
-  `).all(...excludedCategoryParams(), ...params) as ReportEvidenceDrilldown['transactions'];
-
-  return {
-    kind: 'excluded_flow',
-    label: `Excluded ${flowType}`,
-    start_date: options.startDate,
-    end_date: options.endDate,
-    flow_type: flowType,
-    ...evidenceTotals(rows),
-    transactions: rows,
-  };
-}
-
-export function getReportEvidenceDrilldown(
-  db: Database.Database,
-  options: ReportEvidenceOptions
-): ReportEvidenceDrilldown {
-  if (options.kind === 'cashflow_month') {
-    return getCashflowEvidence(db, options);
-  }
-
-  return getExcludedFlowEvidence(db, options);
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-
-function parseNetWorthBreakdown(value: string): Record<string, number> {
-  try {
-    const parsed: unknown = JSON.parse(value);
-    if (!isRecord(parsed)) return {};
-
-    return Object.fromEntries(
-      Object.entries(parsed).filter((entry): entry is [string, number] => typeof entry[1] === 'number')
-    );
-  } catch {
-    return {};
-  }
-}
-
-function getSnapshotAccounts(
-  db: Database.Database,
-  snapshot: NetWorthSnapshot
-): ReportNetWorthEvidence['accounts'] {
-  const breakdown = parseNetWorthBreakdown(snapshot.breakdown);
-  const accountIds = Object.keys(breakdown);
-  if (accountIds.length === 0) return [];
-
-  const rows = db.prepare(`
-    SELECT id, account_name, institution_name, type, is_liability
-    FROM accounts
-    WHERE id IN (${accountIds.map(() => '?').join(',')})
-  `).all(...accountIds) as NetWorthEvidenceAccountRow[];
-  const accountRows = new Map(rows.map((row) => [row.id, row]));
-
-  return accountIds
-    .map((accountId) => {
-      const account = accountRows.get(accountId);
-      return {
-        account_id: accountId,
-        account_name: account?.account_name ?? null,
-        institution_name: account?.institution_name ?? null,
-        type: account?.type ?? null,
-        is_liability: account?.is_liability == null ? null : account.is_liability === 1,
-        balance: breakdown[accountId] ?? 0,
-      };
-    })
-    .sort((a, b) => {
-      const liabilityRank = Number(a.is_liability ?? false) - Number(b.is_liability ?? false);
-      if (liabilityRank !== 0) return liabilityRank;
-      return Math.abs(b.balance) - Math.abs(a.balance);
-    });
-}
-
-export function getReportNetWorthEvidence(
-  db: Database.Database,
-  snapshotId: string
-): ReportNetWorthEvidence | null {
-  const snapshot = db.prepare(`
-    SELECT * FROM net_worth_snapshots
-    WHERE id = ?
-  `).get(snapshotId) as NetWorthSnapshot | undefined;
-
-  if (!snapshot) return null;
-
-  const previousSnapshot = db.prepare(`
-    SELECT * FROM net_worth_snapshots
-    WHERE date < ? AND is_estimated = 0
-    ORDER BY date DESC
-    LIMIT 1
-  `).get(snapshot.date) as NetWorthSnapshot | undefined;
-
-  // Snapshots, deltas, and account balances all stay in cents; routes/reports.ts
-  // dollarizes the snapshot money columns, the breakdown JSON, and these deltas.
-  const accounts = getSnapshotAccounts(db, snapshot);
-
-  return {
-    kind: 'networth_snapshot',
-    label: `Net worth on ${snapshot.date}`,
-    snapshot,
-    previous_snapshot: previousSnapshot ?? null,
-    delta: previousSnapshot ? snapshot.net_worth - previousSnapshot.net_worth : null,
-    asset_delta: previousSnapshot ? snapshot.total_assets - previousSnapshot.total_assets : null,
-    liability_delta: previousSnapshot ? snapshot.total_liabilities - previousSnapshot.total_liabilities : null,
-    accounts,
   };
 }
 

@@ -1333,54 +1333,6 @@ export interface ReportSummary {
   excluded_flows: ReportExcludedFlowSummary[];
 }
 
-export interface ReportDrilldown {
-  kind: 'spending' | 'income';
-  category_id: string;
-  category_name: string;
-  start_date?: string;
-  end_date?: string;
-  total: number;
-  count: number;
-  transactions: Transaction[];
-}
-
-export type ReportEvidenceKind = 'cashflow_month' | 'excluded_flow';
-
-export interface ReportEvidenceDrilldown {
-  kind: ReportEvidenceKind;
-  label: string;
-  start_date?: string;
-  end_date?: string;
-  month?: string;
-  flow_type?: ReportExcludedFlowSummary['flow_type'];
-  income: number;
-  expenses: number;
-  net: number;
-  total: number;
-  count: number;
-  transactions: Transaction[];
-}
-
-export interface ReportNetWorthEvidenceAccount {
-  account_id: string;
-  account_name: string | null;
-  institution_name: string | null;
-  type: string | null;
-  is_liability: boolean | null;
-  balance: number;
-}
-
-export interface ReportNetWorthEvidence {
-  kind: 'networth_snapshot';
-  label: string;
-  snapshot: NetWorthSnapshot;
-  previous_snapshot: NetWorthSnapshot | null;
-  delta: number | null;
-  asset_delta: number | null;
-  liability_delta: number | null;
-  accounts: ReportNetWorthEvidenceAccount[];
-}
-
 export interface TopMerchant {
   merchant: string;
   transaction_count: number;

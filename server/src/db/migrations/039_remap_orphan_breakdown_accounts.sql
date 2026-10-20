@@ -7,8 +7,8 @@
 -- snapshots reference accounts that no longer exist, holding up to $209.19 each, while the
 -- surviving Coinbase account reads $0 in every one of them.
 --
--- reporting.ts joins those ids back to `accounts` (getNetWorthAttribution,
--- getReportNetWorthEvidence). A miss renders as account_name: null, and because the other side
+-- reporting.ts joins those ids back to `accounts` (getNetWorthAttribution). A miss renders as
+-- account_name: null, and because the other side
 -- of the diff treats an absent id as 0, each ghost reports its whole balance as a movement. The
 -- "what moved net worth" panel attributes real dollars to seven nameless rows.
 --
