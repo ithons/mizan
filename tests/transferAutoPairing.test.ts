@@ -389,3 +389,15 @@ test('HEALTHY: when neither names an institution the two stay unpaired rather th
   assert.equal(partnerOf(db, toCash), null);
   assert.equal(partnerOf(db, toBroker), null);
 });
+
+test('two identical same-day payments with different references both pair, whichever partner each takes', () => {
+  const db = migratedTestDb();
+  const savings = insertAccount(db, { account_name: 'Savings', type: 'savings' });
+  const card = insertAccount(db, { account_name: 'Card', type: 'credit', is_liability: 1 });
+  const outs = ['Confirmation# 1111111111', 'Confirmation# 2222222222'].map((ref) =>
+    insertTransaction(db, { account_id: savings, date: '2024-06-26', amount: -48735, original_name: `Online Banking payment to CRD 9999 ${ref}` }));
+  const ins = ['REF 0001', 'REF 0002'].map((ref) =>
+    insertTransaction(db, { account_id: card, date: '2024-06-26', amount: 48735, original_name: `Online payment from SAV 9999 ${ref}` }));
+  refreshTransferCandidates(db);
+  for (const id of [...outs, ...ins]) assert.notEqual(partnerOf(db, id), null);
+});
