@@ -4,6 +4,7 @@ import Database from 'better-sqlite3';
 import { addMonths, format, subDays, subMonths } from 'date-fns';
 import { _setDbForTesting } from '../server/src/db/index';
 import { bigramLength, detectRecurring, recentSignedAmounts } from '../server/src/services/recurring';
+import { buildRecurringForecast } from '../server/src/services/recurringForecast';
 import { compareTwoStrings } from 'string-similarity';
 import { insertAccount, insertTransaction, migratedTestDb } from './helpers/schema';
 
@@ -697,6 +698,74 @@ test('HEALTHY: a stale-retired pattern with no new charge is left exactly as it 
 
     // No write at all, not a reactivate-then-retire flip inside one pass that only updated_at shows.
     assert.deepEqual(patternFor(db, 'netflix'), before);
+  } finally {
+    teardown(db);
+  }
+});
+
+/** The live shape: a dividend pattern detected before brokerage rows left the pool, still active and linked. */
+function seedBrokerageDividendPattern(db: Database.Database, options: { confirmed?: boolean } = {}): string {
+  const fidelity = insertAccount(db, { account_name: 'Fidelity Individual', type: 'brokerage' });
+  const next = format(subDays(new Date(), -10), 'yyyy-MM-dd');
+  db.prepare(`
+    INSERT INTO recurring_patterns (id, merchant_name, average_amount, frequency, last_seen, next_expected,
+      is_active, is_confirmed, transaction_count, created_at, updated_at)
+    VALUES ('rp_dividend', 'dividend', 5, 'monthly', ?, ?, 1, ?, 6, '2026-10-15T22:38:25Z', '2026-10-15T22:38:25Z')
+  `).run(format(subDays(new Date(), 20), 'yyyy-MM-dd'), next, options.confirmed ? 1 : 0);
+  for (let month = 6; month >= 1; month--) {
+    const id = insertTransaction(db, {
+      account_id: fidelity,
+      date: format(subMonths(subDays(new Date(), 20), month - 1), 'yyyy-MM-dd'),
+      amount: 5,
+      merchant_name: 'Dividend',
+      original_name: 'DIVIDEND RECEIVED FIDELITY GOVERNMENT MONEY MARKET (SPAXX)',
+      category_id: 'cat_income_other',
+    });
+    db.prepare("UPDATE transactions SET recurring_id = 'rp_dividend' WHERE id = ?").run(id);
+  }
+  return fidelity;
+}
+
+test('a flow pattern built only from rows detection no longer reads is retired and forecasts nothing', () => {
+  const db = setupDb();
+  try {
+    seedBrokerageDividendPattern(db);
+    assert.ok(buildRecurringForecast(db, 30).occurrences.some((o) => o.pattern_id === 'rp_dividend'), 'the fixture must forecast first');
+
+    detectRecurring();
+
+    assert.equal(patternFor(db, 'dividend'), undefined);
+    assert.equal((db.prepare("SELECT COUNT(*) AS n FROM transactions WHERE recurring_id = 'rp_dividend'").get() as { n: number }).n, 0);
+    assert.ok(!buildRecurringForecast(db, 30).occurrences.some((o) => o.pattern_id === 'rp_dividend'));
+  } finally {
+    teardown(db);
+  }
+});
+
+test('HEALTHY: a confirmed pattern on brokerage rows is the owner\'s, and is left alone', () => {
+  const db = setupDb();
+  try {
+    seedBrokerageDividendPattern(db, { confirmed: true });
+    detectRecurring();
+    assert.equal(patternFor(db, 'dividend')?.is_active, 1);
+    assert.equal((db.prepare("SELECT COUNT(*) AS n FROM transactions WHERE recurring_id = 'rp_dividend'").get() as { n: number }).n, 6);
+  } finally {
+    teardown(db);
+  }
+});
+
+test('HEALTHY: a checking-account pattern survives the sweep untouched', () => {
+  const db = setupDb();
+  try {
+    seedSeries(db, 'Spotify', -1199, 30, 6, { categoryId: 'cat_ent_streaming' });
+    detectRecurring();
+    const before = patternFor(db, 'spotify');
+    assert.ok(before, 'detection never found the pattern, so this test proves nothing');
+    assert.equal(before.is_active, 1);
+
+    detectRecurring();
+    assert.deepEqual(patternFor(db, 'spotify'), before);
+    assert.deepEqual(linkedTo(db, 'Spotify'), Array(6).fill(before.id));
   } finally {
     teardown(db);
   }

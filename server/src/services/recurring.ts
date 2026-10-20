@@ -513,6 +513,44 @@ function cadenceOf(txns: ReadonlyArray<{ date: string; amount: number }>): Caden
   return { frequency, medianGap, amountVariance };
 }
 
+/**
+ * Which rows detection may build a flow pattern from. Shared with the sweep below, so a change to
+ * the pool also retires the patterns it strands: 47fa04c excluded brokerage rows here and left the
+ * brokerage dividend pattern it had created minutes earlier forecasting income for six weeks.
+ */
+function inDetectionPoolSql(t = 't', a = 'a'): string {
+  return `${t}.pending = 0
+      AND ${excludedFromTotalsSql(t)}
+      AND COALESCE(${t}.category_id, '') NOT LIKE 'cat_xfer%'
+      -- What happens inside a brokerage or wallet (a dividend, a reinvestment) never reaches the
+      -- cash the forecast is about.
+      AND ${a}.type NOT IN (${[...MARKET_DRIVEN_TYPES].map((type) => `'${type}'`).join(', ')})`;
+}
+
+/**
+ * Unlink and retire every unconfirmed, undismissed flow pattern none of whose rows is in the pool,
+ * so the stranded-pattern delete below removes it. A confirmed pattern is the owner's decision.
+ */
+function retirePatternsOutsidePool(db: Database.Database): number {
+  const stranded = db.prepare(`
+    SELECT rp.id FROM recurring_patterns rp
+    WHERE rp.kind = 'flow' AND rp.is_confirmed = 0 AND rp.dismissed_at IS NULL
+      AND EXISTS (SELECT 1 FROM transactions t WHERE t.recurring_id = rp.id)
+      AND NOT EXISTS (
+        SELECT 1 FROM transactions t JOIN accounts a ON a.id = t.account_id
+        WHERE t.recurring_id = rp.id AND ${inDetectionPoolSql('t', 'a')}
+      )
+  `).all() as Array<{ id: string }>;
+  const now = new Date().toISOString();
+  const unlink = db.prepare('UPDATE transactions SET recurring_id = NULL, updated_at = ? WHERE recurring_id = ?');
+  const retire = db.prepare('UPDATE recurring_patterns SET is_active = 0, updated_at = ? WHERE id = ?');
+  for (const { id } of stranded) {
+    unlink.run(now, id);
+    retire.run(now, id);
+  }
+  return stranded.length;
+}
+
 export function detectRecurring(): void {
   const db = getDb();
   const cutoff = format(subMonths(new Date(), 13), 'yyyy-MM-dd');
@@ -542,15 +580,10 @@ export function detectRecurring(): void {
     FROM transactions t
     JOIN accounts a ON a.id = t.account_id
     LEFT JOIN categories c ON c.id = t.category_id
-    WHERE t.pending = 0
-      AND t.date >= ?
-      AND ${excludedFromTotalsSql('t')}
-      AND COALESCE(t.category_id, '') NOT LIKE 'cat_xfer%'
-      -- What happens inside a brokerage or wallet (a dividend, a reinvestment) never reaches the
-      -- cash the forecast is about.
-      AND a.type NOT IN (${[...MARKET_DRIVEN_TYPES].map(() => '?').join(', ')})
+    WHERE t.date >= ?
+      AND ${inDetectionPoolSql('t', 'a')}
     ORDER BY t.date ASC
-  `).all(cutoff, ...MARKET_DRIVEN_TYPES) as TxnRow[];
+  `).all(cutoff) as TxnRow[];
 
   // 2. Group by normalized merchant name
   const groups = new Map<
@@ -749,6 +782,11 @@ export function detectRecurring(): void {
   }
 
   detectRecurringTransfers(db, cutoff, today, known);
+
+  const outsidePool = retirePatternsOutsidePool(db);
+  if (outsidePool > 0) {
+    console.log(`[recurring] Retired ${outsidePool} pattern(s) built from rows detection no longer reads.`);
+  }
 
   // 6. Deactivate stale patterns
   const allPatterns = db.prepare(`

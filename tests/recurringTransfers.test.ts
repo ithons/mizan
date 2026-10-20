@@ -57,6 +57,21 @@ test('the weekly contribution is a schedule out of checking at its current size'
   });
 });
 
+test('HEALTHY: a transfer pattern, built from rows outside the flow pool, survives the next pass', () => {
+  withDb((db) => {
+    seedWeeklyContribution(db);
+    detectRecurring();
+    const first = db.prepare("SELECT id, is_active FROM recurring_patterns WHERE kind = 'transfer'").get() as { id: string; is_active: number };
+    const linked = () => (db.prepare('SELECT COUNT(*) AS n FROM transactions WHERE recurring_id = ?').get(first.id) as { n: number }).n;
+    const before = linked();
+    assert.ok(before > 0, 'the fixture must link rows to the transfer pattern');
+
+    detectRecurring();
+    assert.deepEqual(db.prepare("SELECT id, is_active FROM recurring_patterns WHERE kind = 'transfer'").get(), first);
+    assert.equal(linked(), before);
+  });
+});
+
 test('a scheduled transfer is an outflow from its account and neither income nor a bill', () => {
   withDb((db) => {
     seedWeeklyContribution(db);
