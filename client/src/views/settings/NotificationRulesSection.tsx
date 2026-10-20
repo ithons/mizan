@@ -19,7 +19,7 @@ const KIND_LABEL: Record<NotificationRuleKind, string> = {
   large_transaction: 'Large charge',
   bill_due: 'Bill due',
   low_balance: 'Low balance',
-  safe_to_spend_negative: 'Short this month',
+  safe_to_spend_negative: 'Short over the forecast window',
   sync_failed: 'Sync failed',
   goal_milestone: 'Goal milestone',
   unusual_spending: 'Unusual spending',

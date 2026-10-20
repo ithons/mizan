@@ -39,13 +39,13 @@ export function readCardCredit(accounts: Account[]): CardCreditReading {
 /**
  * The two directions of `free`, as words.
  *
- * Hazard 4: `free` is signed since the liability sign was fixed, and "short this month" and "free
- * to spend" are two states rather than one number in red. `Figure` renders the MAGNITUDE plus the
+ * Hazard 4: `free` is signed since the liability sign was fixed, and "short across the window" and
+ * "free to spend" are two states rather than one number in red. `Figure` renders the MAGNITUDE plus the
  * word, so the sign is spent on the reading instead of being a mark the eye skips.
  */
 export const FREE_STATES: FigureStates = {
   positive: 'free to spend',
-  negative: 'short this month',
+  negative: 'short across the window',
   zero: 'exactly level',
 };
 

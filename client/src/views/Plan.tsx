@@ -37,6 +37,11 @@ import { carryoverBudgetPhrase, claimLines, uncountedHeadroom } from './plan/rea
  * still gets a full sheet with two invitations on it instead of a blank screen with two buttons.
  */
 
+/** "Free to spend" names no window; a shortfall does, and the sheet's window runs into next month. */
+function freeLabel(sheet: SafeToSpend): string {
+  return sheet.free >= 0 ? 'Free to spend' : `Short over the next ${sheet.forecast_days} days`;
+}
+
 /** The claim sheet always reads the CURRENT month; the budget list can be stepped backward. */
 function currentMonthKey(): string {
   return format(new Date(), 'yyyy-MM');
@@ -72,7 +77,7 @@ export function ClaimSheet({
     <Card padding="lg" elevation={2} className="mb-9">
       <Figure
         scale="subject"
-        label={sheet.free >= 0 ? 'Free to spend' : 'Short this month'}
+        label={freeLabel(sheet)}
         value={sheet.free}
         states={{
           positive: 'left after every claim already made',
@@ -128,7 +133,7 @@ export function ClaimSheet({
           a statement does, so nothing below can be mistaken for another term of the sum. */}
       <div className="mt-1 border-t border-line-3 pt-2.5">
         <div className="flex items-baseline justify-between gap-4 border-b-[3px] border-double border-line-3 pb-2.5">
-          <span className="text-body-lg text-ink">{sheet.free >= 0 ? 'Free to spend' : 'Short this month'}</span>
+          <span className="text-body-lg text-ink">{freeLabel(sheet)}</span>
           <span
             className={`font-serif text-figure tabular-nums ${sheet.free >= 0 ? 'text-sage-deep' : 'text-clay'}`}
           >

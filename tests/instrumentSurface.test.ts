@@ -81,7 +81,7 @@ test('having room and being short are two states, not one figure in a different 
   // And the word under the numeral differs, through the primitive that owns that rule.
   assert.notEqual(readState(room.kind === 'free' ? room.value : 0, FREE_STATES), readState(-1, FREE_STATES));
   assert.equal(readState(191.23, FREE_STATES), 'free to spend');
-  assert.equal(readState(-1427.96, FREE_STATES), 'short this month');
+  assert.equal(readState(-1427.96, FREE_STATES), 'short across the window');
   assert.equal(readState(0, FREE_STATES), 'exactly level');
 });
 

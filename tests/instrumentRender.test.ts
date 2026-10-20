@@ -20,7 +20,7 @@ test('the surface renders with room to spend, and the subject figure is what is 
   // Hazard 4, the positive state. The magnitude and the word, never a signed figure in a slot.
   assert.match(body, /\$191\.23/);
   assert.match(body, /free to spend/);
-  assert.doesNotMatch(body, /short this month/);
+  assert.doesNotMatch(body, /short across the window/);
   assert.doesNotMatch(body, /−\$191\.23/, 'the direction is carried by the word, not by a sign');
 
   // Net worth is present and is not the subject.
@@ -34,7 +34,7 @@ test('the surface renders with room to spend, and the subject figure is what is 
 test('the surface renders when the owner is short, and reads differently', () => {
   const body = text(render('this-month', { safeToSpend: { ...SAFE_TO_SPEND, free: -1427.96 } }));
 
-  assert.match(body, /short this month/);
+  assert.match(body, /short across the window/);
   assert.doesNotMatch(body, /free to spend/);
   assert.match(body, /\$1,427\.96/);
   assert.doesNotMatch(body, /−\$1,427\.96/, 'the magnitude is printed; the state is a word');

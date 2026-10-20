@@ -485,3 +485,17 @@ test('a card paid from outside the pool shows as its own line, not as a transfer
   assert.ok(!lines.some((line) => line.label === 'Scheduled transfers in'));
   assert.equal(lines.reduce((sum, line) => sum + line.delta, 0), claimLines({ ...SHEET, card_relief: 0 }, 1, 1).reduce((sum, line) => sum + line.delta, 0) + 600);
 });
+
+describe('a shortfall names the window it was measured over', () => {
+  test('short reads as the sheet window, never as this month', () => {
+    const body = text(render({ sheet: { ...SHEET, free: -1408.62, forecast_days: 30 } }));
+    assert.match(body, /Short over the next 30 days/);
+    assert.doesNotMatch(body, /Short this month/i);
+  });
+
+  test('HEALTHY: room to spend names no window at all', () => {
+    const body = text(render({ sheet: SHEET }));
+    assert.match(body, /Free to spend/);
+    assert.doesNotMatch(body, /Short over/);
+  });
+});

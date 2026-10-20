@@ -38,7 +38,7 @@ export type FigureScale = keyof typeof scales;
  *
  * Four of the five rendering hazards the correctness work created are the same hazard: a money
  * field that used to be one-directional now legitimately points both ways, and the two directions
- * are different states rather than one state with a sign. `free` is signed, so "short this month"
+ * are different states rather than one state with a sign. `free` is signed, so "short across the window"
  * and "free to spend" are not the same reading. A card balance is signed, so "you owe $563.26"
  * and "Discover owes you $563.26" are not the same reading. Rendering either as a red number in
  * the slot where a black one used to sit says neither.
