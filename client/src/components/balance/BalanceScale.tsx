@@ -140,7 +140,7 @@ export function calibrationNote(fault: CalibrationFault): string {
     case 'no_sheet':
       return 'No balance sheet has been recorded yet.';
     case 'estimated':
-      return 'This sheet is replayed from the ledger, not measured.';
+      return 'This sheet is reconstructed from the ledger, not measured.';
     case 'coverage':
       return `This sheet reached ${fault.covered} of ${fault.total} accounts.`;
     case 'stale':
@@ -316,7 +316,7 @@ export function describeReading(input: ReadingCaptionInput): ReadingCaption {
       { text: String(history.excluded), numeral: true },
       {
         text: ` ${history.excluded === 1 ? 'is' : 'are'} left off: recorded against a different` +
-          ' number of accounts, or replayed rather than measured.',
+          ' number of accounts, or reconstructed rather than measured.',
       },
     ]);
   }

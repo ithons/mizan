@@ -231,7 +231,7 @@ test('every condition that takes the reading out of calibration says which one i
   const estimated = readCalibration({ ...HEALTHY, isEstimated: true });
   assert.equal(estimated.calibrated, false);
   assert.deepEqual(estimated.faults, [{ kind: 'estimated' }]);
-  assert.match(calibrationNote(estimated.faults[0]), /replayed from the ledger/);
+  assert.match(calibrationNote(estimated.faults[0]), /reconstructed from the ledger/);
 
   const partial = readCalibration({ ...HEALTHY, coveredAccounts: 11, totalAccounts: 14 });
   assert.deepEqual(partial.faults, [{ kind: 'coverage', covered: 11, total: 14 }]);
@@ -389,7 +389,7 @@ test('the reading, the faults and the notes are three separate statements', () =
   ]);
   assert.deepEqual(reading.notes.map(captionText), [
     '1 earlier sheet is drawn above.',
-    '15 are left off: recorded against a different number of accounts, or replayed rather than measured.',
+    '15 are left off: recorded against a different number of accounts, or reconstructed rather than measured.',
   ]);
 });
 
