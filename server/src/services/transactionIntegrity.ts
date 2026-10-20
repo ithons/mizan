@@ -342,6 +342,13 @@ interface PairEdge {
   inflow: TransferRow;
   businessGap: number;
   calendarGap: number;
+  sharedReference: boolean;
+}
+
+const CONFIRMATION = /Conf(?:irmation)?#\s*([A-Za-z0-9]{6,})/gi;
+
+function confirmationNumbers(text: string): Set<string> {
+  return new Set([...text.matchAll(CONFIRMATION)].map((m) => m[1].toUpperCase()));
 }
 
 function edgeOrder(a: PairEdge, b: PairEdge): number {
@@ -366,11 +373,13 @@ function candidateEdges(rows: TransferRow[]): PairEdge[] {
         if (outflow.account_id === inflow.account_id) continue;
         const businessGap = businessDaysBetween(outflow.date, inflow.date);
         if (businessGap > PAIR_WINDOW_BUSINESS_DAYS) continue;
+        const outRefs = confirmationNumbers(outflow.original_name);
         edges.push({
           outflow,
           inflow,
           businessGap,
           calendarGap: Math.abs(dateToDay(outflow.date) - dateToDay(inflow.date)),
+          sharedReference: [...confirmationNumbers(inflow.original_name)].some((ref) => outRefs.has(ref)),
         });
       }
     }
@@ -502,8 +511,22 @@ interface AssignedPair extends PairEdge {
   reviewOnly: boolean;
 }
 
+/** Two legs quoting the same confirmation number are one movement, whatever else is near them. */
+function settleSharedReferences(edges: PairEdge[]): { fixed: PairEdge[]; rest: PairEdge[] } {
+  const referenced = edges.filter((edge) => edge.sharedReference);
+  const count = new Map<string, number>();
+  for (const edge of referenced) {
+    for (const leg of [edge.outflow.id, edge.inflow.id]) count.set(leg, (count.get(leg) ?? 0) + 1);
+  }
+  const fixed = referenced.filter((edge) => count.get(edge.outflow.id) === 1 && count.get(edge.inflow.id) === 1);
+  const taken = new Set(fixed.flatMap((edge) => [edge.outflow.id, edge.inflow.id]));
+  return { fixed, rest: edges.filter((edge) => !taken.has(edge.outflow.id) && !taken.has(edge.inflow.id)) };
+}
+
 function assignPairs(edges: PairEdge[]): AssignedPair[] {
-  const { fixed, rest } = settleMutualNearest(edges);
+  const referenced = settleSharedReferences(edges);
+  const { fixed: nearest, rest } = settleMutualNearest(referenced.rest);
+  const fixed = [...referenced.fixed, ...nearest];
   const searched = groupsOf(rest).flatMap((group) =>
     group.length <= EXACT_GROUP_EDGES
       ? assignExactly(group).map((edge) => ({ ...edge, reviewOnly: false }))
