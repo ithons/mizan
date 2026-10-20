@@ -2,7 +2,7 @@ import type Database from 'better-sqlite3';
 import { format, isValid, parse } from 'date-fns';
 import { v4 as uuidv4 } from 'uuid';
 import type { z } from 'zod';
-import type { CsvImportPreview, CsvImportPreviewIssue, CsvImportPreviewRow } from '../../../shared/types';
+import type { CsvImportPreview, CsvImportPreviewAccount, CsvImportPreviewIssue, CsvImportPreviewRow } from '../../../shared/types';
 import type { CsvImportMappingSchema } from '../../../shared/schemas';
 import { adjustManualAccountBalance } from './manualAccountBalance';
 import { toCents } from './money';
@@ -57,30 +57,46 @@ function rowIssue(
   return { row_number: rowNumber, severity, message, field };
 }
 
+type AccountResolution =
+  | { kind: 'resolved'; account: AccountMatch }
+  | { kind: 'unresolved'; message: string };
+
+// A row lands only where its value names exactly one account: a guessed account would take the
+// row and move that account's balance without the preview ever showing where it went.
+function resolveAccount(db: Database.Database, value: string): AccountResolution {
+  const byName = db.prepare(`
+    SELECT id, account_name, institution_name, is_manual
+    FROM accounts WHERE account_name = ? AND balance_only = 0
+  `).all(value) as AccountMatch[];
+  if (byName.length === 1) return { kind: 'resolved', account: byName[0] };
+  if (byName.length > 1) {
+    return { kind: 'unresolved', message: `Account "${value}" matches ${byName.length} accounts` };
+  }
+
+  const byInstitution = db.prepare(`
+    SELECT id, account_name, institution_name, is_manual
+    FROM accounts WHERE institution_name = ? AND balance_only = 0
+  `).all(value) as AccountMatch[];
+  if (byInstitution.length === 1) return { kind: 'resolved', account: byInstitution[0] };
+  if (byInstitution.length > 1) {
+    return { kind: 'unresolved', message: `Institution "${value}" matches ${byInstitution.length} accounts; name the account` };
+  }
+  return { kind: 'unresolved', message: `No account that takes transactions is named "${value}"` };
+}
+
+function accountValue(row: Record<string, string>, mapping: CsvImportMapping): string {
+  return mapping.account ? (row[mapping.account] ?? '').trim() : '';
+}
+
 function findAccount(
   db: Database.Database,
   row: Record<string, string>,
   mapping: CsvImportMapping
-): AccountMatch | null {
-  if (mapping.account && row[mapping.account]) {
-    const accountValue = row[mapping.account];
-    const account = db.prepare(`
-      SELECT id, account_name, institution_name, is_manual
-      FROM accounts
-      WHERE (account_name = ? OR institution_name = ?) AND balance_only = 0
-      LIMIT 1
-    `).get(accountValue, accountValue) as AccountMatch | undefined;
-    if (account) return account;
-  }
-
-  const fallback = db.prepare(`
-    SELECT id, account_name, institution_name, is_manual
-    FROM accounts
-    WHERE is_manual = 1 AND balance_only = 0
-    LIMIT 1
-  `).get() as AccountMatch | undefined;
-
-  return fallback ?? null;
+): AccountResolution {
+  if (!mapping.account) return { kind: 'unresolved', message: 'No account column is mapped' };
+  const value = accountValue(row, mapping);
+  if (!value) return { kind: 'unresolved', message: 'Account is empty' };
+  return resolveAccount(db, value);
 }
 
 function findCategory(
@@ -174,9 +190,10 @@ function normalizeCsvRow(
     amount = -amount;
   }
 
-  const account = findAccount(db, rawRow, mapping);
-  if (!account) {
-    issues.push(rowIssue(rowNumber, 'error', 'No account matched and no manual fallback account exists', mapping.account));
+  const resolution = findAccount(db, rawRow, mapping);
+  const account = resolution.kind === 'resolved' ? resolution.account : null;
+  if (resolution.kind === 'unresolved') {
+    issues.push(rowIssue(rowNumber, 'error', resolution.message, mapping.account));
   }
 
   const category = findCategory(db, rawRow, mapping);
@@ -225,6 +242,22 @@ function normalizeCsvRow(
   return previewRow;
 }
 
+function accountSummary(
+  input: CsvImportInput,
+  rows: CsvImportPreviewRow[]
+): CsvImportPreviewAccount[] {
+  const byValue = new Map<string, CsvImportPreviewAccount>();
+  input.rows.forEach((raw, index) => {
+    const value = accountValue(raw, input.mapping);
+    const entry = byValue.get(value) ?? { value, account_id: null, account_name: null, row_count: 0 };
+    entry.row_count++;
+    entry.account_id = rows[index].account_id ?? null;
+    entry.account_name = rows[index].account_name ?? null;
+    byValue.set(value, entry);
+  });
+  return [...byValue.values()];
+}
+
 export function buildCsvImportPreview(
   db: Database.Database,
   input: CsvImportInput
@@ -237,6 +270,7 @@ export function buildCsvImportPreview(
 
   return {
     rows,
+    accounts: accountSummary(input, rows),
     valid_count: validRows.length,
     invalid_count: rows.length - validRows.length,
     duplicate_candidate_count: rows.reduce((sum, row) => sum + row.duplicate_candidate_count, 0),

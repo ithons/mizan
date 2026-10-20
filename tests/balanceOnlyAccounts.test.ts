@@ -49,7 +49,7 @@ test('an account with transactions cannot be made balance-only, and one without 
   assert.equal(updateAccount(db, empty, { balance_only: true }).ok, true);
 });
 
-test('a CSV import never lands rows in a balance-only account, by name or as the fallback', () => {
+test('a CSV import never lands rows in a balance-only account, by name or with no account given', () => {
   const db = migratedTestDb();
   wallet(db);
   const preview = buildCsvImportPreview(db, {

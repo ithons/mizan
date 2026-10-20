@@ -134,3 +134,63 @@ test('csv import duplicate detection compares exact cents, not a float epsilon',
   assert.equal(preview.rows[0]?.duplicate_candidate_count, 1, 'matches a float-noisy existing amount at the cent level');
   assert.equal(preview.rows[1]?.duplicate_candidate_count, 0, 'does not match an amount one cent away');
 });
+
+function balanceOf(db: Database.Database, id: string): number {
+  return (db.prepare('SELECT current_balance FROM accounts WHERE id = ?').get(id) as { current_balance: number }).current_balance;
+}
+
+const lunch = { date: '2026-06-27', amount: '-8.00', merchant: 'Lunch', category: '', notes: '' };
+
+test('a row whose account matches nothing is refused, not sent to some manual account', (t) => {
+  const db = setupCsvImportDb();
+  t.after(() => db.close());
+
+  const result = commitCsvImport(db, { rows: [{ ...lunch, account: 'Monarch Checking' }], mapping }, '2026-06-30T12:00:00.000Z');
+
+  assert.equal(result.imported, 0);
+  assert.match(result.errors[0] ?? '', /Monarch Checking/);
+  assert.equal(balanceOf(db, 'acct_cash'), 10000);
+  assert.equal(balanceOf(db, 'acct_savings'), 25000);
+});
+
+test('a row with no account column mapped is refused', (t) => {
+  const db = setupCsvImportDb();
+  t.after(() => db.close());
+
+  const { account: _unmapped, ...withoutAccount } = mapping;
+  const preview = buildCsvImportPreview(db, { rows: [lunch], mapping: withoutAccount });
+
+  assert.equal(preview.valid_count, 0);
+  assert.match(preview.errors[0]?.message ?? '', /No account column/);
+  assert.deepEqual(preview.accounts, [{ value: '', account_id: null, account_name: null, row_count: 1 }]);
+});
+
+test('an institution shared by several accounts is refused rather than picking one', (t) => {
+  const db = setupCsvImportDb();
+  t.after(() => db.close());
+
+  const result = commitCsvImport(db, { rows: [{ ...lunch, account: 'Manual' }], mapping }, '2026-06-30T12:00:00.000Z');
+
+  assert.equal(result.imported, 0);
+  assert.match(result.errors[0] ?? '', /matches 2 accounts/);
+  assert.equal(balanceOf(db, 'acct_cash'), 10000);
+  assert.equal(balanceOf(db, 'acct_savings'), 25000);
+});
+
+test('an exact account name imports cleanly, closed accounts included, and the preview says where', (t) => {
+  const db = setupCsvImportDb();
+  t.after(() => db.close());
+  insertAccount(db, { id: 'acct_closed', account_name: 'Old Checking', institution_name: 'Bank', type: 'closed', is_manual: 1 });
+
+  const preview = buildCsvImportPreview(db, {
+    rows: [{ ...lunch, account: 'Old Checking' }, { ...lunch, date: '2026-06-26', account: 'Old Checking' }],
+    mapping,
+  });
+  assert.deepEqual(preview.errors, []);
+  assert.deepEqual(preview.warnings, []);
+  assert.deepEqual(preview.accounts, [{ value: 'Old Checking', account_id: 'acct_closed', account_name: 'Old Checking', row_count: 2 }]);
+
+  const result = commitCsvImport(db, { rows: [{ ...lunch, account: 'Old Checking' }], mapping }, '2026-06-30T12:00:00.000Z');
+  assert.deepEqual({ imported: result.imported, errors: result.errors }, { imported: 1, errors: [] });
+  assert.equal(balanceOf(db, 'acct_cash'), 10000);
+});

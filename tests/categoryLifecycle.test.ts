@@ -492,14 +492,15 @@ test('a mapped CSV column is not recorded as the owner authoring each row', (t) 
 
   const result = commitCsvImport(db, {
     rows: [
-      { Date: '2026-07-15', Amount: '-4.50', Merchant: 'Blue Bottle', Category: 'Coffee' },
-      { Date: '2026-07-16', Amount: '-9.00', Merchant: 'Corner Store', Category: '' },
+      { Date: '2026-07-15', Amount: '-4.50', Merchant: 'Blue Bottle', Category: 'Coffee', Account: 'Checking' },
+      { Date: '2026-07-16', Amount: '-9.00', Merchant: 'Corner Store', Category: '', Account: 'Checking' },
     ],
     mapping: {
       date: 'Date',
       amount: 'Amount',
       merchant: 'Merchant',
       category: 'Category',
+      account: 'Account',
       dateFormat: 'yyyy-MM-dd',
       // The fixture's amounts are already signed the way the ledger stores them.
       amountNegate: false,
@@ -590,14 +591,15 @@ test('imported rows that are not a transfer produce no pair', (t) => {
 
   const result = commitCsvImport(db, {
     rows: [
-      { Date: '2026-07-15', Amount: '-4.50', Merchant: 'Blue Bottle', Category: 'Coffee' },
-      { Date: '2026-07-16', Amount: '-9.00', Merchant: 'Corner Store', Category: 'Coffee' },
+      { Date: '2026-07-15', Amount: '-4.50', Merchant: 'Blue Bottle', Category: 'Coffee', Account: 'Checking' },
+      { Date: '2026-07-16', Amount: '-9.00', Merchant: 'Corner Store', Category: 'Coffee', Account: 'Checking' },
     ],
     mapping: {
       date: 'Date',
       amount: 'Amount',
       merchant: 'Merchant',
       category: 'Category',
+      account: 'Account',
       dateFormat: 'yyyy-MM-dd',
       // The fixture's amounts are already signed the way the ledger stores them.
       amountNegate: false,

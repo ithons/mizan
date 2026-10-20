@@ -1381,8 +1381,17 @@ export interface CsvImportPreviewRow {
   issues: CsvImportPreviewIssue[];
 }
 
+/** Where each distinct value of the CSV's account column lands; account_id null means nowhere. */
+export interface CsvImportPreviewAccount {
+  value: string;
+  account_id: string | null;
+  account_name: string | null;
+  row_count: number;
+}
+
 export interface CsvImportPreview {
   rows: CsvImportPreviewRow[];
+  accounts: CsvImportPreviewAccount[];
   valid_count: number;
   invalid_count: number;
   duplicate_candidate_count: number;

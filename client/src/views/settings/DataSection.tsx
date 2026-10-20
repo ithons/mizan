@@ -373,6 +373,15 @@ export function DataSection() {
                   </div>
                 </div>
 
+                <div className="max-h-28 overflow-y-auto space-y-1">
+                  {csvPreview.accounts.map((entry) => (
+                    <p key={entry.value} className={`text-note ${entry.account_id ? 'text-ink' : 'text-clay'}`}>
+                      {entry.value ? `"${entry.value}"` : 'No account given'}
+                      {' '}({entry.row_count} row{entry.row_count === 1 ? '' : 's'}): {entry.account_name ?? 'not imported'}
+                    </p>
+                  ))}
+                </div>
+
                 {(csvPreview.errors.length > 0 || csvPreview.warnings.length > 0) && (
                   <div className="max-h-28 overflow-y-auto space-y-1">
                     {[...csvPreview.errors, ...csvPreview.warnings].slice(0, 8).map((issue) => (
