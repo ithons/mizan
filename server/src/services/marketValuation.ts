@@ -12,8 +12,9 @@ const AGREEMENT_CENTS = 100;
  * balance is read intraday and the price is the close, so this has to admit a day's market move.
  * Measured 2026-10-20 over every measured snapshot and statement valuation on a holdings day in a
  * read-only copy of the live ledger (pricedMarketValues against net_worth_snapshots.breakdown and
- * account_valuations): ordinary days sat within 1.63%, and the days the holdings carried a settled
- * deposit as cash beside the buys it paid for sat at 3.69% to 89.8%.
+ * account_valuations): ordinary days sat within 1.63%, and the disagreeing days from 3.69% up. The
+ * two inspected, 2026-10-17 at 23.5% and 89.8%, are holdings listing a deposit as cash beside the
+ * buys it paid for: the sweep equals the gap to the cent.
  */
 const REPORTED_AGREEMENT_FRACTION = 0.025;
 
