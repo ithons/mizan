@@ -108,7 +108,7 @@ test('a flow-conservation finding carries a route to the rows it is made of', ()
   const html = render({ flow_conservation: [flow] });
 
   assert.match(html, /Chase Checking and Fidelity Individual/);
-  assert.match(html, /20 rows between 2026-05-21 and 2026-07-27/);
+  assert.match(html, /20 rows between May 21, 2026 and Jul 27, 2026/);
   assert.match(html, /\$700/);
   // The last mile: the finding used to name a pair and a movement and stop there.
   assert.match(html, /Open Chase Checking/);

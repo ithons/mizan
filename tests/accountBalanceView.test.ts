@@ -240,7 +240,7 @@ test('every condition that takes the reading out of calibration says which one i
   // The live state on 2026-07-31: the newest recorded sheet is dated 2026-07-29.
   const stale = readCalibration({ ...HEALTHY, sheetDate: '2026-07-29' });
   assert.deepEqual(stale.faults, [{ kind: 'stale', asOf: '2026-07-29', days: 2 }]);
-  assert.equal(calibrationNote(stale.faults[0]), 'Recorded 2 days ago, on 29 July.');
+  assert.equal(calibrationNote(stale.faults[0]), 'Recorded 2 days ago, on Jul 29.');
   assert.match(
     calibrationNote(readCalibration({ ...HEALTHY, sheetDate: '2026-07-30' }).faults[0]),
     /Recorded a day ago/
@@ -357,7 +357,7 @@ test('a recorded sheet that is genuinely zero keeps every fault it has', () => {
   // short-circuited on the zeros and printed none of this.
   const stale = caption(0, 0, { sheetDate: '2026-06-01', syncIncomplete: true });
   assert.deepEqual(stale.faults, [
-    'Recorded 60 days ago, on 1 June.',
+    'Recorded 60 days ago, on Jun 1.',
     'The last sync did not finish every stage.',
   ]);
   assert.equal(captionText(stale.reading ?? []), 'Nothing is recorded on either side of this sheet.');
@@ -385,7 +385,7 @@ test('the reading, the faults and the notes are three separate statements', () =
   assert.equal(captionText(reading.reading ?? []), '66.5% of the sheet is held, 16.5 points clear of even.');
   assert.deepEqual(reading.faults, [
     'This sheet reached 11 of 14 accounts.',
-    'Recorded a day ago, on 30 July.',
+    'Recorded a day ago, on Jul 30.',
   ]);
   assert.deepEqual(reading.notes.map(captionText), [
     '1 earlier sheet is drawn above.',

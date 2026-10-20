@@ -3,7 +3,7 @@ import type { Account, NetWorthSnapshot, ReportSummary, SafeToSpend, SpendingRep
 import { isInCredit, signedAccountBalance } from '../lib/accountBalance';
 import { bySignedMagnitude, type FigureStates } from '../components/balance';
 import { comparableHistory, type BeamHistoryPoint } from '../components/balance/BalanceScale';
-import { formatCurrency, formatDateShort, formatWholeCurrency } from '../lib/formatters';
+import { formatCurrency, formatDate, formatDateShort, formatWholeCurrency } from '../lib/formatters';
 
 /**
  * Everything `/` states, as data.
@@ -313,9 +313,9 @@ export function describeWeekChange(change: WeekChange): WeekChangeCaption {
     case 'change': {
       const figure = `${change.delta < 0 ? '−' : '+'}${formatWholeCurrency(Math.abs(change.delta))}`;
       return {
-        short: `${figure} since ${format(parseISO(change.since), 'd MMMM')}`,
+        short: `${figure} since ${formatDateShort(change.since)}`,
         reading:
-          `${figure} since ${format(parseISO(change.since), 'd MMMM')}, the nearest sheet at least seven days ` +
+          `${figure} since ${formatDateShort(change.since)}, the nearest sheet at least seven days ` +
           `back that reached the same ${change.covered} of ${change.total} accounts.`,
         note: change.refused > 0 ? refusedClause(change.refused) : null,
       };
@@ -407,7 +407,7 @@ export function windowRange(id: WindowId, now: Date): WindowRange {
 export function describeWindow(months: string[], range: WindowRange, today: Date): string {
   const pretty = (yearMonth: string) => format(parseISO(`${yearMonth}-01`), 'MMMM yyyy');
   if (months.length === 0) {
-    return `${format(parseISO(range.startDate), 'd MMM yyyy')} to ${format(parseISO(range.endDate), 'd MMM yyyy')} · nothing recorded`;
+    return `${formatDate(range.startDate)} to ${formatDate(range.endDate)} · nothing recorded`;
   }
 
   const first = months[0];
@@ -508,7 +508,7 @@ export interface ComparisonReading {
 export function readComparison(summary: ReportSummary): ComparisonReading {
   const window =
     summary.comparison_start_date && summary.comparison_end_date
-      ? ` (${summary.comparison_start_date} to ${summary.comparison_end_date})`
+      ? ` (${formatDate(summary.comparison_start_date)} to ${formatDate(summary.comparison_end_date)})`
       : '';
   const comparable = summary.income.previous !== 0 || summary.expenses.previous !== 0;
   return {

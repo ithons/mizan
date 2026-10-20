@@ -106,7 +106,7 @@ test('the screen never prints a week that crossed a coverage step', () => {
 test('the week that is comparable renders as one, and names the sheet it is against', () => {
   const body = text(render('this-month', { snapshot: SHEET_0731, recent: [...RECENT_SHEETS, SHEET_0731] }));
 
-  assert.match(body, /\+\$1,444 since 24 July/);
+  assert.match(body, /\+\$1,444 since Jul 24/);
   assert.doesNotMatch(
     text(visible(render('this-month', { snapshot: SHEET_0731, recent: [...RECENT_SHEETS, SHEET_0731] }))),
     /the nearest sheet at least seven days back/,

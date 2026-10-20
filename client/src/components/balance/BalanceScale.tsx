@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react';
-import { differenceInCalendarDays, format, parseISO } from 'date-fns';
-import { formatCurrency } from '../../lib/formatters';
+import { differenceInCalendarDays, parseISO } from 'date-fns';
+import { formatCurrency, formatDateShort } from '../../lib/formatters';
 import { useSettledValue } from '../../lib/useSettledValue';
 
 /**
@@ -144,17 +144,9 @@ export function calibrationNote(fault: CalibrationFault): string {
     case 'coverage':
       return `This sheet reached ${fault.covered} of ${fault.total} accounts.`;
     case 'stale':
-      return `Recorded ${fault.days === 1 ? 'a day' : `${fault.days} days`} ago, on ${formatSheetDate(fault.asOf)}.`;
+      return `Recorded ${fault.days === 1 ? 'a day' : `${fault.days} days`} ago, on ${formatDateShort(fault.asOf)}.`;
     case 'sync_incomplete':
       return 'The last sync did not finish every stage.';
-  }
-}
-
-function formatSheetDate(date: string): string {
-  try {
-    return format(parseISO(date), 'd MMMM');
-  } catch {
-    return date;
   }
 }
 

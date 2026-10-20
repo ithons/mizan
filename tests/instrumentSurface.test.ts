@@ -308,7 +308,7 @@ test('a week the coverage rule can vouch for is stated, with what it refused bes
   const caption = describeWeekChange(change);
   assert.equal(
     caption.reading,
-    '+$1,444 since 24 July, the nearest sheet at least seven days back that reached the same 14 of 14 accounts.'
+    '+$1,444 since Jul 24, the nearest sheet at least seven days back that reached the same 14 of 14 accounts.'
   );
   assert.equal(caption.note, '5 earlier sheets reached a different set of accounts and are not comparable to this one.');
 });
@@ -415,7 +415,7 @@ test('the window is described from the months that carry activity, not from the 
   // Nothing recorded is not "zero spent": it falls back to the dates and says what it found.
   assert.equal(
     describeWindow([], { startDate: '2026-01-01', endDate: '2026-01-31' }, NOW),
-    '1 Jan 2026 to 31 Jan 2026 · nothing recorded'
+    'Jan 1, 2026 to Jan 31, 2026 · nothing recorded'
   );
 });
 
@@ -449,7 +449,7 @@ test('a delta against a window that recorded nothing is not a change, and does n
   // The live `this month` summary, prior_period: June is a real month and the deltas mean something.
   const live = readComparison(summary());
   assert.equal(live.comparable, true);
-  assert.match(live.note, /^Compared with prior period \(2026-05-31 to 2026-06-30\)\.$/);
+  assert.match(live.note, /^Compared with prior period \(May 31, 2026 to Jun 30, 2026\)\.$/);
 
   // The live `all` summary, re-measured rather than restated. `ALL_WINDOW_MONTHS = 600` puts the
   // window at 1976-07-01 to 2026-07-31, and the prior period is the same length again immediately
@@ -473,7 +473,7 @@ test('a delta against a window that recorded nothing is not a change, and does n
     })
   );
   assert.equal(allTime.comparable, false);
-  assert.match(allTime.note, /Nothing is recorded in prior period \(1926-06-01 to 1976-06-30\), so there is no change/);
+  assert.match(allTime.note, /Nothing is recorded in prior period \(Jun 1, 1926 to Jun 30, 1976\), so there is no change/);
 
   // A window with expenses but no income is still comparable: it recorded something.
   const spendOnly = readComparison(summary({ income: metric(0, 0), expenses: metric(50, 120) }));

@@ -82,6 +82,10 @@ export function formatDateShort(dateStr: string): string {
   }
 }
 
+export function formatDateLong(date: Date): string {
+  return format(date, 'EEEE, MMM d');
+}
+
 export function formatPercent(value: number, decimals = 1): string {
   return `${value.toFixed(decimals)}%`;
 }

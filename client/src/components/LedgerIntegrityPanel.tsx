@@ -2,7 +2,7 @@ import { useQuery } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import type { ReconciliationReading } from '@shared/types';
 import { insightsApi } from '../lib/api';
-import { formatWholeCurrency } from '../lib/formatters';
+import { formatDate, formatWholeCurrency } from '../lib/formatters';
 import { SectionLabel, TextButton } from './balance';
 
 /**
@@ -54,7 +54,7 @@ export function LedgerIntegrityPanel({ className = '' }: { className?: string })
                 {/* The two figures are stated separately because they answer different questions:
                     what the balance did, and what the rows account for. A single "off by" number
                     would hide which side is which. */}
-                Between {account.first_date} and {account.last_date} the balance moved{' '}
+                Between {account.first_date && formatDate(account.first_date)} and {account.last_date && formatDate(account.last_date)} the balance moved{' '}
                 {formatWholeCurrency(account.observed_delta)} and the transactions account for{' '}
                 {formatWholeCurrency(account.explained_delta)}
                 {account.direction_conflict ? ', in the opposite direction' : ''}.
@@ -89,7 +89,7 @@ export function LedgerIntegrityPanel({ className = '' }: { className?: string })
                 {/* Says what was compared, not what to conclude. The detector establishes that two
                     ledgers disagree about the same movement; it does not establish which side is
                     wrong, and the copy must not imply that it does. */}
-                {flow.leg_count} rows between {flow.first_date} and {flow.last_date} record the same
+                {flow.leg_count} rows between {formatDate(flow.first_date)} and {formatDate(flow.last_date)} record the same
                 movement leaving both accounts. One side has the wrong sign.
               </div>
             </div>

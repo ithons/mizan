@@ -22,7 +22,7 @@ import {
   syncApi,
   transactionsApi,
 } from '../lib/api';
-import { formatCurrency, formatWholeCurrency } from '../lib/formatters';
+import { formatCurrency, formatDateLong, formatDateShort, formatWholeCurrency } from '../lib/formatters';
 import { useAppStore } from '../store';
 import { QueryErrorBanner } from '../components/QueryErrorBanner';
 import { QueryState } from '../components/QueryState';
@@ -676,7 +676,7 @@ export function Instrument() {
           onClick={() => window.dispatchEvent(new Event('mizan:open-palette'))}
           className="text-note uppercase tracking-[0.09em] text-muted transition-colors hover:text-ink"
         >
-          {format(now, 'EEEE d MMMM')} · <span className="font-mono">⌘K</span>
+          {formatDateLong(now)} · <span className="font-mono">⌘K</span>
         </button>
       </header>
 
@@ -706,7 +706,7 @@ export function Instrument() {
               {standing.kind === 'free' && safeToSpendQ.data?.per_day_until_next_income != null && safeToSpendQ.data.next_income_date && (
                 <div className="mt-1 text-note text-muted tabular-nums">
                   About {formatWholeCurrency(safeToSpendQ.data.per_day_until_next_income)} a day until your next pay on{' '}
-                  {format(parseISO(safeToSpendQ.data.next_income_date), 'd MMMM')}
+                  {formatDateShort(safeToSpendQ.data.next_income_date)}
                   {lateIncomeAllowanceNote(safeToSpendQ.data) && <span className="block">{lateIncomeAllowanceNote(safeToSpendQ.data)}</span>}
                 </div>
               )}
