@@ -920,7 +920,8 @@ test('a two-tool turn stays small enough to answer in', (t) => {
 
   // 28,500 since 072: its two tables add 332 bytes to the index (28,295 on this fixture).
   // 29,000 since 076/077: account_valuations and security_prices bring it to 28,742 here.
-  assert.ok(schema < 29_000, `describe_schema returned ${schema} bytes`);
+  // 30,000 since every table got a purpose and the 078 enum value was documented: 29,647 here.
+  assert.ok(schema < 30_000, `describe_schema returned ${schema} bytes`);
   assert.ok(rules < 3_000, `get_merchant_rules returned ${rules} bytes for one merchant`);
   assert.ok(expansion < 3_000, `expanding one table returned ${expansion} bytes`);
   assert.ok(schema + rules < 32_000, `a two-tool turn cost ${schema + rules} bytes`);

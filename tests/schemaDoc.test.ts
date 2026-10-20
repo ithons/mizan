@@ -296,6 +296,34 @@ test('review_status reviewed does not claim owner attention, because a merchant 
   assert.match(reviewed, /category_source/);
 });
 
+test('every documented enum lists exactly the values its CHECK constraint allows', (t) => {
+  const db = migratedTestDb();
+  t.after(() => db.close());
+
+  let checked = 0;
+  for (const [key, meaning] of Object.entries(ENUM_MEANINGS)) {
+    const row = db.prepare('SELECT sql FROM sqlite_master WHERE type = ? AND name = ?').get('table', meaning.table) as
+      | { sql: string }
+      | undefined;
+    assert.ok(row, `${key} documents a table the migrations do not create`);
+    const check = new RegExp(`CHECK\\s*\\(\\s*${meaning.column}\\s+IN\\s*\\(([^)]*)\\)`, 'i').exec(row.sql);
+    if (!check) continue; // a column with no CHECK has nothing to compare against
+    const allowed = check[1].split(',').map((value) => value.trim().replace(/^'|'$/g, '')).sort();
+    assert.deepEqual(Object.keys(meaning.values).sort(), allowed, `${key} disagrees with its CHECK`);
+    checked += 1;
+  }
+  assert.ok(checked >= 8, `only ${checked} enums had a CHECK to compare; the parser has stopped matching`);
+});
+
+test('every table the migrations create has a documented purpose', (t) => {
+  const db = migratedTestDb();
+  t.after(() => db.close());
+
+  const tables = db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'").all() as Array<{ name: string }>;
+  const undocumented = tables.map((row) => row.name).filter((name) => !TABLE_MEANINGS[name]);
+  assert.deepEqual(undocumented, []);
+});
+
 test('an empty database produces no enum noise at all', (t) => {
   const db = migratedTestDb();
   t.after(() => db.close());

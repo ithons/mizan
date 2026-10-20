@@ -7,6 +7,7 @@ import {
   spendAmountSql,
   REPORT_SCOPE_ROOT_IDS,
 } from './transactionFilters';
+import { NOTIFICATION_PARAM_MONEY_FIELDS, NOTIFICATION_PAYLOAD_MONEY_FIELDS } from './notifications';
 
 /**
  * What the numbers in this database MEAN.
@@ -249,7 +250,7 @@ export const TABLE_MEANINGS: Record<string, TableMeaning> = {
     },
   },
   merchant_rule_revisions: {
-    purpose: 'Every create, recategorize, rename and retire of a merchant rule, so a rule change is never silent.',
+    purpose: 'Every create, recategorize, rename, retire and unretire of a merchant rule, so a rule change is never silent.',
     columns: { operation: { unit: 'enum, see enums.merchant_rule_operation' } },
   },
   transaction_category_revisions: {
@@ -302,7 +303,31 @@ export const TABLE_MEANINGS: Record<string, TableMeaning> = {
   simplefin_connections: { purpose: 'SimpleFIN connection state. Credentials are NOT here; they are encrypted outside the database.', columns: {} },
   coinbase_connections: { purpose: 'Coinbase connection state. Credentials are NOT here; they are encrypted outside the database.', columns: {} },
   schema_migrations: { purpose: 'Which migration files have been applied.', columns: {} },
+  notification_rules: {
+    purpose: 'What the owner wants to be told about. Evaluated after every sync.',
+    columns: { params: { unit: 'JSON TEXT', note: `Integer cents in: ${moneyKeys(NOTIFICATION_PARAM_MONEY_FIELDS)}. No other key is money.` } },
+  },
+  notifications: {
+    purpose: 'The inbox: one row per condition per period, written by the rules.',
+    columns: { payload: { unit: 'JSON TEXT', note: `Integer cents in: ${moneyKeys(NOTIFICATION_PAYLOAD_MONEY_FIELDS)}. No other key is money.` } },
+  },
+  ai_memory: { purpose: 'Durable facts the advisor was told or inferred about the owner. A superseded row is history.', columns: {} },
+  ai_runs: { purpose: 'One row per background AI pass, with its counts and token use.', columns: {} },
+  ai_feedback: { purpose: 'Each time the owner undid, overrode or declined an AI proposal.', columns: {} },
+  ai_incidents: { purpose: 'Autonomous AI batches the guard harness caught moving a headline figure, and their revert.', columns: {} },
+  transaction_field_revisions: {
+    purpose: 'Per-row history of date, amount and merchant edits, by owner or provider.',
+    columns: { from_value: { unit: 'TEXT', note: 'For field = amount, integer cents as text. Same for to_value.' } },
+  },
+  simplefin_relink_proposals: { purpose: 'Detected SimpleFIN account id rotations, pending the owner.', columns: {} },
 };
+
+function moneyKeys(fields: Readonly<Record<string, readonly string[]>>): string {
+  return Object.entries(fields)
+    .filter(([, keys]) => keys.length > 0)
+    .map(([kind, keys]) => `${kind} ${keys.join(', ')}`)
+    .join('; ');
+}
 
 export interface EnumMeaning {
   table: string;
@@ -413,7 +438,12 @@ export const ENUM_MEANINGS: Record<string, EnumMeaning> = {
   advisor_draft_status: {
     table: 'advisor_drafts',
     column: 'status',
-    values: { open: 'Waiting on the owner.', confirmed: 'Applied.', dismissed: 'The owner declined it.' },
+    values: {
+      open: 'Waiting on the owner.',
+      confirmed: 'Applied.',
+      dismissed: 'The owner declined it.',
+      superseded: 'Closed by sync because its premise lapsed; never applied.',
+    },
   },
   merchant_rule_operation: {
     table: 'merchant_rule_revisions',
@@ -423,6 +453,7 @@ export const ENUM_MEANINGS: Record<string, EnumMeaning> = {
       recategorize: 'The rule was pointed at a different category.',
       rename: 'The pattern text changed, the category did not.',
       retire: 'The rule was retired. It still exists and applies to nothing.',
+      unretire: 'A retired rule was put back.',
     },
   },
   recurring_adjustment_action: {
@@ -872,6 +903,7 @@ export function buildSchemaDoc(db: Database.Database, now: Date = new Date()): S
         'Every money TOTAL is an INTEGER number of CENTS. Divide by 100 for dollars, and do the dividing once, at the end, so intermediate sums stay exact.',
       real_dollar_exceptions: [
         'holdings.institution_price and holdings_history.institution_price are REAL DOLLARS PER UNIT, not cents. Crypto spot prices live here. Rounding a $0.003 token to whole cents destroys it, which is why these columns were left REAL. Do not divide them by 100.',
+        'security_prices.close is REAL DOLLARS PER UNIT, not cents.',
       ],
       not_money: [
         'transactions.quantity is a REAL count of units of transactions.security_id. Not cents, not dollars.',

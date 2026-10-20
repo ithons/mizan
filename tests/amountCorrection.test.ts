@@ -360,7 +360,8 @@ test('no money reader has to know the revision log exists', () => {
   // change parks the correction in a second column and leaves the readers on the first, a summing
   // service will have to start joining this table, and this fails.
   const dir = path.join(import.meta.dirname, '..', 'server', 'src', 'services');
-  const allowed = new Set(['categoryWrites.ts', 'transactions.ts', 'simplefin.ts', 'localBackup.ts']);
+  // schemaDoc.ts names the table to describe it to the model, and reads no row of it.
+  const allowed = new Set(['categoryWrites.ts', 'transactions.ts', 'simplefin.ts', 'localBackup.ts', 'schemaDoc.ts']);
   const offenders = fs
     .readdirSync(dir)
     .filter((file) => file.endsWith('.ts') && !allowed.has(file))
