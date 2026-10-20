@@ -578,6 +578,26 @@ export function runNotificationStage(
   }
 }
 
+/** Never fails the run: a proposal left open one sync longer is closed by the next one. */
+export function runSupersedeStage(
+  db: Database.Database,
+  runId: string,
+  supersede: (db: Database.Database) => number = supersedeLapsedDrafts
+): void {
+  try {
+    supersede(db);
+  } catch (err) {
+    recordSyncRunItem(db, runId, {
+      provider: 'system',
+      connection_id: 'superseded-drafts',
+      institution_name: 'Lapsed proposals',
+      status: 'failed',
+      error_message: (err as Error).message || 'Closing lapsed proposals failed',
+      recovery_action: 'Retry sync; lapsed proposals are closed on the next sync.',
+    });
+  }
+}
+
 // Callers that need to mutate connection state right before triggering a sync (e.g. a
 // forced resync nulling last_synced_at) must check this first: runFullSync() silently
 // reuses the in-flight promise when a sync is already running, so a mutation made after
@@ -775,11 +795,7 @@ async function _runFullSyncInternal(): Promise<void> {
     deferredError = postSync.deferredError;
 
     // A proposal the sync just made moot (its row filed, its category or goal gone) stops waiting.
-    try {
-      supersedeLapsedDrafts(db);
-    } catch (err) {
-      console.error('[sync] superseding lapsed drafts failed:', (err as Error).message);
-    }
+    runSupersedeStage(db, run.id);
 
     // Public daily closes for held securities, once a day. Best effort: a quote source being down
     // costs only computed investment values for days the app did not record, so it is reported
