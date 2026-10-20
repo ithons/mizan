@@ -1,7 +1,7 @@
 import type Database from 'better-sqlite3';
 import { addDays, format, parseISO } from 'date-fns';
 import { MARKET_DRIVEN_TYPES, bucketOf } from '../../../shared/accountTypes';
-import { readMarketAnchors } from './snapshot';
+import { readMarketAnchors } from './marketValuation';
 import { externalMarketFlow } from './portfolioFlows';
 import type { NetWorthTimelineAccount, NetWorthTimelinePoint, NetWorthTimelineStep } from '../../../shared/types';
 
@@ -131,7 +131,7 @@ export function netWorthTimeline(
   if (from > to) return { from, to, step, accounts: [], points: [], method: METHOD };
 
   const calendar = days(from, to);
-  const anchors = readMarketAnchors(db, accounts.filter((a) => MARKET_DRIVEN_TYPES.has(a.type)).map((a) => a.id));
+  const anchors = readMarketAnchors(db, accounts.filter((a) => MARKET_DRIVEN_TYPES.has(a.type)).map((a) => a.id), today);
   const series = accounts.map((a) => ({ account: a, ...accountSeries(a, txnsByAccount.get(a.id) ?? [], calendar, anchors.get(a.id) ?? [], today) }));
 
   const points: TimelinePoint[] = calendar.map((date, i) => {

@@ -4,7 +4,7 @@ import type Database from 'better-sqlite3';
 import { getDb } from '../db/index';
 import { getPreference, setPreference } from './preferences';
 import { readPortfolioAccounts } from './netWorthHistory';
-import { pricedMarketValues } from './marketValuation';
+import { readMarketAnchors } from './marketValuation';
 import { externalMarketFlow } from './portfolioFlows';
 import { MARKET_DRIVEN_TYPES, bucketOf } from '../../../shared/accountTypes';
 
@@ -506,41 +506,6 @@ export function reconcileReconstructedHistory(options: { force?: boolean } = {})
   setPreference(db, RECONSTRUCTION_MARK_KEY, mark);
 
   return { ran: true, trigger, ...reconstructionCounts(db) };
-}
-
-/**
- * Known values of each market-driven account, earliest first: positions times that day's close
- * (marketValuation.ts), overridden by a statement valuation, overridden by a measured snapshot.
- * An estimate replays flows back from the nearest of these at or after its date instead of from
- * today's balance, so it meets each known value exactly.
- */
-export function readMarketAnchors(db: Database.Database, accountIds: readonly string[]): Map<string, Array<{ date: string; value: number }>> {
-  const wanted = new Set(accountIds);
-  const byAccount = new Map<string, Map<string, number>>();
-  const put = (id: string, date: string, value: number) => {
-    if (!wanted.has(id)) return;
-    const dates = byAccount.get(id) ?? new Map<string, number>();
-    dates.set(date, value);
-    byAccount.set(id, dates);
-  };
-  for (const [id, values] of pricedMarketValues(db, accountIds)) {
-    for (const [date, value] of values) put(id, date, value);
-  }
-  for (const row of db.prepare('SELECT account_id, date, value_cents FROM account_valuations').all() as Array<{ account_id: string; date: string; value_cents: number }>) {
-    put(row.account_id, row.date, row.value_cents);
-  }
-  for (const row of db.prepare('SELECT date, breakdown FROM net_worth_snapshots WHERE is_estimated = 0').all() as Array<{ date: string; breakdown: string }>) {
-    let breakdown: Record<string, unknown>;
-    try {
-      breakdown = JSON.parse(row.breakdown) as Record<string, unknown>;
-    } catch {
-      continue;
-    }
-    for (const [id, value] of Object.entries(breakdown)) {
-      if (typeof value === 'number' && Number.isInteger(value)) put(id, row.date, value);
-    }
-  }
-  return new Map([...byAccount].map(([id, dates]) => [id, [...dates].map(([date, value]) => ({ date, value })).sort((a, b) => a.date.localeCompare(b.date))]));
 }
 
 export function backfillSnapshots(): void {
