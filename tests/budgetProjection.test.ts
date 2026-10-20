@@ -9,6 +9,7 @@ import {
   recordBudgetRolloverLedger,
 } from '../server/src/services/budgetProjection';
 import { confirmAdvisorDraft } from '../server/src/services/advisorDrafts';
+import { TABLE_MEANINGS } from '../server/src/services/schemaDoc';
 import { _setDbForTesting } from '../server/src/db/index';
 import { detectRecurring } from '../server/src/services/recurring';
 import { insertAccount, insertTransaction, migratedTestDb } from './helpers/schema';
@@ -417,6 +418,23 @@ test('both carryover walkers agree on a month nothing has recorded', (t) => {
   // With no recorded row either side, both fall back to the live amount for every month.
   assert.equal(ledgerCarryover(db, '2026-06', now), 25000);
   assert.equal(screenCarryover(db, '2026-06', now), 25000);
+});
+
+test('the stored budgets.rollover_balance seeds neither carryover walker', (t) => {
+  const db = setupRolloverDb();
+  t.after(() => db.close());
+
+  // Nothing in server/src updates the column, so any value in it is stale by construction.
+  db.prepare(`UPDATE budgets SET rollover_balance = 99999 WHERE id = 'budget_food'`).run();
+  const now = new Date('2026-06-15T12:00:00.000Z');
+  assert.equal(ledgerCarryover(db, '2026-06', now), 25000);
+  assert.equal(screenCarryover(db, '2026-06', now), 25000);
+});
+
+test('the schema doc does not offer budgets.rollover_balance as the carry', () => {
+  const note = TABLE_MEANINGS.budgets.columns.rollover_balance.note ?? '';
+  assert.match(note, /NOT the carry/);
+  assert.doesNotMatch(TABLE_MEANINGS.budget_rollover_ledger.columns.actual_spend.note ?? '', /Re-derived on read/);
 });
 
 // The sync narrates the carryover stage only when this is true. An install that never turned

@@ -859,26 +859,26 @@ test('the list covers the same rows as the Spending figure printed above it', ()
  * `getMonthlyBudgetsWithProjection` is handed the LOCAL year and month. So their rows are dated
  * with `dayInThisMonth`, never with a days-ago offset.
  */
-function budgetOn(db: Database.Database, categoryId: string, amountCents: number, rolloverCents = 0): void {
-  // The budget opens in the month under test, and that is load-bearing for the rollover case.
-  // `walkRolloverLedger` starts at `created_at.slice(0, 7)` and re-derives every month from there,
-  // so a budget created in an EARLIER month has its carried balance recomputed rather than read
-  // from `rollover_balance`. Observed by running this file on 2026-08-01 with the old fixed
-  // 2026-07-30 created_at: August's walk added July's own unspent $200 and the row printed
-  // "$150.00 spent of $500.00 (30%)" where the fixture had set up $300.00 available and 50%.
-  // Opening the budget on the 1st of the current month leaves exactly one month to walk.
+function budgetOn(db: Database.Database, categoryId: string, amountCents: number, carriedCents = 0): void {
+  // A carry exists only as last month's unspent budget, re-derived by `walkRolloverLedger`, so a
+  // rollover budget opens LAST month and spends there exactly what leaves `carriedCents` unspent.
+  // Any other budget opens on the 1st of this month, leaving no earlier month to walk.
   //
   // Built as the ISO of LOCAL midday on that day, not `${date}T00:00:00.000Z`. The production
-  // writer is `new Date().toISOString()`, an instant, and `walkRolloverLedger` now reads the month
-  // back out of it locally. A UTC-midnight string for a local day is only the same day on a machine
-  // at UTC+0: at UTC-4 it is 20:00 the PREVIOUS evening, so the fixture was asking the walk to
-  // start a month earlier than it meant. Midday is unambiguous in every zone this app runs in.
-  const first = new Date();
-  const createdAt = new Date(first.getFullYear(), first.getMonth(), 1, 12, 0, 0).toISOString();
+  // writer is `new Date().toISOString()`, an instant, and `walkRolloverLedger` reads the month back
+  // out of it locally. A UTC-midnight string for a local day is only the same day at UTC+0.
+  const now = new Date();
+  const rollover = carriedCents !== 0;
+  const createdAt = new Date(now.getFullYear(), now.getMonth() - (rollover ? 1 : 0), 1, 12, 0, 0).toISOString();
   db.prepare(`
     INSERT INTO budgets (id, category_id, amount, period, rollover, rollover_balance, created_at, updated_at)
-    VALUES (?, ?, ?, 'monthly', ?, ?, ?, ?)
-  `).run(`bud_${categoryId}`, categoryId, amountCents, rolloverCents === 0 ? 0 : 1, rolloverCents, createdAt, createdAt);
+    VALUES (?, ?, ?, 'monthly', ?, 0, ?, ?)
+  `).run(`bud_${categoryId}`, categoryId, amountCents, rollover ? 1 : 0, createdAt, createdAt);
+  if (rollover) {
+    const lastMonth = new Date(now.getFullYear(), now.getMonth() - 1, 10);
+    const date = `${lastMonth.getFullYear()}-${String(lastMonth.getMonth() + 1).padStart(2, '0')}-10`;
+    insertTransaction(db, { date, amount: -(amountCents - carriedCents), category_id: categoryId });
+  }
 }
 
 test('a budget set on a child category is not compared against its whole parent', () => {

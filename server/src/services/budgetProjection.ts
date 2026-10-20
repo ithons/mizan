@@ -285,7 +285,7 @@ export function getMonthlyBudgetsWithProjection(
     }
 
     const rolloverBalance = budget.rollover
-      ? carriedIn.get(budget.id) ?? Number(budget.rollover_balance ?? 0)
+      ? carriedIn.get(budget.id) ?? 0
       : 0;
     const availableAmount = budget.amount + rolloverBalance;
     const projectedSpend = (budget.spent ?? 0) + expectedRecurring;
@@ -404,7 +404,7 @@ function walkRolloverLedger(
     const range = monthRangeForLedger(createdMonth, throughMonth, months);
     const categoryIds = descendants.get(budget.category_id) ?? new Set([budget.category_id]);
     const spending = spendingByMonth(db, categoryIds, range.firstComputedMonth, range.endMonthExclusive);
-    let balance = Number(budget.rollover_balance ?? 0);
+    let balance = 0;
     let monthKey = range.firstComputedMonth;
 
     while (monthKey < range.endMonthExclusive) {
