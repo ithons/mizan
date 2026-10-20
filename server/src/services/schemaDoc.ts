@@ -5,6 +5,7 @@ import {
   expenseSideSql,
   incomeSideSql,
   spendAmountSql,
+  REPORT_SCOPE_ROOT_IDS,
 } from './transactionFilters';
 
 /**
@@ -466,12 +467,10 @@ export const ENUM_MEANINGS: Record<string, EnumMeaning> = {
  * disagree with the Reports page by $775.00 on the owner's own July, which is precisely the failure
  * this dictionary exists to stop.
  *
- * The root ids are duplicated from reporting.ts because they are private there. That duplication is
- * pinned by tests/schemaDoc.test.ts, which asserts the example returns the same figure as
- * `getSpendingReport` on a fixture carrying a transfer, a refund and an investment flow, so a
- * change to the report's scope fails rather than drifts.
+ * The root ids are `REPORT_SCOPE_ROOT_IDS`, the list reporting.ts reads. tests/schemaDoc.test.ts
+ * asserts the example returns the same figure as `getSpendingReport` on a fixture carrying a
+ * transfer, a refund and an investment flow.
  */
-const REPORT_SCOPE_ROOT_IDS = ['cat_xfer', 'cat_inv', 'cat_crypto'];
 
 const REPORT_SCOPE_CTE = [
   'WITH RECURSIVE excluded_report_categories(id) AS (',

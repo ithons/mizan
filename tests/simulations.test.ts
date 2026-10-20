@@ -4,7 +4,8 @@ import type Database from 'better-sqlite3';
 import { format, subDays } from 'date-fns';
 import { _setDbForTesting } from '../server/src/db/index';
 import { computeSafeToSpend, readSafeToSpend } from '../server/src/services/safeToSpend';
-import { checkAdjustments, compoundGrowth, cashRunway, debtPayoff, emergencyFund, goalTimeline, projectFree, projectFreeBand } from '../server/src/services/simulations';
+import { checkAdjustments, compoundGrowth, cashRunway, dailyDiscretionarySpend, debtPayoff, emergencyFund, goalTimeline, projectFree, projectFreeBand } from '../server/src/services/simulations';
+import { getSpendingReport } from '../server/src/services/reporting';
 import { getMonthlyBudgetsWithProjection } from '../server/src/services/budgetProjection';
 import { detectRecurring } from '../server/src/services/recurring';
 import { refreshTransactionIntegrity } from '../server/src/services/transactionIntegrity';
@@ -290,4 +291,35 @@ test('cancelling steady pay in a band what-if moves every percentile by exactly 
   } finally {
     _setDbForTesting(undefined as unknown as Database.Database);
   }
+});
+
+/** The band's history window replayed against Reports over the same days, with no recurring pattern to set aside. */
+function bandHistoryAgainstReports(extra: (db: Database.Database, account: string) => void) {
+  const db = migratedTestDb();
+  const today = new Date();
+  const account = insertAccount(db, { type: 'checking', current_balance: 500000 });
+  for (let back = 120; back >= 1; back -= 3) {
+    insertTransaction(db, { account_id: account, date: day(back), amount: -2500, category_id: 'cat_food_restaurants' });
+  }
+  extra(db, account);
+  const { daily } = dailyDiscretionarySpend(db, today);
+  const report = getSpendingReport(db, { startDate: day(182), endDate: day(1) });
+  db.close();
+  return { band: daily.reduce((sum, cents) => sum + cents, 0), reports: report.total };
+}
+
+test('the band replays the spending Reports counts, not unpaired transfer or crypto rows', () => {
+  const result = bandHistoryAgainstReports((db, account) => {
+    insertTransaction(db, { account_id: account, date: day(40), amount: 261117, category_id: 'cat_xfer_in' });
+    insertTransaction(db, { account_id: account, date: day(30), amount: -80125, category_id: 'cat_xfer_out' });
+    insertTransaction(db, { account_id: account, date: day(20), amount: -29998, category_id: 'cat_crypto_buy' });
+  });
+  assert.equal(result.band, result.reports);
+  assert.equal(result.band, 40 * 2500);
+});
+
+test('HEALTHY: with no transfer rows the band and Reports already agree', () => {
+  const result = bandHistoryAgainstReports(() => {});
+  assert.equal(result.band, 40 * 2500);
+  assert.equal(result.band, result.reports);
 });

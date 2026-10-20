@@ -1,7 +1,7 @@
 import type Database from 'better-sqlite3';
 import { buildRecurringForecast } from './recurringForecast';
 import { calculateGoalProgress, type GoalProgressInput } from './goalProgress';
-import { excludedFromTotalsSql, expenseSideSql, reportDateSql, spendAmountSql } from './transactionFilters';
+import { excludedFromTotalsSql, expenseSideSql, inReportScopeSql, reportDateSql, spendAmountSql } from './transactionFilters';
 import type { RecurringForecastOccurrence } from '../../../shared/types';
 import { getMonthlyBudgetsWithProjection } from './budgetProjection';
 import { toDollars } from './money';
@@ -374,12 +374,7 @@ function unbudgetedPace(
     `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
 
   const rows = db.prepare(`
-    WITH RECURSIVE out_of_scope(id) AS (
-      SELECT id FROM categories WHERE id IN ('cat_xfer', 'cat_inv', 'cat_crypto')
-      UNION ALL
-      SELECT c.id FROM categories c JOIN out_of_scope s ON c.parent_id = s.id
-    ),
-    budgeted(id) AS (
+    WITH RECURSIVE budgeted(id) AS (
       SELECT id FROM categories WHERE id IN (${budgeted.map(() => '?').join(',') || 'NULL'})
       UNION ALL
       SELECT c.id FROM categories c JOIN budgeted b ON c.parent_id = b.id
@@ -390,7 +385,7 @@ function unbudgetedPace(
     WHERE t.pending = 0
       AND ${excludedFromTotalsSql('t')}
       AND ${expenseSideSql('t', 'c')}
-      AND COALESCE(t.category_id, '') NOT IN (SELECT id FROM out_of_scope)
+      AND ${inReportScopeSql('t')}
       AND COALESCE(t.category_id, '') NOT IN (SELECT id FROM budgeted)
       AND ${reportDateSql('t')} BETWEEN ? AND ?
       AND NOT EXISTS (

@@ -6,6 +6,7 @@ import {
   incomeSideSql,
   reportDateSql,
   spendAmountSql,
+  REPORT_SCOPE_ROOT_IDS,
   type ReportBasis,
 } from './transactionFilters';
 import {
@@ -58,8 +59,7 @@ export interface TrendReport {
   }>;
 }
 
-const EXCLUDED_REPORT_ROOT_CATEGORY_IDS = ['cat_xfer', 'cat_inv', 'cat_crypto'];
-const EXCLUDED_ROOT_PLACEHOLDERS = EXCLUDED_REPORT_ROOT_CATEGORY_IDS.map(() => '?').join(',');
+const EXCLUDED_ROOT_PLACEHOLDERS = REPORT_SCOPE_ROOT_IDS.map(() => '?').join(',');
 
 function excludedCategoriesCte(): string {
   return `
@@ -118,7 +118,7 @@ function dateConditions(range: ReportDateRange): { conditions: string[]; params:
 }
 
 function excludedCategoryParams(): string[] {
-  return [...EXCLUDED_REPORT_ROOT_CATEGORY_IDS];
+  return [...REPORT_SCOPE_ROOT_IDS];
 }
 
 function metric(current: number, previous: number): ReportMetricSummary {
@@ -806,7 +806,7 @@ export function getTopMerchantsReport(
     GROUP BY r.merchant
     ORDER BY total DESC
     LIMIT ?
-  `).all(...EXCLUDED_REPORT_ROOT_CATEGORY_IDS, ...params, limit) as Array<{
+  `).all(...REPORT_SCOPE_ROOT_IDS, ...params, limit) as Array<{
     merchant: string;
     transaction_count: number;
     total: number;
@@ -820,7 +820,7 @@ export function getTopMerchantsReport(
     FROM transactions t
     LEFT JOIN categories c ON c.id = t.category_id
     WHERE ${conditions.join(' AND ')}
-  `).get(...EXCLUDED_REPORT_ROOT_CATEGORY_IDS, ...params) as { total: number };
+  `).get(...REPORT_SCOPE_ROOT_IDS, ...params) as { total: number };
 
   return {
     merchants: rows.map((row) => ({

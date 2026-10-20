@@ -79,6 +79,26 @@ export function spendAmountSql(t = 't'): string {
   return `(-${t}.amount)`;
 }
 
+/**
+ * The category trees Reports leaves out of spend and income whatever their class: money moving
+ * between the owner's accounts, into investments, or into crypto. Kept apart from the side
+ * predicates above because `is_investment` is 0 on the transfer and crypto trees, so a side
+ * predicate alone counts them as spending.
+ */
+export const REPORT_SCOPE_ROOT_IDS: readonly string[] = ['cat_xfer', 'cat_inv', 'cat_crypto'];
+
+/** True when the row's category is inside report scope; self-contained, for a query with no CTE of its own. */
+export function inReportScopeSql(t = 't'): string {
+  return `(${t}.category_id IS NULL OR ${t}.category_id NOT IN (
+    WITH RECURSIVE out_of_report_scope(id) AS (
+      SELECT id FROM categories WHERE id IN (${REPORT_SCOPE_ROOT_IDS.map((id) => `'${id}'`).join(', ')})
+      UNION ALL
+      SELECT child.id FROM categories child JOIN out_of_report_scope parent ON child.parent_id = parent.id
+    )
+    SELECT id FROM out_of_report_scope
+  ))`;
+}
+
 /** 'accrual' files a linked refund in its purchase's period; 'cash' files every row on its own date. */
 export type ReportBasis = 'accrual' | 'cash';
 

@@ -5,7 +5,7 @@ import { getMonthlyBudgetsWithProjection } from './budgetProjection';
 import { getCashflowReport, getSpendingReport } from './reporting';
 import { calculateGoalProgress } from './goalProgress';
 import { toCents, toDollars } from './money';
-import { excludedFromTotalsSql, expenseSideSql, reportDateSql, spendAmountSql } from './transactionFilters';
+import { excludedFromTotalsSql, expenseSideSql, inReportScopeSql, reportDateSql, spendAmountSql } from './transactionFilters';
 
 const ymd = (date: Date) => format(date, 'yyyy-MM-dd');
 
@@ -284,13 +284,13 @@ function quantile(sorted: number[], q: number): number {
 }
 
 /** Daily non-recurring spend over the history window, oldest first, refunds netted to their purchase date. */
-function dailyDiscretionarySpend(db: Database.Database, today: Date): { daily: number[]; coveredDays: number } {
+export function dailyDiscretionarySpend(db: Database.Database, today: Date): { daily: number[]; coveredDays: number } {
   const start = ymd(addDays(today, -BAND_HISTORY_DAYS));
   const end = ymd(addDays(today, -1));
   const rows = db.prepare(`
     SELECT ${reportDateSql('t')} AS day, SUM(${spendAmountSql('t')}) AS cents
     FROM transactions t LEFT JOIN categories c ON c.id = t.category_id
-    WHERE t.pending = 0 AND ${excludedFromTotalsSql('t')} AND ${expenseSideSql('t', 'c')}
+    WHERE t.pending = 0 AND ${excludedFromTotalsSql('t')} AND ${expenseSideSql('t', 'c')} AND ${inReportScopeSql('t')}
       AND ${reportDateSql('t')} BETWEEN ? AND ?
       AND NOT EXISTS (SELECT 1 FROM recurring_patterns rp WHERE rp.id = t.recurring_id AND rp.is_active = 1)
     GROUP BY 1

@@ -4,7 +4,7 @@ import {
   revertRevisions,
   writeTransactionCategory,
 } from './categoryWrites';
-import { excludedFromTotalsSql } from './transactionFilters';
+import { excludedFromTotalsSql, REPORT_SCOPE_ROOT_IDS } from './transactionFilters';
 
 export const REFUND_WINDOW_DAYS = 90;
 
@@ -40,7 +40,7 @@ export function refundMerchantKey(row: Pick<LedgerRow, 'merchant_name' | 'origin
 
 const OUT_OF_SCOPE_CTE = `
   WITH RECURSIVE out_of_scope(id) AS (
-    SELECT id FROM categories WHERE id IN ('cat_xfer', 'cat_inv', 'cat_crypto')
+    SELECT id FROM categories WHERE id IN (${REPORT_SCOPE_ROOT_IDS.map((id) => `'${id}'`).join(', ')})
     UNION ALL
     SELECT c.id FROM categories c JOIN out_of_scope s ON c.parent_id = s.id
   )

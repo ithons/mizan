@@ -1,7 +1,7 @@
 import type Database from 'better-sqlite3';
 import { format, subDays } from 'date-fns';
 import { toDollars } from './money';
-import { excludedFromTotalsSql, expenseSideSql, incomeSideSql, reportDateSql } from './transactionFilters';
+import { excludedFromTotalsSql, expenseSideSql, incomeSideSql, reportDateSql, REPORT_SCOPE_ROOT_IDS } from './transactionFilters';
 
 const REPORT_DATE = reportDateSql('t');
 import type { Insight } from '../../../shared/types';
@@ -21,14 +21,12 @@ interface IncomeRow {
   previous_income: number;
 }
 
-const EXCLUDED_REPORT_ROOT_CATEGORY_IDS = ['cat_xfer', 'cat_inv', 'cat_crypto'];
-
 /** Spike thresholds, in cents. Tuned against a replay over the owner's real ledger; see pickCategorySpike. */
 const MIN_CURRENT_CENTS = 30000;
 const MIN_DELTA_CENTS = 20000;
 const MIN_BASELINE_CENTS = 30000;
 const SPIKE_RATIO = 2;
-const EXCLUDED_ROOT_PLACEHOLDERS = EXCLUDED_REPORT_ROOT_CATEGORY_IDS.map(() => '?').join(',');
+const EXCLUDED_ROOT_PLACEHOLDERS = REPORT_SCOPE_ROOT_IDS.map(() => '?').join(',');
 
 function money(amount: number): string {
   return new Intl.NumberFormat('en-US', {
@@ -160,7 +158,7 @@ export function getAnomalyInsights(db: Database.Database, now = new Date()): Ran
       AND ${expenseSideSql('t', 'c')}
     GROUP BY category_name
   `).all(
-    ...EXCLUDED_REPORT_ROOT_CATEGORY_IDS,
+    ...REPORT_SCOPE_ROOT_IDS,
     ...windowParams,
     oldestStart,
     currentEnd
@@ -187,7 +185,7 @@ export function getAnomalyInsights(db: Database.Database, now = new Date()): Ran
       AND ${excludedFromTotalsSql('t')}
       AND ${incomeSideSql('t', 'c')}
   `).get(
-    ...EXCLUDED_REPORT_ROOT_CATEGORY_IDS,
+    ...REPORT_SCOPE_ROOT_IDS,
     currentStart,
     currentEnd,
     previousStart,
