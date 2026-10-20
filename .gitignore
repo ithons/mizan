@@ -12,12 +12,7 @@ AGENT.md
 .claude/.state-fingerprint
 
 # Historical-backfill data payloads contain real financial history / account names.
-# Keep the machinery (scripts + README + example config) in git, but never the data.
 data/backfill/raw/
-data/backfill/normalized/
-data/backfill/backups/
-data/backfill/floors.json
-data/backfill/jobs.json
 # Raw institution exports (statements/CSVs/PDFs with real financial history). Never commit.
 data/bofa/
 data/chase/

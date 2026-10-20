@@ -144,13 +144,13 @@ interface SeriesStart {
  *     -> all nine SimpleFIN accounts read 2026-07-31; Coinbase reads 2025-09-04
  *
  * So 384 provider rows now sit below their own floor, which is exactly the state described above
- * as the one migration 030 exists to prevent. The floors were rewritten out of band: the only
- * writer of this column anywhere in the tree is `scripts/backfill/floor-map.ts`, which is not in
- * any tsconfig and leaves no record of having run. Nothing in the app can distinguish a floor the
- * owner meant from one a script set, which is the real defect here and is not fixed by editing a
- * comment. The data is left alone deliberately: rewriting a floor to make the sentence true again
- * would be repairing the database instead of the write path, and the intended values are the
- * owner's to state.
+ * as the one migration 030 exists to prevent. The floors were rewritten out of band by a one-time
+ * script (`scripts/backfill/floor-map.ts`, since deleted) that left no record of having run.
+ * Nothing in the tree writes this column now, so the floors are fixed at their present values,
+ * and nothing in the app can distinguish a floor the owner meant from one a script set.
+ * The data is left alone deliberately: rewriting a floor to make the sentence true again would be
+ * repairing the database instead of the write path, and the intended values are the owner's to
+ * state.
  */
 function resolveStart(
   db: Database.Database,

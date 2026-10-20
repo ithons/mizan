@@ -1,7 +1,7 @@
 // Regenerate everything derived from raw transactions after a backfill: duplicate/
 // transfer integrity, recurring-pattern detection, and today's balance sheet. Net worth history
 // needs no rebuild: the timeline is derived from the ledger on every read.
-// Run once after import + dedup.
+// Run once after an import.
 //
 //   tsx scripts/backfill/rebuild.ts
 import { getDb, closeDb } from '../../server/src/db/index';
@@ -22,8 +22,6 @@ function main(): void {
   console.log('Recurring detection refreshed.');
 
   takeSnapshot();
-
-  console.log('\nDone. Now capture the durability snapshot: tsx scripts/backfill/backup.ts');
 }
 
 try { main(); } finally { closeDb(); }
