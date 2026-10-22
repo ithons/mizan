@@ -7,6 +7,7 @@ import { isDraftStillActionable, unpaidCardSentence } from './advisorDrafts';
 import { unpaidCardPayment } from './cardPayments';
 import { describeDraftChanges } from './draftDescriptions';
 import { listNotificationRules, notificationParamsFromDollars } from './notifications';
+import { expectLumpProblem } from './expectedLumps';
 
 const ROUTE_FOR_KIND: Readonly<Record<AdvisorDraftActionKind, string>> = {
   categorize_transaction: '/ledger',
@@ -25,6 +26,7 @@ const ROUTE_FOR_KIND: Readonly<Record<AdvisorDraftActionKind, string>> = {
   update_account: '/accounts',
   set_notification_rule: '/settings?section=notifications',
   delete_notification_rule: '/settings?section=notifications',
+  expect_lump: '/plan',
 };
 
 export const MAX_PROPOSALS_PER_CALL = 20;
@@ -65,6 +67,7 @@ function referenceProblem(db: Database.Database, payload: AdvisorDraftPayload): 
     case 'set_notification_rule': return notificationRuleProblem(db, payload);
     case 'delete_notification_rule':
       return exists(db, 'SELECT 1 FROM notification_rules WHERE id = ?', payload.rule_id) ? null : 'no notification rule has that rule_id';
+    case 'expect_lump': return expectLumpProblem(payload);
   }
 }
 

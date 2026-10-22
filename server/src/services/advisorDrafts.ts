@@ -52,6 +52,7 @@ import { createGoal } from './goals';
 import { dismissRecurringPattern } from './recurring';
 import { updateAccount } from './accounts';
 import { deleteNotificationRule, listNotificationRules, notificationParamsFromDollars, upsertNotificationRule, type UpsertNotificationRuleInput } from './notifications';
+import { confirmExpectedLump, expectLumpLapsed, expectLumpProblem } from './expectedLumps';
 
 interface CategoryRow {
   id: string;
@@ -809,6 +810,13 @@ function confirmDeleteNotificationRule(db: Database.Database, payload: Extract<A
   return { changed: 1, result: { rule_id: payload.rule_id } };
 }
 
+function confirmExpectLump(db: Database.Database, payload: Extract<AdvisorDraftPayload, { kind: 'expect_lump' }>): DraftApplyResult {
+  const problem = expectLumpProblem(payload);
+  if (problem) throw new Error(problem);
+  const written = confirmExpectedLump(db, payload);
+  return { changed: written.changed, result: { expected_lump_id: written.id }, wroteNothing: written.changed === 0 };
+}
+
 function confirmGoalTarget(db: Database.Database, payload: Extract<AdvisorDraftPayload, { kind: 'update_goal_target' }>): {
   changed: number;
   result: unknown;
@@ -952,6 +960,8 @@ function proposalIdentity(payload: AdvisorDraftPayload): ProposalIdentity | null
   switch (payload.kind) {
     case 'categorize_transaction':
       return { transactionId: payload.transaction_id, categoryId: payload.category_id, pattern: null };
+    case 'expect_lump':
+      return { transactionId: null, categoryId: null, pattern: payload.merchant_key };
     case 'create_merchant_rule':
       // The pattern AND the category, because a rule is both. Declining "file Spotify under
       // Entertainment" is not declining "file Spotify under Subscriptions", and matching on the
@@ -1309,6 +1319,8 @@ function premiseLiveness(
       // A creation names nothing that could disappear. Reported as unjudged rather than live, so a
       // reader can tell the difference.
       return 'not_judged';
+    case 'expect_lump':
+      return verdict(!expectLumpLapsed(db, payload));
   }
 }
 
@@ -1391,6 +1403,8 @@ function proposedPatternOf(db: Database.Database, payload: AdvisorDraftPayload):
   switch (payload.kind) {
     case 'create_merchant_rule':
       return payload.pattern;
+    case 'expect_lump':
+      return payload.merchant_key;
     case 'retire_merchant_rule': {
       const rule = db.prepare('SELECT pattern FROM merchant_rules WHERE id = ?')
         .get(payload.rule_id) as { pattern: string } | undefined;
@@ -1794,6 +1808,8 @@ export function confirmAdvisorDraft(
         result = confirmSetNotificationRule(db, draftAction.payload); break;
       case 'delete_notification_rule':
         result = confirmDeleteNotificationRule(db, draftAction.payload); break;
+      case 'expect_lump':
+        result = confirmExpectLump(db, draftAction.payload); break;
       default:
         throw new Error(`Unhandled draft kind: ${(draftAction.payload as { kind: string }).kind}`);
     }

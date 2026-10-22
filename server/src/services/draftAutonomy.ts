@@ -214,6 +214,12 @@ export const DRAFT_KIND_AUTONOMY: Readonly<Record<AdvisorDraftActionKind, DraftA
     argument: 'Deleting a rule loses its params, and the owner may have set them.',
   },
 
+  expect_lump: {
+    autonomy: 'proposal_only',
+    fails: ['observation'],
+    argument: 'Whether an irregular deposit will come again is a forecast only the owner can vouch for, not a fact the ledger holds.',
+  },
+
 };
 
 /**

@@ -375,6 +375,7 @@ function promptInput(
     ],
     ownRules: [{ id: 'rule_1', pattern: 'Trupanion', category_name: 'Health' }],
     reimbursements: [],
+    lumps: [],
     uncategorizedTotal: 1,
     recurring: [
       {

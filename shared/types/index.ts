@@ -911,7 +911,8 @@ export type AdvisorDraftActionKind =
   | 'link_reimbursement'
   | 'update_account'
   | 'set_notification_rule'
-  | 'delete_notification_rule';
+  | 'delete_notification_rule'
+  | 'expect_lump';
 
 export interface AdvisorDraftChange {
   field: string;
@@ -1020,6 +1021,17 @@ export type AdvisorDraftPayload =
   | {
       kind: 'delete_notification_rule';
       rule_id: string;
+    }
+  | {
+      /** An irregular inflow the owner expects. Amounts in dollars; never counted in free to spend. */
+      kind: 'expect_lump';
+      label: string;
+      merchant_key: string;
+      amount_low: number;
+      amount_high: number;
+      window_start: string;
+      window_end: string;
+      last_occurrence: string;
     };
 
 export type AdvisorAutonomy = 'autonomous' | 'proposal_only';

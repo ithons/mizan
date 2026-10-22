@@ -13,6 +13,8 @@ import { retirementRoom } from './retirementRoom';
 import { findReimbursements } from './reimbursements';
 import { counterpartiesToDollars, findCounterparties } from './counterparties';
 import { cardReview, cardReviewToDollars } from './cardReview';
+import { openLumpCandidates } from './expectedLumpCandidates';
+import { listConfirmedLumps } from './expectedLumps';
 import { cashRunway, checkAdjustments, compoundGrowth, emergencyFund, projectFreeBand, debtPayoff, goalTimeline, goalTimelineFor, projectFree } from './simulations';
 
 type ToolInput = Record<string, unknown>;
@@ -32,6 +34,7 @@ const PAYLOAD_GUIDE = [
   'set_manual_cost_basis {holding_id, manual_cost_basis (dollars) | null, note?}.',
   'set_notification_rule {rule_id? (to edit), rule_kind, params, enabled?}: rule_kind and params are budget_threshold {category_id|null, percent}, large_transaction {min_amount (dollars), account_id|null, lookback_days}, bill_due {days_ahead}, low_balance {account_id|null, threshold (dollars)}, safe_to_spend_negative {}, sync_failed {include_partial}, goal_milestone {goal_id|null, milestones:[percents]}, unusual_spending {category_id|null, ratio, min_amount (dollars)}, recurring_amount_changed {}, income_late {min_days_late}, account_shortfall {days_ahead}, card_payment_missing {min_days_late}.',
   'delete_notification_rule {rule_id}.',
+  'expect_lump {label, merchant_key, amount_low, amount_high (dollars), window_start, window_end, last_occurrence}: an irregular deposit the owner expects; copy a candidate from find_expected_lumps. It is an estimate and never counts toward free to spend.',
 ].join(' ');
 
 export const AGENT_TOOLS: Anthropic.Tool[] = [
@@ -161,6 +164,11 @@ export const AGENT_TOOLS: Anthropic.Tool[] = [
     input_schema: { type: 'object', properties: {} },
   },
   {
+    name: 'find_expected_lumps',
+    description: 'Large deposits (a term refund, a family check) that came at least three times at irregular intervals, each with a next window and an amount range ready to propose as expect_lump, plus the lumps the owner already confirmed and whether each has arrived. Paychecks, paired transfers and scheduled items are not here. A confirmed lump is an estimate: it never counts toward free to spend.',
+    input_schema: { type: 'object', properties: {} },
+  },
+  {
     name: 'get_notifications',
     description: 'What the inbox has told the owner: title, body, severity, when, read or not. Use when they ask what they missed or what needs attention.',
     input_schema: { type: 'object', properties: { unread_only: { type: 'boolean' }, limit: { type: 'integer', description: 'Default 30, max 200.' } } },
@@ -253,6 +261,26 @@ function getOpenProposalsTool(db: Database.Database): unknown {
   };
 }
 
+function findExpectedLumpsTool(db: Database.Database): unknown {
+  return {
+    candidates: openLumpCandidates(db).map((candidate) => ({
+      payload: candidate.payload,
+      already_proposed: candidate.draft_id !== null,
+      occurrences: candidate.occurrences.map((o) => ({ date: o.date, amount: toDollars(o.amount) })),
+    })),
+    confirmed: listConfirmedLumps(db).map((lump) => ({
+      id: lump.id,
+      label: lump.label,
+      amount_low: toDollars(lump.amount_low_cents),
+      amount_high: toDollars(lump.amount_high_cents),
+      window_start: lump.window_start,
+      window_end: lump.window_end,
+      state: lump.state,
+      arrived_on: lump.arrived_on,
+    })),
+  };
+}
+
 function num(value: unknown, fallback: number): number {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : fallback;
@@ -337,6 +365,7 @@ export function runAgentTool(db: Database.Database, name: string, input: ToolInp
     case 'get_counterparties': return counterpartiesToDollars(findCounterparties(db));
     case 'find_reimbursements': return findReimbursements(db, Math.min(Math.max(Math.round(num(input.days, 120)), 1), 365));
     case 'get_card_review': return cardReviewToDollars(cardReview(db, format(new Date(), 'yyyy-MM-dd')));
+    case 'find_expected_lumps': return findExpectedLumpsTool(db);
     case 'get_funding_mix': return fundingMix(db, Math.min(Math.max(Math.round(num(input.months, 6)), 1), 24));
     default: return undefined;
   }

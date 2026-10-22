@@ -111,5 +111,7 @@ export function describeDraftChanges(db: Database.Database, payload: AdvisorDraf
     }
     case 'delete_notification_rule':
       return [{ field: 'Notification rule', before: payload.rule_id, after: 'removed' }];
+    case 'expect_lump':
+      return [{ field: `${payload.label} expected`, before: null, after: `${money(payload.amount_low)} to ${money(payload.amount_high)}, ${payload.window_start} to ${payload.window_end}` }];
   }
 }

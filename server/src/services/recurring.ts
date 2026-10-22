@@ -83,7 +83,7 @@ const STRIP_PUNCTUATION = /[^\w\s]/g;
 // merchant's variants ("STARBUCKS #1234 WA", "STARBUCKS #5678 OR") group into one recurring
 // pattern. This is intentionally stronger than transactionIntegrity.normalizeMerchant, which must
 // stay minimal to avoid merging distinct charges into false duplicates. Keep them separate.
-const PAYROLL_WORDS = /payroll|echeckpay|dir dep|direct dep|salary/i;
+export const PAYROLL_WORDS = /payroll|echeckpay|dir dep|direct dep|salary/i;
 const ACH_IDS = /\b(?:ppd|ccd|web|tel|arc)\s*id\s*:?\s*\S+/gi;
 const PAYER_NOISE = new Set([
   'payroll', 'echeckpay', 'dir', 'dep', 'direct', 'deposit', 'salary', 'ach', 'credit', 'edi',

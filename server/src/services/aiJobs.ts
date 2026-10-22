@@ -116,6 +116,7 @@ export const AI_JOBS: Readonly<Record<AiJobName, AiJobDeclaration>> = {
       'update_budget',
       'update_goal_target',
       'link_reimbursement',
+      'expect_lump',
     ],
     invariants: ['autonomy_boundary', 'human_categories_preserved', 'headline_conservation'],
     digestSection: 'review',
@@ -392,6 +393,7 @@ export function draftTargetKey(payload: AdvisorDraftPayload): string {
     case 'set_manual_cost_basis': return `set_manual_cost_basis:${payload.holding_id}`;
     case 'set_sector_metadata': return `set_sector_metadata:${payload.security_id}`;
     case 'link_reimbursement': return `link_reimbursement:${payload.reimbursement_id}`;
+    case 'expect_lump': return `expect_lump:${payload.merchant_key}`;
     default: return (payload as { kind: string }).kind;
   }
 }

@@ -15,7 +15,7 @@ type GoalEarmarkRow = GoalProgressInput & {
   account_is_liability: number | null;
 };
 
-const LIQUID_TYPES = new Set(['checking', 'savings', 'cash']);
+export const LIQUID_TYPES: ReadonlySet<string> = new Set(['checking', 'savings', 'cash']);
 
 /** The one definition of the liquid pool, read by both `liquid` and the goal earmark. */
 function isInLiquidPool(account: { type: string; is_hidden: number; is_liability: number }): boolean {

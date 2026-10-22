@@ -264,6 +264,16 @@ export const AdvisorDraftPayloadSchema = z.discriminatedUnion('kind', [
     enabled: z.boolean().optional(),
   }),
   z.object({ kind: z.literal('delete_notification_rule'), rule_id: id }),
+  z.object({
+    kind: z.literal('expect_lump'),
+    label: z.string().trim().min(1).max(80),
+    merchant_key: z.string().trim().min(1).max(120),
+    amount_low: z.number().positive(),
+    amount_high: z.number().positive(),
+    window_start: calendarDate,
+    window_end: calendarDate,
+    last_occurrence: calendarDate,
+  }),
 ]);
 
 // Top-level draft object as emitted by the worker LLM. label/summary/route/changes/

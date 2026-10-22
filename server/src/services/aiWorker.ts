@@ -20,6 +20,8 @@ import { format } from 'date-fns';
 import { AiWorkerDraftSchema } from '../../../shared/schemas';
 import { describeAutonomyForPrompt } from './draftAutonomy';
 import { findReimbursements } from './reimbursements';
+import { openLumpCandidates } from './expectedLumpCandidates';
+import type { ExpectLumpPayload } from './expectedLumps';
 import type { ProviderUsage } from './aiProviders/types';
 import {
   AI_JOBS,
@@ -129,6 +131,15 @@ export const WORKER_DRAFTS_SCHEMA: Record<string, unknown> = {
               draftPayloadVariant('link_reimbursement', {
                 reimbursement_id: { type: 'string' },
                 purchase_id: { type: 'string' },
+              }),
+              draftPayloadVariant('expect_lump', {
+                label: { type: 'string' },
+                merchant_key: { type: 'string' },
+                amount_low: { type: 'number' },
+                amount_high: { type: 'number' },
+                window_start: { type: 'string' },
+                window_end: { type: 'string' },
+                last_occurrence: { type: 'string' },
               }),
             ],
           },
@@ -283,6 +294,7 @@ const SECTION = {
   recurring: 'Recurring occurrences that are overdue or that the user adjusted',
   goals: 'Goals',
   reimbursements: 'Money a friend may have paid back',
+  lumps: 'Large deposits that have come back at irregular intervals',
   detections: 'System detections new since the last review pass',
 } as const;
 
@@ -293,7 +305,7 @@ const SECTION = {
  * contradiction rather than an emphasis, because the model cannot obey both.
  */
 const ID_RULE =
-  `THE ONE RULE ABOUT IDS. A 'categorize_transaction' payload's "transaction_id" MUST be copied exactly from the "id" field of a row listed under "${SECTION.uncategorized}" or under "${SECTION.refilable}" below. Those two lists together are every transaction you may name, and no other sentence here narrows that. Either list can be empty; an empty one reads "(none)", which means there are none, not that some were left out. Any payload's "category_id" MUST likewise be copied exactly from the "id" field of a row under "${SECTION.categories}"; a 'retire_merchant_rule' payload's "rule_id" from a row under "${SECTION.ownRules}"; a 'create_recurring_adjustment' payload's "recurring_id" and "original_date" both from one row under "${SECTION.recurring}"; an 'update_goal_target' payload's "goal_id" from the "id" field of a row under "${SECTION.goals}"; and a 'link_reimbursement' payload's "reimbursement_id" from a row under "${SECTION.reimbursements}" and its "purchase_id" from that same row's candidates. Never invent an id, and never put a display name where an id belongs: an id that does not match exactly will silently fail to apply.`;
+  `THE ONE RULE ABOUT IDS. A 'categorize_transaction' payload's "transaction_id" MUST be copied exactly from the "id" field of a row listed under "${SECTION.uncategorized}" or under "${SECTION.refilable}" below. Those two lists together are every transaction you may name, and no other sentence here narrows that. Either list can be empty; an empty one reads "(none)", which means there are none, not that some were left out. Any payload's "category_id" MUST likewise be copied exactly from the "id" field of a row under "${SECTION.categories}"; a 'retire_merchant_rule' payload's "rule_id" from a row under "${SECTION.ownRules}"; a 'create_recurring_adjustment' payload's "recurring_id" and "original_date" both from one row under "${SECTION.recurring}"; an 'update_goal_target' payload's "goal_id" from the "id" field of a row under "${SECTION.goals}"; a 'link_reimbursement' payload's "reimbursement_id" from a row under "${SECTION.reimbursements}" and its "purchase_id" from that same row's candidates; and every field of an 'expect_lump' payload from one row under "${SECTION.lumps}". Never invent an id, and never put a display name where an id belongs: an id that does not match exactly will silently fail to apply.`;
 
 /** A heading and its list, never a heading and a blank line. `note` carries its own leading space. */
 function section(heading: string, note: string, lines: readonly string[]): string {
@@ -372,6 +384,8 @@ export interface BackgroundReviewPromptInput {
   goals: readonly PromptGoal[];
   /** Peer payments in with the purchases each could be paying back. */
   reimbursements: readonly PromptReimbursement[];
+  /** Irregular large inflows the detector grouped, not yet confirmed or declined. */
+  lumps: readonly ExpectLumpPayload[];
   detections: readonly DetectedChange[];
 }
 
@@ -389,6 +403,10 @@ export function promptReimbursements(db: Database.Database): PromptReimbursement
     WHERE kind = 'link_reimbursement' AND status = 'dismissed'
   `).all() as Array<{ id: string }>).map((row) => row.id));
   return findReimbursements(db, 60).inflows.filter((r) => r.could_pay_back.length > 0 && !declined.has(r.id));
+}
+
+function lumpLine(l: ExpectLumpPayload): string {
+  return `- label: "${l.label}", merchant_key: "${l.merchant_key}", amount_low: ${l.amount_low.toFixed(2)}, amount_high: ${l.amount_high.toFixed(2)}, window_start: "${l.window_start}", window_end: "${l.window_end}", last_occurrence: "${l.last_occurrence}"`;
 }
 
 function transactionLine(t: PromptTransaction): string {
@@ -451,6 +469,8 @@ ${section(SECTION.recurring, ' (an occurrence the user already adjusted is their
 ${section(SECTION.goals, ':', input.goals.map(goalLine))}
 
 ${section(SECTION.reimbursements, ' (propose a \'link_reimbursement\' only where the payment is plainly someone\'s share of one listed purchase, such as half or a third of a meal or a trip; never for a Venmo cashout, which bundles payments, or for money from the user\'s own account; one draft per payment, and none when unsure):', input.reimbursements.map(reimbursementLine))}
+
+${section(SECTION.lumps, ' (propose an \'expect_lump\' only where the deposit plainly recurs, such as a term refund; the owner confirms it, and it is an estimate that never counts toward free to spend):', input.lumps.map(lumpLine))}
 
 Review Summary:
 ${input.uncategorizedTotal} total uncategorized transactions (${input.uncategorized.length} shown above).
@@ -799,12 +819,16 @@ export const collectBackgroundReview: AiJobCollect = async ({ db, assignment, ru
   const reimbursements = promptReimbursements(db);
   const reimbursementNews = reimbursements.filter((r) =>
     (db.prepare('SELECT created_at FROM transactions WHERE id = ?').get(r.id) as { created_at: string }).created_at > since);
+  const lumpCandidates = openLumpCandidates(db).filter((candidate) => candidate.draft_id === null);
+  const lumpNews = lumpCandidates.filter((candidate) => candidate.occurrences.some((o) =>
+    ((db.prepare('SELECT created_at FROM transactions WHERE id = ?').get(o.id) as { created_at: string } | undefined)?.created_at ?? '') > since));
   if (
     uncategorizedTransactions.length === 0
     && refilableEnteredSince(db, since) === 0
     && !(ownRules.length > 0 && rulesChangedSince(db, since))
     && recurringNews.length === 0
     && reimbursementNews.length === 0
+    && lumpNews.length === 0
     && freshDetects.length === 0
   ) {
     return {
@@ -823,6 +847,7 @@ export const collectBackgroundReview: AiJobCollect = async ({ db, assignment, ru
     recurring: [...overdueRecurring, ...adjustedRecurring.filter((o) => o.status !== 'overdue')].map(promptOccurrence),
     goals,
     reimbursements,
+    lumps: lumpCandidates.map((candidate) => candidate.payload),
     detections: freshDetects,
   });
 
