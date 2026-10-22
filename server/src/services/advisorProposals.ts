@@ -109,7 +109,8 @@ export function proposeChanges(db: Database.Database, input: { changes?: unknown
     VALUES (?, ?, ?, ?, ?, ?, ?, '[]', 'open', ?, ?)
   `);
   const sameOpen = db.prepare("SELECT id FROM advisor_drafts WHERE status = 'open' AND payload = ? LIMIT 1");
-  const reword = db.prepare('UPDATE advisor_drafts SET label = ?, summary = ?, changes = ?, updated_at = ? WHERE id = ?');
+  // Proposing the same change again proposes it now, against the ledger as it stands now.
+  const reword = db.prepare('UPDATE advisor_drafts SET label = ?, summary = ?, changes = ?, created_at = ?, updated_at = ? WHERE id = ?');
   const result: ProposalsResult = { proposed: [], refused: [] };
   const now = new Date().toISOString();
   changes.forEach((raw, index) => {
@@ -139,7 +140,7 @@ export function proposeChanges(db: Database.Database, input: { changes?: unknown
       citations: [],
       confirmation_required: true,
     };
-    if (existing) reword.run(draft.label, draft.summary, JSON.stringify(changesOf), now, draft.id);
+    if (existing) reword.run(draft.label, draft.summary, JSON.stringify(changesOf), now, now, draft.id);
     else insert.run(draft.id, draft.kind, draft.label, draft.summary, draft.route, payloadJson, JSON.stringify(changesOf), now, now);
     result.proposed.push(draft);
   });
@@ -150,13 +151,13 @@ export function proposeChanges(db: Database.Database, input: { changes?: unknown
 /** Open drafts whose premise still holds, newest first: what is waiting for the owner. */
 export function listOpenDrafts(db: Database.Database, limit = 100): AdvisorDraftAction[] {
   const rows = db.prepare(`
-    SELECT id, kind, label, summary, route, payload, updated_at FROM advisor_drafts
+    SELECT id, kind, label, summary, route, payload, created_at FROM advisor_drafts
     WHERE status = 'open' ORDER BY created_at DESC, id LIMIT ?
-  `).all(limit) as Array<{ id: string; kind: AdvisorDraftActionKind; label: string; summary: string; route: string; payload: string; updated_at: string }>;
+  `).all(limit) as Array<{ id: string; kind: AdvisorDraftActionKind; label: string; summary: string; route: string; payload: string; created_at: string }>;
   const drafts: AdvisorDraftAction[] = [];
   for (const row of rows) {
     const parsed = AdvisorDraftPayloadSchema.safeParse(JSON.parse(row.payload));
-    if (!parsed.success || !isDraftStillActionable(db, parsed.data, row.updated_at)) continue;
+    if (!parsed.success || !isDraftStillActionable(db, parsed.data, row.created_at)) continue;
     drafts.push({ id: row.id, kind: row.kind, label: row.label, summary: row.summary, route: row.route, payload: parsed.data, changes: describeDraftChanges(db, parsed.data), citations: [], confirmation_required: true });
   }
   return drafts;

@@ -5,7 +5,7 @@ import type Database from 'better-sqlite3';
 import express from 'express';
 import { format, setDate, subMonths } from 'date-fns';
 import { detectStarterBudgets } from '../server/src/services/starterBudgets';
-import { listDeclinedProposals, restoreDeclinedProposal } from '../server/src/services/advisorDrafts';
+import { listDeclinedProposals, restoreDeclinedProposal, supersedeLapsedDrafts } from '../server/src/services/advisorDrafts';
 import { listOpenDrafts } from '../server/src/services/advisorProposals';
 import { runAgentTool } from '../server/src/services/advisorAgentTools';
 import { _setDbForTesting } from '../server/src/db/index';
@@ -137,6 +137,23 @@ test('a restored decline at an old median does not outlive the starter added at 
     assert.equal((db.prepare("SELECT amount FROM budgets WHERE category_id = 'cat_food'").get() as { amount: number }).amount, 85000);
     assert.equal((db.prepare('SELECT status FROM advisor_drafts WHERE id = ?').get(old.id) as { status: string }).status, 'superseded');
     assert.deepEqual(listOpenDrafts(db), []);
+  });
+});
+
+test('a budget set by hand while a starter decline stood keeps the restored draft out of the queue', async () => {
+  const db = ledger({ cat_food_groceries: STEADY });
+  await withRouter(db, async (base) => {
+    assert.equal((await post(base, { category_id: 'cat_food', decision: 'dismiss' })).status, 200);
+    // Proposed and dismissed two hours ago, a budget set by hand an hour ago, restored now.
+    const twoHoursAgo = new Date(Date.now() - 7_200_000).toISOString();
+    const anHourAgo = new Date(Date.now() - 3_600_000).toISOString();
+    db.prepare('UPDATE advisor_drafts SET created_at = ?, updated_at = ?').run(twoHoursAgo, twoHoursAgo);
+    db.prepare("INSERT INTO budgets (id, category_id, amount, period, rollover, rollover_balance, created_at, updated_at) VALUES ('b_hand', 'cat_food', 61000, 'monthly', 0, 0, ?, ?)").run(anHourAgo, anHourAgo);
+    const [declined] = listDeclinedProposals(db).filter((d) => d.kind === 'update_budget');
+    assert.deepEqual(restoreDeclinedProposal(db, declined.id), { ok: true, draft_reopened: true, queued: false });
+    assert.deepEqual(listOpenDrafts(db), []);
+    assert.equal(supersedeLapsedDrafts(db), 1);
+    assert.equal((db.prepare("SELECT amount FROM budgets WHERE id = 'b_hand'").get() as { amount: number }).amount, 61000);
   });
 });
 

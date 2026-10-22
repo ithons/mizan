@@ -1183,8 +1183,8 @@ export function restoreDeclinedProposal(
 
     if (reopened.changes === 0) return { ok: true, draft_reopened: false, queued: false };
 
-    const draft = db.prepare('SELECT payload, updated_at FROM advisor_drafts WHERE id = ?')
-      .get(row.draft_id) as { payload: string; updated_at: string } | undefined;
+    const draft = db.prepare('SELECT payload, created_at FROM advisor_drafts WHERE id = ?')
+      .get(row.draft_id) as { payload: string; created_at: string } | undefined;
     const parsed = AdvisorDraftPayloadSchema.safeParse(
       safeJsonParse<unknown>(draft?.payload ?? 'null', null, `advisor_drafts.payload for ${row.draft_id}`)
     );
@@ -1192,7 +1192,7 @@ export function restoreDeclinedProposal(
     return {
       ok: true,
       draft_reopened: true,
-      queued: parsed.success && isDraftStillActionable(db, parsed.data, draft?.updated_at),
+      queued: parsed.success && isDraftStillActionable(db, parsed.data, draft?.created_at),
     };
   });
 
@@ -1244,9 +1244,10 @@ export function draftLiveness(
  * second, genuine refusal of a still-live suggestion was recorded as `stale = 1`, i.e. as the model
  * merely being late. Any reader filtering `stale = 1` as "late" would discount a repeated no.
  *
- * `proposedAt` is the draft row's `updated_at`: when it was last proposed, re-proposed or restored.
- * Only `update_budget` reads it, and a caller holding a bare payload passes nothing, in which case
- * that one question is not asked rather than answered as live.
+ * `proposedAt` is the draft row's `created_at`, which `proposeChanges` moves forward when the same
+ * change is proposed again. Dismissing and restoring leave it alone, so a budget written while a
+ * decline stood still counts as written since. Only `update_budget` reads it; called with a bare
+ * payload, that verdict rests on the category alone.
  */
 function premiseLiveness(
   db: Database.Database,
@@ -1366,7 +1367,7 @@ interface OpenDraftRow {
   kind: string;
   summary: string;
   payload: string;
-  updated_at: string;
+  created_at: string;
 }
 
 /**
@@ -1376,7 +1377,7 @@ interface OpenDraftRow {
  * judged, or whose payload no longer parses, is left open.
  */
 export function supersedeLapsedDrafts(db: Database.Database, now = new Date().toISOString()): number {
-  const open = db.prepare("SELECT id, payload, updated_at FROM advisor_drafts WHERE status = 'open'").all() as Array<{ id: string; payload: string; updated_at: string }>;
+  const open = db.prepare("SELECT id, payload, created_at FROM advisor_drafts WHERE status = 'open'").all() as Array<{ id: string; payload: string; created_at: string }>;
   const close = db.prepare(`
     UPDATE advisor_drafts SET status = 'superseded', closed_reason = ?, updated_at = ? WHERE id = ? AND status = 'open'
   `);
@@ -1385,7 +1386,7 @@ export function supersedeLapsedDrafts(db: Database.Database, now = new Date().to
     const parsed = AdvisorDraftPayloadSchema.safeParse(safeJsonParse<unknown>(draft.payload, null, `advisor_drafts.payload for ${draft.id}`));
     if (!parsed.success) continue;
     const declined = ownerDeclinedProposal(db, parsed.data) !== null;
-    if (!declined && premiseLiveness(db, parsed.data, draft.updated_at) !== 'lapsed') continue;
+    if (!declined && premiseLiveness(db, parsed.data, draft.created_at) !== 'lapsed') continue;
     const reason = declined
       ? 'You declined this same change before.'
       : 'It no longer applies: what it names is gone, the change already holds, or the row has since been decided.';
@@ -1467,7 +1468,7 @@ function dismissedDraftEvidence(db: Database.Database, draft: OpenDraftRow): Dra
     transactionId: payload?.kind === 'categorize_transaction' ? payload.transaction_id : null,
     // `premiseLiveness`, not `draftLiveness`: see its header. A dismissal recorded while an earlier
     // dismissal of the same proposal is on file is still a refusal of a live suggestion.
-    stale: staleFlag(payload === null ? null : premiseLiveness(db, payload, draft.updated_at)),
+    stale: staleFlag(payload === null ? null : premiseLiveness(db, payload, draft.created_at)),
   };
 }
 
@@ -1482,7 +1483,7 @@ export function dismissAdvisorDraft(db: Database.Database, id: string): { change
 
   const dismiss = db.transaction(() => {
     const draft = db.prepare(`
-      SELECT id, kind, summary, payload, updated_at FROM advisor_drafts WHERE id = ? AND status = 'open'
+      SELECT id, kind, summary, payload, created_at FROM advisor_drafts WHERE id = ? AND status = 'open'
     `).get(id) as OpenDraftRow | undefined;
 
     const result = db.prepare(`
