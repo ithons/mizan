@@ -101,11 +101,12 @@ export function AccountDetail() {
     retry: false,
   });
   const isCard = account?.type === 'credit';
-  const { data: review } = useQuery({
+  const reviewQ = useQuery({
     queryKey: ['accounts', 'card-review'],
     queryFn: () => accountsApi.cardReview(),
     enabled: isCard,
   });
+  const review = reviewQ.data;
   const cardReview = review?.cards.find((c) => c.account_id === id) ?? null;
   const txQ = useQuery({
     queryKey: ['account', id, 'transactions'],
@@ -204,6 +205,11 @@ export function AccountDetail() {
         </div>
       )}
 
+      {isCard && reviewQ.isError && (
+        <div className="mb-8">
+          <QueryErrorBanner items={[{ query: reviewQ, label: 'what this card returned' }]} />
+        </div>
+      )}
       {review && cardReview && (
         <CardReturn card={cardReview} trailingFrom={review.trailing_12_from} unattributed={review.unattributed} today={review.as_of} />
       )}
