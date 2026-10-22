@@ -34,6 +34,7 @@ import {
 import { AddEntryModal, AddScheduledModal, EditEntryModal } from './ledger/modals';
 import { ADD_ENTRY_PARAM, takeAddEntryRequest } from './ledgerLinks';
 import { LedgerColumnHeader, LedgerRow, ScheduledRow } from './ledger/rows';
+import { PeopleAndCash } from './ledger/people';
 import {
   MAX_BATCH_CONFIRM,
   MAX_SUGGESTED_IDS,
@@ -86,7 +87,12 @@ const RANGES = [
   { id: 'this-year', label: 'This year' },
   { id: 'all', label: 'All time' },
 ] as const;
-type LedgerView = 'entries' | 'scheduled';
+const LEDGER_VIEWS = [
+  { id: 'entries', label: 'Entries' },
+  { id: 'scheduled', label: 'Scheduled' },
+  { id: 'people', label: 'People and cash' },
+] as const;
+type LedgerView = (typeof LEDGER_VIEWS)[number]['id'];
 type RangeId = (typeof RANGES)[number]['id'];
 
 function rangeDates(id: RangeId): { startDate?: string; endDate?: string } {
@@ -117,7 +123,7 @@ export function Ledger() {
   const qc = useQueryClient();
   const { addToast } = useAppStore();
   const [searchParams, setSearchParams] = useSearchParams();
-  const view: LedgerView = searchParams.get('view') === 'scheduled' ? 'scheduled' : 'entries';
+  const view: LedgerView = LEDGER_VIEWS.find((v) => v.id === searchParams.get('view'))?.id ?? 'entries';
   const setView = (next: LedgerView) => {
     const params = new URLSearchParams(searchParams);
     if (next === 'entries') params.delete('view');
@@ -516,7 +522,9 @@ export function Ledger() {
       <ScreenHeader
         title="Ledger"
         sub={
-          view === 'scheduled' ? (
+          view === 'people' ? (
+            'Money between you and other people, wallets and cash'
+          ) : view === 'scheduled' ? (
             forecastQ.data !== undefined ? (
               <>
                 <span className="tabular-nums">{occurrences.filter((o) => o.adjustment_action !== 'skip').length}</span> on the
@@ -541,7 +549,7 @@ export function Ledger() {
       <QueryErrorBanner items={failableQueries} className="mb-5" />
 
       <div role="tablist" aria-label="Ledger view" className="mb-4 flex gap-6 border-b border-line text-body">
-        {(['entries', 'scheduled'] as const).map((id) => (
+        {LEDGER_VIEWS.map(({ id, label }) => (
           <button
             key={id}
             type="button"
@@ -552,7 +560,7 @@ export function Ledger() {
               view === id ? 'border-ink text-ink' : 'border-transparent text-muted hover:text-ink'
             }`}
           >
-            {id === 'entries' ? 'Entries' : 'Scheduled'}
+            {label}
           </button>
         ))}
       </div>
@@ -710,6 +718,8 @@ export function Ledger() {
           see the rest.
         </p>
       )}
+
+      {view === 'people' && <PeopleAndCash />}
 
       {/* ── Ahead of the rule ──────────────────────────────────────────────── */}
       {view === 'scheduled' && forecastQ.isPending && <SkeletonRows rows={6} />}

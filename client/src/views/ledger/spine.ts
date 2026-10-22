@@ -252,7 +252,7 @@ export function foldLedgerRows(transactions: Transaction[], showTrades: boolean)
  * exists to prevent.
  */
 export function cursorRows(
-  view: 'entries' | 'scheduled',
+  view: 'entries' | 'scheduled' | 'people',
   rows: readonly Transaction[],
   draftsByTransaction: ReadonlyMap<string, unknown>
 ): string[] {

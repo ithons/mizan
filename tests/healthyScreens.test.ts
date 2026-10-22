@@ -22,6 +22,8 @@ import type {
   AdvisorSettings,
   ProjectedBudget,
   Category,
+  CounterpartiesResponse,
+  Counterparty,
   CredentialStatus,
   Goal,
   Holding,
@@ -294,6 +296,43 @@ test('and a bill expected before today and not yet seen raises review ink there'
 
 test('a pending transaction is marked, not raised: nothing about it is for the owner to do', () => {
   assertSilent(rendered(Ledger, '/ledger', ledgerSeed([txn({ pending: true })], REVIEW, UPCOMING), 'pending'), '/ledger');
+});
+
+function counterparty(overrides: Partial<Counterparty> & Pick<Counterparty, 'key' | 'name'>): Counterparty {
+  return {
+    kind: 'person', channel: 'zelle', sent: 0, received: 0, net: 0, rows: 2,
+    first_date: day(40), last_date: day(20), days_since_last: 20, state: 'settled', older_than_window: false,
+    ...overrides,
+  };
+}
+
+function peopleSeed(people: Counterparty[]): Seed {
+  const reading: CounterpartiesResponse = {
+    as_of: day(0), window_days: 60, settle_tolerance: 1,
+    people,
+    channels: [
+      counterparty({ key: 'wallet:venmo', name: 'Venmo', kind: 'wallet', channel: 'venmo', sent: 300, received: 120, net: -180, state: null }),
+      counterparty({ key: 'cash', name: 'Cash', kind: 'cash', channel: 'cash', sent: 200, net: -200, state: null, days_since_last: 200 }),
+    ],
+    unclassified: { rows: 0, sent: 0, received: 0 },
+  };
+  return [...HEALTHY_LEDGER, [['transactions', 'counterparties'], reading]];
+}
+
+const ORDINARY_PEOPLE = [
+  counterparty({ key: 'person:sam ortiz', name: 'Sam Ortiz', sent: 46, received: 46 }),
+  counterparty({ key: 'person:ana', name: 'Ana', received: 30, net: 30, state: 'received_more', days_since_last: 300, older_than_window: true }),
+  counterparty({ key: 'person:jordan lee', name: 'Jordan Lee', sent: 46, net: -46, state: 'sent_more', days_since_last: 12 }),
+];
+
+test('people and cash on an ordinary ledger raises nothing', () => {
+  assertSilent(rendered(Ledger, '/ledger?view=people', peopleSeed(ORDINARY_PEOPLE), 'Jordan Lee'), '/ledger?view=people');
+});
+
+test('and money sent with nothing back for over 60 days is review ink, never clay', () => {
+  const stale = [counterparty({ key: 'person:jordan lee', name: 'Jordan Lee', sent: 46, net: -46, state: 'sent_more', days_since_last: 61, older_than_window: true })];
+  const html = rendered(Ledger, '/ledger?view=people', peopleSeed(stale), 'Sent $46.00 more than received');
+  assert.deepEqual(raisedIn(html), ['review']);
 });
 
 // ─── Accounts ─────────────────────────────────────────────────────────────────
