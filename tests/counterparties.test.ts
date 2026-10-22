@@ -7,6 +7,7 @@ import { insertAccount, insertTransaction, migratedTestDb } from './helpers/sche
 import { _setDbForTesting } from '../server/src/db/index';
 import transactionsRouter from '../server/src/routes/transactions';
 import { classifyCounterparty, findCounterparties, zelleName } from '../server/src/services/counterparties';
+import { runAdvisorTool } from '../server/src/services/advisorChatTools';
 import type { CounterpartiesResponse } from '../shared/types';
 
 const TODAY = new Date('2026-10-22T12:00:00');
@@ -119,9 +120,11 @@ test('pending rows, resolved duplicates and spending categories stay out', () =>
   assert.equal(reading.unclassified.rows, 0);
 });
 
-test('the route answers in dollars', async () => {
+test('the route and the advisor tool both answer in dollars', async () => {
   const { db, checking } = ledger();
   move(db, checking, '2026-09-15', -4600, 'Zelle payment to Jordan Lee 10000000001');
+  const tool = runAdvisorTool(db, 'get_counterparties', {}) as CounterpartiesResponse;
+  assert.equal(tool.people[0].net, -46);
   _setDbForTesting(db);
   const app = express();
   app.use('/api/transactions', transactionsRouter);

@@ -11,6 +11,7 @@ import { explainMonth, fundingMix } from './monthStudies';
 import { accountCoverage } from './accountCoverage';
 import { retirementRoom } from './retirementRoom';
 import { findReimbursements } from './reimbursements';
+import { counterpartiesToDollars, findCounterparties } from './counterparties';
 import { cashRunway, checkAdjustments, compoundGrowth, emergencyFund, projectFreeBand, debtPayoff, goalTimeline, goalTimelineFor, projectFree } from './simulations';
 
 type ToolInput = Record<string, unknown>;
@@ -147,6 +148,11 @@ export const AGENT_TOOLS: Anthropic.Tool[] = [
     name: 'find_reimbursements',
     description: 'Zelle, Venmo, Cash App and PayPal money in that nothing pairs or links yet, each with the purchases from the two weeks before it that it could be paying back (a friend covering their share of dinner). Use to propose link_reimbursement drafts, one per inflow you are confident about; the linked money then nets against the purchase and takes its category. When unsure which purchase, or whether it is a reimbursement at all, ask the owner instead.',
     input_schema: { type: 'object', properties: { days: { type: 'integer', description: 'How far back, default 120, max 365.' } } },
+  },
+  {
+    name: 'get_counterparties',
+    description: 'Money between the owner and other people (Zelle, by name), wallets the owner does not track (Venmo, PayPal), wires and ATM cash, all of which reports leave out of spending. Per person: sent, received, net (received minus sent, dollars), last date, and state: settled (net within settle_tolerance), sent_more, or received_more. Use when asked whether anyone owes the owner. Only the transfers are visible: a friend paying back a dinner the owner put on a card shows as received_more, and a payment for the owner\'s own share shows as sent_more, so sent_more is a possibility to ask about, never a debt to assert, and received_more is not money the owner owes. Wallets, wires and cash are pass-through totals with no state; ATM withdrawals are cash that left tracking. unclassified counts transfer rows that matched none of these.',
+    input_schema: { type: 'object', properties: {} },
   },
   {
     name: 'get_notifications',
@@ -322,6 +328,7 @@ export function runAgentTool(db: Database.Database, name: string, input: ToolInp
     }
     case 'get_account_coverage': return accountCoverage(db, Math.min(Math.max(Math.round(num(input.days, 45)), 1), 120));
     case 'get_retirement_room': return retirementRoom(db, num(input.annual_limit, 0), Math.round(num(input.tax_year, new Date().getFullYear())));
+    case 'get_counterparties': return counterpartiesToDollars(findCounterparties(db));
     case 'find_reimbursements': return findReimbursements(db, Math.min(Math.max(Math.round(num(input.days, 120)), 1), 365));
     case 'get_funding_mix': return fundingMix(db, Math.min(Math.max(Math.round(num(input.months, 6)), 1), 24));
     default: return undefined;

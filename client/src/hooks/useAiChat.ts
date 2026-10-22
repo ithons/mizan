@@ -50,6 +50,7 @@ const TOOL_LABELS: Record<string, string> = {
   get_funding_mix: 'Working out what is paying for what…',
   get_account_coverage: 'Checking each account can meet what is scheduled…',
   find_reimbursements: 'Looking for money friends paid back…',
+  get_counterparties: 'Adding up money between you and other people…',
   get_retirement_room: 'Working out IRA room for the year…',
   get_notifications: 'Reading your inbox…',
   get_notification_rules: 'Checking what you are notified about…',
