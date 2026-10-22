@@ -282,8 +282,11 @@ function DeclinedProposalsPanel({ open, onToggle }: { open: boolean; onToggle: (
     onSuccess: (res) => {
       addToast(restoreDeclinedToast(res));
       qc.invalidateQueries({ queryKey: ['ai-declined'] });
-      // The review queue and its counts are derived from the drafts this may have reopened.
-      qc.invalidateQueries({ queryKey: ['transaction-review'] });
+      // The review queue, the advisor's waiting drafts and the Plan starters are all derived from
+      // the declines and drafts this may have reopened.
+      qc.invalidateQueries({ queryKey: ['transactions', 'review'] });
+      qc.invalidateQueries({ queryKey: ['ai-drafts'] });
+      qc.invalidateQueries({ queryKey: ['budgets', 'starter'] });
     },
     onError: (err: Error) => addToast({ type: 'error', message: err.message }),
   });

@@ -21,6 +21,10 @@ export function StarterBudgets({ starters }: { starters: StarterBudgetReading[] 
       budgetsApi.decideStarter(categoryId, decision),
     onSuccess: (_result, { decision }) => {
       invalidateFinancialData(qc);
+      // Add writes an advisor action and may supersede an older draft; dismiss writes a decline.
+      void qc.invalidateQueries({ queryKey: ['ai-actions'] });
+      void qc.invalidateQueries({ queryKey: ['ai-declined'] });
+      void qc.invalidateQueries({ queryKey: ['ai-drafts'] });
       addToast({ type: 'success', message: decision === 'add' ? 'Budget added' : 'Suggestion dismissed' });
     },
     onError: (err: Error) => addToast({ type: 'error', message: err.message }),
