@@ -139,7 +139,7 @@ const AUTONOMY_PHRASE: Record<AdvisorDraftActionKind, string> = {
   update_account: 'renaming, hiding or setting the balance of an account',
   set_notification_rule: 'setting what you are notified about',
   delete_notification_rule: 'removing a notification rule',
-  expect_lump: 'expecting an irregular deposit',
+  expect_lump: 'expecting a large deposit',
 };
 
 /**

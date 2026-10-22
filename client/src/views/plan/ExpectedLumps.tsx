@@ -62,8 +62,8 @@ export function ExpectedLumps({ data }: { data: ExpectedLumpsResponse }) {
         className="mb-1"
         explain={
           <p>
-            Large deposits that have come back at irregular intervals. Each is an estimate of a window and a
-            range, and none is counted in free to spend.
+            Large deposits that may come again. Each is an estimate of a window and a range, and none is
+            counted in free to spend.
           </p>
         }
       >

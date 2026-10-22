@@ -217,7 +217,7 @@ export const DRAFT_KIND_AUTONOMY: Readonly<Record<AdvisorDraftActionKind, DraftA
   expect_lump: {
     autonomy: 'proposal_only',
     fails: ['observation'],
-    argument: 'Whether an irregular deposit will come again is a forecast only the owner can vouch for, not a fact the ledger holds.',
+    argument: 'Whether a large deposit will come again is a forecast only the owner can vouch for, not a fact the ledger holds.',
   },
 
 };

@@ -644,6 +644,8 @@ test('an expected lump renders in estimate ink with its window and range, and no
   assert.ok(html.includes('$1,842.25 to $3,236.25'));
   assert.ok(html.includes('Mar 14 to May 17, 2027'));
   assert.ok(html.includes('$5,000.00'));
+  assert.ok(html.includes('Large deposits that may come again.'));
+  assert.ok(!html.includes('irregular'), 'the detector never measures how regular the gaps were');
 });
 
 test('and an overspent budget raises clay there', () => {

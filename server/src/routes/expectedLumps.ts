@@ -3,7 +3,7 @@ import { getDb } from '../db/index';
 import { validate } from '../middleware/validate';
 import { ExpectedLumpDecisionSchema } from '../../../shared/schemas';
 import type { ExpectLumpPayload, ExpectedLumpsResponse } from '../../../shared/types';
-import { dismissConfirmedLump, pendingConfirmedLumps } from '../services/expectedLumps';
+import { dismissConfirmedLump, lumpSummary, pendingConfirmedLumps } from '../services/expectedLumps';
 import { openLumpCandidates } from '../services/expectedLumpCandidates';
 import { proposeChanges } from '../services/advisorProposals';
 import { confirmAdvisorDraftsByIds, dismissAdvisorDraft } from '../services/advisorDrafts';
@@ -40,7 +40,7 @@ router.post('/decide', validate(ExpectedLumpDecisionSchema), (req: Request, res:
     const db = getDb();
     const { payload, decision } = req.body as { payload: ExpectLumpPayload; decision: 'confirm' | 'dismiss' };
     const proposed = proposeChanges(db, {
-      changes: [{ label: `Expect ${payload.label}`, summary: `${payload.label} has come back at irregular intervals.`, payload }],
+      changes: [{ label: `Expect ${payload.label}`, summary: lumpSummary(db, payload), payload }],
     });
     const draft = proposed.proposed[0];
     if (!draft) {

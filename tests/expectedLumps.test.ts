@@ -316,6 +316,25 @@ test('removing a confirmed lump keeps it off the list for that window, leaves an
   });
 });
 
+test('a monthly inflow nothing schedules is proposed, and its card states the count and gap measured, not a cadence', async () => {
+  const db = migratedTestDb();
+  const checking = insertAccount(db, { account_name: 'Harbor Checking', type: 'checking', current_balance: 254321 });
+  const dates = [150, 120, 90, 60, 30, 0].map((back) => ymd(addDays(new Date(), -back)));
+  seed(db, checking, dates.map((date) => [date, 120000, 'Jordan Vale', 'ZELLE FROM JORDAN VALE', 'cat_income_other'] as Row));
+  const [candidate] = detectExpectedLumps(db);
+  assert.ok(candidate);
+  assert.equal(candidate.median_gap_days, 30);
+  await withRouter(db, async (base) => {
+    const res = await fetch(`${base}/decide`, {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ payload: candidatePayload(candidate), decision: 'confirm' }),
+    });
+    assert.equal(res.status, 200);
+    const { summary } = db.prepare("SELECT summary FROM advisor_drafts WHERE kind = 'expect_lump'").get() as { summary: string };
+    assert.equal(summary, `Jordan Vale has come in 6 times, a median of 30 days apart, last on ${dates[5]}.`);
+  });
+});
+
 test('HEALTHY: a same-payer deposit far outside the range, or on the last occurrence itself, leaves the lump expected', () => {
   const { db, checking } = confirmedGrant();
   arrive(db, checking, { amount: 40000 });

@@ -1046,7 +1046,7 @@ export type AdvisorDraftPayload =
       rule_id: string;
     }
   | {
-      /** An irregular inflow the owner expects. Amounts in dollars; never counted in free to spend. */
+      /** A large inflow the owner expects. Amounts in dollars; never counted in free to spend. */
       kind: 'expect_lump';
       label: string;
       merchant_key: string;

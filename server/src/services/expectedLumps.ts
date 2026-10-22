@@ -120,8 +120,9 @@ function candidateFor(key: string, band: LumpInflow[]): LumpCandidate {
 }
 
 /**
- * Large inflows that come back at irregular intervals, one group per payer key: the band with
- * the most occurrences, if it has at least three and its next window has not already passed.
+ * Large inflows with no active recurring pattern, one group per payer key: the band with the most
+ * occurrences, if it has at least three and its next window has not already passed. How regular
+ * the gaps were is not judged; a monthly inflow nothing schedules is a candidate too.
  */
 export function detectExpectedLumps(db: Database.Database, today = new Date()): LumpCandidate[] {
   const byKey = new Map<string, LumpInflow[]>();
@@ -171,6 +172,14 @@ export function lumpArrival(
 }
 
 export type ExpectLumpPayload = Extract<AdvisorDraftPayload, { kind: 'expect_lump' }>;
+
+/** What was measured about this payer, from the detector's own group when it still finds one. */
+export function lumpSummary(db: Database.Database, payload: ExpectLumpPayload, today = new Date()): string {
+  const found = detectExpectedLumps(db, today).find((candidate) =>
+    candidate.merchant_key === payload.merchant_key && candidate.last_occurrence === payload.last_occurrence);
+  if (!found) return `${payload.label} last came in on ${payload.last_occurrence}.`;
+  return `${payload.label} has come in ${found.occurrences.length} times, a median of ${found.median_gap_days} days apart, last on ${found.last_occurrence}.`;
+}
 
 export function candidatePayload(candidate: LumpCandidate): ExpectLumpPayload {
   return {

@@ -36,7 +36,7 @@ const PAYLOAD_GUIDE = [
   'set_manual_cost_basis {holding_id, manual_cost_basis (dollars) | null, note?}.',
   'set_notification_rule {rule_id? (to edit), rule_kind, params, enabled?}: rule_kind and params are budget_threshold {category_id|null, percent}, large_transaction {min_amount (dollars), account_id|null, lookback_days}, bill_due {days_ahead}, low_balance {account_id|null, threshold (dollars)}, safe_to_spend_negative {}, sync_failed {include_partial}, goal_milestone {goal_id|null, milestones:[percents]}, unusual_spending {category_id|null, ratio, min_amount (dollars)}, recurring_amount_changed {}, income_late {min_days_late}, account_shortfall {days_ahead}, card_payment_missing {min_days_late}.',
   'delete_notification_rule {rule_id}.',
-  'expect_lump {label, merchant_key, amount_low, amount_high (dollars), window_start, window_end, last_occurrence}: an irregular deposit the owner expects; copy a candidate from find_expected_lumps. It is an estimate and never counts toward free to spend.',
+  'expect_lump {label, merchant_key, amount_low, amount_high (dollars), window_start, window_end, last_occurrence}: a large deposit the owner expects; copy a candidate from find_expected_lumps. It is an estimate and never counts toward free to spend.',
 ].join(' ');
 
 export const AGENT_TOOLS: Anthropic.Tool[] = [
@@ -167,7 +167,7 @@ export const AGENT_TOOLS: Anthropic.Tool[] = [
   },
   {
     name: 'find_expected_lumps',
-    description: 'Large deposits (a term refund, a family check) that came at least three times at irregular intervals, each with a next window and an amount range ready to propose as expect_lump, plus the lumps the owner already confirmed and whether each has arrived. Paychecks, paired transfers and scheduled items are not here. A confirmed lump is an estimate: it never counts toward free to spend.',
+    description: 'Large deposits (a term refund, a family check) that came at least three times from one payer with no active recurring pattern (how regular the gaps were is not judged), each with a next window and an amount range ready to propose as expect_lump, plus the lumps the owner already confirmed and whether each has arrived. Paychecks, paired transfers and scheduled items are not here. A confirmed lump is an estimate: it never counts toward free to spend.',
     input_schema: { type: 'object', properties: {} },
   },
   {

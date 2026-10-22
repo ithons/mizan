@@ -320,7 +320,7 @@ export const TABLE_MEANINGS: Record<string, TableMeaning> = {
     columns: { from_value: { unit: 'TEXT', note: 'For field = amount, integer cents as text. Same for to_value.' } },
   },
   expected_lumps: {
-    purpose: 'Large irregular inflows the owner expects (a term refund, a family deposit). An estimate: never counted in free to spend.',
+    purpose: 'Large inflows the owner expects (a term refund, a family deposit). An estimate: never counted in free to spend.',
     columns: {
       amount_low_cents: { unit: CENTS },
       amount_high_cents: { unit: CENTS },
