@@ -337,14 +337,17 @@ test('a delta is refused on a series that is not in date order', () => {
   assert.equal(getPortfolioDelta(2436.21, [point('2026-07-30', 2445.89), point('2026-07-30', 2436.21)], IDS), null);
 });
 
-test('the delta carries whether its baseline was measured or reconstructed', () => {
-  const delta = getPortfolioDelta(2436.21, [
-    point('2026-07-30', 2400, 3, true),
-    point('2026-07-31', 2436.21, 3),
-  ], IDS);
+test('no delta is measured from an estimated baseline, which is today less the flows since', () => {
+  // Replayed with prices flat, the baseline differs from the headline by exactly the deposits,
+  // so the change came out $0 whatever the market did.
+  const flows = [{ date: '2026-07-31', amount: 36.21 }];
+  const history = [point('2026-07-30', 2400, 3, true), point('2026-07-31', 2436.21, 3)];
+  assert.equal(getPortfolioDelta(2436.21, history, IDS, flows), null);
 
-  assert.equal(delta?.baseline.date, '2026-07-30');
-  assert.equal(delta?.baseline.estimated, true);
+  // HEALTHY: with the day before measured, a market move with no deposit reads as that move.
+  const measured = getPortfolioDelta(2436.21, [point('2026-07-30', 2400, 3), point('2026-07-31', 2436.21, 3)], IDS);
+  assert.equal(measured?.baseline.date, '2026-07-30');
+  assert.equal(Number(measured?.change.toFixed(2)), 36.21);
 });
 
 /**

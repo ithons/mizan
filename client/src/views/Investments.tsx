@@ -342,7 +342,6 @@ export function Investments() {
             // that hides that is a claim the screen did not check.
             <div className={`mt-1.5 text-body tabular-nums ${delta.change >= 0 ? 'text-sage-deep' : 'text-clay'}`}>
               {delta.change >= 0 ? '↑' : '↓'} {formatWholeCurrency(Math.abs(delta.change))} since{' '}
-              {delta.baseline.estimated ? 'the estimated ' : ''}
               {formatDateShort(delta.baseline.date)}
               {delta.deposited !== 0 && (
                 <span className="text-muted">

@@ -141,6 +141,9 @@ export function getPortfolioDelta(
   // practice and this only absorbs float representation.
   const baseline = Math.abs(newest.value - marketValue) < 0.005 ? history[history.length - 2] : newest;
   if (!baseline || !covers(baseline)) return null;
+  // An estimated point is today's value less the flows since, prices held flat, so the change
+  // measured from it is zero by construction: a "$0" nothing measured.
+  if (baseline.estimated) return null;
 
   const depositedCents = flows
     .filter((flow) => flow.date > baseline.date)
