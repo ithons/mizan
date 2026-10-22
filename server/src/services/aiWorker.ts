@@ -294,7 +294,7 @@ const SECTION = {
   recurring: 'Recurring occurrences that are overdue or that the user adjusted',
   goals: 'Goals',
   reimbursements: 'Money a friend may have paid back',
-  lumps: 'Large deposits that came at least three times from one payer with no recurring pattern',
+  lumps: 'Large deposits that came at least three times under one payer key with no active recurring pattern',
   detections: 'System detections new since the last review pass',
 } as const;
 

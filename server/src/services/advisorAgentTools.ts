@@ -167,7 +167,7 @@ export const AGENT_TOOLS: Anthropic.Tool[] = [
   },
   {
     name: 'find_expected_lumps',
-    description: 'Large deposits (a term refund, a family check) that came at least three times from one payer with no active recurring pattern (how regular the gaps were is not judged), each with a next window and an amount range ready to propose as expect_lump, plus the lumps the owner already confirmed and whether each has arrived. Paychecks, paired transfers and scheduled items are not here. A confirmed lump is an estimate: it never counts toward free to spend.',
+    description: 'Large deposits (a term refund, a family check) that came at least three times under one payer key (all anonymous deposits share one key) with no active recurring pattern (how regular the gaps were is not judged), each with a next window and an amount range ready to propose as expect_lump, plus the lumps the owner already confirmed and whether each has arrived. Paychecks, paired transfers and scheduled items are not here. A confirmed lump is an estimate: it never counts toward free to spend.',
     input_schema: { type: 'object', properties: {} },
   },
   {
