@@ -94,6 +94,7 @@ interface InvestmentsReport {
   allocation: Array<{ security_type: string; total_value: number }>;
   holdings: Array<{ id: string; account_id: string }>;
   history: Array<{ date: string; value: number; estimated: boolean; covered_accounts: number; covered_account_ids: string[] }>;
+  returns: { portfolio: { end_value: number | null } } | null;
 }
 
 async function getReport(db: Database.Database, query = ''): Promise<InvestmentsReport> {
@@ -186,6 +187,7 @@ test('an ordinary ledger says nothing it does not have to', async () => {
     // Every point covers the whole headline, so the delta is supportable on every one of them.
     assert.ok(report.history.every((point) => point.covered_accounts === report.portfolio_account_ids.length));
     assert.ok(report.history.every((point) => [...point.covered_account_ids].sort().join() === [...report.portfolio_account_ids].sort().join()));
+    assert.equal(report.returns?.portfolio.end_value, report.portfolio_value, 'returns are served in dollars and end on the headline');
   } finally {
     db.close();
   }

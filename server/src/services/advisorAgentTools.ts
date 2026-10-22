@@ -16,6 +16,7 @@ import { cardReview, cardReviewToDollars } from './cardReview';
 import { openLumpCandidates } from './expectedLumpCandidates';
 import { listConfirmedLumps } from './expectedLumps';
 import { cashRunway, checkAdjustments, compoundGrowth, emergencyFund, projectFreeBand, debtPayoff, goalTimeline, goalTimelineFor, horizonDays, MAX_HORIZON_DAYS, projectFree, runwayTo, type Horizon } from './simulations';
+import { investmentReturns, investmentReturnsToDollars } from './investmentReturns';
 
 type ToolInput = Record<string, unknown>;
 
@@ -167,6 +168,11 @@ export const AGENT_TOOLS: Anthropic.Tool[] = [
     name: 'find_expected_lumps',
     description: 'Large deposits (a term refund, a family check) that came at least three times at irregular intervals, each with a next window and an amount range ready to propose as expect_lump, plus the lumps the owner already confirmed and whether each has arrived. Paychecks, paired transfers and scheduled items are not here. A confirmed lump is an estimate: it never counts toward free to spend.',
     input_schema: { type: 'object', properties: {} },
+  },
+  {
+    name: 'get_investment_returns',
+    description: 'Annualized money-weighted return (XIRR) per investment and crypto account and for the whole portfolio over the last N months (default 12) or the whole history (months = 0): start and end value, net money moved in (dollars), and annualized as a fraction (0.05 is 5% a year). annualized is null with a reason when the window is under 90 days, the end value is an estimate, or no single rate fits the flows; then say it was not computed and why, never estimate one. start_estimated = true means the start value is reconstructed; say so when quoting the rate. Always state the window (from, to) with the figure.',
+    input_schema: { type: 'object', properties: { months: { type: 'integer', description: 'Months back (default 12, 0 for all history, max 120).' } } },
   },
   {
     name: 'get_notifications',
@@ -372,6 +378,11 @@ export function runAgentTool(db: Database.Database, name: string, input: ToolInp
     case 'get_retirement_room': return retirementRoom(db, num(input.annual_limit, 0), Math.round(num(input.tax_year, new Date().getFullYear())));
     case 'get_counterparties': return counterpartiesToDollars(findCounterparties(db));
     case 'find_reimbursements': return findReimbursements(db, Math.min(Math.max(Math.round(num(input.days, 120)), 1), 365));
+    case 'get_investment_returns': {
+      const months = Math.min(Math.max(Math.round(num(input.months, 12)), 0), 120);
+      const returns = investmentReturns(db, { from: months > 0 ? format(subMonths(new Date(), months), 'yyyy-MM-dd') : undefined });
+      return returns ? investmentReturnsToDollars(returns) : { note: 'No investment or crypto accounts.' };
+    }
     case 'get_card_review': return cardReviewToDollars(cardReview(db, format(new Date(), 'yyyy-MM-dd')));
     case 'find_expected_lumps': return findExpectedLumpsTool(db);
     case 'get_funding_mix': return fundingMix(db, Math.min(Math.max(Math.round(num(input.months, 6)), 1), 24));

@@ -438,9 +438,22 @@ function holding(overrides: Partial<Holding> & Pick<Holding, 'id' | 'ticker'>): 
 
 const HOLDINGS = [holding({ id: 'h_vti', ticker: 'VTI' }), holding({ id: 'h_vxus', ticker: 'VXUS' })];
 
-function investmentsReport(holdings: Holding[]) {
+function returnsFor(annualized: number) {
+  const row = { name: 'Fidelity Brokerage', annualized, reason: null, start_value: 1800, end_value: 2045.04, net_flows: 100, start_estimated: false };
+  return {
+    from: day(365),
+    to: day(0),
+    days: 365,
+    accounts: [{ ...row, account_id: BROKERAGE.id }],
+    portfolio: { ...row, account_id: null, name: 'Portfolio' },
+    method: '',
+  };
+}
+
+function investmentsReport(holdings: Holding[], annualized = 0.0734) {
   const value = holdings.reduce((s, h) => s + h.institution_value, 0);
   return {
+    returns: returnsFor(annualized),
     portfolio_value: value,
     holdings_value: value,
     invested_balance: value,
@@ -460,11 +473,11 @@ function investmentsReport(holdings: Holding[]) {
   };
 }
 
-function investmentsSeed(holdings: Holding[]): Seed {
+function investmentsSeed(holdings: Holding[], annualized?: number): Seed {
   return [
     [['holdings'], holdings],
     [['accounts'], [{ ...BROKERAGE, current_balance: holdings.reduce((s, h) => s + h.institution_value, 0) }]],
-    [['reports-investments', '1Y'], investmentsReport(holdings)],
+    [['reports-investments', '1Y'], investmentsReport(holdings, annualized)],
   ];
 }
 
@@ -481,6 +494,21 @@ test('a healthy portfolio raises nothing', () => {
   );
   assert.ok((getCostBasisStats(HOLDINGS).unrealized ?? -1) >= 0, 'the fixture holds a loss');
   assertSilent(rendered(Investments, '/investments', investmentsSeed(HOLDINGS), 'VXUS'), '/investments');
+});
+
+test('an annualized return is a number in neutral ink, whatever its sign', () => {
+  assertSilent(rendered(Investments, '/investments', investmentsSeed(HOLDINGS), '7.3% a year'), '/investments');
+  assertSilent(rendered(Investments, '/investments', investmentsSeed(HOLDINGS, -0.0647), '-6.5% a year'), '/investments');
+});
+
+test('and a return that was not computed says why, with no number', () => {
+  const seed = investmentsSeed(HOLDINGS).map(([key, data]) =>
+    key[0] === 'reports-investments'
+      ? ([key, { ...(data as ReturnType<typeof investmentsReport>), returns: { ...returnsFor(0), days: 60, portfolio: { ...returnsFor(0).portfolio, annualized: null, reason: 'not enough history' } } }] as const)
+      : ([key, data] as const)
+  );
+  const html = rendered(Investments, '/investments', seed, 'not enough history');
+  assertSilent(html, '/investments');
 });
 
 test('and a position under water raises clay there', () => {

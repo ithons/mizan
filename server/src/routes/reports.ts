@@ -21,6 +21,7 @@ import type {
 import { dollarizeFields, toDollars } from '../services/money';
 import { readPortfolioAccounts } from '../services/netWorthHistory';
 import { netWorthTimeline } from '../services/netWorthTimeline';
+import { investmentReturns, investmentReturnsToDollars } from '../services/investmentReturns';
 
 const router = Router();
 
@@ -340,6 +341,8 @@ router.get('/investments', (req: Request, res: Response, next: NextFunction): vo
       covered_account_ids: Object.keys(point.by_account),
     }));
 
+    const returns = investmentReturns(db, { from: startDate || undefined, to: endDate || undefined });
+
     // `portfolio_account_ids` is served rather than a count so the screen filters its holdings
     // list against the same set instead of re-deriving membership from account types on the
     // client. There have been four hand-maintained copies of a set in this codebase before.
@@ -355,6 +358,7 @@ router.get('/investments', (req: Request, res: Response, next: NextFunction): vo
         allocation,
         holdings,
         history,
+        returns: returns ? investmentReturnsToDollars(returns) : null,
       },
     });
   } catch (err) {

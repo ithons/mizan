@@ -70,6 +70,7 @@ import type {
   ExpectLumpPayload,
   ExpectedLumpsResponse,
   RunwayReading,
+  InvestmentReturns,
 } from '@shared/types';
 
 async function apiFetch<T>(url: string, options?: RequestInit): Promise<T> {
@@ -551,7 +552,7 @@ export const reportsApi = {
     // that hold a position, the only figure `holdings_value` can be reconciled against;
     // `crypto_value` is the part in crypto wallets. `covered_account_ids` per point is which of the
     // accounts that day's value is known for, so a point over a different set is a different quantity.
-    return apiFetch<{ portfolio_value: number; holdings_value: number; invested_balance: number; crypto_value: number; portfolio_account_ids: string[]; external_flows: Array<{ date: string; amount: number }>; history: Array<{ date: string; value: number; estimated: boolean; covered_accounts: number; covered_account_ids: string[] }>; allocation: Array<{ security_type: string; total_value: number }>; holdings: unknown[] }>(`/api/reports/investments?${q.toString()}`);
+    return apiFetch<{ portfolio_value: number; holdings_value: number; invested_balance: number; crypto_value: number; portfolio_account_ids: string[]; external_flows: Array<{ date: string; amount: number }>; history: Array<{ date: string; value: number; estimated: boolean; covered_accounts: number; covered_account_ids: string[] }>; allocation: Array<{ security_type: string; total_value: number }>; holdings: unknown[]; returns: InvestmentReturns | null }>(`/api/reports/investments?${q.toString()}`);
   },
 };
 

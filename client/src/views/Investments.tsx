@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { format, subMonths } from 'date-fns';
-import type { Holding } from '@shared/types';
+import { format, parseISO, subMonths } from 'date-fns';
+import type { Holding, InvestmentReturn, InvestmentReturns } from '@shared/types';
 import { accountsApi, investmentsApi, reportsApi } from '../lib/api';
 import { formatWholeCurrency, formatPercent, formatDateShort, formatUnitPrice, formatAdaptiveCurrency, formatQuantity } from '../lib/formatters';
 import { parseDecimalInput } from '../lib/numberInput';
@@ -200,6 +200,29 @@ export function investmentNotes({
   };
 }
 
+/** A rate is a number in neutral ink whatever its sign; a refusal says why and never shows one. */
+export function returnReading(row: InvestmentReturn): string {
+  if (row.annualized === null) return row.reason === 'not enough history' ? 'not enough history' : `not computed: ${row.reason}`;
+  return `${formatPercent(row.annualized * 100)} a year${row.start_estimated ? ' from an estimated start' : ''}`;
+}
+
+function ReturnsTable({ returns }: { returns: InvestmentReturns }) {
+  const day = (date: string) => format(parseISO(date), 'MMM d, yyyy');
+  return (
+    <div className="mt-3 text-note tabular-nums">
+      <div className="text-muted-2">
+        Annualized, money-weighted, {day(returns.from)} to {day(returns.to)} ({returns.days} days)
+      </div>
+      {[returns.portfolio, ...returns.accounts].map((row) => (
+        <div key={row.account_id ?? 'portfolio'} className="flex justify-end gap-3">
+          <span className="text-muted">{row.name}</span>
+          <span className={row.annualized === null ? 'text-muted-2' : 'text-ink'}>{returnReading(row)}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 export function Investments() {
   const [range, setRange] = useState<RangeId>('1Y');
   const months = RANGES.find((r) => r.id === range)!.months;
@@ -329,7 +352,7 @@ export function Investments() {
               )}
             </div>
           )}
-
+          {report?.returns && <ReturnsTable returns={report.returns} />}
         </div>
       </div>
 

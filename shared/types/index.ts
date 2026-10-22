@@ -617,6 +617,29 @@ export type NetWorthTimeline = {
   method: string;
 };
 
+export type InvestmentReturn = {
+  /** Null on the portfolio row. */
+  account_id: string | null;
+  name: string;
+  /** Annualized money-weighted return as a fraction (0.05 is 5% a year), or null with `reason`. */
+  annualized: number | null;
+  reason: string | null;
+  start_value: number | null;
+  end_value: number | null;
+  /** Money moved in less money moved out inside the window. */
+  net_flows: number;
+  start_estimated: boolean;
+};
+
+export type InvestmentReturns = {
+  from: string;
+  to: string;
+  days: number;
+  accounts: InvestmentReturn[];
+  portfolio: InvestmentReturn;
+  method: string;
+};
+
 export interface NetWorthSnapshot {
   id: string;
   date: string;
