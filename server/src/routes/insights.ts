@@ -12,7 +12,8 @@ import { findFlowConservationViolations } from '../services/flowConservation';
 import { getMonthlyBudgetsWithProjection } from '../services/budgetProjection';
 import { getSyncHealth } from '../services/syncHealth';
 import { toDollars } from '../services/money';
-import type { Insight, InsightSeverity, SyncHealthConnection } from '../../../shared/types';
+import { horizonDays, MAX_HORIZON_DAYS, runwayTo } from '../services/simulations';
+import type { Insight, InsightSeverity, RunwayReading, SyncHealthConnection } from '../../../shared/types';
 import { SCHEDULED_ROUTE } from '../../../shared/routes';
 
 const router = Router();
@@ -151,6 +152,20 @@ router.get('/safe-to-spend', (_req: Request, res: Response, next: NextFunction):
   try {
     const db = getDb();
     res.json({ data: readSafeToSpend(db) });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.get('/runway', (req: Request, res: Response, next: NextFunction): void => {
+  try {
+    const end = typeof req.query.end === 'string' && req.query.end ? req.query.end : undefined;
+    if (end !== undefined && horizonDays(end) === null) {
+      res.status(400).json({ error: `end must be a YYYY-MM-DD date 1 to ${MAX_HORIZON_DAYS} days ahead` });
+      return;
+    }
+    const data: RunwayReading = runwayTo(getDb(), end);
+    res.json({ data });
   } catch (err) {
     next(err);
   }

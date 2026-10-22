@@ -8,6 +8,10 @@ import { detectRecurring } from '../server/src/services/recurring';
 import { refreshTransactionIntegrity } from '../server/src/services/transactionIntegrity';
 import { runAgentTool } from '../server/src/services/advisorAgentTools';
 import { insertAccount, insertTransaction, migratedTestDb } from './helpers/schema';
+import http from 'node:http';
+import express from 'express';
+import insightsRouter from '../server/src/routes/insights';
+import type { RunwayReading } from '../shared/types';
 
 const now = new Date();
 const ymd = (date: Date) => format(date, 'yyyy-MM-dd');
@@ -137,4 +141,30 @@ test('run_simulation takes an end date and refuses one in the past', () => {
     const runway = runAgentTool(db, 'run_simulation', { type: 'runway_to', params: { end_date: ahead(30) } }) as { end_date: string };
     assert.equal(runway.end_date, ahead(30));
   });
+});
+
+test('GET /api/insights/runway serves the reading in dollars to the default or a chosen end, and refuses a past one', async () => {
+  const db = migratedTestDb();
+  insertAccount(db, { account_name: 'Chase Checking', type: 'checking', current_balance: 123456 });
+  _setDbForTesting(db);
+  const app = express();
+  app.use('/api/insights', insightsRouter);
+  const server = http.createServer(app);
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+  try {
+    const addr = server.address();
+    if (!addr || typeof addr === 'string') throw new Error('no server address');
+    const base = `http://127.0.0.1:${addr.port}/api/insights/runway`;
+    const plain = (await (await fetch(base)).json()) as { data: RunwayReading };
+    assert.equal(plain.data.end_date, defaultRunwayEnd());
+    assert.equal(plain.data.lowest, 1234.56);
+    assert.equal(plain.data.covered, true);
+    const chosen = (await (await fetch(`${base}?end=${ahead(20)}`)).json()) as { data: RunwayReading };
+    assert.equal(chosen.data.days, 20);
+    assert.equal((await fetch(`${base}?end=${back(2)}`)).status, 400);
+  } finally {
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+    _setDbForTesting(undefined as unknown as Database.Database);
+    db.close();
+  }
 });

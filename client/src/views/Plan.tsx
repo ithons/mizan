@@ -23,6 +23,7 @@ import {
 } from '../components/balance';
 import { carryoverBudgetPhrase, claimLines, uncountedHeadroom } from './plan/readings';
 import { ExpectedLumps } from './plan/ExpectedLumps';
+import { Runway } from './plan/Runway';
 
 /**
  * `/plan`: every claim already made on the money, at both horizons.
@@ -573,6 +574,8 @@ export function Plan() {
   const categoriesQ = useQuery({ queryKey: ['categories'], queryFn: () => categoriesApi.list() });
   const goalsQ = useQuery({ queryKey: ['goals', 'all'], queryFn: () => goalsApi.list({ includeArchived: true }) });
   const lumpsQ = useQuery({ queryKey: ['expected-lumps'], queryFn: () => expectedLumpsApi.list() });
+  const [runwayEnd, setRunwayEnd] = useState<string | undefined>(undefined);
+  const runwayQ = useQuery({ queryKey: ['insights', 'runway', runwayEnd ?? 'default'], queryFn: () => insightsApi.runway(runwayEnd), placeholderData: (previous) => previous });
 
   // A failed request used to render as an empty section, indistinguishable from no data.
   const failableQueries = [
@@ -584,6 +587,7 @@ export function Plan() {
     { query: categoriesQ, label: 'categories' },
     { query: goalsQ, label: 'goals' },
     { query: lumpsQ, label: 'expected deposits' },
+    { query: runwayQ, label: 'the runway' },
   ];
 
   const budgets = budgetsQ.data ?? [];
@@ -623,6 +627,8 @@ export function Plan() {
           goalCount={goalsQ.data ? active.length : null}
         />
       )}
+
+      {runwayQ.data && <Runway reading={runwayQ.data} onEndChange={setRunwayEnd} />}
 
       {lumpsQ.data && <ExpectedLumps data={lumpsQ.data} />}
 

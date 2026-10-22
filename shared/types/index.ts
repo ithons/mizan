@@ -1057,6 +1057,45 @@ export interface ExpectedLumpsResponse {
   candidates: ExpectedLumpCandidateReading[];
 }
 
+export interface PercentileBand {
+  p10: number;
+  p50: number;
+  p90: number;
+}
+
+/** The lowest projected point of free to spend before an end date. Dollars; an estimate throughout. */
+export interface RunwayReading {
+  end_date: string;
+  days: number;
+  lowest: number;
+  lowest_on: string;
+  first_short_on: string | null;
+  /** The low point, and the band's 10th percentile of it when there is a band, stay above zero. */
+  covered: boolean;
+  lowest_band: PercentileBand | null;
+  band_note: string | null;
+  expected_lumps_counted: Array<{
+    label: string;
+    counted_on: string;
+    counted_amount: number;
+    window_start: string;
+    window_end: string;
+    amount_low: number;
+    amount_high: number;
+  }>;
+  /** The one scheduled outflow whose removal raises the low point most, or null when none would. */
+  largest_scheduled_drain: {
+    label: string;
+    pattern_id: string;
+    occurrences: number;
+    total: number;
+    lowest_without: number;
+    lowest_without_on: string;
+    raises_low_by: number;
+  } | null;
+  assumptions: string[];
+}
+
 export type AdvisorAutonomy = 'autonomous' | 'proposal_only';
 
 /**

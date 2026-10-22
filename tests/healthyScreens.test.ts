@@ -26,6 +26,7 @@ import type {
   Counterparty,
   CredentialStatus,
   ExpectedLumpsResponse,
+  RunwayReading,
   Goal,
   Holding,
   NetWorthTimeline,
@@ -545,9 +546,27 @@ const GOAL: Goal = {
 
 const NO_LUMPS: ExpectedLumpsResponse = { confirmed: [], candidates: [] };
 
-function planSeed(spent: number, lumps: ExpectedLumpsResponse = NO_LUMPS): Seed {
+const RUNWAY: RunwayReading = {
+  end_date: '2026-12-31',
+  days: 70,
+  lowest: 2911.4,
+  lowest_on: '2026-12-31',
+  first_short_on: null,
+  covered: true,
+  lowest_band: { p10: 2410.12, p50: 2890.55, p90: 3301.2 },
+  band_note: null,
+  expected_lumps_counted: [],
+  largest_scheduled_drain: {
+    label: 'Transfer to Wealthfront', pattern_id: 'rp_wf', occurrences: 10, total: 1000,
+    lowest_without: 3911.4, lowest_without_on: '2026-12-31', raises_low_by: 1000,
+  },
+  assumptions: ['Scheduled income, bills and transfers land on their forecast dates.'],
+};
+
+function planSeed(spent: number, lumps: ExpectedLumpsResponse = NO_LUMPS, runway: RunwayReading = RUNWAY): Seed {
   return [
     [['expected-lumps'], lumps],
+    [['insights', 'runway', 'default'], runway],
     [['insights', 'safe-to-spend'], SHEET],
     [['budgets', format(now, 'yyyy-MM')], [budget(spent)]],
     [['categories'], CATEGORIES],
@@ -561,7 +580,17 @@ function planSeed(spent: number, lumps: ExpectedLumpsResponse = NO_LUMPS): Seed 
 test('a healthy plan raises nothing', () => {
   assert.ok(SHEET.free > 0);
   assert.equal(healthTone(200, 500), 'sage');
-  assertSilent(rendered(Plan, '/plan', planSeed(200), 'Emergency Fund'), '/plan');
+  const html = rendered(Plan, '/plan', planSeed(200), 'Emergency Fund');
+  assertSilent(html, '/plan');
+  assert.ok(html.includes('Covered through Dec 31, 2026'));
+  assert.ok(html.includes('Without Transfer to Wealthfront (scheduled 10 times, $1,000.00 in all) the lowest point would be $3,911.40 on Dec 31, 2026.'));
+});
+
+test('and a runway that runs short raises estimate ink there, naming the first short day', () => {
+  const short: RunwayReading = { ...RUNWAY, covered: false, lowest: -412.5, lowest_on: '2026-12-31', first_short_on: '2026-12-02', lowest_band: { p10: -980.1, p50: -430, p90: 120.4 } };
+  const html = rendered(Plan, '/plan', planSeed(200, NO_LUMPS, short), 'Projected short from Dec 2, 2026');
+  assert.deepEqual(raisedIn(html), ['estimate']);
+  assert.ok(html.includes('$412.50 short on Dec 31, 2026'));
 });
 
 test('an expected lump renders in estimate ink with its window and range, and nothing else is raised', () => {

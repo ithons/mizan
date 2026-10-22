@@ -69,6 +69,7 @@ import type {
   ReconciliationReading,
   ExpectLumpPayload,
   ExpectedLumpsResponse,
+  RunwayReading,
 } from '@shared/types';
 
 async function apiFetch<T>(url: string, options?: RequestInit): Promise<T> {
@@ -467,6 +468,7 @@ export const goalsApi = {
 export const insightsApi = {
   list: () => apiFetch<Insight[]>('/api/insights'),
   safeToSpend: () => apiFetch<SafeToSpend>('/api/insights/safe-to-spend'),
+  runway: (end?: string) => apiFetch<RunwayReading>(`/api/insights/runway${end ? `?end=${end}` : ''}`),
   quality: () => apiFetch<DataQualitySummary>('/api/insights/quality'),
   /**
    * Does the ledger explain each account's balance, and do two accounts' rows explain each other?
