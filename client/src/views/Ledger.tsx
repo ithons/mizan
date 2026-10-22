@@ -757,7 +757,7 @@ export function Ledger() {
 
           {spine.overdue.length > 0 && (
             <>
-              <SectionLabel className="mb-1 mt-4">Expected before today, not seen yet</SectionLabel>
+              <SectionLabel className="mb-1 mt-4"><span className="text-review-text">Expected before today, not seen yet</span></SectionLabel>
               {spine.overdue.map((o) => (
                 <ScheduledRow
                   key={o.id}

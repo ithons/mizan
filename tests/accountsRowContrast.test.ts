@@ -234,12 +234,12 @@ test('the review pair means an open question, which is what the badge note says 
   const LEDGER = readFileSync(join(ROOT, 'client/src/views/Ledger.tsx'), 'utf8');
   const SPINE = readFileSync(join(ROOT, 'client/src/views/ledger/spine.ts'), 'utf8');
 
-  assert.match(ROWS, /flag === 'set_aside'\s*\n?\s*\? 'border border-line-3 text-muted'\s*\n?\s*: 'border border-review-border bg-review-bg text-review-text'/);
+  assert.match(ROWS, /flag === 'set_aside' \|\| flag === 'pending'\s*\n?\s*\? 'border border-line-3 text-muted'\s*\n?\s*: 'border border-review-border bg-review-bg text-review-text'/);
   // The chips folded into one select on the filter row; the review tint now only marks rows.
   assert.match(LEDGER, /onChange=\{\(v\) => selectChip\(v as LedgerFilter\)\}/);
   // The flags that DO land on the pair, read off the label map rather than typed in here.
   const labels = SPINE.slice(SPINE.indexOf('export const FLAG_LABEL'), SPINE.indexOf('};', SPINE.indexOf('export const FLAG_LABEL')));
-  for (const flag of ['duplicate', 'transfer', 'pending']) {
+  for (const flag of ['duplicate', 'transfer']) {
     assert.ok(labels.includes(`${flag}:`), `${flag} is no longer a row flag`);
     assert.match(PROSE, new RegExp(`"${labels.match(new RegExp(`${flag}: '([^']+)'`))![1]}"`));
   }
@@ -298,11 +298,11 @@ test('the call-site count in the badge note is the count the tree has', () => {
   // whenever a view is added and a bare integer in a comment would go stale in silence. What is
   // asserted is the shape the argument rests on: gold is an ink in many modules, not in one place.
   assert.ok(gold + warning >= 10, `gold is a text colour at ${gold + warning} call sites, which no longer supports the note`);
-  assert.ok(modules.size >= 8, `gold is an ink in ${modules.size} modules; the note says eight`);
+  assert.ok(modules.size >= 7, `gold is an ink in ${modules.size} modules; the note says seven`);
   assert.match(PROSE, /-> \d+ that day, being \d+ `text-gold` and \d+ `text-warning`/);
   assert.match(PROSE, /counted 2026-08-01 with/i);
   assert.match(PROSE, /grep -rnE 'text-\(gold\|warning\)' client\/src \| grep -vE ':\[0-9\]\+: \\\*'/);
-  assert.match(PROSE, /gold is an ink across eight modules/);
+  assert.match(PROSE, /gold is an ink across seven modules/);
 
   // index.css states the SAME reading from the SAME command, and its copy was once wrong, so it is
   // pinned to the walk above rather than trusted.

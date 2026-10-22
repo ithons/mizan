@@ -194,15 +194,15 @@ export function LedgerRowInner({
             {flags.map((flag) => (
               <span
                 key={flag}
-                /* An open question is tinted; a decision the owner already made is not. `set_aside`
-                   is the second kind, so it carries the neutral outline rather than the review
-                   tint, which otherwise puts settled work back in the colour of open work.
+                /* An open question is tinted; a decision the owner already made, or a state nobody can
+                   act on, is not. `set_aside` and `pending` carry the neutral outline rather than the
+                   review tint, which otherwise puts settled or waiting rows in the colour of open work.
                    This one carries no fill, so its ground is the row's: `text-muted` measures
                    7.01:1 on light paper and 6.44:1 on light well,
                    7.76:1 on dark paper and 6.23:1 on dark well,
                    from the triplets in client/src/index.css. */
                 className={`rounded-md px-1.5 py-px text-rule uppercase tracking-[0.1em] ${
-                  flag === 'set_aside'
+                  flag === 'set_aside' || flag === 'pending'
                     ? 'border border-line-3 text-muted'
                     : 'border border-review-border bg-review-bg text-review-text'
                 }`}

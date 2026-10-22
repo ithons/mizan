@@ -286,6 +286,16 @@ test('the scheduled tab draws its forecast in estimate ink and nothing louder', 
 });
 
 
+test('and a bill expected before today and not yet seen raises review ink there', () => {
+  const overdue = ledgerSeed([txn()], REVIEW, forecast([occurrence(day(3), 'overdue'), PAYCHECK]));
+  const html = rendered(Ledger, '/ledger?view=scheduled', overdue, 'Expected before today');
+  assert.ok(raisedIn(html).includes('review'), 'an overdue bill reads exactly like an upcoming one');
+});
+
+test('a pending transaction is marked, not raised: nothing about it is for the owner to do', () => {
+  assertSilent(rendered(Ledger, '/ledger', ledgerSeed([txn({ pending: true })], REVIEW, UPCOMING), 'pending'), '/ledger');
+});
+
 // ─── Accounts ─────────────────────────────────────────────────────────────────
 
 const CLEAN_RECONCILIATION: ReconciliationReading = {
@@ -564,11 +574,9 @@ test('a healthy advisor page raises nothing', () => {
   assertSilent(rendered(Advisor, '/advisor', advisorSeed([CONFIRMED_ACTION]), 'Is the emergency fund on pace?'), '/advisor');
 });
 
-test('and the one alarm ink this page sets is visible to the check: an unattended action in gold', () => {
-  // An open proposal renders in ink and sage, so nothing seedable but this reaches an alarm token here.
+test('an action the advisor applied on its own is marked, not alarmed', () => {
   const auto: AiActionItem = { ...CONFIRMED_ACTION, id: 'act_2', source: 'worker_auto' };
-  const html = rendered(Advisor, '/advisor', advisorSeed([auto]), 'auto-applied');
-  assert.deepEqual(raisedIn(html), ['gold']);
+  assertSilent(rendered(Advisor, '/advisor', advisorSeed([auto]), 'auto-applied'), '/advisor');
 });
 
 // ─── Settings ─────────────────────────────────────────────────────────────────

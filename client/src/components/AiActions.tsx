@@ -73,7 +73,7 @@ export function AiActionRow({
       </div>
       <div className="flex flex-shrink-0 items-start gap-3">
         <div className="text-right text-micro text-muted-2">
-          <div className={action.source === 'worker_auto' ? 'text-warning' : 'text-sage-deep'}>
+          <div className={action.source === 'worker_auto' ? 'text-muted' : 'text-sage-deep'}>
             {action.source === 'worker_auto' ? 'auto-applied' : 'you confirmed'}
           </div>
           <div>{formatCompactRelative(action.created_at)}</div>

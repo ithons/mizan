@@ -74,14 +74,15 @@ function accountMeta(a: Account): string {
  *
  * That is a dated reading of a figure that moves as views are added, and the command is beside it
  * so it can be re-run rather than trusted. What does not move is the shape: gold is an ink across
- * eight modules, so recolouring the token is never a local change, and changing one pill's ground
+ * seven modules, so recolouring the token is never a local change, and changing one pill's ground
  * changes one pill.
  *
  * The `review` pair is not borrowed from the AI. It is what this palette uses for an open question
  * the owner has not settled, and only two of its five call sites are about the model:
- * `ledger/rows.tsx` puts a row's "possible duplicate", "possible transfer" and "pending" flags on
- * it, and `Ledger.tsx` tints the selected review filter chip with it. `set_aside` deliberately
- * does NOT take it, because a decision the owner already made is not an open question. A connection
+ * `ledger/rows.tsx` puts a row's "possible duplicate" and "possible transfer" flags on it, and
+ * `Ledger.tsx` marks bills expected before today with it. `set_aside` deliberately does NOT take
+ * it, because a decision the owner already made is not an open question, and "pending" does not
+ * either, because a row the bank has not settled is nothing for the owner to do. A connection
  * that has never synced or has gone stale is that same open question, which is why these two pills
  * take it and the "Reconnect" pill, which is a failure rather than a question, stays on `clay`.
  *

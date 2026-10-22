@@ -142,9 +142,9 @@
  *      dark, and what separates it from the page is the chroma, with nothing at the other end of a
  *      hue comparison to be near or far from. It is also dark enough on light to be read as text:
  *      L* 49.0, and `gold` on `paper` is 4.57:1, which clears AA.
- *      It is used as text at ELEVEN call sites, not the five this line used to claim:
+ *      It is used as text at TEN call sites, not the five this line used to claim:
  *        grep -rnE 'text-(gold|warning)' client/src | grep -vE ':[0-9]+: \*'
- *        -> 11 on 2026-10-20, being 6 `text-gold` and 5 `text-warning` (the legacy alias, same
+ *        -> 10 on 2026-10-22, being 6 `text-gold` and 4 `text-warning` (the legacy alias, same
  *           triplet). The trailing grep drops prose in block comments, including this line.
  *      What it measured before the rebuild is not re-derivable from this file, because the old
  *      triplets are gone from it, so no figure for that is stated here.
