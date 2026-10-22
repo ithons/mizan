@@ -120,3 +120,29 @@ test('a crypto wallet with no coin moves is computed and stays in the portfolio'
   assert.equal(returns.portfolio.name, 'Portfolio');
   assert.equal(returns.portfolio.end_value, 160000);
 });
+
+function harbor(duplicate: boolean) {
+  const db = migratedTestDb();
+  const id = insertAccount(db, { type: 'brokerage', account_name: 'Harbor Brokerage', current_balance: 210000 });
+  insertTransaction(db, { account_id: id, date: '2026-01-10', amount: 100000, category_id: 'cat_inv_transfer' });
+  insertTransaction(db, { account_id: id, date: '2026-06-24', amount: 100000, category_id: 'cat_inv_transfer' });
+  if (duplicate) {
+    const copy = insertTransaction(db, { account_id: id, date: '2026-06-24', amount: 100000, category_id: 'cat_inv_transfer' });
+    db.prepare("UPDATE transactions SET duplicate_status = 'confirmed' WHERE id = ?").run(copy);
+  }
+  return investmentReturns(db, { from: '2026-03-01', today: TODAY })!.accounts.find((a) => a.account_id === id)!;
+}
+
+test('a confirmed duplicate is neither a deposit nor part of the replayed start value', () => {
+  const row = harbor(true);
+  // 2,100 today less the one real 1,000 deposit after the start: 1,100 then, so nothing was earned.
+  assert.equal(row.start_value, 110000);
+  assert.equal(row.net_flows, 100000);
+  assert.equal(row.annualized?.toFixed(6), '0.000000');
+});
+
+test('HEALTHY: without the duplicate the same ledger reads the same, so the copy changed nothing', () => {
+  const { account_id: _plain, ...plain } = harbor(false);
+  const { account_id: _copied, ...copied } = harbor(true);
+  assert.deepEqual(plain, copied);
+});

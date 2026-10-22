@@ -128,9 +128,14 @@ export function netWorthTimeline(
   `).all() as AccountRow[];
   const accounts = wanted ? all.filter((a) => wanted.has(a.id)) : all;
   const txnsByAccount = new Map<string, TxnRow[]>();
+  // A confirmed duplicate is a second copy of a row the balance already counts once, so walking
+  // back through it would count it twice. portfolioExternalFlows applies the same rule, which is
+  // what lets a return's flows and this replay read one population.
   for (const txn of db.prepare(`
     SELECT account_id, date, amount, category_id, transfer_status, is_internal_trade
-    FROM transactions WHERE pending = 0 AND date <= ? ORDER BY date ASC
+    FROM transactions
+    WHERE pending = 0 AND date <= ? AND COALESCE(duplicate_status, 'none') <> 'confirmed'
+    ORDER BY date ASC
   `).all(today) as TxnRow[]) {
     const list = txnsByAccount.get(txn.account_id) ?? [];
     list.push(txn);
@@ -203,4 +208,4 @@ export function netWorthNow(db: Database.Database, today = format(new Date(), 'y
   return { net_worth: point?.net_worth ?? 0, assets: point?.assets ?? 0, liabilities: point?.liabilities ?? 0, as_of: today };
 }
 
-const METHOD = 'Checking, savings and cards are walked back day by day from today\'s balance through every posted transaction, so a day reads what the ledger holds for it now; that can differ from the balance recorded when a sync ran, where a transaction posted or arrived after that sync. Investment and crypto accounts are valued at each day\'s positions times that day\'s public closing price, where the ledger states every quantity and the recorded holdings agree with the balance the institution reported; a recorded balance or a statement overrides that on its own day. Days without known positions or prices replay only money moving in or out from the next known value, holding prices flat, and are estimates. An account that holds a balance only carries the value last recorded for it, and is unknown before the first. An account counts as zero before its first transaction when its walk opens at zero, and as unknown otherwise. A week or month step shows the last day of each period.';
+const METHOD = 'Checking, savings and cards are walked back day by day from today\'s balance through every posted transaction except a confirmed duplicate, so a day reads what the ledger holds for it now; that can differ from the balance recorded when a sync ran, where a transaction posted or arrived after that sync. Investment and crypto accounts are valued at each day\'s positions times that day\'s public closing price, where the ledger states every quantity and the recorded holdings agree with the balance the institution reported; a recorded balance or a statement overrides that on its own day. Days without known positions or prices replay only money moving in or out from the next known value, holding prices flat, and are estimates. An account that holds a balance only carries the value last recorded for it, and is unknown before the first. An account counts as zero before its first transaction when its walk opens at zero, and as unknown otherwise. A week or month step shows the last day of each period.';

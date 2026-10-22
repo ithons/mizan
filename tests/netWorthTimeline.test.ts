@@ -33,6 +33,15 @@ test('HEALTHY: one point for every day, ending on today\'s balances, with every 
   assert.equal(points.find((p) => p.date === '2026-01-31')!.net_worth, 100000);
 });
 
+test('a confirmed duplicate is walked back through once, not twice', () => {
+  const { db, checking } = cashAndCard();
+  const copy = insertTransaction(db, { account_id: checking, date: '2026-02-01', amount: -30000 });
+  db.prepare("UPDATE transactions SET duplicate_status = 'confirmed' WHERE id = ?").run(copy);
+  const { points, accounts } = netWorthTimeline(db, { accountIds: [checking], today: TODAY });
+  assert.equal(points.find((p) => p.date === '2026-01-31')!.by_account[checking], 100000);
+  assert.equal(accounts[0].opening_balance, 0, 'the walk still opens at zero, as it does without the copy');
+});
+
 test('an account that opened at zero counts as zero before its first row', () => {
   const { db, card } = cashAndCard();
   const { points, accounts } = netWorthTimeline(db, { today: TODAY });
