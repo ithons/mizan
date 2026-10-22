@@ -147,6 +147,56 @@ test('HEALTHY: without the duplicate the same ledger reads the same, so the copy
   assert.deepEqual(plain, copied);
 });
 
+/** A $1,000 buy and its $1,000 sell: worth nothing either way, whether the dollars stayed or left. */
+function lanternWallet(dollarsStayed: boolean) {
+  const db = migratedTestDb();
+  const broker = insertAccount(db, { type: 'brokerage', account_name: 'Harbor Brokerage', current_balance: 110000 });
+  insertTransaction(db, { account_id: broker, date: '2026-06-24', amount: 100000, category_id: 'cat_inv_transfer' });
+  const wallet = insertAccount(db, { type: 'crypto_wallet', account_name: 'Lantern Wallet', current_balance: dollarsStayed ? 100000 : 0 });
+  insertTransaction(db, { account_id: wallet, date: '2025-10-01', amount: -100000, category_id: 'cat_crypto_buy' });
+  insertTransaction(db, { account_id: wallet, date: '2026-04-01', amount: 100000, category_id: 'cat_crypto_sell' });
+  db.prepare("INSERT INTO securities (id, ticker, name, type) VALUES ('sec_usd', 'USD', 'US Dollar', 'crypto')").run();
+  if (dollarsStayed) {
+    db.prepare(`INSERT INTO holdings (id, account_id, security_id, quantity, institution_price, institution_value, currency, updated_at)
+      VALUES ('h_usd', ?, 'sec_usd', 1000, 1, 100000, 'USD', '2026-10-22T00:00:00Z')`).run(wallet);
+  } else {
+    const out = insertTransaction(db, { account_id: wallet, date: '2026-04-01', amount: -100000, category_id: 'cat_xfer_out' });
+    db.prepare("UPDATE transactions SET quantity = -1000, security_id = 'sec_usd' WHERE id = ?").run(out);
+  }
+  return { db, broker, wallet };
+}
+
+test('a wallet holding the dollars from a sell is not computed, and the portfolio leaves it out by name', () => {
+  const { db, broker, wallet } = lanternWallet(true);
+  const returns = investmentReturns(db, { from: '2025-09-01', today: TODAY })!;
+  const lantern = returns.accounts.find((a) => a.account_id === wallet)!;
+  assert.equal(lantern.annualized, null);
+  assert.equal(lantern.reason, 'the wallet held $1,000.00 in US dollars on 2026-10-22, and dollars resting in a wallet are not counted as money in or out');
+  assert.equal(returns.portfolio.name, 'Portfolio, without Lantern Wallet');
+  assert.equal(returns.portfolio.end_value, 110000);
+  assert.equal(returns.portfolio.annualized?.toFixed(6), returns.accounts.find((a) => a.account_id === broker)!.annualized?.toFixed(6));
+});
+
+test('dollars a recorded holding shows resting in the wallet on the window\'s first day refuse the rate too', () => {
+  const { db, wallet } = lanternWallet(false);
+  const deposit = insertTransaction(db, { account_id: wallet, date: '2025-08-20', amount: 5000, category_id: 'cat_xfer_in' });
+  db.prepare("UPDATE transactions SET quantity = 50, security_id = 'sec_usd' WHERE id = ?").run(deposit);
+  db.prepare(`INSERT INTO holdings_history (id, account_id, security_id, date, quantity, institution_price, institution_value, created_at)
+    VALUES ('hh_usd', ?, 'sec_usd', '2025-09-01', 50, 1, 5000, '2025-09-01T00:00:00Z')`).run(wallet);
+  const lantern = investmentReturns(db, { from: '2025-09-01', today: TODAY })!.accounts.find((a) => a.account_id === wallet)!;
+  assert.equal(lantern.annualized, null);
+  assert.equal(lantern.reason, 'the wallet held $50.00 in US dollars on 2025-09-01, and dollars resting in a wallet are not counted as money in or out');
+});
+
+test('HEALTHY: a wallet whose sell left the same day is computed, at the zero it earned', () => {
+  const { db, wallet } = lanternWallet(false);
+  const returns = investmentReturns(db, { from: '2025-09-01', today: TODAY })!;
+  const lantern = returns.accounts.find((a) => a.account_id === wallet)!;
+  assert.equal(lantern.reason, null);
+  assert.equal(lantern.annualized?.toFixed(6), '0.000000');
+  assert.equal(returns.portfolio.name, 'Portfolio');
+});
+
 function newRoth(contributed: string) {
   const db = migratedTestDb();
   const id = insertAccount(db, { type: 'ira_roth', account_name: 'Juniper Roth', current_balance: 105000 });

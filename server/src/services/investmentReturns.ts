@@ -3,7 +3,7 @@ import { differenceInCalendarDays, format, parseISO } from 'date-fns';
 import { netWorthTimeline } from './netWorthTimeline';
 import { portfolioExternalFlows, type PortfolioFlow } from './portfolioFlows';
 import { readPortfolioAccounts } from './netWorthHistory';
-import { dollarizeFields } from './money';
+import { dollarizeFields, formatMoney, toDollars } from './money';
 import type { InvestmentReturn, InvestmentReturns } from '../../../shared/types';
 
 export type { InvestmentReturn, InvestmentReturns };
@@ -115,6 +115,46 @@ function coinMoves(db: Database.Database, accountId: string, from: string, to: s
   `).get(accountId, from, to) as { n: number }).n;
 }
 
+/** Under a dollar is ignored: dust left behind by a trade cannot always be withdrawn, and would refuse the rate for good. */
+const USD_HELD_FLOOR_CENTS = 100;
+
+/**
+ * Dollars a crypto wallet held on either end of the window, in cents, where a holding records it.
+ * A sell leaves its proceeds as a USD holding that the balance counts, while `externalMarketFlow`
+ * books the sell as money out and the later withdrawal as nothing. Dollars that arrive and leave
+ * inside the window cancel, so only dollars resting on an end move the rate. Today is the live
+ * holdings; an earlier day is holdings_history on that exact date, and a day with no row there is
+ * not judged.
+ */
+function usdHeld(db: Database.Database, accountId: string, window: { from: string; to: string }, today: string): { date: string; cents: number } | null {
+  const live = db.prepare(`
+    SELECT COALESCE(SUM(h.institution_value), 0) AS cents FROM holdings h
+    JOIN accounts a ON a.id = h.account_id AND a.type = 'crypto_wallet'
+    JOIN securities s ON s.id = h.security_id
+    WHERE h.account_id = ? AND s.ticker = 'USD'
+  `);
+  const recorded = db.prepare(`
+    SELECT COALESCE(SUM(h.institution_value), 0) AS cents FROM holdings_history h
+    JOIN accounts a ON a.id = h.account_id AND a.type = 'crypto_wallet'
+    JOIN securities s ON s.id = h.security_id
+    WHERE h.account_id = ? AND s.ticker = 'USD' AND h.date = ?
+  `);
+  for (const date of [window.from, window.to]) {
+    const row = (date === today ? live.get(accountId) : recorded.get(accountId, date)) as { cents: number };
+    if (row.cents >= USD_HELD_FLOOR_CENTS) return { date, cents: row.cents };
+  }
+  return null;
+}
+
+/** Why a crypto wallet's rate is refused whatever its flows say, or null. The portfolio figure leaves such a wallet out. */
+function walletRefusal(db: Database.Database, accountId: string, window: { from: string; to: string }, today: string): string | null {
+  const n = coinMoves(db, accountId, window.from, window.to);
+  if (n > 0) return `${n === 1 ? 'a coin transfer' : `${n} coin transfers`} to or from another wallet ${n === 1 ? 'is' : 'are'} not counted as money in or out`;
+  const usd = usdHeld(db, accountId, window, today);
+  if (usd) return `the wallet held ${formatMoney(toDollars(usd.cents))} in US dollars on ${usd.date}, and dollars resting in a wallet are not counted as money in or out`;
+  return null;
+}
+
 function nothingIncluded(row: InvestmentReturn): InvestmentReturn {
   return row.reason === 'not enough history' ? row : { ...row, reason: 'every account was left out of the portfolio figure' };
 }
@@ -133,7 +173,7 @@ export function investmentReturns(
   if (!first || !last) return null;
   const window = { from: first.date, to: last.date, days: differenceInCalendarDays(parseISO(last.date), parseISO(first.date)) };
 
-  const moved = new Map(timeline.accounts.map((account) => [account.id, coinMoves(db, account.id, window.from, window.to)]));
+  const refused = new Map(timeline.accounts.map((account) => [account.id, walletRefusal(db, account.id, window, today)]));
   const accounts = timeline.accounts.map((account) => {
     const row = judge(
       { account_id: account.id, name: account.name },
@@ -142,12 +182,10 @@ export function investmentReturns(
       { value: last.by_account[account.id], estimated: last.estimated_accounts.includes(account.id) },
       windowFlows(portfolioExternalFlows(db, [account.id]), window.from, window.to),
     );
-    const n = moved.get(account.id) ?? 0;
-    return n > 0 && row.reason !== 'not enough history'
-      ? { ...row, annualized: null, reason: `${n === 1 ? 'a coin transfer' : `${n} coin transfers`} to or from another wallet ${n === 1 ? 'is' : 'are'} not counted as money in or out` }
-      : row;
+    const reason = refused.get(account.id);
+    return reason && row.reason !== 'not enough history' ? { ...row, annualized: null, reason } : row;
   });
-  const included = ids.filter((id) => (moved.get(id) ?? 0) === 0);
+  const included = ids.filter((id) => !refused.get(id));
   const excludedNames = timeline.accounts.filter((a) => !included.includes(a.id)).map((a) => a.name);
   const sumOver = (point: typeof first) => (included.every((id) => point.by_account[id] !== undefined)
     ? included.reduce((sum, id) => sum + point.by_account[id], 0) : undefined);
@@ -174,4 +212,4 @@ export function investmentReturnsToDollars(returns: InvestmentReturns): Investme
   };
 }
 
-const METHOD = 'Money-weighted (XIRR): the annual rate at which the value at the start of the window, plus every deposit and less every withdrawal on its date, grows into the value at the end, counting days over 365. Values are the net worth timeline\'s for each account; deposits and withdrawals are the same rows the timeline replays as money moving in or out. Not computed when the money was held for under 90 days of the window (counted from the first day its value was not zero), when the end value is an estimate, when coins moved to or from another wallet (those moves are not counted as money in or out, so a rate would read them as gains or losses; the portfolio figure then leaves that account out), or when no single rate between -99% and 1000% a year balances the flows. A start value that is an estimate is flagged and still used.';
+const METHOD = 'Money-weighted (XIRR): the annual rate at which the value at the start of the window, plus every deposit and less every withdrawal on its date, grows into the value at the end, counting days over 365. Values are the net worth timeline\'s for each account; deposits and withdrawals are the same rows the timeline replays as money moving in or out. Not computed when the money was held for under 90 days of the window (counted from the first day its value was not zero), when the end value is an estimate, when coins moved to or from another wallet or a wallet held at least $1 in US dollars at either end of the window, as its holdings record (neither is counted as money in or out, so a rate would read them as gains or losses; the portfolio figure then leaves that account out), or when no single rate between -99% and 1000% a year balances the flows. A start value that is an estimate is flagged and still used.';
