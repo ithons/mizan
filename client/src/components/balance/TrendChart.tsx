@@ -10,6 +10,7 @@ import {
   parseISO,
 } from 'date-fns';
 import { formatWholeCurrency } from '../../lib/formatters';
+import { sameAccounts } from './BalanceScale';
 
 const VIEW_W = 1000;
 const VIEW_H = 140;
@@ -43,6 +44,12 @@ export interface TrendPoint {
    * with a count on exactly one end knows only that it cannot compare them.
    */
   coverage?: number;
+  /**
+   * Which accounts this point counts, when the caller knows. Two ends with the same count over
+   * different accounts are not the same quantity either. Where both ends carry ids they decide;
+   * where either end has none, the count alone does.
+   */
+  accounts?: ReadonlySet<string>;
 }
 
 /**
@@ -78,8 +85,8 @@ interface MarkPosition extends TrendMark {
  * What a segment between two consecutive points is allowed to claim.
  *
  * `measured` joins two observations. `estimated` has at least one reconstructed end. `coverage`
- * is the case where the two ends are not known to be the same quantity at all, either because
- * the account counts differ or because only one end records a count, so it outranks the other
+ * is the case where the two ends are not known to be the same quantity at all, because the
+ * account counts differ, the account ids differ, or only one end records a count, so it outranks the other
  * two. An unrecorded count is a reason to withhold the join, never a reason to assume it.
  */
 export type TrendSegmentKind = 'measured' | 'estimated' | 'coverage';
@@ -378,7 +385,9 @@ export function trendGeometry(history: TrendPoint[], marks: TrendMark[]): TrendG
     const b = history[i + 1];
     // Silence on both ends is silence; silence on one end is not agreement with the other.
     const bothSilent = a.coverage === undefined && b.coverage === undefined;
-    const comparable = bothSilent || a.coverage === b.coverage;
+    const comparable =
+      bothSilent ||
+      (a.coverage === b.coverage && (a.accounts === undefined || b.accounts === undefined || sameAccounts(a.accounts, b.accounts)));
     if (!comparable) {
       kinds.push('coverage');
     } else if (a.estimated || b.estimated) {
@@ -592,7 +601,10 @@ export function trendCaptions(geometry: TrendGeometry): string[] {
 
   // Both sentences count `coverageSpans` entries, which are one-per-rendered-polyline by
   // construction, so the number in the copy is the number of stretches a reader can point at.
-  const named = coverageSpans.filter((span) => !span.incomplete);
+  // A complete stretch whose count never changes was set apart because its accounts did.
+  const sameCount = (span: TrendCoverageSpan): boolean => !span.incomplete && span.counts.length === 1;
+  const named = coverageSpans.filter((span) => !span.incomplete && !sameCount(span));
+  const swapped = coverageSpans.filter(sameCount);
   const unnamed = coverageSpans.filter((span) => span.incomplete);
   if (named.length > 0) {
     const counts = named.flatMap((span) => span.counts);
@@ -601,6 +613,16 @@ export function trendCaptions(geometry: TrendGeometry): string[] {
       `${named.length} ${one ? 'stretch is' : 'stretches are'} set apart because the number of accounts ` +
         `counted changes across ${one ? 'it' : 'them'}, between ${Math.min(...counts)} and ` +
         `${Math.max(...counts)}. The two ends of such a stretch are not the same quantity.`
+    );
+  }
+  if (swapped.length > 0) {
+    const one = swapped.length === 1;
+    const sizes = new Set(swapped.map((span) => span.counts[0]));
+    const held = sizes.size === 1 ? `stays ${[...sizes][0]}` : 'stays the same within each';
+    lines.push(
+      `${swapped.length} ${one ? 'stretch is' : 'stretches are'} set apart because the accounts counted ` +
+        `change across ${one ? 'it' : 'them'} while their number ${held}. ` +
+        'The two ends of such a stretch are not the same quantity.'
     );
   }
   if (unnamed.length > 0) {

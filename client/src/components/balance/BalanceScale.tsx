@@ -187,7 +187,7 @@ export function sheetAccountIds(breakdown: string | null | undefined): ReadonlyS
   );
 }
 
-function sameAccounts(a: ReadonlySet<string> | null, b: ReadonlySet<string> | null): boolean {
+export function sameAccounts(a: ReadonlySet<string> | null, b: ReadonlySet<string> | null): boolean {
   if (a === null || b === null || a.size !== b.size) return false;
   for (const id of a) if (!b.has(id)) return false;
   return true;

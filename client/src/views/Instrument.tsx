@@ -660,6 +660,7 @@ export function Instrument() {
     value: p.net_worth,
     estimated: p.estimated,
     coverage: p.coverage,
+    accounts: new Set(Object.keys(p.by_account)),
   }));
   const trendMarks = (sheetsQ.data ?? []).map((s) => ({ date: s.date, value: settledNetWorth(s) }));
 

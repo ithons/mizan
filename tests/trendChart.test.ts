@@ -384,6 +384,34 @@ test('a clean measured series gets no captions at all', () => {
   assert.deepEqual(trendCaptions(trendGeometry(clean, [])), []);
 });
 
+const ids = (...names: string[]): ReadonlySet<string> => new Set(names);
+
+test('two points of the same count over different accounts are not joined as money moving', () => {
+  const history: TrendPoint[] = [
+    { date: '2026-07-01', value: 1000, coverage: 2, accounts: ids('a', 'b') },
+    { date: '2026-07-02', value: 1400, coverage: 2, accounts: ids('a', 'c') },
+  ];
+  const geometry = trendGeometry(history, []);
+  assert.deepEqual(geometry.segments.map((s) => s.kind), ['coverage']);
+  assert.deepEqual(trendCaptions(geometry), [
+    '1 stretch is set apart because the accounts counted change across it while their number stays 2. ' +
+      'The two ends of such a stretch are not the same quantity.',
+  ]);
+  assert.deepEqual(statedCoverageCounts(trendCaptions(geometry)), [1]);
+});
+
+test('the same accounts at different values are joined, and the copy says nothing about coverage', () => {
+  const history: TrendPoint[] = [
+    { date: '2026-07-01', value: 1000, coverage: 2, accounts: ids('a', 'b') },
+    { date: '2026-07-02', value: 1400, coverage: 2, accounts: ids('b', 'a') },
+    { date: '2026-07-03', value: 900, coverage: 2 },
+  ];
+  const geometry = trendGeometry(history, []);
+  assert.deepEqual(geometry.segments.map((s) => s.kind), ['measured']);
+  assert.deepEqual(geometry.coverageSpans, []);
+  assert.deepEqual(trendCaptions(geometry), []);
+});
+
 test('the crowding line appears only where the mouse cannot separate two points', () => {
   const crowded = (history: TrendPoint[]): boolean =>
     trendKeyboardHint(trendGeometry(history, [])) !== null;
