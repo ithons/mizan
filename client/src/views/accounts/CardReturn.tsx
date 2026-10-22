@@ -1,3 +1,4 @@
+import { addDays, format, parseISO } from 'date-fns';
 import type { CardReviewCard, CardReviewWindow, UnattributedRedemption } from '@shared/types';
 import { formatCurrency, formatDate } from '../../lib/formatters';
 import { SectionLabel } from '../../components/balance';
@@ -9,15 +10,19 @@ const ROWS: ReadonlyArray<[keyof CardReviewWindow, string]> = [
   ['spend', 'Spend'],
 ];
 
+// An annual fee posts on a statement close, which drifts by days from the anniversary, so the
+// expectation stands for one statement cycle past it before the line reports only what posted.
+const RENEWAL_GRACE_DAYS = 35;
+
 function renewalLine(card: CardReviewCard, today: string): string | null {
   if (!card.last_annual_fee_date || !card.next_annual_fee_date) return null;
   const fee = card.fees.filter((f) => f.kind === 'annual' && f.date === card.last_annual_fee_date)
     .reduce((sum, f) => sum - f.amount, 0);
-  const last = formatDate(card.last_annual_fee_date);
-  const next = formatDate(card.next_annual_fee_date);
-  return card.next_annual_fee_date < today
-    ? `Annual fee of ${formatCurrency(fee)} last charged ${last}. The next was expected around ${next} and has not posted.`
-    : `Annual fee of ${formatCurrency(fee)} last charged ${last}. The next is expected around ${next}.`;
+  const last = `Annual fee of ${formatCurrency(fee)} last charged ${formatDate(card.last_annual_fee_date)}.`;
+  const graceEnd = format(addDays(parseISO(card.next_annual_fee_date), RENEWAL_GRACE_DAYS), 'yyyy-MM-dd');
+  return today > graceEnd
+    ? `${last} None has posted since.`
+    : `${last} The next is expected around ${formatDate(card.next_annual_fee_date)}.`;
 }
 
 function unattributedLine(row: UnattributedRedemption): string {

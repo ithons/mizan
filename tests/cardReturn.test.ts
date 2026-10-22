@@ -45,8 +45,8 @@ const CASH_REDEMPTION: UnattributedRedemption = {
   same_institution_card_ids: ['sapphire', 'flex'],
 };
 
-function render(card: CardReviewCard, unattributed: UnattributedRedemption[] = []): string {
-  return renderToStaticMarkup(createElement(CardReturn, { card, trailingFrom: '2025-10-23', unattributed, today: '2026-10-22' }));
+function render(card: CardReviewCard, unattributed: UnattributedRedemption[] = [], today = '2026-10-22'): string {
+  return renderToStaticMarkup(createElement(CardReturn, { card, trailingFrom: '2025-10-23', unattributed, today }));
 }
 
 test('a card that cost more than it returned reads as a number, in neutral ink', () => {
@@ -64,4 +64,18 @@ test('a card with nothing redeemed and no fees reads zero, with no renewal and n
   assert.equal((html.match(/\$0\.00/g) ?? []).length, 6);
   assert.doesNotMatch(html, /Annual fee/);
   assert.doesNotMatch(html, /names no card/);
+});
+
+test('an annual fee a few days past its anniversary is still expected, not reported missing', () => {
+  for (const today of ['2027-02-02', '2027-02-05', '2027-03-08']) {
+    const html = render(SAPPHIRE, [], today);
+    assert.match(html, /The next is expected around Feb 1, 2027/, today);
+    assert.doesNotMatch(html, /has not posted|None has posted/, today);
+  }
+});
+
+test('past one statement cycle the line states only what posted, with no expectation left standing', () => {
+  const html = render(SAPPHIRE, [], '2027-03-09');
+  assert.match(html, /Annual fee of \$95\.00 last charged Feb 1, 2026\. None has posted since\./);
+  assert.doesNotMatch(html, /expected|has not posted/);
 });
