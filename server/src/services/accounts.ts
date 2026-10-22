@@ -447,12 +447,6 @@ export function mergeAccounts(
  * Values are summed where both ids appear on the same date: after a merge they are two parts of one
  * account, so the month's net worth must not change. That is the property migration 039 was
  * restoring, and it is the property this keeps.
- *
- * `portfolio_accounts` (migration 056) is remapped in the same pass, and has to be: it is a list of
- * ids naming which accounts a point's portfolio value was a sum over, so leaving the source id in it
- * after the breakdown entry moved would drop that account's balance out of every historical point
- * while the row still looked complete. The set is a set, so a merge of two portfolio accounts
- * shortens it by one, which is what actually happened to the ledger and is the honest count.
  */
 export function remapAccountIdInSnapshots(
   db: Database.Database,
@@ -460,15 +454,9 @@ export function remapAccountIdInSnapshots(
   toAccountId: string
 ): number {
   const rows = db.prepare(
-    'SELECT id, breakdown, portfolio_accounts FROM net_worth_snapshots'
-  ).all() as Array<{
-    id: string;
-    breakdown: string;
-    portfolio_accounts: string | null;
-  }>;
-  const update = db.prepare(
-    'UPDATE net_worth_snapshots SET breakdown = ?, portfolio_accounts = ? WHERE id = ?'
-  );
+    'SELECT id, breakdown FROM net_worth_snapshots'
+  ).all() as Array<{ id: string; breakdown: string }>;
+  const update = db.prepare('UPDATE net_worth_snapshots SET breakdown = ? WHERE id = ?');
   let changed = 0;
 
   for (const row of rows) {
@@ -487,41 +475,13 @@ export function remapAccountIdInSnapshots(
       breakdown[toAccountId] =
         typeof existing === 'number' && Number.isFinite(existing) ? existing + moved : moved;
     }
-    update.run(JSON.stringify(breakdown), remapPortfolioAccounts(row.portfolio_accounts, fromAccountId, toAccountId), row.id);
+    update.run(JSON.stringify(breakdown), row.id);
     changed += 1;
   }
 
   return changed;
 }
 
-/**
- * The frozen portfolio membership of one snapshot, with the merged-away id replaced.
- *
- * Returns the column unchanged when it holds nothing this can act on, which keeps "no set was ever
- * recorded" (NULL) distinct from "the set is empty": the first is read as a reconstruction at the
- * read edge, and writing `[]` here would turn it into a claim that the point held no portfolio.
- */
-function remapPortfolioAccounts(
-  stored: string | null,
-  fromAccountId: string,
-  toAccountId: string
-): string | null {
-  if (stored === null) return null;
-
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(stored);
-  } catch {
-    return stored;
-  }
-  if (!Array.isArray(parsed)) return stored;
-
-  const ids = parsed.filter((id): id is string => typeof id === 'string');
-  if (!ids.includes(fromAccountId)) return stored;
-
-  const remapped = new Set(ids.map((id) => (id === fromAccountId ? toAccountId : id)));
-  return JSON.stringify([...remapped].sort());
-}
 
 export type DeleteAccountResult = { ok: true } | { ok: false; reason: 'not_found' };
 
