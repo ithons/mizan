@@ -15,7 +15,6 @@ function balanceLine(c: Counterparty): string {
 }
 
 function PersonRow({ person }: { person: Counterparty }) {
-  const ink = person.state === 'sent_more' && person.older_than_window ? 'text-review-text' : 'text-ink';
   return (
     <div className="flex flex-wrap items-baseline justify-between gap-x-6 gap-y-1 border-b border-line py-2.5">
       <div className="min-w-0">
@@ -25,7 +24,7 @@ function PersonRow({ person }: { person: Counterparty }) {
           <span className="tabular-nums">{formatCurrency(person.received)}</span> · last {formatDate(person.last_date)}
         </div>
       </div>
-      <div className={`text-body tabular-nums ${ink}`}>{balanceLine(person)}</div>
+      <div className={`text-body tabular-nums text-ink`}>{balanceLine(person)}</div>
     </div>
   );
 }
@@ -93,8 +92,8 @@ export function PeopleAndCash() {
       <p className="mb-5 max-w-[640px] text-note text-muted-2">
         Transfers to and from people, wallets you do not track, and cash. Reports leave these out of spending,
         and nothing here counts toward it. Only the transfers are visible here, so a balance is what moved, not
-        what anyone owes. Within {formatCurrency(reading.settle_tolerance)} counts as even, and someone sent more
-        than came back is marked for review after {reading.window_days} days with no activity.
+        what anyone owes. Within {formatCurrency(reading.settle_tolerance)} counts as even. Paying for someone and lending to
+        them look the same here, so nothing is flagged.
       </p>
       <People reading={reading} />
       {reading.channels.length > 0 && (

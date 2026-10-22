@@ -329,10 +329,9 @@ test('people and cash on an ordinary ledger raises nothing', () => {
   assertSilent(rendered(Ledger, '/ledger?view=people', peopleSeed(ORDINARY_PEOPLE), 'Jordan Lee'), '/ledger?view=people');
 });
 
-test('and money sent with nothing back for over 60 days is review ink, never clay', () => {
+test('and money sent with nothing back for months is stated, not flagged: a gift and a loan look alike here', () => {
   const stale = [counterparty({ key: 'person:jordan lee', name: 'Jordan Lee', sent: 46, net: -46, state: 'sent_more', days_since_last: 61, older_than_window: true })];
-  const html = rendered(Ledger, '/ledger?view=people', peopleSeed(stale), 'Sent $46.00 more than received');
-  assert.deepEqual(raisedIn(html), ['review']);
+  assertSilent(rendered(Ledger, '/ledger?view=people', peopleSeed(stale), 'Sent $46.00 more than received'), '/ledger?view=people');
 });
 
 // ─── Accounts ─────────────────────────────────────────────────────────────────
