@@ -14,6 +14,7 @@ import { Screen, SectionLabel, TextButton, TrendChart } from '../../components/b
 import { SkeletonRows } from '../../components/SkeletonLoader';
 import { QueryErrorBanner } from '../../components/QueryErrorBanner';
 import { MARKET_DRIVEN_TYPES } from '@shared/accountTypes';
+import { CardReturn } from './CardReturn';
 
 
 function plural(count: number, noun: string): string {
@@ -99,6 +100,13 @@ export function AccountDetail() {
     enabled: Boolean(id) && isInvestment,
     retry: false,
   });
+  const isCard = account?.type === 'credit';
+  const { data: review } = useQuery({
+    queryKey: ['accounts', 'card-review'],
+    queryFn: () => accountsApi.cardReview(),
+    enabled: isCard,
+  });
+  const cardReview = review?.cards.find((c) => c.account_id === id) ?? null;
   const txQ = useQuery({
     queryKey: ['account', id, 'transactions'],
     queryFn: () => transactionsApi.list({ accountId: [id], limit: 25 }),
@@ -194,6 +202,10 @@ export function AccountDetail() {
             <TrendChart history={chart} marks={marks} height={110} label={account.account_name} />
           )}
         </div>
+      )}
+
+      {review && cardReview && (
+        <CardReturn card={cardReview} trailingFrom={review.trailing_12_from} unattributed={review.unattributed} today={review.as_of} />
       )}
 
       {isInvestment && holdings && holdings.length > 0 && (
