@@ -547,14 +547,16 @@ export function runwayTo(db: Database.Database, end: string = defaultRunwayEnd()
   const curve = runCurve(inputs.start, inputs.perDay, effects, inputs.days, today);
   const hasBand = inputs.coveredDays >= BAND_MIN_HISTORY_DAYS;
   const band = hasBand ? simulateBand(curve, inputs, 1, new Set(), bandLumps).lowest_band : null;
-  const low = Math.min(toDollars(curve.lowest), band ? band.p10 : Number.POSITIVE_INFINITY);
+  // Short means below the claims, the same test that sets first_short_on, so a low of exactly
+  // zero is covered and an uncovered reading always names a short day or a band that went below.
+  const covered = curve.firstNegativeDate === null && (!band || band.p10 >= 0);
   return {
     end_date: ymd(addDays(today, inputs.days)),
     days: inputs.days,
     lowest: toDollars(curve.lowest),
     lowest_on: curve.lowestDate,
     first_short_on: curve.firstNegativeDate,
-    covered: low > 0,
+    covered,
     lowest_band: band,
     band_note: hasBand ? null : `Only ${inputs.coveredDays} days of spending history; a band needs ${BAND_MIN_HISTORY_DAYS}.`,
     expected_lumps_counted: lumpsCounted(lumps),

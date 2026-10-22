@@ -127,6 +127,23 @@ test('a ledger that runs below its claims is not covered and names the first sho
   });
 });
 
+test('HEALTHY: a point projection that bottoms at exactly $0.00, with no band, reads covered and names no simulation', () => {
+  const db = migratedTestDb();
+  _setDbForTesting(db);
+  try {
+    insertAccount(db, { account_name: 'Harbor Checking', type: 'checking', current_balance: 87654 });
+    insertAccount(db, { account_name: 'Harbor Card', type: 'credit', is_liability: 1, current_balance: 87654 });
+    const runway = runwayTo(db, ahead(30), now);
+    assert.equal(runway.lowest, 0);
+    assert.equal(runway.lowest_band, null);
+    assert.equal(runway.first_short_on, null);
+    assert.equal(runway.covered, true, 'reaching the claims exactly is not short of them');
+  } finally {
+    _setDbForTesting(undefined as unknown as Database.Database);
+    db.close();
+  }
+});
+
 test('the default end is Dec 31, or next year\'s once this year has under two weeks left', () => {
   assert.equal(defaultRunwayEnd(new Date(2026, 9, 22)), '2026-12-31');
   assert.equal(defaultRunwayEnd(new Date(2026, 11, 20)), '2027-12-31');
