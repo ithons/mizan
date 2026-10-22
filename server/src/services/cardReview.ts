@@ -109,8 +109,9 @@ function lastAnnualFee(fees: readonly CardFeeRow[]): string | null {
 /**
  * Per credit card, what it returned (redemptions on the card, and bank deposits whose descriptor
  * names exactly one card's program) and what it charged (issuer fees, by a descriptor that begins
- * with the charge's name; a merchant's or processor's fee is not one, even one filed under Fees). Spend is what Reports counts on the card,
- * less the fee rows. A bank deposit that names no single card is returned unattributed.
+ * with the charge's name; a merchant's or processor's fee is not one, even one filed under Fees).
+ * Spend is what Reports counts on the card, less the fee and redemption rows, so a statement credit
+ * in an expense category counts once, as redeemed. A bank deposit that names no single card is returned unattributed.
  */
 export function cardReview(db: Database.Database, asOf: string): CardReview {
   const trailingFrom = format(addDays(subMonths(parseISO(asOf), 12), 1), 'yyyy-MM-dd');
@@ -149,9 +150,11 @@ export function cardReview(db: Database.Database, asOf: string): CardReview {
   }
 
   const cardIds = cards.map((card) => card.id);
-  const feeIds = [...fees.values()].flat().map((fee) => fee.transaction_id);
-  const lifeSpend = getSpendByAccount(db, { endDate: asOf }, cardIds, feeIds);
-  const trailingSpend = getSpendByAccount(db, { startDate: trailingFrom, endDate: asOf }, cardIds, feeIds);
+  // A statement credit filed in an expense category would otherwise net Spend as a refund while also
+  // counting as Redeemed, so the same dollars would appear twice.
+  const countedIds = [...fees.values(), ...redemptions.values()].flat().map((row) => row.transaction_id);
+  const lifeSpend = getSpendByAccount(db, { endDate: asOf }, cardIds, countedIds);
+  const trailingSpend = getSpendByAccount(db, { startDate: trailingFrom, endDate: asOf }, cardIds, countedIds);
 
   return {
     as_of: asOf,

@@ -157,3 +157,18 @@ test('an issuer fee that begins with the charge name is still a fee', () => {
   assert.equal(card.life.spend, 4200);
   assert.equal(card.last_annual_fee_date, '2025-06-01');
 });
+
+test('a statement credit filed in an expense category counts once, as redeemed, not also as a refund', () => {
+  const { db, sapphire, flex, bofa, plain } = fixture();
+  tx(db, plain, '2026-04-01', -20000, 'SKYLARK AIRWAYS', 'cat_travel_flights');
+  tx(db, plain, '2026-04-09', 5000, 'STATEMENT CREDIT', 'cat_travel_flights');
+  const review = cardReview(db, AS_OF);
+  const card = review.cards.find((c) => c.account_id === plain)!;
+  assert.deepEqual(card.life, { redeemed: 5000, fees: 0, net: 5000, spend: 4200 + 20000 });
+  assert.deepEqual(card.trailing_12, { redeemed: 5000, fees: 0, net: 5000, spend: 4200 + 20000 });
+
+  const reportTotal = getSpendingReport(db, { endDate: AS_OF }).total;
+  const feeTotal = review.cards.reduce((sum, c) => sum + c.fees.reduce((s, x) => s - x.amount, 0), 0);
+  const cardSpend = [sapphire, bofa, flex, plain].reduce((sum, id) => sum + review.cards.find((c) => c.account_id === id)!.life.spend, 0);
+  assert.equal(cardSpend + feeTotal - 5000, reportTotal, 'Reports nets the credit as a refund; the review moves it to Redeemed');
+});

@@ -35,7 +35,8 @@ const METHOD = (
       Fees are the issuer&rsquo;s own charges, read from a description that begins with the charge&rsquo;s name:
       annual, foreign transaction, late, interest, returned payment, cash advance or balance transfer. A
       merchant&rsquo;s or processor&rsquo;s fee, such as one whose description names the merchant first, is spend. Net is redeemed less fees.
-      Spend is what Reports counts on this card, refunds netted, fees left out.
+      Spend is what Reports counts on this card, refunds netted, fees and redemptions left out, so a statement
+      credit Reports nets as a refund is counted here once, as redeemed.
     </p>
   </>
 );
