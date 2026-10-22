@@ -197,6 +197,14 @@ function seedEveryTable(db: Database.Database, tag: string): SeededIds {
     VALUES (?, ?, 100000, 2000, 98000, '{}', ?)
   `).run(`snap_${tag}`, `2026-07-0${tag.length}`, TEST_NOW);
 
+  db.prepare(`
+    INSERT INTO expected_lumps (id, label, merchant_key, amount_low_cents, amount_high_cents,
+                                window_start, window_end, last_occurrence, status, created_at,
+                                updated_at, confirmed_at)
+    VALUES (?, 'Term refund', 'ma institute tec erefund', 184225, 323625, '2027-02-01',
+            '2027-03-01', '2026-09-17', 'confirmed', ?, ?, ?)
+  `).run(`lump_${tag}`, TEST_NOW, TEST_NOW, TEST_NOW);
+
   const runId = `run_${tag}`;
   db.prepare(`
     INSERT INTO sync_runs (id, scope, status, started_at) VALUES (?, 'full', 'succeeded', ?)
