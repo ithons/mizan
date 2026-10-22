@@ -52,7 +52,7 @@ import { createGoal } from './goals';
 import { dismissRecurringPattern } from './recurring';
 import { updateAccount } from './accounts';
 import { deleteNotificationRule, listNotificationRules, notificationParamsFromDollars, upsertNotificationRule, type UpsertNotificationRuleInput } from './notifications';
-import { confirmExpectedLump, expectLumpLapsed, expectLumpProblem } from './expectedLumps';
+import { confirmExpectedLump, expectLumpLapsed, expectLumpProblem, removedLump } from './expectedLumps';
 
 interface CategoryRow {
   id: string;
@@ -1026,6 +1026,8 @@ function declinedRetirement(db: Database.Database, ruleId: string): DeclinedProp
  *   create_merchant_rule    the pattern AND the category, case- and whitespace-insensitive.
  *   retire_merchant_rule    the rule id, out of the dismissed draft's own payload. See
  *     `declinedRetirement`; the pattern is not the rule.
+ *   expect_lump             the payer key; also, for one window only, a confirmed lump the owner
+ *     removed with the same last occurrence (see `removedLump`).
  * Every other kind matches nothing and is never blocked here.
  *
  * THE OWNER CAN TAKE IT BACK. A decline is durable, not permanent: `listDeclinedProposals` puts
@@ -1044,6 +1046,11 @@ export function ownerDeclinedProposal(
   payload: AdvisorDraftPayload
 ): DeclinedProposal | null {
   if (payload.kind === 'retire_merchant_rule') return declinedRetirement(db, payload.rule_id);
+  if (payload.kind === 'expect_lump') {
+    // Removing a confirmed lump confirmed it first, so no dismissed draft records that refusal.
+    const removed = removedLump(db, payload);
+    if (removed) return { draftId: null, declinedAt: removed.removed_at };
+  }
 
   const identity = proposalIdentity(payload);
   if (identity === null) return null;

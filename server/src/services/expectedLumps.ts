@@ -258,6 +258,21 @@ export function dismissConfirmedLump(db: Database.Database, id: string): boolean
   `).run(new Date().toISOString(), id).changes === 1;
 }
 
+/**
+ * The owner's removal of a confirmed lump for this payer and this last occurrence, or null.
+ *
+ * Removing is a decision about one window, not about the payer: once the payer pays again the
+ * detector computes a new last occurrence and the next window is offered as usual.
+ */
+export function removedLump(db: Database.Database, payload: ExpectLumpPayload): { id: string; removed_at: string } | null {
+  const row = db.prepare(`
+    SELECT id, updated_at FROM expected_lumps
+    WHERE status = 'dismissed' AND merchant_key = ? AND last_occurrence = ?
+    ORDER BY updated_at DESC, id LIMIT 1
+  `).get(payload.merchant_key, payload.last_occurrence) as { id: string; updated_at: string } | undefined;
+  return row ? { id: row.id, removed_at: row.updated_at } : null;
+}
+
 /** Why an expect_lump payload cannot become a card, or null. */
 export function expectLumpProblem(payload: ExpectLumpPayload, today = new Date()): string | null {
   if (payload.amount_low > payload.amount_high) return 'amount_low must not exceed amount_high';

@@ -297,6 +297,25 @@ test('a confirmed lump reads as arrived when its deposit is filed under a spendi
   assert.equal(listConfirmedLumps(db)[0].state, 'arrived');
 });
 
+test('removing a confirmed lump keeps it off the list for that window, leaves another payer alone, and offers the next window', async () => {
+  const { db, checking } = confirmedGrant();
+  const savings = insertAccount(db, { account_name: 'Harbor Savings', type: 'savings', current_balance: 50000 });
+  const dates = [400, 220, 40].map((back) => ymd(addDays(new Date(), -back)));
+  seed(db, savings, dates.map((date) => [date, 150000, 'Aunt Rowan', 'ZELLE FROM AUNT ROWAN', 'cat_income_other'] as Row));
+  await withRouter(db, async (base) => {
+    const before = (await (await fetch(base)).json()) as { data: ExpectedLumpsResponse };
+    assert.equal(before.data.confirmed.length, 1);
+    assert.deepEqual(before.data.candidates.map((c) => c.payload.label), ['Aunt Rowan']);
+    assert.equal((await fetch(`${base}/${before.data.confirmed[0].id}/dismiss`, { method: 'POST' })).status, 200);
+    const after = (await (await fetch(base)).json()) as { data: ExpectedLumpsResponse };
+    assert.deepEqual(after.data.confirmed, []);
+    assert.deepEqual(after.data.candidates.map((c) => c.payload.label), ['Aunt Rowan'], 'the removed grant is not offered again for the same window');
+    arrive(db, checking, {});
+    const next = (await (await fetch(base)).json()) as { data: ExpectedLumpsResponse };
+    assert.deepEqual(next.data.candidates.map((c) => c.payload.label).sort(), ['Aunt Rowan', 'Northfield grant'], 'a removal is not a standing veto on the payer');
+  });
+});
+
 test('HEALTHY: a same-payer deposit far outside the range, or on the last occurrence itself, leaves the lump expected', () => {
   const { db, checking } = confirmedGrant();
   arrive(db, checking, { amount: 40000 });
