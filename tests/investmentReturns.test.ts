@@ -28,7 +28,9 @@ test('xirr matches the published spreadsheet example to four decimals', () => {
 
 test('xirr refuses flows no rate can balance rather than returning one', () => {
   assert.equal(xirr([{ date: '2026-01-01', amount: -100 }, { date: '2026-06-01', amount: -50 }]).rate, null);
-  assert.equal(xirr([{ date: '2026-01-01', amount: 0 }, { date: '2026-06-01', amount: 0 }]).rate, null);
+  assert.equal(xirr([{ date: '2026-01-01', amount: 0 }, { date: '2026-06-01', amount: 0 }]).reason, 'no money moved and nothing was held');
+  // Held at the end with nothing put in: something is held, so the reason must not say otherwise.
+  assert.equal(xirr([{ date: '2026-01-01', amount: 0 }, { date: '2026-06-01', amount: 500 }]).reason, 'the flows all run one way, so no rate balances them');
   // A loss is a rate, not a refusal.
   assert.ok((xirr([{ date: '2025-01-01', amount: -1000 }, { date: '2026-01-01', amount: 900 }]).rate ?? 0) < 0);
 });

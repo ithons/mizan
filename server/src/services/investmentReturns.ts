@@ -45,7 +45,7 @@ function bisect(flows: readonly CashFlow[], lo: number, hi: number): number {
 /** The annual rate r solving sum(amount / (1 + r)^(days / 365)) = 0, bracketed in [-99%, 1000%]. */
 export function xirr(flows: readonly CashFlow[]): XirrResult {
   const sorted = [...flows].filter((f) => f.amount !== 0).sort((a, b) => a.date.localeCompare(b.date));
-  if (sorted.length < 2) return { rate: null, reason: 'no money moved and nothing was held' };
+  if (sorted.length === 0) return { rate: null, reason: 'no money moved and nothing was held' };
   if (sorted.every((f) => f.amount > 0) || sorted.every((f) => f.amount < 0)) {
     return { rate: null, reason: 'the flows all run one way, so no rate balances them' };
   }
