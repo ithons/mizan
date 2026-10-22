@@ -21,6 +21,7 @@ import {
   TRENDS,
   render,
 } from './helpers/instrumentHarness';
+import { familiesIn } from './helpers/screenHarness';
 
 /**
  * Rule 3 applied to colour: the palette must be silent on an ordinary healthy event.
@@ -42,21 +43,13 @@ import {
  * screen correctly raised gold ("Recorded 33 days ago") and estimate (the beam's uncalibrated
  * fill). Those two paths are healthy-silent; the fixture was 33 days stale.
  *
- * SCOPE: this covers Instrument. The directional clay on Investments (an unrealized loss), Plan (a
- * short sheet) and Accounts (a balance owed) is conditional on a measured state and so falls under
- * the plan's own carve-out, but nothing asserts it. Five screens are unverified.
+ * SCOPE: this covers Instrument. `healthyScreens.test.ts` covers the other six (Ledger and its
+ * Scheduled tab, Accounts, Investments, Plan, Advisor, and Settings with its panels collapsed) on
+ * a healthy fixture, and five of them with an unhealthy state proving the check fires there; that
+ * file says why Advisor has none and why expanded panels and modals are not reached. Both files
+ * read colour through `familiesIn` in `helpers/screenHarness.ts`, which counts inline `var(--mz-*)`
+ * ink and the legacy `negative`/`warning` aliases as well as utility classes.
  */
-const ALARM = ['clay', 'gold', 'estimate', 'review'] as const;
-
-/** Every chromatic family the markup carries, sage included. */
-function familiesIn(html: string): string[] {
-  const found = new Set<string>();
-  for (const family of [...ALARM, 'sage']) {
-    if (new RegExp(`\\b(?:text|bg|border|fill|stroke)-${family}\\b`).test(html)) found.add(family);
-    if (new RegExp(`\\b(?:text|bg|border|fill|stroke)-${family}-[\\w-]+`).test(html)) found.add(family);
-  }
-  return [...found].sort();
-}
 
 const day = (daysBack: number) => format(subDays(new Date(), daysBack), 'yyyy-MM-dd');
 
