@@ -91,7 +91,9 @@ export function NetWorthHistory({ accounts }: { accounts: Account[] }) {
   const history = (timeline?.points ?? []).flatMap((p) => {
     const value = read(p);
     const estimated = accountId ? p.estimated_accounts.includes(accountId) : p.estimated;
-    return value === null ? [] : [{ date: p.date, value, estimated, coverage: total ? p.coverage : undefined }];
+    return value === null
+      ? []
+      : [{ date: p.date, value, estimated, coverage: total ? p.coverage : undefined, accounts: total ? new Set(Object.keys(p.by_account)) : undefined }];
   });
   const first = history[0];
   const last = history.at(-1);
