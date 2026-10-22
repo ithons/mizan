@@ -2,7 +2,7 @@ import { Router, Request, Response, NextFunction } from 'express';
 import { v4 as uuidv4 } from 'uuid';
 import { getDb } from '../db/index';
 import { validate } from '../middleware/validate';
-import { UpsertBudgetSchema } from '../../../shared/schemas';
+import { StarterBudgetDecisionSchema, UpsertBudgetSchema } from '../../../shared/schemas';
 import {
   computeBudgetRolloverLedger,
   getMonthlyBudgetsWithProjection,
@@ -11,6 +11,9 @@ import {
 import { toCents, dollarizeFields } from '../services/money';
 import type { BudgetRolloverLedgerEntry, ProjectedBudget } from '../../../shared/types';
 import { deleteBudget } from '../services/budgets';
+import { detectStarterBudgets, starterBudgetPayload, starterBudgetSummary, starterBudgetToDollars } from '../services/starterBudgets';
+import { proposeChanges } from '../services/advisorProposals';
+import { confirmAdvisorDraftsByIds, dismissAdvisorDraft } from '../services/advisorDrafts';
 
 const router = Router();
 
@@ -98,6 +101,49 @@ router.get('/rollover-ledger', (req: Request, res: Response, next: NextFunction)
         months: months ?? undefined,
       }).map(ledgerEntryToDollars),
     });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.get('/starter', (_req: Request, res: Response, next: NextFunction): void => {
+  try {
+    res.json({ data: detectStarterBudgets(getDb()).map(starterBudgetToDollars) });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// The amount is recomputed here rather than taken from the client, so what is added is what the detector reads now.
+router.post('/starter/decide', validate(StarterBudgetDecisionSchema), (req: Request, res: Response, next: NextFunction): void => {
+  try {
+    const db = getDb();
+    const { category_id, decision } = req.body as { category_id: string; decision: 'add' | 'dismiss' };
+    const starter = detectStarterBudgets(db).find((s) => s.category_id === category_id);
+    if (!starter) {
+      res.status(409).json({ error: 'That category no longer has a starter budget to offer' });
+      return;
+    }
+    const proposed = proposeChanges(db, {
+      changes: [{ label: `Budget ${starter.category_name}`, summary: starterBudgetSummary(starter), payload: starterBudgetPayload(starter) }],
+    });
+    const draft = proposed.proposed[0];
+    if (!draft) {
+      res.status(409).json({ error: proposed.refused[0]?.reason ?? 'That budget cannot be proposed' });
+      return;
+    }
+    if (decision === 'dismiss') {
+      dismissAdvisorDraft(db, draft.id);
+      res.json({ data: { dismissed: true } });
+      return;
+    }
+    const outcome = confirmAdvisorDraftsByIds(db, [draft.id]);
+    if (outcome.applied !== 1) {
+      const reason = outcome.outcomes[0]?.reason;
+      res.status(409).json({ error: reason && reason !== 'apply_failed' ? reason : 'That budget could not be added' });
+      return;
+    }
+    res.json({ data: { added: true } });
   } catch (err) {
     next(err);
   }

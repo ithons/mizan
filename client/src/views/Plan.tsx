@@ -23,6 +23,7 @@ import {
 } from '../components/balance';
 import { carryoverBudgetPhrase, claimLines, uncountedHeadroom } from './plan/readings';
 import { ExpectedLumps } from './plan/ExpectedLumps';
+import { StarterBudgets } from './plan/StarterBudgets';
 import { Runway } from './plan/Runway';
 
 /**
@@ -574,6 +575,7 @@ export function Plan() {
   const categoriesQ = useQuery({ queryKey: ['categories'], queryFn: () => categoriesApi.list() });
   const goalsQ = useQuery({ queryKey: ['goals', 'all'], queryFn: () => goalsApi.list({ includeArchived: true }) });
   const lumpsQ = useQuery({ queryKey: ['expected-lumps'], queryFn: () => expectedLumpsApi.list() });
+  const startersQ = useQuery({ queryKey: ['budgets', 'starter'], queryFn: () => budgetsApi.starter() });
   const [runwayEnd, setRunwayEnd] = useState<string | undefined>(undefined);
   const runwayQ = useQuery({ queryKey: ['insights', 'runway', runwayEnd ?? 'default'], queryFn: () => insightsApi.runway(runwayEnd), placeholderData: (previous) => previous });
 
@@ -588,6 +590,7 @@ export function Plan() {
     { query: goalsQ, label: 'goals' },
     { query: lumpsQ, label: 'expected deposits' },
     { query: runwayQ, label: 'the runway' },
+    { query: startersQ, label: 'budgets to start from' },
   ];
 
   const budgets = budgetsQ.data ?? [];
@@ -683,6 +686,8 @@ export function Plan() {
           </p>
         )}
       </section>
+
+      {startersQ.data && <StarterBudgets starters={startersQ.data} />}
 
       <section className="flex-1">
         <SectionLabel

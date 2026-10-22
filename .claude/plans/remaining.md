@@ -8,32 +8,28 @@ for the long-form record of why the code is the way it is.
 
 ## Code
 
-1. **Investments compares sheets by count.** `getPortfolioDelta` (`client/src/lib/investmentAnalytics.ts`)
-   and the Investments `TrendChart` compare `covered_accounts` counts; Balance and Accounts now
-   compare account ids. Serving the covered ids per point from `/api/reports/investments` would let
-   Investments do the same.
-2. **Colour silence is checked on rendered screens only.** `tests/healthyScreens.test.ts` covers all
+1. **Colour silence is checked on rendered screens only.** `tests/healthyScreens.test.ts` covers all
    seven screens with panels closed. Settings panels and every modal open through effects that
    server-side rendering does not run, so they are outside the check until a DOM renderer exists.
-3. **An uncategorized row is unmarked on the Ledger** while Balance counts it in clay. The Ledger's
+2. **An uncategorized row is unmarked on the Ledger** while Balance counts it in clay. The Ledger's
    "Needs a category" filter exists; whether the row itself should carry a mark is open.
 
 ## Data waiting on the bank feed
 
-4. **Two bounced Fidelity deposits** (Apr 15 and May 15, 2026) are stored by SimpleFIN with both legs
+3. **Two bounced Fidelity deposits** (Apr 15 and May 15, 2026) are stored by SimpleFIN with both legs
    positive, overstating money put in by $400 and keeping April estimated on the history chart. Left
    as reported by rule; an owner correction through `amount_source` would settle it if the owner asks.
-5. **Three FSKAX buys** (Aug 4, 11 and 18, 2026) sit above Fidelity's floor and the feed never
+4. **Three FSKAX buys** (Aug 4, 11 and 18, 2026) sit above Fidelity's floor and the feed never
    delivered them. Holdings history covers their value; the rows themselves are missing.
 
 ## Owner
 
-6. **Push.** Commits on `main` are unpushed: the push was refused by the session's permission check.
+5. **Push.** Commits on `main` are unpushed: the push was refused by the session's permission check.
    `git push origin main` from the owner's terminal, or a permission rule that allows it.
-7. **Cloud backup** of `.mizan/` and `data/`, plus the keychain key that decrypts
+6. **Cloud backup** of `.mizan/` and `data/`, plus the keychain key that decrypts
    `credentials.json` (`security find-generic-password -s mizan -a encryption_key -w`), which does
    not travel with the folder. Nothing is backed up on this device by choice.
-8. **Not app work, recorded so it is not lost:** the missed October Chase Sapphire autopay (call
+7. **Not app work, recorded so it is not lost:** the missed October Chase Sapphire autopay (call
    about fees, confirm the Nov 10 payment), the IRA limit for the 2026 room estimate, and whether
    BofA's backup withholding means a tax-ID form was never filed.
 

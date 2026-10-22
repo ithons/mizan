@@ -26,6 +26,7 @@ import type {
   Counterparty,
   CredentialStatus,
   ExpectedLumpsResponse,
+  StarterBudgetReading,
   RunwayReading,
   Goal,
   Holding,
@@ -592,8 +593,9 @@ const RUNWAY: RunwayReading = {
   assumptions: ['Scheduled income, bills and transfers land on their forecast dates.'],
 };
 
-function planSeed(spent: number, lumps: ExpectedLumpsResponse = NO_LUMPS, runway: RunwayReading = RUNWAY): Seed {
+function planSeed(spent: number, lumps: ExpectedLumpsResponse = NO_LUMPS, runway: RunwayReading = RUNWAY, starters: StarterBudgetReading[] = []): Seed {
   return [
+    [['budgets', 'starter'], starters],
     [['expected-lumps'], lumps],
     [['insights', 'runway', 'default'], runway],
     [['insights', 'safe-to-spend'], SHEET],
@@ -759,4 +761,15 @@ test('and a re-link waiting on the owner raises review ink there', () => {
   };
   const html = rendered(Settings, '/settings', settingsSeed(pending), 'Needs your confirmation');
   assert.ok(raisedIn(html).includes('review'), 'every sync is blocked and the screen says nothing');
+});
+
+test('a budget to start from renders in neutral ink with its median stated', () => {
+  const starter: StarterBudgetReading = {
+    category_id: 'cat_transport', category_name: 'Transport', amount: 280, median: 283.5,
+    months: Array.from({ length: 12 }, (_, i) => ({ month: `2025-${String(i + 1).padStart(2, '0')}`, spent: 283.5 })),
+    months_with_spend: 12, months_at_or_under: 5,
+  };
+  const html = rendered(Plan, '/plan', planSeed(200, NO_LUMPS, RUNWAY, [starter]), 'Budgets to start from');
+  assertSilent(html, '/plan');
+  assert.ok(html.includes('median of 12 months $283.50, at or under in 5 of 12'));
 });

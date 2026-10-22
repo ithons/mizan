@@ -6,6 +6,7 @@ import { formatCurrency, formatDate, formatDateShort } from '../../lib/formatter
 import { invalidateFinancialData } from '../../lib/queryInvalidation';
 import { useAppStore } from '../../store';
 import { SectionLabel, TextButton } from '../../components/balance';
+import { SuggestionRow } from './SuggestionRow';
 
 export function lumpRange(low: number, high: number): string {
   return low === high ? formatCurrency(low) : `${formatCurrency(low)} to ${formatCurrency(high)}`;
@@ -25,19 +26,9 @@ function LumpRow({ label, low, high, start, end, note, children }: {
   children: ReactNode;
 }) {
   return (
-    <div className="border-b border-line-2 py-3 last:border-b-0">
-      <div className="flex items-baseline justify-between gap-4">
-        <span className="min-w-0 truncate text-body-lg text-ink">{label}</span>
-        <span className="flex-shrink-0 text-body tabular-nums text-estimate">{lumpRange(low, high)}</span>
-      </div>
-      <div className="mt-1 flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 text-note">
-        <span className="text-estimate">{lumpWindow(start, end)}</span>
-        <span className="flex items-baseline gap-4">
-          <span className="text-muted-2">{note}</span>
-          {children}
-        </span>
-      </div>
-    </div>
+    <SuggestionRow label={label} figure={lumpRange(low, high)} figureInk="text-estimate" detail={lumpWindow(start, end)} detailInk="text-estimate" note={note}>
+      {children}
+    </SuggestionRow>
   );
 }
 

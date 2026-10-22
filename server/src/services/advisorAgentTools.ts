@@ -17,6 +17,7 @@ import { openLumpCandidates } from './expectedLumpCandidates';
 import { listConfirmedLumps } from './expectedLumps';
 import { cashRunway, checkAdjustments, compoundGrowth, emergencyFund, projectFreeBand, debtPayoff, goalTimeline, goalTimelineFor, horizonDays, MAX_HORIZON_DAYS, projectFree, runwayTo, type Horizon } from './simulations';
 import { investmentReturns, investmentReturnsToDollars } from './investmentReturns';
+import { detectStarterBudgets, starterBudgetToDollars } from './starterBudgets';
 
 type ToolInput = Record<string, unknown>;
 
@@ -170,8 +171,13 @@ export const AGENT_TOOLS: Anthropic.Tool[] = [
     input_schema: { type: 'object', properties: {} },
   },
   {
+    name: 'get_starter_budgets',
+    description: 'For each top-level spending category with no budget, spending in at least 9 of the last 12 complete months and no starter budget the owner declined: the median monthly spend, that median rounded to $10 as a starting budget, each month\'s signed spend, and how many months came in at or under it. Measured the way a budget on the category would measure it (the whole category tree, refunds netting down). Propose one with update_budget {category_id, amount, period: "monthly", rollover: false} only when the owner asks for budgets; state that it is a median, not a target.',
+    input_schema: { type: 'object', properties: {} },
+  },
+  {
     name: 'get_investment_returns',
-    description: 'Annualized money-weighted return (XIRR) per investment and crypto account and for the whole portfolio over the last N months (default 12) or the whole history (months = 0): start and end value, net money moved in (dollars), and annualized as a fraction (0.05 is 5% a year). annualized is null with a reason when the window is under 90 days, the end value is an estimate, or no single rate fits the flows; then say it was not computed and why, never estimate one. start_estimated = true means the start value is reconstructed; say so when quoting the rate. Always state the window (from, to) with the figure.',
+    description: 'Annualized money-weighted return (XIRR) per investment and crypto account and for the whole portfolio over the last N months (default 12) or the whole history (months = 0): start and end value, net money moved in (dollars), and annualized as a fraction (0.05 is 5% a year). annualized is null with a reason when the window is under 90 days, the end value is an estimate, coins moved between a crypto wallet and another wallet (the portfolio figure then leaves that account out and its name says so), or no single rate fits the flows; then say it was not computed and why, never estimate one. start_estimated = true means the start value is reconstructed; say so when quoting the rate. Always state the window (from, to) with the figure.',
     input_schema: { type: 'object', properties: { months: { type: 'integer', description: 'Months back (default 12, 0 for all history, max 120).' } } },
   },
   {
@@ -385,6 +391,7 @@ export function runAgentTool(db: Database.Database, name: string, input: ToolInp
     }
     case 'get_card_review': return cardReviewToDollars(cardReview(db, format(new Date(), 'yyyy-MM-dd')));
     case 'find_expected_lumps': return findExpectedLumpsTool(db);
+    case 'get_starter_budgets': return detectStarterBudgets(db).map(starterBudgetToDollars);
     case 'get_funding_mix': return fundingMix(db, Math.min(Math.max(Math.round(num(input.months, 6)), 1), 24));
     default: return undefined;
   }

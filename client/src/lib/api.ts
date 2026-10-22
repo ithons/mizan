@@ -69,6 +69,7 @@ import type {
   ReconciliationReading,
   ExpectLumpPayload,
   ExpectedLumpsResponse,
+  StarterBudgetReading,
   RunwayReading,
   InvestmentReturns,
 } from '@shared/types';
@@ -386,6 +387,12 @@ export const budgetsApi = {
     if (params.months) q.set('months', String(params.months));
     return apiFetch<BudgetRolloverLedgerEntry[]>(`/api/budgets/rollover-ledger?${q.toString()}`);
   },
+  starter: () => apiFetch<StarterBudgetReading[]>('/api/budgets/starter'),
+  decideStarter: (categoryId: string, decision: 'add' | 'dismiss') =>
+    apiFetch<{ added?: true; dismissed?: true }>('/api/budgets/starter/decide', {
+      method: 'POST',
+      body: JSON.stringify({ category_id: categoryId, decision }),
+    }),
   upsert: (categoryId: string, body: { amount: number; period?: 'monthly'; rollover?: boolean }) =>
     apiFetch<Budget>(`/api/budgets/${categoryId}`, {
       method: 'PUT',

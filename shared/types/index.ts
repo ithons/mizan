@@ -1075,6 +1075,17 @@ export interface ExpectedLumpCandidateReading {
   draft_id: string | null;
 }
 
+/** A budget to start from for a steady category with none. Dollars; the proposal is applied only when the owner adds it. */
+export interface StarterBudgetReading {
+  category_id: string;
+  category_name: string;
+  amount: number;
+  median: number;
+  months: Array<{ month: string; spent: number }>;
+  months_with_spend: number;
+  months_at_or_under: number;
+}
+
 export interface ExpectedLumpsResponse {
   confirmed: ExpectedLumpReading[];
   candidates: ExpectedLumpCandidateReading[];

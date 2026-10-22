@@ -276,6 +276,11 @@ export const AdvisorDraftPayloadSchema = z.discriminatedUnion('kind', [
   }),
 ]);
 
+export const StarterBudgetDecisionSchema = z.object({
+  category_id: z.string().min(1),
+  decision: z.enum(['add', 'dismiss']),
+});
+
 export const ExpectedLumpDecisionSchema = z.object({
   payload: AdvisorDraftPayloadSchema.refine((payload) => payload.kind === 'expect_lump', 'payload must be an expect_lump'),
   decision: z.enum(['confirm', 'dismiss']),
