@@ -70,9 +70,20 @@ function windowFlows(flows: readonly PortfolioFlow[], from: string, to: string):
   return flows.filter((f) => f.date > from && f.date <= to);
 }
 
+/**
+ * Days of the window the money was held: from the first day the value was not zero. A start of
+ * zero drops out of the rate, so the rate compounds over only those days, and gating on the
+ * window alone annualized a 30-day-old account inside a 1-year window. A value never above zero
+ * leaves the window's length, so the refusal that follows says nothing was held.
+ */
+function heldDays<P extends { date: string }>(window: { to: string; days: number }, points: readonly P[], valueOf: (point: P) => number | undefined): number {
+  const held = points.find((point) => (valueOf(point) ?? 0) !== 0);
+  return held ? differenceInCalendarDays(parseISO(window.to), parseISO(held.date)) : window.days;
+}
+
 function judge(
   base: Pick<InvestmentReturn, 'account_id' | 'name'>,
-  window: { from: string; to: string; days: number },
+  window: { from: string; to: string; days: number; held: number },
   start: { value: number | undefined; estimated: boolean },
   end: { value: number | undefined; estimated: boolean },
   flows: PortfolioFlow[],
@@ -80,7 +91,7 @@ function judge(
   const net = flows.reduce((sum, f) => sum + f.amount, 0);
   const row = { ...base, start_value: start.value ?? null, end_value: end.value ?? null, net_flows: net, start_estimated: start.estimated };
   const refuse = (reason: string): InvestmentReturn => ({ ...row, annualized: null, reason });
-  if (window.days < MIN_RETURN_WINDOW_DAYS) return refuse('not enough history');
+  if (window.held < MIN_RETURN_WINDOW_DAYS) return refuse('not enough history');
   if (start.value === undefined) return refuse(`no value known on ${window.from}`);
   if (end.value === undefined) return refuse(`no value known on ${window.to}`);
   if (end.estimated) return refuse(`the value on ${window.to} is an estimate`);
@@ -126,7 +137,7 @@ export function investmentReturns(
   const accounts = timeline.accounts.map((account) => {
     const row = judge(
       { account_id: account.id, name: account.name },
-      window,
+      { ...window, held: heldDays(window, timeline.points, (point) => point.by_account[account.id]) },
       { value: first.by_account[account.id], estimated: first.estimated_accounts.includes(account.id) },
       { value: last.by_account[account.id], estimated: last.estimated_accounts.includes(account.id) },
       windowFlows(portfolioExternalFlows(db, [account.id]), window.from, window.to),
@@ -142,10 +153,10 @@ export function investmentReturns(
     ? included.reduce((sum, id) => sum + point.by_account[id], 0) : undefined);
   const estimatedIn = (point: typeof first) => point.estimated_accounts.some((id) => included.includes(id));
   const portfolio = included.length === 0
-    ? nothingIncluded(judge({ account_id: null, name: 'Portfolio' }, window, { value: undefined, estimated: false }, { value: undefined, estimated: false }, []))
+    ? nothingIncluded(judge({ account_id: null, name: 'Portfolio' }, { ...window, held: window.days }, { value: undefined, estimated: false }, { value: undefined, estimated: false }, []))
     : judge(
     { account_id: null, name: excludedNames.length ? `Portfolio, without ${excludedNames.join(' and ')}` : 'Portfolio' },
-    window,
+    { ...window, held: heldDays(window, timeline.points, sumOver) },
     { value: sumOver(first), estimated: estimatedIn(first) },
     { value: sumOver(last), estimated: estimatedIn(last) },
     windowFlows(portfolioExternalFlows(db, included), window.from, window.to),
@@ -163,4 +174,4 @@ export function investmentReturnsToDollars(returns: InvestmentReturns): Investme
   };
 }
 
-const METHOD = 'Money-weighted (XIRR): the annual rate at which the value at the start of the window, plus every deposit and less every withdrawal on its date, grows into the value at the end, counting days over 365. Values are the net worth timeline\'s for each account; deposits and withdrawals are the same rows the timeline replays as money moving in or out. Not computed for a window under 90 days, when the end value is an estimate, when coins moved to or from another wallet (those moves are not counted as money in or out, so a rate would read them as gains or losses; the portfolio figure then leaves that account out), or when no single rate between -99% and 1000% a year balances the flows. A start value that is an estimate is flagged and still used.';
+const METHOD = 'Money-weighted (XIRR): the annual rate at which the value at the start of the window, plus every deposit and less every withdrawal on its date, grows into the value at the end, counting days over 365. Values are the net worth timeline\'s for each account; deposits and withdrawals are the same rows the timeline replays as money moving in or out. Not computed when the money was held for under 90 days of the window (counted from the first day its value was not zero), when the end value is an estimate, when coins moved to or from another wallet (those moves are not counted as money in or out, so a rate would read them as gains or losses; the portfolio figure then leaves that account out), or when no single rate between -99% and 1000% a year balances the flows. A start value that is an estimate is flagged and still used.';

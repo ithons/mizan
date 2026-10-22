@@ -146,3 +146,29 @@ test('HEALTHY: without the duplicate the same ledger reads the same, so the copy
   const { account_id: _copied, ...copied } = harbor(true);
   assert.deepEqual(plain, copied);
 });
+
+function newRoth(contributed: string) {
+  const db = migratedTestDb();
+  const id = insertAccount(db, { type: 'ira_roth', account_name: 'Juniper Roth', current_balance: 105000 });
+  insertTransaction(db, { account_id: id, date: contributed, amount: 100000, category_id: 'cat_inv_transfer' });
+  return { db, id };
+}
+
+test('an account held for 30 days of a 1-year window is not annualized from those 30 days', () => {
+  const { db, id } = newRoth('2026-09-22');
+  const returns = investmentReturns(db, { from: '2025-10-22', today: TODAY })!;
+  assert.equal(returns.days, 365);
+  for (const row of [returns.accounts.find((a) => a.account_id === id)!, returns.portfolio]) {
+    assert.equal(row.annualized, null);
+    assert.equal(row.reason, 'not enough history');
+  }
+});
+
+test('HEALTHY: an account held for 100 days of a 1-year window is annualized over those days', () => {
+  const { db, id } = newRoth('2026-07-14');
+  const returns = investmentReturns(db, { from: '2025-10-22', today: TODAY })!;
+  const row = returns.accounts.find((a) => a.account_id === id)!;
+  assert.equal(row.reason, null);
+  assert.equal(row.annualized?.toFixed(4), (Math.pow(1.05, 365 / 100) - 1).toFixed(4));
+  assert.equal(returns.portfolio.annualized?.toFixed(4), row.annualized?.toFixed(4));
+});
