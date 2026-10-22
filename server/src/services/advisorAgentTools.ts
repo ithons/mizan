@@ -15,7 +15,7 @@ import { counterpartiesToDollars, findCounterparties } from './counterparties';
 import { cardReview, cardReviewToDollars } from './cardReview';
 import { openLumpCandidates } from './expectedLumpCandidates';
 import { listConfirmedLumps } from './expectedLumps';
-import { cashRunway, checkAdjustments, compoundGrowth, emergencyFund, projectFreeBand, debtPayoff, goalTimeline, goalTimelineFor, projectFree } from './simulations';
+import { cashRunway, checkAdjustments, compoundGrowth, emergencyFund, projectFreeBand, debtPayoff, goalTimeline, goalTimelineFor, horizonDays, MAX_HORIZON_DAYS, projectFree, runwayTo, type Horizon } from './simulations';
 
 type ToolInput = Record<string, unknown>;
 
@@ -118,11 +118,11 @@ export const AGENT_TOOLS: Anthropic.Tool[] = [
   {
     name: 'run_simulation',
     description:
-      'Estimates and what-ifs computed from the owner\'s real data. type "project": what is free day by day over `days` (default 30, max 120), its lowest point and the first day it drops below the claims already on the money (not an overdraft), built from the same inputs as free to spend; pass `adjustments` for a what-if: {kind:"one_off", date, amount (dollars, negative to spend)}, {kind:"monthly", amount, start_date?}, {kind:"cancel_recurring", pattern_id}, {kind:"scale_unbudgeted", percent (e.g. -20)}. Pass band:true for a 10th/50th/90th percentile range and the chance of dropping below claims (with adjustments it also returns the scenario, on the same simulated futures), from replaying the owner\'s own spending and pay. Use it for "can I afford X", "what if I cut Y", "when do I run short". type "debt_payoff": {account_id or balance, apr, monthly_payment}. type "goal_timeline": {goal_id or target and current, monthly_contribution, annual_return?}. type "runway": {months?} months the liquid accounts, less card balances, cover at recent spending. type "growth": {principal, monthly_contribution, annual_return, years}. type "emergency_fund": {months? (default 3), confidence? 0.8|0.9|0.95, categories? (category ids counted as essential), history? months} sizes a cushion from how much essential spending varies. Every result states its assumptions; repeat them when you quote it.',
+      'Estimates and what-ifs computed from the owner\'s real data. type "project": what is free day by day over `days` (default 30, max 120) or up to `end_date` (YYYY-MM-DD, up to 400 days ahead), its lowest point and the first day it drops below the claims already on the money (not an overdraft), built from the same inputs as free to spend; pass `adjustments` for a what-if: {kind:"one_off", date, amount (dollars, negative to spend)}, {kind:"monthly", amount, start_date?}, {kind:"cancel_recurring", pattern_id}, {kind:"scale_unbudgeted", percent (e.g. -20)}. Pass band:true for a 10th/50th/90th percentile range and the chance of dropping below claims (with adjustments it also returns the scenario, on the same simulated futures), from replaying the owner\'s own spending and pay. When the owner has confirmed expected lumps (find_expected_lumps), the result adds with_expected_lumps, counting each at its low amount on the last day of its window; baseline never includes them. Use it for "can I afford X", "what if I cut Y", "when do I run short". type "runway_to": {end_date? (default Dec 31)} the lowest projected point to that date and its date, with confirmed lumps, the 10th/50th/90th percentile of that low point, and the one scheduled outflow whose removal raises it most. type "debt_payoff": {account_id or balance, apr, monthly_payment}. type "goal_timeline": {goal_id or target and current, monthly_contribution, annual_return?}. type "runway": {months?} months the liquid accounts, less card balances, cover at recent spending. type "growth": {principal, monthly_contribution, annual_return, years}. type "emergency_fund": {months? (default 3), confidence? 0.8|0.9|0.95, categories? (category ids counted as essential), history? months} sizes a cushion from how much essential spending varies. Every result states its assumptions; repeat them when you quote it.',
     input_schema: {
       type: 'object',
       properties: {
-        type: { type: 'string', enum: ['project', 'debt_payoff', 'goal_timeline', 'runway', 'growth', 'emergency_fund'] },
+        type: { type: 'string', enum: ['project', 'runway_to', 'debt_payoff', 'goal_timeline', 'runway', 'growth', 'emergency_fund'] },
         params: { type: 'object' },
       },
       required: ['type'],
@@ -290,12 +290,20 @@ function runSimulationTool(db: Database.Database, input: ToolInput): unknown {
   const params = (input.params && typeof input.params === 'object' ? input.params : {}) as Record<string, unknown>;
   switch (input.type) {
     case 'project': {
-      const days = Math.min(Math.max(Math.round(num(params.days, 30)), 1), 120);
-      const checked = checkAdjustments(db, params.adjustments, days);
+      const horizon: Horizon = typeof params.end_date === 'string'
+        ? params.end_date
+        : Math.min(Math.max(Math.round(num(params.days, 30)), 1), 120);
+      if (horizonDays(horizon) === null) return { error: `end_date must be a YYYY-MM-DD date 1 to ${MAX_HORIZON_DAYS} days ahead` };
+      const checked = checkAdjustments(db, params.adjustments, horizon);
       if (!checked.ok) return { error: 'Some adjustments were refused', details: checked.errors };
-      if (params.band === true) return projectFreeBand(db, days, undefined, undefined, undefined, checked.adjustments);
-      return projectFree(db, days, checked.adjustments);
+      if (params.band === true) return projectFreeBand(db, horizon, undefined, undefined, undefined, checked.adjustments);
+      return projectFree(db, horizon, checked.adjustments);
     }
+    case 'runway_to':
+      if (params.end_date !== undefined && (typeof params.end_date !== 'string' || horizonDays(params.end_date) === null)) {
+        return { error: `end_date must be a YYYY-MM-DD date 1 to ${MAX_HORIZON_DAYS} days ahead` };
+      }
+      return runwayTo(db, typeof params.end_date === 'string' ? params.end_date : undefined);
     case 'debt_payoff': {
       let balance = num(params.balance, NaN);
       if (!Number.isFinite(balance) && typeof params.account_id === 'string') {
@@ -327,7 +335,7 @@ function runSimulationTool(db: Database.Database, input: ToolInput): unknown {
       });
     }
     default:
-      return { error: 'type must be one of project, debt_payoff, goal_timeline, runway, growth, emergency_fund' };
+      return { error: 'type must be one of project, runway_to, debt_payoff, goal_timeline, runway, growth, emergency_fund' };
   }
 }
 

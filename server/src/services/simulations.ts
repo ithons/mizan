@@ -1,13 +1,71 @@
 import type Database from 'better-sqlite3';
-import { addDays, addMonths, format, parseISO, startOfMonth, subMonths, endOfMonth } from 'date-fns';
+import { addDays, addMonths, differenceInCalendarDays, format, parseISO, startOfMonth, subMonths, endOfMonth } from 'date-fns';
 import { computeSafeToSpend, overdueIncomeCounted, type ScheduledEffect } from './safeToSpend';
 import { getMonthlyBudgetsWithProjection } from './budgetProjection';
 import { averageOfCompleteMonths, getSpendingReport } from './reporting';
 import { calculateGoalProgress } from './goalProgress';
 import { toCents, toDollars } from './money';
+import { pendingConfirmedLumps } from './expectedLumps';
 import { excludedFromTotalsSql, expenseSideSql, inReportScopeSql, reportDateSql, spendAmountSql } from './transactionFilters';
 
 const ymd = (date: Date) => format(date, 'yyyy-MM-dd');
+
+export const MAX_HORIZON_DAYS = 400;
+
+/** A day count, or a YYYY-MM-DD end date counted from today. */
+export type Horizon = number | string;
+
+export function horizonDays(horizon: Horizon, today = new Date()): number | null {
+  if (typeof horizon === 'number') return Number.isInteger(horizon) && horizon >= 1 && horizon <= MAX_HORIZON_DAYS ? horizon : null;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(horizon) || Number.isNaN(parseISO(horizon).getTime())) return null;
+  const days = differenceInCalendarDays(parseISO(horizon), today);
+  return days >= 1 && days <= MAX_HORIZON_DAYS ? days : null;
+}
+
+function requireDays(horizon: Horizon, today: Date): number {
+  const days = horizonDays(horizon, today);
+  if (days === null) throw new Error(`The horizon must be 1 to ${MAX_HORIZON_DAYS} days ahead`);
+  return days;
+}
+
+interface LumpEffect extends ScheduledEffect {
+  low: number;
+  high: number;
+  windowStart: string;
+  windowEnd: string;
+}
+
+/** Confirmed lumps whose window ends inside the horizon, each at its low amount on its last day. */
+function lumpEffects(db: Database.Database, days: number, today: Date): LumpEffect[] {
+  const last = ymd(addDays(today, days));
+  return pendingConfirmedLumps(db, today)
+    .filter((lump) => lump.window_end <= last)
+    .map((lump) => ({
+      date: lump.window_end,
+      cents: lump.amount_low_cents,
+      kind: 'income',
+      label: lump.label,
+      patternId: `lump:${lump.id}`,
+      low: lump.amount_low_cents,
+      high: lump.amount_high_cents,
+      windowStart: lump.window_start,
+      windowEnd: lump.window_end,
+    }));
+}
+
+function lumpsCounted(lumps: LumpEffect[]) {
+  return lumps.map((lump) => ({
+    label: lump.label,
+    counted_on: lump.date,
+    counted_amount: toDollars(lump.low),
+    window_start: lump.windowStart,
+    window_end: lump.windowEnd,
+    amount_low: toDollars(lump.low),
+    amount_high: toDollars(lump.high),
+  }));
+}
+
+const LUMP_ASSUMPTION = 'Each confirmed expected lump is counted at the low end of its range on the last day of its window. It is an estimate the owner confirmed, and free to spend never counts it.';
 
 export type ProjectionAdjustment =
   | { kind: 'one_off'; date: string; amount: number; label?: string }
@@ -62,7 +120,9 @@ function adjustedEffects(effects: ScheduledEffect[], adjustments: ProjectionAdju
 export type AdjustmentCheck = { ok: true; adjustments: ProjectionAdjustment[] } | { ok: false; errors: string[] };
 
 /** Refuses anything that would silently change the answer: a missing amount, a date outside the window, an unknown pattern. */
-export function checkAdjustments(db: Database.Database, raw: unknown, days: number, today = new Date()): AdjustmentCheck {
+export function checkAdjustments(db: Database.Database, raw: unknown, horizon: Horizon, today = new Date()): AdjustmentCheck {
+  const days = horizonDays(horizon, today);
+  if (days === null) return { ok: false, errors: [`the horizon must be 1 to ${MAX_HORIZON_DAYS} days ahead`] };
   if (raw === undefined) return { ok: true, adjustments: [] };
   if (!Array.isArray(raw)) return { ok: false, errors: ['adjustments must be an array'] };
   const first = ymd(today);
@@ -104,9 +164,11 @@ export function checkAdjustments(db: Database.Database, raw: unknown, days: numb
 /**
  * What is free, day by day over the window, from the same inputs as the headline figure: claims
  * on the pool are taken on day 0, each scheduled item on its date, unbudgeted spending evenly.
- * Without adjustments, the last day equals the free-to-spend figure exactly.
+ * Without adjustments, the baseline's last day equals the free-to-spend figure exactly; confirmed
+ * expected lumps are a separate curve on top of it.
  */
-export function projectFree(db: Database.Database, days: number, adjustments: ProjectionAdjustment[] = [], today = new Date()) {
+export function projectFree(db: Database.Database, horizon: Horizon, adjustments: ProjectionAdjustment[] = [], today = new Date()) {
+  const days = requireDays(horizon, today);
   const budgets = getMonthlyBudgetsWithProjection(db, today.getFullYear(), today.getMonth() + 1);
   const sheet = computeSafeToSpend(db, { budgets, forecastDays: days, today });
   const start = sheet.liquid - sheet.cardBalances - sheet.allocatedBudgets - sheet.allocatedGoals;
@@ -121,9 +183,13 @@ export function projectFree(db: Database.Database, days: number, adjustments: Pr
     first_short_on: curve.firstNegativeDate,
   });
   const overdue = sheet.overdueIncome;
+  const lumps = lumpEffects(db, days, today);
+  const withLumps = lumps.length > 0 ? runCurve(start, perDay, [...sheet.scheduled, ...lumps], days, today) : null;
   return {
     days,
+    end_date: ymd(addDays(today, days)),
     baseline: dollars(baseline),
+    ...(withLumps ? { with_expected_lumps: dollars(withLumps), expected_lumps_counted: lumpsCounted(lumps) } : {}),
     ...(overdue.length > 0 ? {
       overdue_income_counted: overdueIncomeCounted(sheet),
     } : {}),
@@ -133,6 +199,7 @@ export function projectFree(db: Database.Database, days: number, adjustments: Pr
       'Scheduled income, bills and transfers land on their forecast dates.',
       `Spending outside budgets runs at its trailing ${sheet.unbudgetedBasisDays}-day pace, spread evenly.`,
       ...(overdue.length > 0 ? ['Income that was expected already but has not posted is counted as arriving today; see overdue_income_counted.'] : []),
+      ...(withLumps ? [LUMP_ASSUMPTION] : []),
     ],
   };
 }
@@ -302,57 +369,94 @@ export function dailyDiscretionarySpend(db: Database.Database, today: Date): { d
   return { daily, coveredDays: daily.length };
 }
 
-/**
- * The projection as a distribution: non-recurring spending is replayed from the owner's own days
- * in 7-day blocks, and each income occurrence's amount is drawn from that pattern's last twelve.
- * The point projection's own inputs are kept; only these two vary.
- */
-export function projectFreeBand(db: Database.Database, days: number, paths = 4000, today = new Date(), seed = 20261016, adjustments: ProjectionAdjustment[] = []) {
+interface BandLump {
+  pointOffset: number;
+  low: number;
+  high: number;
+  startOffset: number;
+  endOffset: number;
+}
+
+interface BandInputs {
+  start: number;
+  perDay: number;
+  daily: number[];
+  meanDaily: number;
+  income: Array<{ offset: number; expected: number; history: number[]; patternId: string }>;
+  days: number;
+  paths: number;
+  seed: number;
+  coveredDays: number;
+}
+
+function bandInputs(db: Database.Database, horizon: Horizon, paths: number, today: Date, seed: number) {
+  const days = requireDays(horizon, today);
   const budgets = getMonthlyBudgetsWithProjection(db, today.getFullYear(), today.getMonth() + 1);
-  const sheet = computeSafeToSpend(db, { budgets, forecastDays: days });
+  const sheet = computeSafeToSpend(db, { budgets, forecastDays: days, today });
   const { daily, coveredDays } = dailyDiscretionarySpend(db, today);
-  if (coveredDays < BAND_MIN_HISTORY_DAYS) {
-    return { band: null, note: `Only ${coveredDays} days of spending history; a band needs ${BAND_MIN_HISTORY_DAYS}.` };
-  }
-  const meanDaily = daily.reduce((sum, value) => sum + value, 0) / daily.length;
+  const meanDaily = daily.length > 0 ? daily.reduce((sum, value) => sum + value, 0) / daily.length : 0;
   const todayKey = ymd(today);
+  const offsetOf = (date: string) => Math.round((parseISO(date).getTime() - parseISO(todayKey).getTime()) / 86_400_000);
   const recentAmounts = db.prepare('SELECT amount FROM transactions WHERE recurring_id = ? ORDER BY date DESC LIMIT 12');
   const income = sheet.scheduled
     .filter((item) => item.kind === 'income')
     .map((item) => {
       const history = (recentAmounts.all(item.patternId) as Array<{ amount: number }>).map((row) => row.amount).filter((amount) => amount > 0);
-      const offset = Math.max(0, Math.round((parseISO(item.date).getTime() - parseISO(todayKey).getTime()) / 86_400_000));
-      return { offset, expected: item.cents, history, patternId: item.patternId };
+      return { offset: Math.max(0, offsetOf(item.date)), expected: item.cents, history, patternId: item.patternId };
     });
-  const start = sheet.liquid - sheet.cardBalances - sheet.allocatedBudgets - sheet.allocatedGoals;
+  const lumps = lumpEffects(db, days, today);
+  const bandLumps: BandLump[] = lumps.map((lump) => ({
+    pointOffset: offsetOf(lump.date),
+    low: lump.low,
+    high: lump.high,
+    startOffset: Math.max(0, offsetOf(lump.windowStart)),
+    endOffset: offsetOf(lump.windowEnd),
+  }));
+  const inputs: BandInputs = {
+    start: sheet.liquid - sheet.cardBalances - sheet.allocatedBudgets - sheet.allocatedGoals,
+    perDay: sheet.estimatedUnbudgeted / days,
+    daily, meanDaily, income, days, paths, seed, coveredDays,
+  };
+  return { sheet, inputs, lumps, bandLumps };
+}
+
+/**
+ * The projection as a distribution: non-recurring spending is replayed from the owner's own days
+ * in 7-day blocks, and each income occurrence's amount is drawn from that pattern's last twelve.
+ * The point projection's own inputs are kept; only these two vary. Confirmed expected lumps are a
+ * separate run, each drawn anywhere in its window and range.
+ */
+export function projectFreeBand(db: Database.Database, horizon: Horizon, paths = 4000, today = new Date(), seed = 20261016, adjustments: ProjectionAdjustment[] = []) {
+  const { sheet, inputs, lumps, bandLumps } = bandInputs(db, horizon, paths, today, seed);
+  const { days, coveredDays } = inputs;
+  if (coveredDays < BAND_MIN_HISTORY_DAYS) {
+    return { band: null, note: `Only ${coveredDays} days of spending history; a band needs ${BAND_MIN_HISTORY_DAYS}.` };
+  }
   const scale = adjustments.reduce((factor, a) => (a.kind === 'scale_unbudgeted' ? factor * (1 + a.percent / 100) : factor), 1);
-  const baselineCurve = runCurve(start, sheet.estimatedUnbudgeted / days, sheet.scheduled, days, today);
+  const baselineCurve = runCurve(inputs.start, inputs.perDay, sheet.scheduled, days, today);
   const cancelled = new Set(adjustments.flatMap((a) => (a.kind === 'cancel_recurring' ? [a.pattern_id] : [])));
-  const run = (curve: Curve, spendScale: number, dropped = new Set<string>()) => simulateBand(curve, daily, meanDaily, income, days, paths, seed, spendScale, dropped);
+  const run = (curve: Curve, spendScale: number, dropped = new Set<string>(), varied: BandLump[] = []) => simulateBand(curve, inputs, spendScale, dropped, varied);
   const baseline = run(baselineCurve, 1);
+  const withLumps = lumps.length > 0
+    ? { ...run(runCurve(inputs.start, inputs.perDay, [...sheet.scheduled, ...lumps], days, today), 1, new Set(), bandLumps), expected_lumps_counted: lumpsCounted(lumps) }
+    : null;
   const assumptions = [
     `Non-recurring spending is replayed from ${coveredDays} days of history in ${BAND_BLOCK_DAYS}-day blocks around its daily average.`,
     'Each expected income occurrence is drawn from its pattern\'s last twelve amounts; patterns with fewer than three keep the forecast amount.',
     'Everything else (claims, bills, transfers, budgets) is as in the point projection. "Below claims" is not an overdraft.',
+    ...(withLumps ? [`${LUMP_ASSUMPTION} In the band each one lands on a random day of its window at a random amount in its range.`] : []),
   ];
-  if (adjustments.length === 0) return { days, paths, ...baseline, assumptions };
-  const scenarioCurve = runCurve(start, (sheet.estimatedUnbudgeted / days) * scale, adjustedEffects(sheet.scheduled, adjustments, today, days), days, today);
-  return { days, paths, ...baseline, scenario: run(scenarioCurve, scale, cancelled), assumptions };
+  const lumpPart = withLumps ? { with_expected_lumps: withLumps } : {};
+  if (adjustments.length === 0) return { days, end_date: ymd(addDays(today, days)), paths, ...baseline, ...lumpPart, assumptions };
+  const scenarioCurve = runCurve(inputs.start, inputs.perDay * scale, adjustedEffects(sheet.scheduled, adjustments, today, days), days, today);
+  return { days, end_date: ymd(addDays(today, days)), paths, ...baseline, ...lumpPart, scenario: run(scenarioCurve, scale, cancelled), assumptions };
 }
 
-function simulateBand(
-  pointEnd: Curve,
-  daily: number[],
-  meanDaily: number,
-  income: Array<{ offset: number; expected: number; history: number[]; patternId: string }>,
-  days: number,
-  paths: number,
-  seed: number,
-  spendScale: number,
-  dropped: ReadonlySet<string>
-) {
+function simulateBand(pointEnd: Curve, inputs: BandInputs, spendScale: number, dropped: ReadonlySet<string>, lumps: BandLump[]) {
+  const { daily, meanDaily, income, days, paths, seed } = inputs;
   const random = seededRandom(seed);
   const ends: number[] = [];
+  const lows: number[] = [];
   let pathsBelowZero = 0;
   for (let path = 0; path < paths; path++) {
     const deviation = new Array<number>(days + 1).fill(0);
@@ -366,6 +470,12 @@ function simulateBand(
         if (!dropped.has(item.patternId)) deviation[item.offset] += drawn - item.expected;
       }
     }
+    for (const lump of lumps) {
+      const on = lump.startOffset + Math.floor(random() * (lump.endOffset - lump.startOffset + 1));
+      const amount = lump.low + random() * (lump.high - lump.low);
+      deviation[lump.pointOffset] -= lump.low;
+      if (on <= days) deviation[on] += amount;
+    }
     let shift = 0;
     let lowest = Number.POSITIVE_INFINITY;
     for (let day = 0; day <= days; day++) {
@@ -373,16 +483,87 @@ function simulateBand(
       lowest = Math.min(lowest, pointEnd.daily[day] + shift);
     }
     ends.push(pointEnd.end + shift);
+    lows.push(lowest);
     if (lowest < 0) pathsBelowZero++;
   }
   ends.sort((a, b) => a - b);
+  lows.sort((a, b) => a - b);
+  const quantiles = (sorted: number[]) => ({
+    p10: toDollars(Math.round(quantile(sorted, 0.1))),
+    p50: toDollars(Math.round(quantile(sorted, 0.5))),
+    p90: toDollars(Math.round(quantile(sorted, 0.9))),
+  });
   return {
     point_estimate: toDollars(pointEnd.end),
-    band: {
-      p10: toDollars(Math.round(quantile(ends, 0.1))),
-      p50: toDollars(Math.round(quantile(ends, 0.5))),
-      p90: toDollars(Math.round(quantile(ends, 0.9))),
-    },
+    band: quantiles(ends),
+    lowest_band: quantiles(lows),
     chance_of_dropping_below_claims: Math.round((pathsBelowZero / paths) * 100) / 100,
+  };
+}
+
+/** Dec 31 of this year, or of next year once this one has under two weeks left. */
+export function defaultRunwayEnd(today = new Date()): string {
+  const end = new Date(today.getFullYear(), 11, 31);
+  return ymd(differenceInCalendarDays(end, today) >= 14 ? end : new Date(today.getFullYear() + 1, 11, 31));
+}
+
+function largestScheduledDrain(start: number, perDay: number, effects: ScheduledEffect[], days: number, today: Date, lowest: number) {
+  const outflows = new Map<string, { label: string; occurrences: number; cents: number }>();
+  for (const item of effects) {
+    if (item.cents >= 0 || item.kind === 'budget') continue;
+    const entry = outflows.get(item.patternId) ?? { label: item.label, occurrences: 0, cents: 0 };
+    entry.occurrences++;
+    entry.cents -= item.cents;
+    outflows.set(item.patternId, entry);
+  }
+  let best: { patternId: string; label: string; occurrences: number; cents: number; without: Curve } | null = null;
+  for (const [patternId, entry] of outflows) {
+    const without = runCurve(start, perDay, effects.filter((item) => item.patternId !== patternId), days, today);
+    if (without.lowest <= lowest) continue;
+    if (!best || without.lowest > best.without.lowest || (without.lowest === best.without.lowest && entry.label < best.label)) {
+      best = { patternId, ...entry, without };
+    }
+  }
+  if (!best) return null;
+  return {
+    label: best.label,
+    pattern_id: best.patternId,
+    occurrences: best.occurrences,
+    total: toDollars(best.cents),
+    lowest_without: toDollars(best.without.lowest),
+    lowest_without_on: best.without.lowestDate,
+    raises_low_by: toDollars(best.without.lowest - lowest),
+  };
+}
+
+/**
+ * The lowest point of free to spend between today and `end`, with confirmed expected lumps at the
+ * low end of their range on the last day of their window, the spread of that low point over
+ * simulated futures, and the one scheduled outflow whose absence would raise it most.
+ */
+export function runwayTo(db: Database.Database, end: string = defaultRunwayEnd(), today = new Date(), paths = 2000, seed = 20261016) {
+  const { sheet, inputs, lumps, bandLumps } = bandInputs(db, end, paths, today, seed);
+  const effects = [...sheet.scheduled, ...lumps];
+  const curve = runCurve(inputs.start, inputs.perDay, effects, inputs.days, today);
+  const hasBand = inputs.coveredDays >= BAND_MIN_HISTORY_DAYS;
+  const band = hasBand ? simulateBand(curve, inputs, 1, new Set(), bandLumps).lowest_band : null;
+  const low = Math.min(toDollars(curve.lowest), band ? band.p10 : Number.POSITIVE_INFINITY);
+  return {
+    end_date: ymd(addDays(today, inputs.days)),
+    days: inputs.days,
+    lowest: toDollars(curve.lowest),
+    lowest_on: curve.lowestDate,
+    first_short_on: curve.firstNegativeDate,
+    covered: low > 0,
+    lowest_band: band,
+    band_note: hasBand ? null : `Only ${inputs.coveredDays} days of spending history; a band needs ${BAND_MIN_HISTORY_DAYS}.`,
+    expected_lumps_counted: lumpsCounted(lumps),
+    largest_scheduled_drain: largestScheduledDrain(inputs.start, inputs.perDay, effects, inputs.days, today, curve.lowest),
+    assumptions: [
+      'Card balances, budgets still unspent and goal earmarks are claimed on day 0, so "short" means below those claims, not an overdrawn account.',
+      'Scheduled income, bills and transfers land on their forecast dates; spending outside budgets runs at its trailing pace.',
+      ...(lumps.length > 0 ? [LUMP_ASSUMPTION] : []),
+      ...(band ? ['The band is the 10th, 50th and 90th percentile of the lowest point over simulated futures that replay the owner\'s own spending.'] : []),
+    ],
   };
 }
