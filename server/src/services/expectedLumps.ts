@@ -137,17 +137,37 @@ export function detectExpectedLumps(db: Database.Database, today = new Date()): 
   return out.sort((a, b) => a.window_start.localeCompare(b.window_start) || a.merchant_key.localeCompare(b.merchant_key));
 }
 
-/** The first inflow after `after` with this key whose amount sits in the lump's band. */
+/**
+ * The first inflow after `last_occurrence` with this key whose amount sits in the lump's band.
+ *
+ * Not `lumpInflows`: that is the filter for proposing a lump, and its pending and category clauses
+ * would leave a deposit already in the balance unseen, so the runway would count it a second time.
+ * Any category and pending rows count here; transfers, duplicates, linked refunds and internal
+ * trades do not.
+ */
 export function lumpArrival(
   db: Database.Database,
   lump: { merchant_key: string; amount_low_cents: number; amount_high_cents: number; last_occurrence: string }
 ): LumpInflow | null {
-  return lumpInflows(db).find((row) =>
-    row.key === lump.merchant_key
-    && row.date > lump.last_occurrence
-    && row.amount >= lump.amount_low_cents / BAND_STEP_RATIO
-    && row.amount <= lump.amount_high_cents * BAND_STEP_RATIO
-  ) ?? null;
+  const types = [...LIQUID_TYPES, 'closed'].map((type) => `'${type}'`).join(', ');
+  const rows = db.prepare(`
+    SELECT t.id, t.date, t.amount, t.merchant_name, t.original_name
+    FROM transactions t
+    JOIN accounts a ON a.id = t.account_id
+    WHERE t.date > ? AND t.amount >= ? AND t.amount <= ? AND ${excludedFromTotalsSql('t')}
+      AND t.transfer_pair_id IS NULL AND t.refund_of_id IS NULL
+      AND a.is_liability = 0 AND a.is_hidden = 0 AND a.type IN (${types})
+    ORDER BY t.date, t.id
+  `).all(
+    lump.last_occurrence,
+    Math.ceil(lump.amount_low_cents / BAND_STEP_RATIO),
+    Math.floor(lump.amount_high_cents * BAND_STEP_RATIO)
+  ) as Array<{ id: string; date: string; amount: number; merchant_name: string | null; original_name: string | null }>;
+  for (const row of rows) {
+    const key = lumpKey(row.merchant_name, row.original_name);
+    if (key === lump.merchant_key) return { id: row.id, date: row.date, amount: row.amount, merchant_name: row.merchant_name, key };
+  }
+  return null;
 }
 
 export type ExpectLumpPayload = Extract<AdvisorDraftPayload, { kind: 'expect_lump' }>;

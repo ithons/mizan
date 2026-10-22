@@ -8,6 +8,7 @@ import { proposeChanges } from '../server/src/services/advisorProposals';
 import { confirmAdvisorDraftsByIds, dismissAdvisorDraft, supersedeLapsedDrafts } from '../server/src/services/advisorDrafts';
 import { draftTargetKey } from '../server/src/services/aiJobs';
 import { computeSafeToSpend } from '../server/src/services/safeToSpend';
+import { projectFree, runwayTo } from '../server/src/services/simulations';
 import { insertAccount, insertTransaction, migratedTestDb } from './helpers/schema';
 import http from 'node:http';
 import express from 'express';
@@ -247,4 +248,58 @@ test('the route serves candidates in dollars, confirms one through the draft pat
     assert.equal((await fetch(`${base}/${after.data.confirmed[0].id}/dismiss`, { method: 'POST' })).status, 200);
     assert.equal((await fetch(`${base}/${after.data.confirmed[0].id}/dismiss`, { method: 'POST' })).status, 404);
   });
+});
+
+const GRANT_ORIGINAL = 'NORTHFIELD COLL GRANT PPD ID: 4400000001';
+
+/** Three invented college grants 180 days apart, the last 100 days ago, confirmed through the draft path. */
+function confirmedGrant() {
+  const db = migratedTestDb();
+  const checking = insertAccount(db, { account_name: 'Harbor Checking', type: 'checking', current_balance: 312345 });
+  const dates = [460, 280, 100].map((back) => ymd(addDays(new Date(), -back)));
+  seed(db, checking, dates.map((date, i) => [date, 180000 + i * 5000, 'Northfield grant', GRANT_ORIGINAL, 'cat_income_other'] as Row));
+  const [candidate] = detectExpectedLumps(db);
+  assert.ok(candidate, 'the fixture proposes a lump');
+  const payload = candidatePayload(candidate);
+  const [draft] = proposeChanges(db, { changes: [{ label: 'Expect the grant', summary: 's', payload }] }).proposed;
+  assert.equal(confirmAdvisorDraftsByIds(db, [draft.id]).applied, 1);
+  assert.equal(listConfirmedLumps(db)[0].state, 'expected');
+  return { db, checking, payload };
+}
+
+function arrive(db: Database.Database, account: string, fields: { pending?: number; category_id?: string | null; date?: string; amount?: number }): void {
+  insertTransaction(db, {
+    account_id: account, date: fields.date ?? ymd(new Date()), amount: fields.amount ?? 186000,
+    merchant_name: 'Northfield grant', original_name: GRANT_ORIGINAL,
+    category_id: fields.category_id === undefined ? 'cat_income_other' : fields.category_id, pending: fields.pending ?? 0,
+  });
+}
+
+test('a confirmed lump reads as arrived when its deposit is still pending, and the runway stops counting it', () => {
+  const { db, checking } = confirmedGrant();
+  _setDbForTesting(db);
+  try {
+    const end = ymd(addDays(new Date(), 120));
+    assert.equal(runwayTo(db, end).expected_lumps_counted.length, 1);
+    arrive(db, checking, { pending: 1 });
+    assert.equal(listConfirmedLumps(db)[0].state, 'arrived');
+    assert.deepEqual(runwayTo(db, end).expected_lumps_counted, []);
+    assert.equal('with_expected_lumps' in projectFree(db, 120), false);
+  } finally {
+    _setDbForTesting(null);
+    db.close();
+  }
+});
+
+test('a confirmed lump reads as arrived when its deposit is filed under a spending category', () => {
+  const { db, checking } = confirmedGrant();
+  arrive(db, checking, { category_id: 'cat_education' });
+  assert.equal(listConfirmedLumps(db)[0].state, 'arrived');
+});
+
+test('HEALTHY: a same-payer deposit far outside the range, or on the last occurrence itself, leaves the lump expected', () => {
+  const { db, checking } = confirmedGrant();
+  arrive(db, checking, { amount: 40000 });
+  arrive(db, checking, { date: ymd(addDays(new Date(), -100)), amount: 186000 });
+  assert.equal(listConfirmedLumps(db)[0].state, 'expected');
 });
