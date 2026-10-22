@@ -92,6 +92,22 @@ function judge(
   return result.rate === null ? refuse(result.reason) : { ...row, annualized: result.rate, reason: null };
 }
 
+/** Coins sent to or received from another wallet in the window. `externalMarketFlow` counts no transfer on a crypto wallet as money in or out, so the rate would treat them as gains or losses. */
+function coinMoves(db: Database.Database, accountId: string, from: string, to: string): number {
+  return (db.prepare(`
+    SELECT COUNT(*) AS n FROM transactions t
+    JOIN accounts a ON a.id = t.account_id AND a.type = 'crypto_wallet'
+    LEFT JOIN securities s ON s.id = t.security_id
+    WHERE t.account_id = ? AND t.pending = 0 AND t.date > ? AND t.date <= ?
+      AND t.category_id IN ('cat_xfer_in', 'cat_xfer_out') AND t.quantity IS NOT NULL
+      AND COALESCE(s.ticker, 'USD') <> 'USD'
+  `).get(accountId, from, to) as { n: number }).n;
+}
+
+function nothingIncluded(row: InvestmentReturn): InvestmentReturn {
+  return row.reason === 'not enough history' ? row : { ...row, reason: 'every account was left out of the portfolio figure' };
+}
+
 /** Money-weighted annualized return per portfolio account and for the portfolio, over one window. In cents. */
 export function investmentReturns(
   db: Database.Database,
@@ -106,22 +122,33 @@ export function investmentReturns(
   if (!first || !last) return null;
   const window = { from: first.date, to: last.date, days: differenceInCalendarDays(parseISO(last.date), parseISO(first.date)) };
 
-  const accounts = timeline.accounts.map((account) =>
-    judge(
+  const moved = new Map(timeline.accounts.map((account) => [account.id, coinMoves(db, account.id, window.from, window.to)]));
+  const accounts = timeline.accounts.map((account) => {
+    const row = judge(
       { account_id: account.id, name: account.name },
       window,
       { value: first.by_account[account.id], estimated: first.estimated_accounts.includes(account.id) },
       { value: last.by_account[account.id], estimated: last.estimated_accounts.includes(account.id) },
       windowFlows(portfolioExternalFlows(db, [account.id]), window.from, window.to),
-    ),
-  );
-  const whole = (point: typeof first) => (point.coverage === ids.length ? point.net_worth : undefined);
-  const portfolio = judge(
-    { account_id: null, name: 'Portfolio' },
+    );
+    const n = moved.get(account.id) ?? 0;
+    return n > 0 && row.reason !== 'not enough history'
+      ? { ...row, annualized: null, reason: `${n === 1 ? 'a coin transfer' : `${n} coin transfers`} to or from another wallet ${n === 1 ? 'is' : 'are'} not counted as money in or out` }
+      : row;
+  });
+  const included = ids.filter((id) => (moved.get(id) ?? 0) === 0);
+  const excludedNames = timeline.accounts.filter((a) => !included.includes(a.id)).map((a) => a.name);
+  const sumOver = (point: typeof first) => (included.every((id) => point.by_account[id] !== undefined)
+    ? included.reduce((sum, id) => sum + point.by_account[id], 0) : undefined);
+  const estimatedIn = (point: typeof first) => point.estimated_accounts.some((id) => included.includes(id));
+  const portfolio = included.length === 0
+    ? nothingIncluded(judge({ account_id: null, name: 'Portfolio' }, window, { value: undefined, estimated: false }, { value: undefined, estimated: false }, []))
+    : judge(
+    { account_id: null, name: excludedNames.length ? `Portfolio, without ${excludedNames.join(' and ')}` : 'Portfolio' },
     window,
-    { value: whole(first), estimated: first.estimated },
-    { value: whole(last), estimated: last.estimated },
-    windowFlows(portfolioExternalFlows(db, ids), window.from, window.to),
+    { value: sumOver(first), estimated: estimatedIn(first) },
+    { value: sumOver(last), estimated: estimatedIn(last) },
+    windowFlows(portfolioExternalFlows(db, included), window.from, window.to),
   );
   return { ...window, accounts, portfolio, method: METHOD };
 }
@@ -136,4 +163,4 @@ export function investmentReturnsToDollars(returns: InvestmentReturns): Investme
   };
 }
 
-const METHOD = 'Money-weighted (XIRR): the annual rate at which the value at the start of the window, plus every deposit and less every withdrawal on its date, grows into the value at the end, counting days over 365. Values are the net worth timeline\'s for each account; deposits and withdrawals are the same rows the timeline replays as money moving in or out. Not computed for a window under 90 days, when the end value is an estimate, or when no single rate between -99% and 1000% a year balances the flows. A start value that is an estimate is flagged and still used.';
+const METHOD = 'Money-weighted (XIRR): the annual rate at which the value at the start of the window, plus every deposit and less every withdrawal on its date, grows into the value at the end, counting days over 365. Values are the net worth timeline\'s for each account; deposits and withdrawals are the same rows the timeline replays as money moving in or out. Not computed for a window under 90 days, when the end value is an estimate, when coins moved to or from another wallet (those moves are not counted as money in or out, so a rate would read them as gains or losses; the portfolio figure then leaves that account out), or when no single rate between -99% and 1000% a year balances the flows. A start value that is an estimate is flagged and still used.';

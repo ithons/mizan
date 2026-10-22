@@ -87,3 +87,36 @@ test('dollars at the edge, and the advisor reads the same figures', () => {
     ['2026-06-24', 1100, true, 0],
   );
 });
+
+function withCoinbase(coinMove: boolean) {
+  const { db, id } = brokerage(110000);
+  const wallet = insertAccount(db, { type: 'crypto_wallet', account_name: 'Coinbase', current_balance: 50000 });
+  insertTransaction(db, { account_id: wallet, date: '2026-06-24', amount: -40000, category_id: 'cat_crypto_buy' });
+  if (coinMove) {
+    db.prepare("INSERT INTO securities (id, ticker, name, type) VALUES ('sec_btc', 'BTC', 'Bitcoin', 'crypto')").run();
+    const moved = insertTransaction(db, { account_id: wallet, date: '2026-08-10', amount: -5000, category_id: 'cat_xfer_out' });
+    db.prepare("UPDATE transactions SET quantity = -0.001, security_id = 'sec_btc' WHERE id = ?").run(moved);
+  }
+  return { db, id, wallet };
+}
+
+test('a crypto wallet whose coins moved to another wallet is not computed, and the portfolio leaves it out by name', () => {
+  const { db, id, wallet } = withCoinbase(true);
+  const returns = investmentReturns(db, { from: '2026-06-01', today: TODAY })!;
+  const coinbase = returns.accounts.find((a) => a.account_id === wallet)!;
+  assert.equal(coinbase.annualized, null);
+  assert.equal(coinbase.reason, 'a coin transfer to or from another wallet is not counted as money in or out');
+  const fidelity = returns.accounts.find((a) => a.account_id === id)!;
+  assert.equal(returns.portfolio.name, 'Portfolio, without Coinbase');
+  assert.equal(returns.portfolio.annualized?.toFixed(6), fidelity.annualized?.toFixed(6));
+  assert.equal(returns.portfolio.end_value, 110000);
+});
+
+test('a crypto wallet with no coin moves is computed and stays in the portfolio', () => {
+  const { db, wallet } = withCoinbase(false);
+  const returns = investmentReturns(db, { from: '2026-06-01', today: TODAY })!;
+  const coinbase = returns.accounts.find((a) => a.account_id === wallet)!;
+  assert.equal(coinbase.reason, null);
+  assert.equal(returns.portfolio.name, 'Portfolio');
+  assert.equal(returns.portfolio.end_value, 160000);
+});
