@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import type Database from 'better-sqlite3';
 import { cardReview, cardReviewToDollars } from '../server/src/services/cardReview';
 import { getSpendingReport } from '../server/src/services/reporting';
+import { AGENT_TOOLS, runAgentTool } from '../server/src/services/advisorAgentTools';
 import { insertAccount, insertTransaction, migratedTestDb } from './helpers/schema';
 
 const AS_OF = '2026-10-22';
@@ -115,5 +116,13 @@ test('dollars at the edge cover every money field', () => {
   const s = review.cards.find((c) => c.account_id === sapphire)!;
   assert.deepEqual(s.life, { redeemed: 0, fees: 209.99, net: -209.99, spend: 208 });
   assert.equal(s.fees[0].amount, -95);
+  assert.equal(review.unattributed[0].amount, 944.89);
+});
+
+test('the advisor reads the same review, in dollars, through get_card_review', () => {
+  assert.ok(AGENT_TOOLS.some((tool) => tool.name === 'get_card_review'));
+  const { db, checking } = fixture();
+  const review = runAgentTool(db, 'get_card_review', {}) as ReturnType<typeof cardReviewToDollars>;
+  assert.equal(review.unattributed[0].account_id, checking);
   assert.equal(review.unattributed[0].amount, 944.89);
 });

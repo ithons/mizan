@@ -12,6 +12,7 @@ import { accountCoverage } from './accountCoverage';
 import { retirementRoom } from './retirementRoom';
 import { findReimbursements } from './reimbursements';
 import { counterpartiesToDollars, findCounterparties } from './counterparties';
+import { cardReview, cardReviewToDollars } from './cardReview';
 import { cashRunway, checkAdjustments, compoundGrowth, emergencyFund, projectFreeBand, debtPayoff, goalTimeline, goalTimelineFor, projectFree } from './simulations';
 
 type ToolInput = Record<string, unknown>;
@@ -152,6 +153,11 @@ export const AGENT_TOOLS: Anthropic.Tool[] = [
   {
     name: 'get_counterparties',
     description: 'Money between the owner and other people (Zelle, by name), wallets the owner does not track (Venmo, PayPal), wires and ATM cash, all of which reports leave out of spending. Per person: sent, received, net (received minus sent, dollars), last date, and state: settled (net within settle_tolerance), sent_more, or received_more. Use when asked whether anyone owes the owner. Only the transfers are visible: a friend paying back a dinner the owner put on a card shows as received_more, and a payment for the owner\'s own share shows as sent_more, so neither state is a debt: sent_more is a possibility to ask the owner about, and received_more may be a share paid back, a gift, or money fronted to the owner, which the transfers cannot tell apart. Wallets, wires and cash are pass-through totals with no state; ATM withdrawals are cash that left tracking. unclassified counts transfer rows that matched none of these.',
+    input_schema: { type: 'object', properties: {} },
+  },
+  {
+    name: 'get_card_review',
+    description: 'Per credit card, over the whole recorded ledger and the trailing 12 months: rewards redeemed (credits on the card, and bank deposits whose descriptor names exactly one card\'s program), issuer fees (annual, foreign transaction, late, interest, returned payment), net (redeemed less fees) and spend, with each row behind them and the next annual fee date a year after the last one. Redemptions that land in a bank account and name no single card are listed as unattributed; never assign them to a card or call any credit a bonus. Report the numbers; do not judge whether a card is worth keeping unless asked, and then say what the numbers leave out (rewards not yet redeemed, anything before ledger_from).',
     input_schema: { type: 'object', properties: {} },
   },
   {
@@ -330,6 +336,7 @@ export function runAgentTool(db: Database.Database, name: string, input: ToolInp
     case 'get_retirement_room': return retirementRoom(db, num(input.annual_limit, 0), Math.round(num(input.tax_year, new Date().getFullYear())));
     case 'get_counterparties': return counterpartiesToDollars(findCounterparties(db));
     case 'find_reimbursements': return findReimbursements(db, Math.min(Math.max(Math.round(num(input.days, 120)), 1), 365));
+    case 'get_card_review': return cardReviewToDollars(cardReview(db, format(new Date(), 'yyyy-MM-dd')));
     case 'get_funding_mix': return fundingMix(db, Math.min(Math.max(Math.round(num(input.months, 6)), 1), 24));
     default: return undefined;
   }
