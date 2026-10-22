@@ -84,6 +84,52 @@ export interface BalanceMeasurement {
   balance: number;
 }
 
+export type CardFeeKind = 'annual' | 'foreign_transaction' | 'late' | 'interest' | 'returned_payment' | 'cash_advance_or_transfer';
+
+export interface CardReviewRow {
+  transaction_id: string;
+  date: string;
+  amount: number;
+  descriptor: string;
+  account_id: string;
+  account_name: string;
+}
+
+export interface CardFeeRow extends CardReviewRow {
+  kind: CardFeeKind;
+}
+
+export interface CardReviewWindow {
+  redeemed: number;
+  fees: number;
+  net: number;
+  spend: number;
+}
+
+export interface CardReviewCard {
+  account_id: string;
+  account_name: string;
+  institution_name: string;
+  ledger_from: string | null;
+  life: CardReviewWindow;
+  trailing_12: CardReviewWindow;
+  redemptions: CardReviewRow[];
+  fees: CardFeeRow[];
+  last_annual_fee_date: string | null;
+  next_annual_fee_date: string | null;
+}
+
+export interface UnattributedRedemption extends CardReviewRow {
+  same_institution_card_ids: string[];
+}
+
+export interface CardReview {
+  as_of: string;
+  trailing_12_from: string;
+  cards: CardReviewCard[];
+  unattributed: UnattributedRedemption[];
+}
+
 export interface AccountBalanceHistory {
   basis: BalanceSeriesBasis;
   points: BalanceHistoryPoint[];

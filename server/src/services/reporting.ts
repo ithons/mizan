@@ -492,6 +492,33 @@ function buildSpendingTree(
   };
 }
 
+/** What getSpendingReport counts, per account, in cents, leaving out the rows named in `excludeIds`. */
+export function getSpendByAccount(
+  db: Database.Database,
+  range: ReportDateRange,
+  accountIds: readonly string[],
+  excludeIds: readonly string[] = []
+): Map<string, number> {
+  const { conditions, params } = dateConditions(range);
+  conditions.push(expenseCategoryCondition());
+  conditions.push(`t.account_id IN (SELECT value FROM json_each(?))`);
+  conditions.push(`t.id NOT IN (SELECT value FROM json_each(?))`);
+  const rows = db.prepare(`
+    ${excludedCategoriesCte()}
+    SELECT t.account_id, SUM(${spendAmountSql('t')}) AS amount
+    FROM transactions t
+    LEFT JOIN categories c ON c.id = t.category_id
+    WHERE ${conditions.join(' AND ')}
+    GROUP BY t.account_id
+  `).all(
+    ...excludedCategoryParams(),
+    ...params,
+    JSON.stringify(accountIds),
+    JSON.stringify(excludeIds)
+  ) as Array<{ account_id: string; amount: number }>;
+  return new Map(rows.map((row) => [row.account_id, row.amount]));
+}
+
 function categoriesById(db: Database.Database): Map<string, CategoryRow> {
   const rows = db.prepare(`
     SELECT id, name, color, parent_id
