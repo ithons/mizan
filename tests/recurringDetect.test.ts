@@ -773,3 +773,20 @@ test('HEALTHY: a checking-account pattern survives the sweep untouched', () => {
     teardown(db);
   }
 });
+
+test('a confirmed weekly paycheck that stops arriving stays active, so its absence can be reported', () => {
+  const db = setupDb();
+  try {
+    seedSeries(db, 'Campus Payroll', 22878, 7, 6, { endDaysAgo: 22, categoryId: 'cat_income_paycheck' });
+    seedSeries(db, 'Corner Cafe', -450, 7, 6, { endDaysAgo: 22 });
+    detectRecurring();
+    db.prepare('UPDATE recurring_patterns SET is_active = 1').run();
+    db.prepare("UPDATE recurring_patterns SET is_confirmed = 1 WHERE lower(merchant_name) LIKE '%campus payroll%'").run();
+    detectRecurring();
+    const state = (name: string) => db.prepare('SELECT is_active FROM recurring_patterns WHERE lower(merchant_name) LIKE ?').get(`%${name}%`) as { is_active: number } | undefined;
+    assert.equal(state('campus payroll')?.is_active, 1);
+    assert.equal(state('corner cafe')?.is_active, 0, 'an unconfirmed pattern still goes stale as before');
+  } finally {
+    teardown(db);
+  }
+});

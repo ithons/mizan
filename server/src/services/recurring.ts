@@ -783,11 +783,12 @@ export function detectRecurring(): void {
     console.log(`[recurring] Retired ${outsidePool} pattern(s) built from rows detection no longer reads.`);
   }
 
-  // 6. Deactivate stale patterns
+  // 6. Deactivate stale patterns. A confirmed one is the owner's and stays: a missed payment shows as
+  // overdue, with skip and dismiss, and is what the late-income alert is for.
   const allPatterns = db.prepare(`
     SELECT id, last_seen, frequency, average_amount
     FROM recurring_patterns
-    WHERE is_active = 1
+    WHERE is_active = 1 AND is_confirmed = 0
   `).all() as Array<{
     id: string;
     last_seen: string;
