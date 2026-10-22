@@ -460,6 +460,20 @@ test('HEALTHY: income_late respects pay the owner snoozed or skipped', () => {
   }
 });
 
+test('income_late measures snoozed pay from the snoozed date with the rule minimum, not the usual wobble again', () => {
+  // Wobbly pay (up to 3 days off its median gap), snoozed from 8 days ago to 3 days ago.
+  const { db, pattern } = payFixture([7, 10, 6, 7, 9], 8);
+  db.prepare(`INSERT INTO recurring_occurrence_adjustments (id, recurring_id, original_date, action, adjusted_date, created_at, updated_at)
+    VALUES ('adj_snooze', ?, ?, 'snooze', ?, ?, ?)`).run(pattern, localDaysFromToday(-8), localDaysFromToday(-3), TEST_NOW, TEST_NOW);
+  const created = evaluateNotifications(db).created;
+  assert.deepEqual(created.map((n) => n.dedupe_key), [`income_late:${pattern}:${localDaysFromToday(-3)}`]);
+  assert.match(created[0].body, /^You moved it to .+ from .+\. Nothing has posted yet\.$/);
+  // Two days past the snoozed date is within the rule's minimum.
+  db.prepare("UPDATE recurring_occurrence_adjustments SET adjusted_date = ? WHERE id = 'adj_snooze'").run(localDaysFromToday(-2));
+  db.prepare("DELETE FROM notifications").run();
+  assert.deepEqual(fires(db), []);
+});
+
 function shortfallFixture(checkingCents: number, paymentCents: number, dueIn: number, daysAhead = 14) {
   const { db } = withOnlyRule({ kind: 'account_shortfall', params: { days_ahead: daysAhead } });
   const checking = insertAccount(db, { account_name: 'Checking', type: 'checking', current_balance: checkingCents });

@@ -648,17 +648,21 @@ const incomeLate: Evaluator<'income_late'> = (ctx, params) => {
   return patterns.flatMap((pattern) => {
     const adjustment = adjustmentOf.get(pattern.id, pattern.next_expected) as { action: string; adjusted_date: string | null } | undefined;
     if (adjustment?.action === 'skip') return [];
-    const expectedOn = adjustment?.adjusted_date ?? pattern.next_expected;
+    const snoozedTo = adjustment?.action === 'snooze' ? adjustment.adjusted_date : null;
+    const expectedOn = snoozedTo ?? pattern.next_expected;
     if (expectedOn >= today) return [];
     const usualStray = usualStrayDays(ctx.db, pattern.id);
     if (usualStray === null) return [];
-    const tolerance = Math.max(params.min_days_late, usualStray);
+    // A snoozed date is the owner's own allowance for the delay, so the usual wobble is not added again.
+    const tolerance = snoozedTo ? params.min_days_late : Math.max(params.min_days_late, usualStray);
     const daysLate = Math.round((parseISO(today).getTime() - parseISO(expectedOn).getTime()) / 86_400_000);
     if (daysLate <= tolerance) return [];
     return [{
       dedupe_key: `income_late:${pattern.id}:${expectedOn}`,
       title: `${pattern.merchant_name} is ${daysLate} days late`,
-      body: `It was expected on ${shortDate(expectedOn)}${usualStray > 0 ? `, and its timing usually varies by up to ${usualStray} day${usualStray === 1 ? '' : 's'}` : ''}. Nothing has posted yet.`,
+      body: snoozedTo
+        ? `You moved it to ${shortDate(snoozedTo)} from ${shortDate(pattern.next_expected)}. Nothing has posted yet.`
+        : `It was expected on ${shortDate(expectedOn)}${usualStray > 0 ? `, and its timing usually varies by up to ${usualStray} day${usualStray === 1 ? '' : 's'}` : ''}. Nothing has posted yet.`,
       severity: 'warning' as const,
       payload: { pattern_id: pattern.id, expected_on: expectedOn, days_late: daysLate, amount: Math.abs(pattern.average_amount) },
       route: SCHEDULED_ROUTE,
