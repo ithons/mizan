@@ -17,13 +17,15 @@ const CARD_REDEMPTION = /STATEMENT CREDIT|STMT CRDT|CASH ?BACK|CASH ?REWARDS?|RE
 
 const BANK_REDEMPTION = /CASH ?REWARDS?|CASH ?BACK|CASH REDEMPTION|REWARDS? REDEMPTION/i;
 
+// Anchored at the start because an issuer names its own charge first, while a merchant's fee
+// ('<gym> ANNUAL FEE', '<city> LATE FEE') carries the merchant's name ahead of the phrase and is spend.
 const FEE_KINDS: ReadonlyArray<[CardFeeKind, RegExp]> = [
-  ['annual', /ANNUAL (MEMBERSHIP )?FEE/i],
-  ['foreign_transaction', /FOREIGN TRANSACTION FEE/i],
-  ['late', /\bLATE (PAYMENT )?FEE\b/i],
-  ['interest', /INTEREST CHARGE|PURCHASE INTEREST|FINANCE CHARGE/i],
-  ['returned_payment', /RETURNED (CHECK|PAYMENT) (CHARGE|FEE)/i],
-  ['cash_advance_or_transfer', /CASH ADVANCE FEE|BALANCE TRANSFER FEE/i],
+  ['annual', /^ANNUAL (MEMBERSHIP )?FEE\b/i],
+  ['foreign_transaction', /^FOREIGN TRANSACTION FEE\b/i],
+  ['late', /^LATE (PAYMENT )?FEE\b/i],
+  ['interest', /^(?:INTEREST CHARGE|PURCHASE INTEREST|FINANCE CHARGE)/i],
+  ['returned_payment', /^RETURNED (CHECK|PAYMENT) (CHARGE|FEE)\b/i],
+  ['cash_advance_or_transfer', /^(?:CASH ADVANCE FEE|BALANCE TRANSFER FEE)\b/i],
 ];
 
 interface BankProgram {
@@ -106,8 +108,8 @@ function lastAnnualFee(fees: readonly CardFeeRow[]): string | null {
 
 /**
  * Per credit card, what it returned (redemptions on the card, and bank deposits whose descriptor
- * names exactly one card's program) and what it charged (issuer fees by descriptor; a merchant's
- * or processor's fee filed under Fees is not one). Spend is what Reports counts on the card,
+ * names exactly one card's program) and what it charged (issuer fees, by a descriptor that begins
+ * with the charge's name; a merchant's or processor's fee is not one, even one filed under Fees). Spend is what Reports counts on the card,
  * less the fee rows. A bank deposit that names no single card is returned unattributed.
  */
 export function cardReview(db: Database.Database, asOf: string): CardReview {

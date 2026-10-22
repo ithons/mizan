@@ -133,3 +133,27 @@ test('the life window starts at the first row on the card, even one that is a tr
   db.prepare("UPDATE transactions SET transfer_status = 'confirmed' WHERE id = ?").run(payment);
   assert.equal(cardReview(db, AS_OF).cards.find((c) => c.account_id === plain)!.ledger_from, '2026-01-15');
 });
+
+test('a merchant fee that names the merchant first is spend, not an issuer fee', () => {
+  const { db, plain } = fixture();
+  tx(db, plain, '2025-06-01', -4900, 'IRONWORKS GYM ANNUAL FEE', 'cat_fees');
+  tx(db, plain, '2025-07-01', -2500, 'TOWN OF ELMHAVEN LATE FEE', 'cat_fees');
+  tx(db, plain, '2025-08-01', -800, 'ACME LENDING INTEREST CHARGE', 'cat_fees');
+  const card = cardReview(db, AS_OF).cards.find((c) => c.account_id === plain)!;
+  assert.equal(card.fees.length, 0);
+  assert.deepEqual(card.life, { redeemed: 0, fees: 0, net: 0, spend: 4200 + 4900 + 2500 + 800 });
+  assert.equal(card.last_annual_fee_date, null);
+  assert.equal(card.next_annual_fee_date, null);
+});
+
+test('an issuer fee that begins with the charge name is still a fee', () => {
+  const { db, plain } = fixture();
+  tx(db, plain, '2025-06-01', -9900, 'ANNUAL FEE', 'cat_fees');
+  tx(db, plain, '2025-07-01', -2900, 'LATE PAYMENT FEE', 'cat_fees');
+  tx(db, plain, '2025-08-01', -1200, 'PURCHASE INTEREST CHARGE', 'cat_fees');
+  tx(db, plain, '2025-09-01', -300, 'FINANCE CHARGE', 'cat_fees');
+  const card = cardReview(db, AS_OF).cards.find((c) => c.account_id === plain)!;
+  assert.deepEqual(card.fees.map((f) => f.kind), ['annual', 'late', 'interest', 'interest']);
+  assert.equal(card.life.spend, 4200);
+  assert.equal(card.last_annual_fee_date, '2025-06-01');
+});
