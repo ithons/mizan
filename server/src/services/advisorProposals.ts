@@ -150,13 +150,13 @@ export function proposeChanges(db: Database.Database, input: { changes?: unknown
 /** Open drafts whose premise still holds, newest first: what is waiting for the owner. */
 export function listOpenDrafts(db: Database.Database, limit = 100): AdvisorDraftAction[] {
   const rows = db.prepare(`
-    SELECT id, kind, label, summary, route, payload FROM advisor_drafts
+    SELECT id, kind, label, summary, route, payload, updated_at FROM advisor_drafts
     WHERE status = 'open' ORDER BY created_at DESC, id LIMIT ?
-  `).all(limit) as Array<{ id: string; kind: AdvisorDraftActionKind; label: string; summary: string; route: string; payload: string }>;
+  `).all(limit) as Array<{ id: string; kind: AdvisorDraftActionKind; label: string; summary: string; route: string; payload: string; updated_at: string }>;
   const drafts: AdvisorDraftAction[] = [];
   for (const row of rows) {
     const parsed = AdvisorDraftPayloadSchema.safeParse(JSON.parse(row.payload));
-    if (!parsed.success || !isDraftStillActionable(db, parsed.data)) continue;
+    if (!parsed.success || !isDraftStillActionable(db, parsed.data, row.updated_at)) continue;
     drafts.push({ id: row.id, kind: row.kind, label: row.label, summary: row.summary, route: row.route, payload: parsed.data, changes: describeDraftChanges(db, parsed.data), citations: [], confirmation_required: true });
   }
   return drafts;

@@ -6,6 +6,7 @@ import express from 'express';
 import { format, setDate, subMonths } from 'date-fns';
 import { detectStarterBudgets } from '../server/src/services/starterBudgets';
 import { listDeclinedProposals, restoreDeclinedProposal } from '../server/src/services/advisorDrafts';
+import { listOpenDrafts } from '../server/src/services/advisorProposals';
 import { runAgentTool } from '../server/src/services/advisorAgentTools';
 import { _setDbForTesting } from '../server/src/db/index';
 import budgetsRouter from '../server/src/routes/budgets';
@@ -116,6 +117,39 @@ test('adding a starter writes the budget it showed, without rollover, and it sto
     assert.deepEqual(await list(base), []);
     const action = db.prepare("SELECT kind, source FROM advisor_actions ORDER BY created_at DESC LIMIT 1").get() as { kind: string; source: string };
     assert.equal(action.kind, 'update_budget');
+  });
+});
+
+test('a restored decline at an old median does not outlive the starter added at the new one', async () => {
+  const db = ledger({ cat_food_groceries: STEADY });
+  await withRouter(db, async (base) => {
+    assert.equal((await post(base, { category_id: 'cat_food', decision: 'dismiss' })).status, 200);
+    const [declined] = listDeclinedProposals(db).filter((d) => d.kind === 'update_budget');
+    assert.deepEqual(restoreDeclinedProposal(db, declined.id), { ok: true, draft_reopened: true, queued: true });
+    const old = db.prepare("SELECT id FROM advisor_drafts WHERE status = 'open'").get() as { id: string };
+
+    // Spending rose while the decline stood, so the starter now offers more than the reopened draft.
+    db.prepare("UPDATE transactions SET amount = amount - 5000 WHERE category_id = 'cat_food_groceries'").run();
+    const [starter] = await list(base);
+    assert.equal(starter.amount, 850);
+    assert.equal((await post(base, { category_id: 'cat_food', decision: 'add' })).status, 200);
+
+    assert.equal((db.prepare("SELECT amount FROM budgets WHERE category_id = 'cat_food'").get() as { amount: number }).amount, 85000);
+    assert.equal((db.prepare('SELECT status FROM advisor_drafts WHERE id = ?').get(old.id) as { status: string }).status, 'superseded');
+    assert.deepEqual(listOpenDrafts(db), []);
+  });
+});
+
+test('HEALTHY: a restored decline at the same median is the draft the starter adds', async () => {
+  const db = ledger({ cat_food_groceries: STEADY });
+  await withRouter(db, async (base) => {
+    assert.equal((await post(base, { category_id: 'cat_food', decision: 'dismiss' })).status, 200);
+    const [declined] = listDeclinedProposals(db).filter((d) => d.kind === 'update_budget');
+    restoreDeclinedProposal(db, declined.id);
+    assert.equal(listOpenDrafts(db).length, 1, 'the reopened draft is listed while nothing has been written');
+    assert.equal((await post(base, { category_id: 'cat_food', decision: 'add' })).status, 200);
+    const statuses = db.prepare('SELECT status FROM advisor_drafts').all() as Array<{ status: string }>;
+    assert.deepEqual(statuses.map((r) => r.status), ['confirmed']);
   });
 });
 

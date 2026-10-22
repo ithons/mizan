@@ -109,6 +109,19 @@ test('HEALTHY: a proposal to create a notification rule names nothing that can l
   assert.equal(state(db, 'd_new_rule').status, 'open');
 });
 
+test('a budget proposal closes once that category budget has been written since it was proposed', () => {
+  const db = migratedTestDb();
+  db.prepare("INSERT INTO budgets (id, category_id, amount, created_at, updated_at) VALUES ('b_fun', 'cat_ent', 12000, '2026-07-01T00:00:00Z', '2026-07-01T00:00:00Z')").run();
+  draft(db, 'd_budget', { kind: 'update_budget', category_id: 'cat_ent', amount: 150, period: 'monthly', rollover: false });
+
+  assert.equal(supersedeLapsedDrafts(db), 0, 'HEALTHY: the budget it was proposed against is untouched, so it stays open');
+  assert.equal(state(db, 'd_budget').status, 'open');
+
+  db.prepare("UPDATE budgets SET amount = 17000, updated_at = '2026-07-26T00:00:00Z' WHERE id = 'b_fun'").run();
+  assert.equal(supersedeLapsedDrafts(db), 1);
+  assert.equal(state(db, 'd_budget').status, 'superseded');
+});
+
 test('a notification rule proposal with an unknown kind or bad params is refused before it becomes a card', () => {
   const db = migratedTestDb();
   const propose = (payload: object) => proposeChanges(db, { changes: [{ label: 'Rule', summary: 'Because.', payload }] });

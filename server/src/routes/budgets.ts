@@ -13,7 +13,7 @@ import type { BudgetRolloverLedgerEntry, ProjectedBudget } from '../../../shared
 import { deleteBudget } from '../services/budgets';
 import { detectStarterBudgets, starterBudgetPayload, starterBudgetSummary, starterBudgetToDollars } from '../services/starterBudgets';
 import { proposeChanges } from '../services/advisorProposals';
-import { confirmAdvisorDraftsByIds, dismissAdvisorDraft } from '../services/advisorDrafts';
+import { confirmAdvisorDraftsByIds, dismissAdvisorDraft, supersedeLapsedDrafts } from '../services/advisorDrafts';
 
 const router = Router();
 
@@ -143,6 +143,9 @@ router.post('/starter/decide', validate(StarterBudgetDecisionSchema), (req: Requ
       res.status(409).json({ error: reason && reason !== 'apply_failed' ? reason : 'That budget could not be added' });
       return;
     }
+    // An older budget proposal for this category (a restored decline, say) lapsed the moment this
+    // budget was written; close it now rather than leave it confirmable until the next sync.
+    supersedeLapsedDrafts(db);
     res.json({ data: { added: true } });
   } catch (err) {
     next(err);

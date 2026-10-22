@@ -91,7 +91,7 @@ export function getTransactionReviewSummary(db: Database.Database): TransactionR
       if (payload === null) return null;
       // A draft whose premise no longer holds is not work; showing it as work pins the review
       // count and the data-quality penalty on nothing. See isDraftStillActionable.
-      if (!isDraftStillActionable(db, payload as AdvisorDraftPayload)) return null;
+      if (!isDraftStillActionable(db, payload as AdvisorDraftPayload, row.updated_at)) return null;
       return { ...row, payload, changes: changes ?? [], citations: citations ?? [], confirmation_required: true };
     })
     .filter((d): d is NonNullable<typeof d> => d !== null);
