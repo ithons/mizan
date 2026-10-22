@@ -1,8 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import Database from 'better-sqlite3';
-import { migratedTestDb, insertAccount } from './helpers/schema';
+import { migratedTestDb, insertAccount, insertTransaction, localDaysFromToday } from './helpers/schema';
+import { accountCoverage } from '../server/src/services/accountCoverage';
 import {
+  confirmDuplicateGroup,
   confirmTransferPair,
   dismissDuplicateGroup,
   dismissTransferPair,
@@ -367,4 +369,29 @@ test('resolving a candidate leaves the detector silent rather than re-finding it
   assert.equal(after.transfers.newPairCount, 0);
   assert.equal(after.duplicates.groupCount, 0);
   assert.equal(after.transfers.pairCount, 0);
+});
+
+test('confirming a duplicate unlinks the copy from its recurring pattern, and the copy stays out of unscheduled outflow', () => {
+  const db = migratedTestDb();
+  const checking = insertAccount(db, { account_name: 'Everyday Checking', type: 'checking', current_balance: 900000 });
+  db.prepare(`INSERT INTO recurring_patterns (id, merchant_name, average_amount, frequency, last_seen, next_expected,
+      is_active, is_confirmed, transaction_count, created_at, updated_at, kind)
+    VALUES ('rp_gym', 'Pinecrest Gym', -4321, 'monthly', ?, ?, 1, 1, 3, '2026-01-01', '2026-01-01', 'flow')`)
+    .run(localDaysFromToday(-10), localDaysFromToday(20));
+  const date = localDaysFromToday(-10);
+  const keep = insertTransaction(db, { account_id: checking, date, amount: -4321, merchant_name: 'Pinecrest Gym' });
+  const copy = insertTransaction(db, { account_id: checking, date, amount: -4321, merchant_name: 'Pinecrest Gym' });
+  db.prepare("UPDATE transactions SET recurring_id = 'rp_gym', duplicate_group_id = 'dup_gym', duplicate_status = 'candidate' WHERE id IN (?, ?)").run(keep, copy);
+
+  assert.deepEqual(confirmDuplicateGroup(db, 'dup_gym', keep), { ok: true, excluded: 1 });
+  const link = db.prepare('SELECT recurring_id FROM transactions WHERE id = ?');
+  assert.equal((link.get(keep) as { recurring_id: string | null }).recurring_id, 'rp_gym');
+  assert.equal((link.get(copy) as { recurring_id: string | null }).recurring_id, null);
+
+  const [account] = accountCoverage(db).cash_accounts;
+  assert.equal(account.unscheduled_outflow_last_90_days, 0, 'the unlinked copy is a duplicate, not unscheduled spending');
+
+  // HEALTHY: an ordinary one-off outflow still counts.
+  insertTransaction(db, { account_id: checking, date, amount: -1250, merchant_name: 'Corner Hardware' });
+  assert.equal(accountCoverage(db).cash_accounts[0].unscheduled_outflow_last_90_days, 12.5);
 });

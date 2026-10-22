@@ -76,6 +76,7 @@ function unscheduledOutflow(db: Database.Database, accountId: string, today: Dat
   const row = db.prepare(`
     SELECT COALESCE(SUM(-amount), 0) AS cents FROM transactions
     WHERE account_id = ? AND amount < 0 AND pending = 0 AND recurring_id IS NULL
+      AND COALESCE(duplicate_status, 'none') <> 'confirmed'
       AND transfer_pair_id IS NULL AND date > ? AND date <= ?
   `).get(accountId, format(subDays(today, UNSCHEDULED_WINDOW_DAYS), 'yyyy-MM-dd'), format(today, 'yyyy-MM-dd')) as { cents: number };
   return row.cents;

@@ -622,7 +622,7 @@ const recurringAmountChanged: Evaluator<'recurring_amount_changed'> = (ctx) => {
 
 /** The 95th percentile of how far a pattern's gaps strayed from their median, or null under three postings. */
 function usualStrayDays(db: Database.Database, patternId: string): number | null {
-  const dates = (db.prepare('SELECT date FROM transactions WHERE recurring_id = ? AND pending = 0 ORDER BY date')
+  const dates = (db.prepare(`SELECT date FROM transactions WHERE recurring_id = ? AND pending = 0 AND ${excludedFromTotalsSql()} ORDER BY date`)
     .all(patternId) as Array<{ date: string }>).map((row) => parseISO(row.date).getTime());
   if (dates.length < 3) return null;
   const gaps = dates.slice(1).map((time, i) => Math.round((time - dates[i]) / 86_400_000));

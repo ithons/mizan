@@ -836,10 +836,13 @@ export function confirmDuplicateGroup(
       WHERE id = ?
     `).run(now, keepTransactionId);
 
-    // The redundant copies: excluded from reports.
+    // The redundant copies: excluded from reports, and unlinked from any recurring pattern.
+    // Detection's pool already drops a confirmed copy, so nothing relinks it, and a copy left
+    // linked reads as an extra posting to every `recurring_id = ?` reader (a zero-day gap that
+    // widened income_late's tolerance by a whole period).
     excluded = db.prepare(`
       UPDATE transactions
-      SET duplicate_status = 'confirmed', review_status = 'reviewed', updated_at = ?
+      SET duplicate_status = 'confirmed', review_status = 'reviewed', recurring_id = NULL, updated_at = ?
       WHERE duplicate_group_id = ? AND duplicate_status = 'candidate' AND id <> ?
     `).run(now, groupId, keepTransactionId).changes;
   });

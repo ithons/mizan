@@ -451,6 +451,19 @@ test('HEALTHY: income_late is silent for pay within its usual wobble, and for a 
   assert.deepEqual(fires(db), []);
 });
 
+test('income_late does not count a confirmed duplicate as a posting when it judges the usual wobble', () => {
+  // Fortnightly pay, ten days late, with a confirmed copy of the third posting still linked: the
+  // copy is a zero-day gap that would otherwise make the usual stray a whole period.
+  const { db, pattern } = payFixture([14, 14, 14, 14], 10);
+  const third = db.prepare('SELECT date, amount, category_id FROM transactions WHERE recurring_id = ? ORDER BY date LIMIT 1 OFFSET 2')
+    .get(pattern) as { date: string; amount: number; category_id: string };
+  const copy = insertTransaction(db, { amount: third.amount, category_id: third.category_id, date: third.date });
+  db.prepare("UPDATE transactions SET recurring_id = ?, duplicate_status = 'confirmed' WHERE id = ?").run(pattern, copy);
+  const created = evaluateNotifications(db).created;
+  assert.deepEqual(created.map((n) => n.dedupe_key), [`income_late:${pattern}:${localDaysFromToday(-10)}`]);
+  assert.doesNotMatch(created[0].body, /varies/);
+});
+
 test('HEALTHY: income_late respects pay the owner snoozed or skipped', () => {
   for (const [action, adjusted] of [['snooze', localDaysFromToday(4)], ['skip', null]] as const) {
     const { db, pattern } = payFixture([7, 7, 7, 7, 7], 5);
