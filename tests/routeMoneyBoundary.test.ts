@@ -109,3 +109,20 @@ test('GET /api/budgets/month returns each budget ceiling in dollars', async () =
     db.close();
   }
 });
+
+test('GET /api/accounts/card-review returns redeemed, fees and net in dollars', async () => {
+  const db = setupDb();
+  const tx = db.prepare(`INSERT INTO transactions (id, account_id, date, amount, original_name, category_id, created_at, updated_at)
+    VALUES (?, 'acc_card', ?, ?, ?, ?, '2026-07-01T00:00:00Z', '2026-07-01T00:00:00Z')`);
+  tx.run('t_fee', localDaysFromToday(-30), -9500, 'ANNUAL MEMBERSHIP FEE', 'cat_fees');
+  tx.run('t_credit', localDaysFromToday(-10), 28381, 'STATEMENT CREDIT', 'cat_income_other');
+  await withServer(db, async (baseUrl) => {
+    const res = await fetch(`${baseUrl}/api/accounts/card-review`);
+    assert.equal(res.status, 200);
+    const body = (await res.json()) as { data: { cards: Array<{ account_id: string; life: Record<string, number>; fees: Array<{ amount: number }> }> } };
+    const card = body.data.cards.find((c) => c.account_id === 'acc_card');
+    assert.ok(card);
+    assert.deepEqual(card.life, { redeemed: 283.81, fees: 95, net: 188.81, spend: 0 });
+    assert.equal(card.fees[0].amount, -95);
+  });
+});

@@ -20,6 +20,8 @@ import {
   getLedgerBalanceHistory,
   getMarketBalanceHistory,
 } from '../services/balanceHistory';
+import { cardReview, cardReviewToDollars } from '../services/cardReview';
+import { format } from 'date-fns';
 import type { AccountBalanceHistory } from '../../../shared/types';
 
 const router = Router();
@@ -50,6 +52,15 @@ router.get('/', (_req: Request, res: Response, next: NextFunction): void => {
   try {
     const db = getDb();
     res.json({ data: listAccounts(db).map(accountToDollars) });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// GET /card-review - per credit card: redeemed, issuer fees and spend, over life and 12 months
+router.get('/card-review', (_req: Request, res: Response, next: NextFunction): void => {
+  try {
+    res.json({ data: cardReviewToDollars(cardReview(getDb(), format(new Date(), 'yyyy-MM-dd'))) });
   } catch (err) {
     next(err);
   }
