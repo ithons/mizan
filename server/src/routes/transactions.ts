@@ -30,6 +30,7 @@ import {
   RefundLinkSchema,
 } from '../../../shared/schemas';
 import { dollarizeFields } from '../services/money';
+import { counterpartiesToDollars, findCounterparties } from '../services/counterparties';
 
 const router = Router();
 
@@ -249,6 +250,14 @@ router.get('/', (req: Request, res: Response, next: NextFunction): void => {
         limit,
       },
     });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.get('/counterparties', (_req: Request, res: Response, next: NextFunction): void => {
+  try {
+    res.json({ data: counterpartiesToDollars(findCounterparties(getDb())) });
   } catch (err) {
     next(err);
   }

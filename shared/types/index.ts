@@ -1960,3 +1960,34 @@ export interface NotificationEvaluationSummary {
   /** One entry per rule that threw. The other rules still ran. */
   errors: NotificationEvaluationError[];
 }
+
+export type CounterpartyKind = 'person' | 'wallet' | 'cash' | 'wire';
+export type CounterpartyChannel = 'zelle' | 'venmo' | 'paypal' | 'cash' | 'wire';
+/** Only a person is judged; a wallet, cash or a wire has no one on the other side to settle with. */
+export type CounterpartyState = 'settled' | 'sent_more' | 'received_more';
+
+export type Counterparty = {
+  key: string;
+  name: string;
+  kind: CounterpartyKind;
+  channel: CounterpartyChannel;
+  sent: number;
+  received: number;
+  /** received minus sent, from the owner's side. */
+  net: number;
+  rows: number;
+  first_date: string;
+  last_date: string;
+  days_since_last: number;
+  state: CounterpartyState | null;
+  older_than_window: boolean;
+};
+
+export interface CounterpartiesResponse {
+  as_of: string;
+  window_days: number;
+  settle_tolerance: number;
+  people: Counterparty[];
+  channels: Counterparty[];
+  unclassified: { rows: number; sent: number; received: number };
+}

@@ -26,6 +26,7 @@ import type {
   Category,
   CategoryTrendReport,
   ChatMessage,
+  CounterpartiesResponse,
   CredentialStatus,
   CsvImportPreview,
   DataImportRun,
@@ -167,6 +168,7 @@ export const transactionsApi = {
     return apiFetch<PaginatedResponse<Transaction>>(`/api/transactions?${q.toString()}`);
   },
   review: () => apiFetch<TransactionReviewSummary>('/api/transactions/review'),
+  counterparties: () => apiFetch<CounterpartiesResponse>('/api/transactions/counterparties'),
   createManual: (body: Partial<Transaction>) =>
     apiFetch<Transaction>('/api/transactions/manual', {
       method: 'POST',
