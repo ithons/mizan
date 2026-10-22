@@ -73,12 +73,6 @@ import { SCHEDULED_ROUTE } from '../../../shared/routes';
 /**
  * `/`, the instrument.
  *
- * One surface where there were three. Today, Cash Flow and Reports ran the same query set; Reports
- * and Cash Flow differed only in the WINDOW they ran it over, and Today was that window set to now.
- * Keeping them apart cost 1,121 lines of view code (Today 397, Reports 534, Cash Flow 190, counting
- * lines that are neither blank nor comment) and, more seriously, allowed two screens to disagree
- * about net worth, which `Reports.tsx` carried a comment about having shipped once.
- *
  * The surface has two registers and the rule between them is the whole design:
  *
  *   THE STANDING   what is true at this instant. The beam, net worth, what is free, where it sits.
