@@ -237,7 +237,8 @@ function sheetPoint(
   coverage: number,
   isEstimated = false
 ): SheetPoint {
-  return { date, assets, liabilities, netWorth, isEstimated, coveredAccounts: coverage, totalAccounts: coverage };
+  const accountIds = new Set(Array.from({ length: coverage }, (_, i) => `acct_${i + 1}`));
+  return { date, assets, liabilities, netWorth, isEstimated, coveredAccounts: coverage, totalAccounts: coverage, accountIds };
 }
 
 /**
@@ -350,8 +351,22 @@ test('a sheet written before migration 044 records no coverage, and says so inst
   const uncounted: SheetPoint = { ...at('2026-07-31'), coveredAccounts: null, totalAccounts: null };
   const change = readWeekChange(before('2026-07-31'), uncounted);
   assert.equal(change.kind, 'uncounted');
-  assert.match(describeWeekChange(change).reading, /does not record how many accounts it reached/);
+  assert.match(describeWeekChange(change).reading, /does not record which accounts it reached/);
   assert.doesNotMatch(describeWeekChange(change).reading, /\$/);
+});
+
+test('a week against a sheet of the same size over different accounts is refused', () => {
+  const current = at('2026-07-31');
+  const swapped = new Set([...(current.accountIds ?? [])].filter((id) => id !== 'acct_14').concat('acct_15'));
+  const earlier = before('2026-07-31').map((s) => (s.coveredAccounts === 14 ? { ...s, accountIds: swapped } : s));
+  const change = readWeekChange(earlier, current);
+  assert.equal(change.kind, 'incomparable');
+  assert.equal(change.kind === 'incomparable' && change.refused, 6);
+});
+
+test('an unreadable breakdown on the current sheet is uncounted, not compared', () => {
+  const change = readWeekChange(before('2026-07-31'), { ...at('2026-07-31'), accountIds: null });
+  assert.equal(change.kind, 'uncounted');
 });
 
 test('a change in a rate is in points, and a rate that moved never prints as zero', () => {

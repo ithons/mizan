@@ -245,9 +245,10 @@ export interface SheetPoint extends BeamHistoryPoint {
  * 420286 - 309594 = 110692c and the screen rendered "+$1,107" in the positive tone, with no
  * caveat, on a surface whose own beam refuses that exact pair.
  *
- * So the rule here is the beam's rule. `comparableHistory` is CALLED rather than restated: an
- * exact coverage match, never an estimated sheet, and everything refused counted rather than
- * dropped, because "no week to compare" and "a week you may not compare" are different states.
+ * So the rule here is the beam's rule. `comparableHistory` is CALLED rather than restated: the
+ * same account ids in both breakdowns, never an estimated sheet, and everything refused counted
+ * rather than dropped, because "no week to compare" and "a week you may not compare" are different
+ * states.
  */
 export const WEEK_MIN_DAYS = 7;
 
@@ -259,7 +260,7 @@ export function settledNetWorth(sheet: Pick<NetWorthSnapshot, 'net_worth' | 'in_
 export type WeekChange =
   | { kind: 'change'; delta: number; since: string; covered: number; total: number; refused: number }
   | { kind: 'incomparable'; covered: number; total: number; refused: number }
-  /** This sheet predates migration 044 and records no coverage, so nothing can be matched to it. */
+  /** This sheet records no coverage counts or no readable breakdown, so nothing can be matched to it. */
   | { kind: 'uncounted' }
   | { kind: 'none' };
 
@@ -271,7 +272,9 @@ export function readWeekChange(earlier: SheetPoint[], current: SheetPoint | null
     .sort((a, b) => a.date.localeCompare(b.date));
   if (eligible.length === 0) return { kind: 'none' };
 
-  if (current.coveredAccounts === null || current.totalAccounts === null) return { kind: 'uncounted' };
+  if (current.coveredAccounts === null || current.totalAccounts === null || current.accountIds === null) {
+    return { kind: 'uncounted' };
+  }
   const covered = current.coveredAccounts;
   const total = current.totalAccounts;
 
@@ -331,7 +334,7 @@ export function describeWeekChange(change: WeekChange): WeekChangeCaption {
     case 'uncounted':
       return {
         short: 'No week to compare',
-        reading: 'This sheet does not record how many accounts it reached, so no earlier sheet can be matched to it.',
+        reading: 'This sheet does not record which accounts it reached, so no earlier sheet can be matched to it.',
         note: null,
       };
     case 'none':

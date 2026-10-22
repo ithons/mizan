@@ -10,6 +10,7 @@ import {
   describeReading,
   readCalibration,
   scalePans,
+  sheetAccountIds,
   type BeamHistory,
   type BeamHistoryPoint,
 } from '../client/src/components/balance/BalanceScale';
@@ -285,16 +286,21 @@ test('faults accumulate rather than the worst one winning', () => {
 // arrived in mizān on 07-24, so part of the distance between an 11-account point and a
 // 14-account point is not money moving. The instrument refuses that comparison.
 
+const ELEVEN = new Set(Array.from({ length: 11 }, (_, i) => `acct_${i + 1}`));
+const FOURTEEN = new Set([...ELEVEN, 'acct_12', 'acct_13', 'acct_14']);
+
 const LIVE_HISTORY: BeamHistoryPoint[] = [
-  { date: '2026-06-01', assets: 8037.59, liabilities: 4168.67, isEstimated: true, coveredAccounts: null, totalAccounts: null },
-  { date: '2026-06-30', assets: 8377.52, liabilities: 7309.23, isEstimated: false, coveredAccounts: 11, totalAccounts: 11 },
-  { date: '2026-07-16', assets: 7503.38, liabilities: 3903.5, isEstimated: false, coveredAccounts: 11, totalAccounts: 11 },
-  { date: '2026-07-24', assets: 8032.4, liabilities: 5283.01, isEstimated: false, coveredAccounts: 14, totalAccounts: 14 },
-  { date: '2026-07-28', assets: 8012.58, liabilities: 5229.91, isEstimated: false, coveredAccounts: 14, totalAccounts: 14 },
+  { date: '2026-06-01', assets: 8037.59, liabilities: 4168.67, isEstimated: true, coveredAccounts: null, totalAccounts: null, accountIds: null },
+  { date: '2026-06-30', assets: 8377.52, liabilities: 7309.23, isEstimated: false, coveredAccounts: 11, totalAccounts: 11, accountIds: ELEVEN },
+  { date: '2026-07-16', assets: 7503.38, liabilities: 3903.5, isEstimated: false, coveredAccounts: 11, totalAccounts: 11, accountIds: ELEVEN },
+  { date: '2026-07-24', assets: 8032.4, liabilities: 5283.01, isEstimated: false, coveredAccounts: 14, totalAccounts: 14, accountIds: FOURTEEN },
+  { date: '2026-07-28', assets: 8012.58, liabilities: 5229.91, isEstimated: false, coveredAccounts: 14, totalAccounts: 14, accountIds: FOURTEEN },
 ];
 
+const measuredAt14 = { isEstimated: false, accountIds: FOURTEEN };
+
 test('only sheets that reached the same accounts are drawn on the same axis', () => {
-  const history = comparableHistory(LIVE_HISTORY, { coveredAccounts: 14, totalAccounts: 14 });
+  const history = comparableHistory(LIVE_HISTORY, measuredAt14);
   assert.deepEqual(history.marks.map((m) => m.date), ['2026-07-24', '2026-07-28']);
   assert.equal(history.excluded, 3, 'two 11-account sheets and one replayed month');
 
@@ -303,17 +309,57 @@ test('only sheets that reached the same accounts are drawn on the same axis', ()
   assert.equal((history.marks[1].fraction * 100).toFixed(1), '60.5');
 });
 
-test('a reading with no coverage of its own compares against nothing', () => {
-  // A current sheet whose coverage was never recorded cannot establish that any earlier sheet
-  // reached the same accounts, so it draws no history rather than assuming it did.
-  const history = comparableHistory(LIVE_HISTORY, { coveredAccounts: null, totalAccounts: null });
+test('two sheets of the same size over different accounts are not comparable', () => {
+  // One account left as another arrived: the counts agree and the sums are over different things.
+  const swapped = new Set([...FOURTEEN].filter((id) => id !== 'acct_14').concat('acct_15'));
+  const earlier: BeamHistoryPoint = { ...LIVE_HISTORY[3], accountIds: swapped };
+  assert.equal(swapped.size, FOURTEEN.size);
+
+  const history = comparableHistory([earlier], measuredAt14);
+  assert.deepEqual(history.marks, []);
+  assert.equal(history.excluded, 1);
+});
+
+test('the same accounts at different values are comparable', () => {
+  const earlier: BeamHistoryPoint = { ...LIVE_HISTORY[3], assets: 9100, liabilities: 2000, accountIds: new Set(FOURTEEN) };
+  const history = comparableHistory([earlier], measuredAt14);
+  assert.equal(history.marks.length, 1);
+  assert.equal(history.excluded, 0);
+});
+
+test('an unreadable breakdown is not an empty one, and compares against nothing', () => {
+  const unreadable: BeamHistoryPoint = { ...LIVE_HISTORY[3], accountIds: null };
+  assert.equal(comparableHistory([unreadable], measuredAt14).excluded, 1);
+  assert.equal(comparableHistory([LIVE_HISTORY[3]], { isEstimated: false, accountIds: null }).excluded, 1);
+  assert.equal(comparableHistory([{ ...unreadable, accountIds: new Set() }], { isEstimated: false, accountIds: null }).excluded, 1);
+});
+
+test('an estimated reading draws no measured history beside it', () => {
+  assert.equal(comparableHistory([LIVE_HISTORY[3]], { isEstimated: true, accountIds: FOURTEEN }).excluded, 1);
+});
+
+test('the served breakdown string is read for the ids that carry a number', () => {
+  assert.deepEqual([...(sheetAccountIds('{"a":12.5,"b":-3,"c":"x","d":null}') ?? [])], ['a', 'b']);
+  assert.deepEqual([...(sheetAccountIds('{}') ?? ['not empty'])], []);
+  assert.equal(sheetAccountIds('not json'), null);
+  assert.equal(sheetAccountIds('[1,2]'), null);
+  assert.equal(sheetAccountIds('null'), null);
+  assert.equal(sheetAccountIds('7'), null);
+  assert.equal(sheetAccountIds(null), null);
+  assert.equal(sheetAccountIds(undefined), null);
+});
+
+test('a reading with no readable accounts of its own compares against nothing', () => {
+  // A current sheet whose accounts cannot be read cannot establish that any earlier sheet reached
+  // the same accounts, so it draws no history rather than assuming it did.
+  const history = comparableHistory(LIVE_HISTORY, { isEstimated: false, accountIds: null });
   assert.deepEqual(history.marks, []);
   assert.equal(history.excluded, LIVE_HISTORY.length);
 });
 
-test('a series recorded at one coverage throughout keeps all of it', () => {
+test('a series recorded over one set of accounts throughout keeps all of it', () => {
   const steady = LIVE_HISTORY.filter((p) => p.coveredAccounts === 11);
-  const history = comparableHistory(steady, { coveredAccounts: 11, totalAccounts: 11 });
+  const history = comparableHistory(steady, { isEstimated: false, accountIds: new Set(ELEVEN) });
   assert.equal(history.marks.length, 2);
   assert.equal(history.excluded, 0, 'nothing is refused on a series that never changed shape');
 });
@@ -389,7 +435,7 @@ test('the reading, the faults and the notes are three separate statements', () =
   ]);
   assert.deepEqual(reading.notes.map(captionText), [
     '1 earlier sheet is drawn above.',
-    '15 are left off: recorded against a different number of accounts, or reconstructed rather than measured.',
+    '15 are left off: not recorded against the same accounts, or reconstructed rather than measured.',
   ]);
 });
 

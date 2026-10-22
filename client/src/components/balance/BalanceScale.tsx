@@ -160,6 +160,37 @@ export interface BeamHistoryPoint {
   isEstimated: boolean;
   coveredAccounts: number | null;
   totalAccounts: number | null;
+  /** The accounts the sheet's breakdown carries a value for. Null when the breakdown is unreadable. */
+  accountIds: ReadonlySet<string> | null;
+}
+
+/**
+ * The account ids a served `breakdown` carries a number for.
+ *
+ * The server hands the breakdown back as a JSON string, and returns it unchanged when it could not
+ * parse it, so this parses again and refuses anything that is not an object of numbers. Null is
+ * not an empty set: an unreadable sheet is one whose accounts are unknown, not one with none.
+ */
+export function sheetAccountIds(breakdown: string | null | undefined): ReadonlySet<string> | null {
+  if (typeof breakdown !== 'string') return null;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(breakdown);
+  } catch {
+    return null;
+  }
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return null;
+  return new Set(
+    Object.entries(parsed as Record<string, unknown>)
+      .filter(([, value]) => typeof value === 'number' && Number.isFinite(value))
+      .map(([id]) => id)
+  );
+}
+
+function sameAccounts(a: ReadonlySet<string> | null, b: ReadonlySet<string> | null): boolean {
+  if (a === null || b === null || a.size !== b.size) return false;
+  for (const id of a) if (!b.has(id)) return false;
+  return true;
 }
 
 export interface BeamHistory {
@@ -173,25 +204,22 @@ export interface BeamHistory {
  *
  * A snapshot that reached 11 accounts and one that reached 14 sit at positions whose difference
  * is partly accounts arriving in mizān rather than money moving, so plotting them together draws
- * a change that did not happen. Comparability is therefore exact-match on the coverage pair, and
- * an estimated sheet is never comparable to a measured one at all. Everything refused is counted
- * rather than dropped silently, because "no history" and "history you may not compare" are
- * different states.
+ * a change that did not happen. Equal counts are not enough either: one account leaving as another
+ * arrives keeps the count and changes what is summed. Comparability is therefore the same set of
+ * account ids in both breakdowns, and an estimated sheet is never comparable at all, on either
+ * side. Everything refused is counted rather than dropped silently, because "no history" and
+ * "history you may not compare" are different states.
  */
 export function comparableHistory(
   points: BeamHistoryPoint[],
-  reference: { coveredAccounts: number | null; totalAccounts: number | null }
+  reference: Pick<BeamHistoryPoint, 'isEstimated' | 'accountIds'>
 ): BeamHistory {
   const marks: BeamHistory['marks'] = [];
   let excluded = 0;
 
   for (const point of points) {
     const comparable =
-      !point.isEstimated &&
-      reference.coveredAccounts !== null &&
-      reference.totalAccounts !== null &&
-      point.coveredAccounts === reference.coveredAccounts &&
-      point.totalAccounts === reference.totalAccounts;
+      !point.isEstimated && !reference.isEstimated && sameAccounts(point.accountIds, reference.accountIds);
 
     if (!comparable) {
       excluded += 1;
@@ -307,8 +335,8 @@ export function describeReading(input: ReadingCaptionInput): ReadingCaption {
     notes.push([
       { text: String(history.excluded), numeral: true },
       {
-        text: ` ${history.excluded === 1 ? 'is' : 'are'} left off: recorded against a different` +
-          ' number of accounts, or reconstructed rather than measured.',
+        text: ` ${history.excluded === 1 ? 'is' : 'are'} left off: not recorded against the same` +
+          ' accounts, or reconstructed rather than measured.',
       },
     ]);
   }

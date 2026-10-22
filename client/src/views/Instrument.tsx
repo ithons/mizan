@@ -43,7 +43,7 @@ import {
   TrendChart,
   signedBarScale,
 } from '../components/balance';
-import { comparableHistory, readCalibration } from '../components/balance/BalanceScale';
+import { comparableHistory, readCalibration, sheetAccountIds } from '../components/balance/BalanceScale';
 import {
   FREE_STATES,
   INSTRUMENT_WINDOWS,
@@ -555,6 +555,7 @@ export function Instrument() {
             isEstimated: Boolean(snapshot.is_estimated),
             coveredAccounts: snapshot.covered_accounts ?? null,
             totalAccounts: snapshot.total_accounts ?? null,
+            accountIds: sheetAccountIds(snapshot.breakdown),
           }
         : null,
     [snapshot]
@@ -571,6 +572,7 @@ export function Instrument() {
           isEstimated: Boolean(s.is_estimated),
           coveredAccounts: s.covered_accounts ?? null,
           totalAccounts: s.total_accounts ?? null,
+          accountIds: sheetAccountIds(s.breakdown),
         })),
     [recentQ.data, snapshot?.date]
   );
@@ -578,8 +580,8 @@ export function Instrument() {
   const beamHistory = useMemo(
     () =>
       comparableHistory(earlierSheets, {
-        coveredAccounts: currentSheet?.coveredAccounts ?? null,
-        totalAccounts: currentSheet?.totalAccounts ?? null,
+        isEstimated: currentSheet?.isEstimated ?? false,
+        accountIds: currentSheet?.accountIds ?? null,
       }),
     [earlierSheets, currentSheet]
   );

@@ -76,6 +76,7 @@ function healthySheet(daysBack: number, netWorth: number): NetWorthSnapshot {
     investment_assets: netWorth * 0.3,
     crypto_assets: netWorth * 0.1,
     is_estimated: false,
+    breakdown: JSON.stringify(Object.fromEntries(Array.from({ length: 14 }, (_, i) => [`acct_${i + 1}`, 0]))),
     covered_accounts: 14,
     total_accounts: 14,
     created_at: `${date}T12:00:00.000Z`,
