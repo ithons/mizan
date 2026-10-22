@@ -126,3 +126,10 @@ test('the advisor reads the same review, in dollars, through get_card_review', (
   assert.equal(review.unattributed[0].account_id, checking);
   assert.equal(review.unattributed[0].amount, 944.89);
 });
+
+test('the life window starts at the first row on the card, even one that is a transfer', () => {
+  const { db, plain } = fixture();
+  const payment = tx(db, plain, '2026-01-15', 5000, 'Payment Thank You', 'cat_xfer_cc');
+  db.prepare("UPDATE transactions SET transfer_status = 'confirmed' WHERE id = ?").run(payment);
+  assert.equal(cardReview(db, AS_OF).cards.find((c) => c.account_id === plain)!.ledger_from, '2026-01-15');
+});

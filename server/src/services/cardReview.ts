@@ -123,9 +123,11 @@ export function cardReview(db: Database.Database, asOf: string): CardReview {
 
   const redemptions = new Map<string, CardReviewRow[]>(cards.map((card) => [card.id, []]));
   const fees = new Map<string, CardFeeRow[]>(cards.map((card) => [card.id, []]));
-  const ledgerFrom = new Map<string, string>();
+  const ledgerFrom = new Map((db.prepare(`
+    SELECT t.account_id, MIN(t.date) AS first FROM transactions t JOIN accounts a ON a.id = t.account_id
+    WHERE a.type = 'credit' AND t.pending = 0 GROUP BY t.account_id
+  `).all() as Array<{ account_id: string; first: string }>).map((row) => [row.account_id, row.first]));
   for (const row of cardRows) {
-    if (!ledgerFrom.has(row.account_id)) ledgerFrom.set(row.account_id, row.date);
     const kind = feeKind(row.descriptor);
     if (kind) fees.get(row.account_id)?.push({ ...toRow(row), kind });
     else if (row.amount > 0 && CARD_REDEMPTION.test(row.descriptor)) redemptions.get(row.account_id)?.push(toRow(row));
