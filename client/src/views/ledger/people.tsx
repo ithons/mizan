@@ -68,8 +68,8 @@ function People({ reading }: { reading: CounterpartiesResponse }) {
       {receivedMore.length > 0 && (
         <Details summary={`Received more than sent · ${receivedMore.length}`} className="mt-4">
           <p className="mb-2 text-note text-muted-2">
-            Often someone paying back their share of something you paid for on a card. That purchase sits in
-            spending, so none of this is money you owe.
+            This may be a share paid back for something you put on a card, a gift, or money fronted to you. The
+            transfers alone cannot tell which.
           </p>
           {receivedMore.map((p) => <PersonRow key={p.key} person={p} />)}
         </Details>
