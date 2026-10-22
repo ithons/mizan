@@ -211,7 +211,6 @@ test('the settle overshoots by 9%, which is what the clamp is sized for', () => 
 const HEALTHY = {
   sheetDate: '2026-07-31',
   today: '2026-07-31',
-  isEstimated: false,
   coveredAccounts: 14,
   totalAccounts: 14,
   syncIncomplete: false,
@@ -229,11 +228,6 @@ test('a sheet measured today against every account is calibrated, and says nothi
 });
 
 test('every condition that takes the reading out of calibration says which one it was', () => {
-  const estimated = readCalibration({ ...HEALTHY, isEstimated: true });
-  assert.equal(estimated.calibrated, false);
-  assert.deepEqual(estimated.faults, [{ kind: 'estimated' }]);
-  assert.match(calibrationNote(estimated.faults[0]), /reconstructed from the ledger/);
-
   const partial = readCalibration({ ...HEALTHY, coveredAccounts: 11, totalAccounts: 14 });
   assert.deepEqual(partial.faults, [{ kind: 'coverage', covered: 11, total: 14 }]);
   assert.equal(calibrationNote(partial.faults[0]), 'This sheet reached 11 of 14 accounts.');
@@ -257,7 +251,6 @@ test('every condition that takes the reading out of calibration says which one i
   const nothingYet = readCalibration({
     ...HEALTHY,
     sheetDate: null,
-    isEstimated: true,
     coveredAccounts: 6,
     totalAccounts: 14,
   });
@@ -268,7 +261,6 @@ test('faults accumulate rather than the worst one winning', () => {
   const reading = readCalibration({
     ...HEALTHY,
     sheetDate: '2026-06-01',
-    isEstimated: true,
     coveredAccounts: 6,
     totalAccounts: 14,
     syncIncomplete: true,
@@ -276,7 +268,7 @@ test('faults accumulate rather than the worst one winning', () => {
   assert.equal(reading.calibrated, false);
   assert.deepEqual(
     reading.faults.map((f) => f.kind),
-    ['estimated', 'coverage', 'stale', 'sync_incomplete']
+    ['coverage', 'stale', 'sync_incomplete']
   );
 });
 
@@ -290,14 +282,14 @@ const ELEVEN = new Set(Array.from({ length: 11 }, (_, i) => `acct_${i + 1}`));
 const FOURTEEN = new Set([...ELEVEN, 'acct_12', 'acct_13', 'acct_14']);
 
 const LIVE_HISTORY: BeamHistoryPoint[] = [
-  { date: '2026-06-01', assets: 8037.59, liabilities: 4168.67, isEstimated: true, coveredAccounts: null, totalAccounts: null, accountIds: null },
-  { date: '2026-06-30', assets: 8377.52, liabilities: 7309.23, isEstimated: false, coveredAccounts: 11, totalAccounts: 11, accountIds: ELEVEN },
-  { date: '2026-07-16', assets: 7503.38, liabilities: 3903.5, isEstimated: false, coveredAccounts: 11, totalAccounts: 11, accountIds: ELEVEN },
-  { date: '2026-07-24', assets: 8032.4, liabilities: 5283.01, isEstimated: false, coveredAccounts: 14, totalAccounts: 14, accountIds: FOURTEEN },
-  { date: '2026-07-28', assets: 8012.58, liabilities: 5229.91, isEstimated: false, coveredAccounts: 14, totalAccounts: 14, accountIds: FOURTEEN },
+  { date: '2026-06-01', assets: 8037.59, liabilities: 4168.67, coveredAccounts: null, totalAccounts: null, accountIds: null },
+  { date: '2026-06-30', assets: 8377.52, liabilities: 7309.23, coveredAccounts: 11, totalAccounts: 11, accountIds: ELEVEN },
+  { date: '2026-07-16', assets: 7503.38, liabilities: 3903.5, coveredAccounts: 11, totalAccounts: 11, accountIds: ELEVEN },
+  { date: '2026-07-24', assets: 8032.4, liabilities: 5283.01, coveredAccounts: 14, totalAccounts: 14, accountIds: FOURTEEN },
+  { date: '2026-07-28', assets: 8012.58, liabilities: 5229.91, coveredAccounts: 14, totalAccounts: 14, accountIds: FOURTEEN },
 ];
 
-const measuredAt14 = { isEstimated: false, accountIds: FOURTEEN };
+const measuredAt14 = { accountIds: FOURTEEN };
 
 test('only sheets that reached the same accounts are drawn on the same axis', () => {
   const history = comparableHistory(LIVE_HISTORY, measuredAt14);
@@ -330,12 +322,8 @@ test('the same accounts at different values are comparable', () => {
 test('an unreadable breakdown is not an empty one, and compares against nothing', () => {
   const unreadable: BeamHistoryPoint = { ...LIVE_HISTORY[3], accountIds: null };
   assert.equal(comparableHistory([unreadable], measuredAt14).excluded, 1);
-  assert.equal(comparableHistory([LIVE_HISTORY[3]], { isEstimated: false, accountIds: null }).excluded, 1);
-  assert.equal(comparableHistory([{ ...unreadable, accountIds: new Set() }], { isEstimated: false, accountIds: null }).excluded, 1);
-});
-
-test('an estimated reading draws no measured history beside it', () => {
-  assert.equal(comparableHistory([LIVE_HISTORY[3]], { isEstimated: true, accountIds: FOURTEEN }).excluded, 1);
+  assert.equal(comparableHistory([LIVE_HISTORY[3]], { accountIds: null }).excluded, 1);
+  assert.equal(comparableHistory([{ ...unreadable, accountIds: new Set() }], { accountIds: null }).excluded, 1);
 });
 
 test('the served breakdown string is read for the ids that carry a number', () => {
@@ -352,14 +340,14 @@ test('the served breakdown string is read for the ids that carry a number', () =
 test('a reading with no readable accounts of its own compares against nothing', () => {
   // A current sheet whose accounts cannot be read cannot establish that any earlier sheet reached
   // the same accounts, so it draws no history rather than assuming it did.
-  const history = comparableHistory(LIVE_HISTORY, { isEstimated: false, accountIds: null });
+  const history = comparableHistory(LIVE_HISTORY, { accountIds: null });
   assert.deepEqual(history.marks, []);
   assert.equal(history.excluded, LIVE_HISTORY.length);
 });
 
 test('a series recorded over one set of accounts throughout keeps all of it', () => {
   const steady = LIVE_HISTORY.filter((p) => p.coveredAccounts === 11);
-  const history = comparableHistory(steady, { isEstimated: false, accountIds: new Set(ELEVEN) });
+  const history = comparableHistory(steady, { accountIds: new Set(ELEVEN) });
   assert.equal(history.marks.length, 2);
   assert.equal(history.excluded, 0, 'nothing is refused on a series that never changed shape');
 });

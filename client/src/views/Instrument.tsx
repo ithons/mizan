@@ -535,7 +535,6 @@ export function Instrument() {
   const calibration = readCalibration({
     sheetDate: snapshot?.date ?? null,
     today,
-    isEstimated: Boolean(snapshot?.is_estimated),
     coveredAccounts: snapshot?.covered_accounts ?? null,
     totalAccounts: snapshot?.total_accounts ?? null,
     syncIncomplete: syncStatus === 'error' || Boolean(syncHealthQ.data?.last_run?.incomplete),
@@ -552,7 +551,6 @@ export function Instrument() {
             assets: snapshot.total_assets,
             liabilities: snapshot.total_liabilities,
             netWorth: settledNetWorth(snapshot),
-            isEstimated: Boolean(snapshot.is_estimated),
             coveredAccounts: snapshot.covered_accounts ?? null,
             totalAccounts: snapshot.total_accounts ?? null,
             accountIds: sheetAccountIds(snapshot.breakdown),
@@ -569,7 +567,6 @@ export function Instrument() {
           assets: s.total_assets,
           liabilities: s.total_liabilities,
           netWorth: settledNetWorth(s),
-          isEstimated: Boolean(s.is_estimated),
           coveredAccounts: s.covered_accounts ?? null,
           totalAccounts: s.total_accounts ?? null,
           accountIds: sheetAccountIds(s.breakdown),
@@ -580,7 +577,6 @@ export function Instrument() {
   const beamHistory = useMemo(
     () =>
       comparableHistory(earlierSheets, {
-        isEstimated: currentSheet?.isEstimated ?? false,
         accountIds: currentSheet?.accountIds ?? null,
       }),
     [earlierSheets, currentSheet]

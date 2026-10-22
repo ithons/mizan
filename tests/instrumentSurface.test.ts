@@ -234,11 +234,10 @@ function sheetPoint(
   assets: number,
   liabilities: number,
   netWorth: number,
-  coverage: number,
-  isEstimated = false
+  coverage: number
 ): SheetPoint {
   const accountIds = new Set(Array.from({ length: coverage }, (_, i) => `acct_${i + 1}`));
-  return { date, assets, liabilities, netWorth, isEstimated, coveredAccounts: coverage, totalAccounts: coverage, accountIds };
+  return { date, assets, liabilities, netWorth, coveredAccounts: coverage, totalAccounts: coverage, accountIds };
 }
 
 /**
@@ -312,26 +311,6 @@ test('a week the coverage rule can vouch for is stated, with what it refused bes
     '+$1,444 since Jul 24, the nearest sheet at least seven days back that reached the same 14 of 14 accounts.'
   );
   assert.equal(caption.note, '5 earlier sheets reached a different set of accounts and are not comparable to this one.');
-});
-
-test('an estimated sheet is never a baseline, even when its coverage matches exactly', () => {
-  //   SELECT date, total_assets, total_liabilities, net_worth, is_estimated, covered_accounts,
-  //          total_accounts FROM net_worth_snapshots WHERE date IN ('2026-03-01', '2026-04-01');
-  //   -- 2026-03-01  613238c  554131c  59107c   est  14/14
-  //   -- 2026-04-01 1144870c  530809c 614061c   est  14/14
-  // The old rule read +554954c off this pair; both sheets are replayed from the ledger, not
-  // measured, so neither can vouch for the other.
-  const march = sheetPoint('2026-03-01', 6132.38, 5541.31, 591.07, 14, true);
-  const april = sheetPoint('2026-04-01', 11448.7, 5308.09, 6140.61, 14, true);
-  assert.equal(cents(april.netWorth) - cents(march.netWorth), 554954);
-
-  const change = readWeekChange([march], april);
-  assert.equal(change.kind, 'incomparable');
-  assert.equal(change.kind === 'incomparable' && change.refused, 1);
-  assert.equal(
-    describeWeekChange(change).note,
-    'One earlier sheet reached a different set of accounts and is not comparable to this one.'
-  );
 });
 
 test('no sheet far enough back, and no sheet at all, are their own readings', () => {

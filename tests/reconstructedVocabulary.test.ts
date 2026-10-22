@@ -19,5 +19,4 @@ test('the reconstructed-history panel never calls its points replayed', () => {
 test('the chart legend and the beam use the same word', () => {
   const chart = readFileSync(join(ROOT, 'client/src/components/balance/TrendChart.tsx'), 'utf8');
   assert.match(chart, /key: 'reconstructed'/);
-  assert.match(calibrationNote({ kind: 'estimated' }), /reconstructed/);
 });

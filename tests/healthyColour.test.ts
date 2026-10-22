@@ -150,7 +150,6 @@ test('the fixture this test uses is healthy, by the code’s own definitions', (
   const calibration = readCalibration({
     sheetDate: SNAPSHOT.date,
     today: day(0),
-    isEstimated: SNAPSHOT.is_estimated,
     coveredAccounts: SNAPSHOT.covered_accounts ?? null,
     totalAccounts: SNAPSHOT.total_accounts ?? null,
     syncIncomplete: SYNC_HEALTH_OK.last_run?.incomplete ?? false,

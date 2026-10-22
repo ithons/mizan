@@ -84,7 +84,6 @@ export function scalePans(assets: number, liabilities: number): ScalePans {
  */
 export type CalibrationFault =
   | { kind: 'no_sheet' }
-  | { kind: 'estimated' }
   | { kind: 'coverage'; covered: number; total: number }
   | { kind: 'stale'; asOf: string; days: number }
   | { kind: 'sync_incomplete' };
@@ -99,7 +98,6 @@ export interface CalibrationInput {
   sheetDate: string | null;
   /** Today's local `yyyy-MM-dd`. Supplied rather than read, so the function stays pure. */
   today: string;
-  isEstimated: boolean;
   /** NULL on rows written before migration 044, which is why this is not defaulted to the total. */
   coveredAccounts: number | null;
   totalAccounts: number | null;
@@ -113,7 +111,6 @@ export function readCalibration(input: CalibrationInput): Calibration {
   if (input.sheetDate === null) {
     faults.push({ kind: 'no_sheet' });
   } else {
-    if (input.isEstimated) faults.push({ kind: 'estimated' });
     if (
       input.coveredAccounts !== null &&
       input.totalAccounts !== null &&
@@ -139,8 +136,6 @@ export function calibrationNote(fault: CalibrationFault): string {
   switch (fault.kind) {
     case 'no_sheet':
       return 'No balance sheet has been recorded yet.';
-    case 'estimated':
-      return 'This sheet is reconstructed from the ledger, not measured.';
     case 'coverage':
       return `This sheet reached ${fault.covered} of ${fault.total} accounts.`;
     case 'stale':
@@ -157,7 +152,6 @@ export interface BeamHistoryPoint {
   assets: number;
   /** Signed, the way the snapshot stores it. */
   liabilities: number;
-  isEstimated: boolean;
   coveredAccounts: number | null;
   totalAccounts: number | null;
   /** The accounts the sheet's breakdown carries a value for. Null when the breakdown is unreadable. */
@@ -206,20 +200,19 @@ export interface BeamHistory {
  * is partly accounts arriving in mizān rather than money moving, so plotting them together draws
  * a change that did not happen. Equal counts are not enough either: one account leaving as another
  * arrives keeps the count and changes what is summed. Comparability is therefore the same set of
- * account ids in both breakdowns, and an estimated sheet is never comparable at all, on either
- * side. Everything refused is counted rather than dropped silently, because "no history" and
+ * account ids in both breakdowns. Everything refused is counted rather than dropped silently, because "no history" and
  * "history you may not compare" are different states.
  */
 export function comparableHistory(
   points: BeamHistoryPoint[],
-  reference: Pick<BeamHistoryPoint, 'isEstimated' | 'accountIds'>
+  reference: Pick<BeamHistoryPoint, 'accountIds'>
 ): BeamHistory {
   const marks: BeamHistory['marks'] = [];
   let excluded = 0;
 
   for (const point of points) {
     const comparable =
-      !point.isEstimated && !reference.isEstimated && sameAccounts(point.accountIds, reference.accountIds);
+      sameAccounts(point.accountIds, reference.accountIds);
 
     if (!comparable) {
       excluded += 1;
