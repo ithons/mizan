@@ -593,6 +593,13 @@ test('and a runway that runs short raises estimate ink there, naming the first s
   assert.ok(html.includes('$412.50 short on Dec 31, 2026'));
 });
 
+test('a runway without enough history for a band says so beside its covered reading', () => {
+  const young: RunwayReading = { ...RUNWAY, lowest_band: null, band_note: 'Only 40 days of spending history; a band needs 90.' };
+  const html = rendered(Plan, '/plan', planSeed(200, NO_LUMPS, young), 'Covered through Dec 31, 2026');
+  assertSilent(html, '/plan');
+  assert.ok(html.includes('Only 40 days of spending history; a band needs 90. The reading above is the point projection alone.'));
+});
+
 test('an expected lump renders in estimate ink with its window and range, and nothing else is raised', () => {
   const html = rendered(Plan, '/plan', planSeed(200, {
     confirmed: [{ id: 'lump_1', label: 'Deposits', amount_low: 5000, amount_high: 5000, window_start: '2027-03-07', window_end: '2027-04-16' }],

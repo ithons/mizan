@@ -62,6 +62,7 @@ export function Runway({ reading, onEndChange }: { reading: RunwayReading; onEnd
       </SectionLabel>
       <p className={`mt-2 text-body-lg ${reading.covered ? 'text-ink' : 'text-estimate'}`}>{runwayHeadline(reading)}</p>
       <p className={`mt-1 text-note tabular-nums ${ink}`}>{runwayLowLine(reading)}</p>
+      {reading.band_note && <p className="mt-1 text-note text-muted-2">{`${reading.band_note} The reading above is the point projection alone.`}</p>}
       {reading.expected_lumps_counted.map((lump) => (
         <p key={`${lump.label}-${lump.counted_on}`} className={`mt-1 text-note tabular-nums ${ink}`}>
           Counts {lump.label} at {formatCurrency(lump.counted_amount)} on {formatDate(lump.counted_on)}, the low end of its range on the last day of its window.

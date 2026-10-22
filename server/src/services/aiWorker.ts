@@ -833,7 +833,7 @@ export const collectBackgroundReview: AiJobCollect = async ({ db, assignment, ru
   ) {
     return {
       status: 'nothing_to_do',
-      detail: 'nothing uncategorized, nothing refilable, retirable or recurring that an earlier pass had not been shown, no new detections',
+      detail: 'nothing uncategorized, nothing refilable, retirable, recurring, reimbursable or lump-like that an earlier pass had not been shown, no new detections',
     };
   }
 
