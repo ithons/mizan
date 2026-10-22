@@ -1034,6 +1034,29 @@ export type AdvisorDraftPayload =
       last_occurrence: string;
     };
 
+export type ExpectLumpPayload = Extract<AdvisorDraftPayload, { kind: 'expect_lump' }>;
+
+/** A confirmed lump still to come. Dollars. An estimate: never part of free to spend. */
+export interface ExpectedLumpReading {
+  id: string;
+  label: string;
+  amount_low: number;
+  amount_high: number;
+  window_start: string;
+  window_end: string;
+}
+
+export interface ExpectedLumpCandidateReading {
+  payload: ExpectLumpPayload;
+  occurrences: Array<{ date: string; amount: number }>;
+  draft_id: string | null;
+}
+
+export interface ExpectedLumpsResponse {
+  confirmed: ExpectedLumpReading[];
+  candidates: ExpectedLumpCandidateReading[];
+}
+
 export type AdvisorAutonomy = 'autonomous' | 'proposal_only';
 
 /**

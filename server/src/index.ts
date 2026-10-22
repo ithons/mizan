@@ -26,6 +26,7 @@ import categoriesRouter from './routes/categories';
 import budgetsRouter from './routes/budgets';
 import recurringRouter from './routes/recurring';
 import goalsRouter from './routes/goals';
+import expectedLumpsRouter from './routes/expectedLumps';
 import rulesRouter from './routes/rules';
 import insightsRouter from './routes/insights';
 import reportsRouter from './routes/reports';
@@ -180,6 +181,7 @@ async function main() {
   app.use('/api/budgets', budgetsRouter);
   app.use('/api/recurring', recurringRouter);
   app.use('/api/goals', goalsRouter);
+  app.use('/api/expected-lumps', expectedLumpsRouter);
   app.use('/api/rules', rulesRouter);
   app.use('/api/insights', insightsRouter);
   app.use('/api/reports', reportsRouter);

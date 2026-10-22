@@ -67,6 +67,8 @@ import type {
   TransactionReviewSummary,
   TransactionUpdateResult,
   ReconciliationReading,
+  ExpectLumpPayload,
+  ExpectedLumpsResponse,
 } from '@shared/types';
 
 async function apiFetch<T>(url: string, options?: RequestInit): Promise<T> {
@@ -433,6 +435,17 @@ export const recurringApi = {
 };
 
 // ─── Goals ──────────────────────────────────────────────────────────────────
+
+export const expectedLumpsApi = {
+  list: () => apiFetch<ExpectedLumpsResponse>('/api/expected-lumps'),
+  decide: (payload: ExpectLumpPayload, decision: 'confirm' | 'dismiss') =>
+    apiFetch<{ confirmed?: true; dismissed?: true }>('/api/expected-lumps/decide', {
+      method: 'POST',
+      body: JSON.stringify({ payload, decision }),
+    }),
+  dismiss: (id: string) =>
+    apiFetch<{ dismissed: true }>(`/api/expected-lumps/${id}/dismiss`, { method: 'POST' }),
+};
 
 export const goalsApi = {
   list: (opts?: { includeArchived?: boolean }) =>

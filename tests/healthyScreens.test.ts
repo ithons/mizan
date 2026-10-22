@@ -25,6 +25,7 @@ import type {
   CounterpartiesResponse,
   Counterparty,
   CredentialStatus,
+  ExpectedLumpsResponse,
   Goal,
   Holding,
   NetWorthTimeline,
@@ -542,8 +543,11 @@ const GOAL: Goal = {
   progress_percent: 20.034,
 } as Goal;
 
-function planSeed(spent: number): Seed {
+const NO_LUMPS: ExpectedLumpsResponse = { confirmed: [], candidates: [] };
+
+function planSeed(spent: number, lumps: ExpectedLumpsResponse = NO_LUMPS): Seed {
   return [
+    [['expected-lumps'], lumps],
     [['insights', 'safe-to-spend'], SHEET],
     [['budgets', format(now, 'yyyy-MM')], [budget(spent)]],
     [['categories'], CATEGORIES],
@@ -558,6 +562,21 @@ test('a healthy plan raises nothing', () => {
   assert.ok(SHEET.free > 0);
   assert.equal(healthTone(200, 500), 'sage');
   assertSilent(rendered(Plan, '/plan', planSeed(200), 'Emergency Fund'), '/plan');
+});
+
+test('an expected lump renders in estimate ink with its window and range, and nothing else is raised', () => {
+  const html = rendered(Plan, '/plan', planSeed(200, {
+    confirmed: [{ id: 'lump_1', label: 'Deposits', amount_low: 5000, amount_high: 5000, window_start: '2027-03-07', window_end: '2027-04-16' }],
+    candidates: [{
+      payload: { kind: 'expect_lump', label: 'MIT student account refund', merchant_key: 'ma institute tec erefund', amount_low: 1842.25, amount_high: 3236.25, window_start: '2027-03-14', window_end: '2027-05-17', last_occurrence: '2026-09-17' },
+      occurrences: [{ date: '2026-09-17', amount: 3236.25 }],
+      draft_id: null,
+    }],
+  }), 'Expected, not scheduled');
+  assert.deepEqual(raisedIn(html), ['estimate']);
+  assert.ok(html.includes('$1,842.25 to $3,236.25'));
+  assert.ok(html.includes('Mar 14 to May 17, 2027'));
+  assert.ok(html.includes('$5,000.00'));
 });
 
 test('and an overspent budget raises clay there', () => {

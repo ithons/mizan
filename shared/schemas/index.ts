@@ -276,6 +276,11 @@ export const AdvisorDraftPayloadSchema = z.discriminatedUnion('kind', [
   }),
 ]);
 
+export const ExpectedLumpDecisionSchema = z.object({
+  payload: AdvisorDraftPayloadSchema.refine((payload) => payload.kind === 'expect_lump', 'payload must be an expect_lump'),
+  decision: z.enum(['confirm', 'dismiss']),
+});
+
 // Top-level draft object as emitted by the worker LLM. label/summary/route/changes/
 // citations are display-only, so they're validated loosely; the payload carries
 // everything that mutates the DB, so it's validated strictly. The refinement rejects

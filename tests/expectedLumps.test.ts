@@ -9,6 +9,11 @@ import { confirmAdvisorDraftsByIds, dismissAdvisorDraft, supersedeLapsedDrafts }
 import { draftTargetKey } from '../server/src/services/aiJobs';
 import { computeSafeToSpend } from '../server/src/services/safeToSpend';
 import { insertAccount, insertTransaction, migratedTestDb } from './helpers/schema';
+import http from 'node:http';
+import express from 'express';
+import { _setDbForTesting } from '../server/src/db/index';
+import expectedLumpsRouter from '../server/src/routes/expectedLumps';
+import type { ExpectedLumpsResponse } from '../shared/types';
 
 const TODAY = new Date(2026, 9, 22);
 const ymd = (date: Date) => format(date, 'yyyy-MM-dd');
@@ -206,4 +211,40 @@ test('neither a candidate nor a confirmed lump moves free to spend', () => {
   assert.equal(after.free, before.free);
   assert.equal(after.expectedInflows, before.expectedInflows);
   assert.deepEqual(after.scheduled, before.scheduled);
+});
+
+async function withRouter(db: Database.Database, fn: (base: string) => Promise<void>): Promise<void> {
+  _setDbForTesting(db);
+  const app = express();
+  app.use(express.json());
+  app.use('/api/expected-lumps', expectedLumpsRouter);
+  const server = http.createServer(app);
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+  try {
+    const addr = server.address();
+    if (!addr || typeof addr === 'string') throw new Error('no server address');
+    await fn(`http://127.0.0.1:${addr.port}/api/expected-lumps`);
+  } finally {
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+    _setDbForTesting(null);
+    db.close();
+  }
+}
+
+test('the route serves candidates in dollars, confirms one through the draft path and removes it again', async () => {
+  const { db, payload } = liveLedger();
+  await withRouter(db, async (base) => {
+    const listed = (await (await fetch(base)).json()) as { data: ExpectedLumpsResponse };
+    assert.equal(listed.data.candidates.length, 1);
+    assert.equal(listed.data.candidates[0].payload.amount_low, 2500);
+    assert.deepEqual(listed.data.confirmed, []);
+    const post = (body: unknown) => fetch(`${base}/decide`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+    assert.equal((await post({ payload: { kind: 'delete_budget', category_id: 'cat_food' }, decision: 'confirm' })).status, 400);
+    assert.equal((await post({ payload, decision: 'confirm' })).status, 200);
+    const after = (await (await fetch(base)).json()) as { data: ExpectedLumpsResponse };
+    assert.equal(after.data.candidates.length, 0);
+    assert.equal(after.data.confirmed[0].amount_high, 2700);
+    assert.equal((await fetch(`${base}/${after.data.confirmed[0].id}/dismiss`, { method: 'POST' })).status, 200);
+    assert.equal((await fetch(`${base}/${after.data.confirmed[0].id}/dismiss`, { method: 'POST' })).status, 404);
+  });
 });

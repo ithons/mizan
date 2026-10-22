@@ -23,6 +23,7 @@ const FINANCIAL_QUERY_KEYS = [
   'inv-transactions',
   'ai-context',
   'notifications',
+  'expected-lumps',
 ];
 
 export function invalidateFinancialData(queryClient: QueryClient): void {
