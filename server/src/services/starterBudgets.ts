@@ -107,7 +107,7 @@ export function starterBudgetPayload(starter: StarterBudget): StarterBudgetPaylo
 }
 
 export function starterBudgetSummary(starter: StarterBudget): string {
-  return `$${toDollars(starter.amount_cents).toFixed(2)} a month: the median of ${starter.months.length} complete months, $${toDollars(starter.median_cents).toFixed(2)}, rounded to $10. `
+  return `${starter.category_name}, $${toDollars(starter.amount_cents).toFixed(2)} a month: the median of ${starter.months.length} complete months, $${toDollars(starter.median_cents).toFixed(2)}, rounded to $10. `
     + `Spending was at or under it in ${starter.months_at_or_under} of ${starter.months.length}. No rollover.`;
 }
 

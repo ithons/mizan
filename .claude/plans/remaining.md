@@ -24,8 +24,11 @@ for the long-form record of why the code is the way it is.
 
 ## Owner
 
-5. **Push.** Commits on `main` are unpushed: the push was refused by the session's permission check.
-   `git push origin main` from the owner's terminal, or a permission rule that allows it.
+5. **Push.** `main` is ahead of GitHub, and history from 02018b5 (Oct 17) was rewritten on
+   2026-10-22 to take friends' names and real reference numbers out of test fixtures, so the push
+   needs `git push --force-with-lease origin main` from the owner's terminal (the session's
+   permission check refuses it). GitHub keeps the old commits fetchable by hash until its support
+   purges them.
 6. **Cloud backup** of `.mizan/` and `data/`, plus the keychain key that decrypts
    `credentials.json` (`security find-generic-password -s mizan -a encryption_key -w`), which does
    not travel with the folder. Nothing is backed up on this device by choice.

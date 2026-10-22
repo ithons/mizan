@@ -101,7 +101,7 @@ test('dismissing a starter keeps it gone, lists the decline, and restoring it br
     assert.equal((await post(base, { category_id: 'cat_food', decision: 'add' })).status, 409);
 
     const [declined] = listDeclinedProposals(db).filter((d) => d.kind === 'update_budget');
-    assert.match(declined.summary ?? '', /^\$800\.00 a month: the median of 12 complete months, \$802\.50, rounded to \$10\. Spending was at or under it in 6 of 12\./);
+    assert.match(declined.summary ?? '', /^Food & Drink, \$800\.00 a month: the median of 12 complete months, \$802\.50, rounded to \$10\. Spending was at or under it in 6 of 12\./);
     restoreDeclinedProposal(db, declined.id);
     assert.deepEqual((await list(base)).map((s) => s.category_id), ['cat_food', 'cat_transport']);
   });
