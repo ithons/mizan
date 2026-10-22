@@ -452,6 +452,7 @@ function investmentsReport(holdings: Holding[]) {
       value: value - (4 - i) * 10,
       estimated: false,
       covered_accounts: 1,
+      covered_account_ids: [BROKERAGE.id],
       membership: 'recorded' as const,
     })),
     allocation: [{ security_type: 'etf', total_value: value }],

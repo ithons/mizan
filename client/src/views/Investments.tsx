@@ -256,7 +256,7 @@ export function Investments() {
   const delta = getPortfolioDelta(
     marketValue,
     history,
-    report?.portfolio_account_ids.length ?? null,
+    report?.portfolio_account_ids ?? null,
     report?.external_flows ?? []
   );
 
@@ -354,6 +354,7 @@ export function Investments() {
               value: point.value,
               estimated: point.estimated,
               coverage: point.covered_accounts,
+              accounts: new Set(point.covered_account_ids),
             }))}
             label="Portfolio value"
           />

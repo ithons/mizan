@@ -258,8 +258,10 @@ test('eight groups or fewer keep their own slot', () => {
 });
 
 /** A history point covering the whole portfolio, which is what an ordinary snapshot does. */
-function point(date: string, value: number, over = 3, estimated = false) {
-  return { date, value, estimated, covered_accounts: over };
+const IDS = ['acc_a', 'acc_b', 'acc_c'];
+
+function point(date: string, value: number, over = 3, estimated = false, ids = IDS.slice(0, over)) {
+  return { date, value, estimated, covered_accounts: ids.length, covered_account_ids: ids };
 }
 
 test('the portfolio delta measures the headline against a named snapshot', () => {
@@ -267,21 +269,21 @@ test('the portfolio delta measures the headline against a named snapshot', () =>
 
   // Straight after a sync the newest snapshot IS the headline, so it cannot be the baseline:
   // that is what printed "$0" while the headline moved.
-  const settled = getPortfolioDelta(2436.21, history, 3);
+  const settled = getPortfolioDelta(2436.21, history, IDS);
   assert.equal(settled?.baseline.date, '2026-07-30');
   assert.equal(Number(settled?.change.toFixed(2)), -9.68);
 
   // Balances that moved since the last sync measure against that sync.
-  const moved = getPortfolioDelta(2443.0, history, 3);
+  const moved = getPortfolioDelta(2443.0, history, IDS);
   assert.equal(moved?.baseline.date, '2026-07-31');
   assert.equal(Number(moved?.change.toFixed(2)), 6.79);
 });
 
 test('the portfolio delta reports nothing rather than a delta it cannot support', () => {
-  assert.equal(getPortfolioDelta(null, [point('2026-07-31', 2436.21)], 3), null);
-  assert.equal(getPortfolioDelta(2436.21, [], 3), null);
+  assert.equal(getPortfolioDelta(null, [point('2026-07-31', 2436.21)], IDS), null);
+  assert.equal(getPortfolioDelta(2436.21, [], IDS), null);
   // One snapshot, and it is the headline: there is no earlier value to measure from.
-  assert.equal(getPortfolioDelta(2436.21, [point('2026-07-31', 2436.21)], 3), null);
+  assert.equal(getPortfolioDelta(2436.21, [point('2026-07-31', 2436.21)], IDS), null);
   // No account set to check membership against is not the same as a set of none.
   assert.equal(getPortfolioDelta(2436.21, [point('2026-07-30', 2400), point('2026-07-31', 2436.21)], null), null);
 });
@@ -293,11 +295,11 @@ test('a delta is refused when the newest point does not cover the whole headline
   // "+$391.17 since Jul 31" every day, on a portfolio that had not moved at all.
   const history = [point('2026-07-30', 2445.89, 3), point('2026-07-31', 2045.04, 2)];
 
-  assert.equal(getPortfolioDelta(2436.21, history, 3), null);
+  assert.equal(getPortfolioDelta(2436.21, history, IDS), null);
 
   // The same series once the newest point covers the set again: the delta comes back.
   const covered = [point('2026-07-30', 2445.89, 3), point('2026-07-31', 2436.21, 3)];
-  assert.equal(getPortfolioDelta(2436.21, covered, 3)?.baseline.date, '2026-07-30');
+  assert.equal(getPortfolioDelta(2436.21, covered, IDS)?.baseline.date, '2026-07-30');
 });
 
 test('a delta is refused when the baseline it would name does not cover the headline', () => {
@@ -305,22 +307,41 @@ test('a delta is refused when the baseline it would name does not cover the head
   // difference between them is an account appearing rather than money arriving.
   const history = [point('2026-07-30', 2045.04, 2), point('2026-07-31', 2436.21, 3)];
 
-  assert.equal(getPortfolioDelta(2436.21, history, 3), null);
+  assert.equal(getPortfolioDelta(2436.21, history, IDS), null);
+});
+
+test('a delta is refused across points that count the same number of different accounts', () => {
+  // Coinbase hidden and a new IRA opened on the same day: three accounts before and after, and
+  // the difference between the two points is one account swapped for another.
+  const swapped = [
+    point('2026-07-30', 2445.89, 3, false, ['acc_a', 'acc_b', 'acc_x']),
+    point('2026-07-31', 2436.21, 3, false, IDS),
+  ];
+  assert.equal(getPortfolioDelta(2436.21, swapped, IDS), null);
+  assert.equal(getPortfolioDelta(2436.21, [point('2026-07-31', 2436.21, 3, false, ['acc_a', 'acc_b', 'acc_x'])], IDS), null);
+});
+
+test('points over the same accounts compare, whatever order they list them in', () => {
+  const history = [
+    point('2026-07-30', 2445.89, 3, false, ['acc_c', 'acc_a', 'acc_b']),
+    point('2026-07-31', 2436.21, 3, false, IDS),
+  ];
+  assert.equal(Number(getPortfolioDelta(2436.21, history, IDS)?.change.toFixed(2)), -9.68);
 });
 
 test('a delta is refused on a series that is not in date order', () => {
   // The route serves `ORDER BY date ASC` and `net_worth_snapshots.date` is UNIQUE, so this
   // should be unreachable. It is checked rather than assumed because the baseline's date is
   // printed to the owner: out of order, the copy names the wrong day.
-  assert.equal(getPortfolioDelta(2436.21, [point('2026-07-31', 2436.21), point('2026-07-30', 2445.89)], 3), null);
-  assert.equal(getPortfolioDelta(2436.21, [point('2026-07-30', 2445.89), point('2026-07-30', 2436.21)], 3), null);
+  assert.equal(getPortfolioDelta(2436.21, [point('2026-07-31', 2436.21), point('2026-07-30', 2445.89)], IDS), null);
+  assert.equal(getPortfolioDelta(2436.21, [point('2026-07-30', 2445.89), point('2026-07-30', 2436.21)], IDS), null);
 });
 
 test('the delta carries whether its baseline was measured or reconstructed', () => {
   const delta = getPortfolioDelta(2436.21, [
     point('2026-07-30', 2400, 3, true),
     point('2026-07-31', 2436.21, 3),
-  ], 3);
+  ], IDS);
 
   assert.equal(delta?.baseline.date, '2026-07-30');
   assert.equal(delta?.baseline.estimated, true);

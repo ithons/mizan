@@ -23,19 +23,19 @@ test('only money moved in or out of the portfolio is a flow; a trade inside it i
 
 test('the change since a snapshot is what the market did, with deposits named apart', () => {
   const history = [
-    { date: '2026-10-01', value: 3513, estimated: false, covered_accounts: 3 },
-    { date: '2026-10-15', value: 3716, estimated: false, covered_accounts: 3 },
+    { date: '2026-10-01', value: 3513, estimated: false, covered_accounts: 3, covered_account_ids: ['a', 'b', 'c'] },
+    { date: '2026-10-15', value: 3716, estimated: false, covered_accounts: 3, covered_account_ids: ['a', 'b', 'c'] },
   ];
   const flows = [
     { date: '2026-09-28', amount: 100 },
     { date: '2026-10-05', amount: 100 },
     { date: '2026-10-13', amount: 100 },
   ];
-  const delta = getPortfolioDelta(3716, history, 3, flows);
+  const delta = getPortfolioDelta(3716, history, ['a', 'b', 'c'], flows);
   assert.ok(delta);
   assert.equal(delta.deposited, 200, 'the 28 September deposit predates the baseline');
   assert.equal(delta.change, 3, '$203 of change was $200 the owner put in');
-  assert.equal(getPortfolioDelta(3716, history, 3)?.change, 203, 'with no flows known, nothing is subtracted');
+  assert.equal(getPortfolioDelta(3716, history, ['a', 'b', 'c'])?.change, 203, 'with no flows known, nothing is subtracted');
 });
 
 test('a crypto wallet counts its buys and sells as the money in and out, and holds deposits flat', () => {

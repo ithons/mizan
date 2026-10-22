@@ -549,9 +549,9 @@ export const reportsApi = {
     // `portfolio_value` is today's balances and the last point of `history` is today's value of
     // the same accounts in the net worth timeline. `invested_balance` is the part held by accounts
     // that hold a position, the only figure `holdings_value` can be reconciled against;
-    // `crypto_value` is the part in crypto wallets. `covered_accounts` per point is how many of the
-    // accounts that day's value is known for, so a point covering fewer is a different quantity.
-    return apiFetch<{ portfolio_value: number; holdings_value: number; invested_balance: number; crypto_value: number; portfolio_account_ids: string[]; external_flows: Array<{ date: string; amount: number }>; history: Array<{ date: string; value: number; estimated: boolean; covered_accounts: number }>; allocation: Array<{ security_type: string; total_value: number }>; holdings: unknown[] }>(`/api/reports/investments?${q.toString()}`);
+    // `crypto_value` is the part in crypto wallets. `covered_account_ids` per point is which of the
+    // accounts that day's value is known for, so a point over a different set is a different quantity.
+    return apiFetch<{ portfolio_value: number; holdings_value: number; invested_balance: number; crypto_value: number; portfolio_account_ids: string[]; external_flows: Array<{ date: string; amount: number }>; history: Array<{ date: string; value: number; estimated: boolean; covered_accounts: number; covered_account_ids: string[] }>; allocation: Array<{ security_type: string; total_value: number }>; holdings: unknown[] }>(`/api/reports/investments?${q.toString()}`);
   },
 };
 

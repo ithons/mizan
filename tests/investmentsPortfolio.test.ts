@@ -93,7 +93,7 @@ interface InvestmentsReport {
   portfolio_account_ids: string[];
   allocation: Array<{ security_type: string; total_value: number }>;
   holdings: Array<{ id: string; account_id: string }>;
-  history: Array<{ date: string; value: number; estimated: boolean; covered_accounts: number }>;
+  history: Array<{ date: string; value: number; estimated: boolean; covered_accounts: number; covered_account_ids: string[] }>;
 }
 
 async function getReport(db: Database.Database, query = ''): Promise<InvestmentsReport> {
@@ -185,6 +185,7 @@ test('an ordinary ledger says nothing it does not have to', async () => {
 
     // Every point covers the whole headline, so the delta is supportable on every one of them.
     assert.ok(report.history.every((point) => point.covered_accounts === report.portfolio_account_ids.length));
+    assert.ok(report.history.every((point) => [...point.covered_account_ids].sort().join() === [...report.portfolio_account_ids].sort().join()));
   } finally {
     db.close();
   }
@@ -290,6 +291,7 @@ test('a point that does not carry every portfolio account says so', async () => 
 
     assert.equal(report.portfolio_account_ids.length, 3);
     assert.deepEqual(report.history.slice(0, 2).map((point) => point.covered_accounts), [2, 3]);
+    assert.equal(report.history[0].covered_account_ids.length, 2);
   } finally {
     db.close();
   }

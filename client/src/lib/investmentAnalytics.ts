@@ -77,6 +77,8 @@ export interface PortfolioSeriesPoint {
    * not a smaller portfolio.
    */
   covered_accounts: number;
+  /** Which accounts those are. Two points with the same count over different accounts are not comparable. */
+  covered_account_ids: readonly string[];
 }
 
 export interface PortfolioDelta {
@@ -99,8 +101,9 @@ export interface PortfolioDelta {
  *
  * Membership is CHECKED, not inferred. Value equality (`newest.value === marketValue`) says only
  * that two numbers match, which they also do by coincidence and which they can fail to do for
- * two unrelated reasons at once; `portfolioAccountCount` against each point's `covered_accounts`
- * is the actual question, and a point that does not cover the whole headline yields null rather
+ * two unrelated reasons at once; `portfolioAccountIds` against each point's `covered_account_ids`
+ * is the actual question (a count is not: one account leaving and another arriving keeps it), and
+ * a point that does not cover exactly the headline's accounts yields null rather
  * than a delta measured across two different account sets.
  *
  * Straight after a sync the newest snapshot IS the headline, so the baseline is the snapshot
@@ -116,17 +119,20 @@ export interface PortfolioDelta {
 export function getPortfolioDelta(
   marketValue: number | null,
   history: PortfolioSeriesPoint[],
-  portfolioAccountCount: number | null,
+  portfolioAccountIds: readonly string[] | null,
   flows: ReadonlyArray<{ date: string; amount: number }> = []
 ): PortfolioDelta | null {
-  if (marketValue == null || portfolioAccountCount == null || history.length === 0) return null;
+  if (marketValue == null || portfolioAccountIds == null || history.length === 0) return null;
 
   for (let i = 1; i < history.length; i++) {
     if (history[i].date <= history[i - 1].date) return null;
   }
 
-  const covers = (point: PortfolioSeriesPoint): boolean =>
-    point.covered_accounts === portfolioAccountCount;
+  const portfolio = new Set(portfolioAccountIds);
+  const covers = (point: PortfolioSeriesPoint): boolean => {
+    const ids = new Set(point.covered_account_ids);
+    return ids.size === portfolio.size && [...ids].every((id) => portfolio.has(id));
+  };
 
   const newest = history[history.length - 1];
   if (!covers(newest)) return null;

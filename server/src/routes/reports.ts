@@ -337,6 +337,7 @@ router.get('/investments', (req: Request, res: Response, next: NextFunction): vo
       value: toDollars(point.net_worth),
       estimated: point.estimated,
       covered_accounts: point.coverage,
+      covered_account_ids: Object.keys(point.by_account),
     }));
 
     // `portfolio_account_ids` is served rather than a count so the screen filters its holdings
