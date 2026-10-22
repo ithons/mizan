@@ -67,7 +67,8 @@ test('per card sums are exact over life and the trailing twelve months', () => {
   assert.equal(f.fees.length, 0, 'a processor fee beside a tax payment is not a card fee');
 
   const b = card(bofa);
-  assert.deepEqual(b.life, { redeemed: 3702 + 4076 + 582, fees: 37, net: 3702 + 4076 + 582 - 37, spend: 3700 });
+  assert.equal(b.ledger_from, '2025-01-02');
+  assert.deepEqual(b.life, { redeemed: 4076 + 582, fees: 37, net: 4076 + 582 - 37, spend: 3700 }, 'the 2024 deposit predates the card');
   assert.deepEqual(b.trailing_12, { redeemed: 4076 + 582, fees: 0, net: 4076 + 582, spend: 0 });
   assert.deepEqual(b.redemptions.map((r) => r.account_name), ['BofA Savings', 'BofA Savings', 'BofA Cash Rewards']);
 });
@@ -171,4 +172,23 @@ test('a statement credit filed in an expense category counts once, as redeemed, 
   const feeTotal = review.cards.reduce((sum, c) => sum + c.fees.reduce((s, x) => s - x.amount, 0), 0);
   const cardSpend = [sapphire, bofa, flex, plain].reduce((sum, id) => sum + review.cards.find((c) => c.account_id === id)!.life.spend, 0);
   assert.equal(cardSpend + feeTotal - 5000, reportTotal, 'Reports nets the credit as a refund; the review moves it to Redeemed');
+});
+
+test('no row counted in the life window predates the ledger_from the column is headed with', () => {
+  const { db } = fixture();
+  for (const card of cardReview(db, AS_OF).cards) {
+    if (!card.ledger_from) continue;
+    const counted = [...card.redemptions, ...card.fees].filter((r) => r.date >= card.ledger_from!);
+    const redeemed = counted.filter((r) => !('kind' in r)).reduce((sum, r) => sum + r.amount, 0);
+    const charged = counted.filter((r) => 'kind' in r).reduce((sum, r) => sum - r.amount, 0);
+    assert.equal(card.life.redeemed, redeemed, card.account_name);
+    assert.equal(card.life.fees, charged, card.account_name);
+  }
+});
+
+test('a card whose redemptions all postdate its first row counts every one over life', () => {
+  const { db, flex } = fixture();
+  const card = cardReview(db, AS_OF).cards.find((c) => c.account_id === flex)!;
+  assert.equal(card.ledger_from, '2026-03-20');
+  assert.equal(card.life.redeemed, card.redemptions.reduce((sum, r) => sum + r.amount, 0));
 });

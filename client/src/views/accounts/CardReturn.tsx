@@ -29,7 +29,8 @@ const METHOD = (
     <p>
       Redeemed counts credits on this card whose description names a reward, a statement credit or a redemption, and
       deposits into a bank account whose description names this card&rsquo;s program. Rewards earned and not yet
-      redeemed are not in the ledger and are not counted.
+      redeemed are not in the ledger and are not counted. The longer column starts at this card&rsquo;s first
+      recorded row, so a deposit dated before it is not counted there.
     </p>
     <p>
       Fees are the issuer&rsquo;s own charges, read from a description that begins with the charge&rsquo;s name:

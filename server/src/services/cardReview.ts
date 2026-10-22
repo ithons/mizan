@@ -163,12 +163,15 @@ export function cardReview(db: Database.Database, asOf: string): CardReview {
       const cardRedemptions = (redemptions.get(card.id) ?? []).sort((a, b) => a.date.localeCompare(b.date));
       const cardFees = fees.get(card.id) ?? [];
       const lastFee = lastAnnualFee(cardFees);
+      // Fees and spend are card rows, so they already start at ledger_from; a bank deposit can predate
+      // it, and counting one would break the "since" the column is headed with.
+      const from = ledgerFrom.get(card.id) ?? null;
       return {
         account_id: card.id,
         account_name: card.account_name,
         institution_name: card.institution_name,
-        ledger_from: ledgerFrom.get(card.id) ?? null,
-        life: windowFor(cardRedemptions, cardFees, lifeSpend.get(card.id) ?? 0, null, asOf),
+        ledger_from: from,
+        life: windowFor(cardRedemptions, cardFees, lifeSpend.get(card.id) ?? 0, from, asOf),
         trailing_12: windowFor(cardRedemptions, cardFees, trailingSpend.get(card.id) ?? 0, trailingFrom, asOf),
         redemptions: cardRedemptions,
         fees: cardFees,
