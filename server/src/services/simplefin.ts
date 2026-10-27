@@ -13,7 +13,7 @@ import { isBelowBackfillFloor } from './backfillFloor';
 import { toCents, toCentsOrNull, toDollars } from './money';
 import { recordFieldRevision } from './categoryWrites';
 import { cleanProviderMerchant } from './merchantNames';
-import { directedAmount, isInternalTrade } from './investmentTrades';
+import { directedBrokerageAmount, isInternalTrade, type PostedReceipt } from './investmentTrades';
 import {
   guardSimplefinRelink,
   toProviderSnapshot,
@@ -821,6 +821,28 @@ export function stampProviderSeen(db: Database.Database, accountIds: readonly st
  * with no network in it. The relink gate below is the reason that matters: its guarantee is that
  * NOTHING is written, and a guarantee about writes has to be testable against the real schema.
  */
+/** Plain transfer receipts already stored on the account and in this payload, for reading reversals. */
+function brokerageReceipts(
+  db: Database.Database,
+  accountId: string,
+  incoming: readonly SimplefinTransactionPayload[],
+): PostedReceipt[] {
+  const stored = db.prepare(`
+    SELECT date, amount, original_name AS description FROM transactions
+    WHERE account_id = ? AND original_name LIKE 'Electronic Funds Transfer Received%'
+  `).all(accountId) as PostedReceipt[];
+  const fresh = incoming.flatMap((txn) => {
+    const description = txn.description ?? '';
+    if (!/^Electronic Funds Transfer Received/i.test(description)) return [];
+    try {
+      return [{ date: epochSecondsToLocalDate(txn.posted), amount: toCents(parseFinancialAmount(txn.amount, `transaction ${txn.id} amount`)), description }];
+    } catch {
+      return []; // the main loop reports and skips the same row
+    }
+  });
+  return [...stored, ...fresh];
+}
+
 export function applySimplefinResponse(
   db: Database.Database,
   data: unknown,
@@ -989,6 +1011,8 @@ export function applySimplefinResponse(
       stampProviderSeen(db, [accountId], now);
     }
 
+    const receipts = brokerageReceipts(db, accountId, acct.transactions ?? []);
+
     // Process transactions
     for (const txn of (acct.transactions ?? [])) {
       // Normalize the posted epoch to a LOCAL calendar day: see services/dates.ts for why
@@ -1009,7 +1033,7 @@ export function applySimplefinResponse(
         continue;
       }
       const description = txn.description || '';
-      const directed = directedAmount(amount, description);
+      const directed = directedBrokerageAmount(amount, description, receipts);
       const write = upsertSimplefinTransaction(db, accountId, {
         providerId: txn.id,
         date,

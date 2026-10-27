@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { descriptorDirection, directedAmount } from '../server/src/services/investmentTrades';
 import { applySimplefinResponse } from '../server/src/services/simplefin';
+import { epochSecondsToLocalDate } from '../server/src/services/dates';
 import { updateTransaction } from '../server/src/services/transactions';
 import { findFlowConservationViolations } from '../server/src/services/flowConservation';
 import { runMigrationsOn } from '../server/src/db/index';
@@ -90,4 +91,50 @@ test('the repair flips the July legs and the detector stops reporting money that
   const amounts = db.prepare('SELECT amount FROM transactions WHERE account_id = ? ORDER BY date').all(fid)
     .map((row) => (row as { amount: number }).amount);
   assert.deepEqual(amounts, [-2500, 10000, 10000], 'an owner-set amount is not the rule\'s to change');
+});
+
+const DAY = 86_400;
+const DEPOSIT_AT = 1_784_000_000;
+
+function eft(id: string, posted: number, amount: string, description: string) {
+  return { id, posted, amount, payee: 'Electronic Funds Transfer Received', description, pending: false };
+}
+
+function feed(transactions: unknown[]): unknown {
+  return {
+    accounts: [{
+      id: 'ACT-fid', name: 'Individual', currency: 'USD', balance: '3128.83',
+      org: { name: 'Fidelity Investments' },
+      transactions,
+    }],
+  };
+}
+
+const amountOf = (db: ReturnType<typeof migratedTestDb>, providerId: string) =>
+  (db.prepare('SELECT amount FROM transactions WHERE simplefin_transaction_id = ?').get(providerId) as { amount: number }).amount;
+
+test('a back-dated receipt that undoes a deposit of the same amount is money leaving, in either order and across syncs', () => {
+  const asOf = epochSecondsToLocalDate(DEPOSIT_AT + DAY);
+  const reversal = eft('TRN-rev', DEPOSIT_AT + 3 * DAY, '-100.00', `Electronic Funds Transfer Received as of ${asOf} (Cash)`);
+  const deposit = eft('TRN-dep', DEPOSIT_AT, '-100.00', EFT);
+
+  const together = migratedTestDb();
+  applySimplefinResponse(together, feed([reversal, deposit]), TEST_NOW);
+  assert.deepEqual([amountOf(together, 'TRN-dep'), amountOf(together, 'TRN-rev')], [10000, -10000]);
+
+  const later = migratedTestDb();
+  applySimplefinResponse(later, feed([deposit]), TEST_NOW);
+  applySimplefinResponse(later, feed([deposit, reversal]), TEST_NOW);
+  assert.deepEqual([amountOf(later, 'TRN-dep'), amountOf(later, 'TRN-rev')], [10000, -10000]);
+});
+
+test('HEALTHY: a back-dated receipt with no deposit for it to undo is a late arrival', () => {
+  const db = migratedTestDb();
+  const asOf = epochSecondsToLocalDate(DEPOSIT_AT);
+  applySimplefinResponse(db, feed([
+    eft('TRN-late', DEPOSIT_AT + 2 * DAY, '-100.00', `Electronic Funds Transfer Received as of ${asOf} (Cash)`),
+    eft('TRN-other', DEPOSIT_AT - 10 * DAY, '-100.00', EFT),
+    eft('TRN-size', DEPOSIT_AT, '-50.00', EFT),
+  ]), TEST_NOW);
+  assert.equal(amountOf(db, 'TRN-late'), 10000);
 });
